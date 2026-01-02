@@ -1,12 +1,15 @@
 import os
+import sys
 
 def run_audit():
     violators = []
-    # We are looking for any file that handles 'SessionId' or 'ResonanceScore'
-    # but DOES NOT mention 'Encryption' or 'AuditTrail'
-    base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    contracts_path = os.path.join(base_path, "Shared-Clinical-Contracts")
+    # Check the contracts folder for the encryption requirement
+    contracts_path = "./Shared-Clinical-Contracts"
     
+    if not os.path.exists(contracts_path):
+        print(f"⚠️ Warning: {contracts_path} not found.")
+        return
+
     for root, dirs, files in os.walk(contracts_path):
         for file in files:
             if file.endswith(".cs"):
@@ -18,9 +21,10 @@ def run_audit():
     
     if not violators:
         print("✅ PASS: All sensitive contracts include an Encryption check.")
+        sys.exit(0)
     else:
         print(f"❌ FAIL: The following files lack encryption protocols: {violators}")
+        sys.exit(1) # This forces the 'Stop'
 
 if __name__ == "__main__":
     run_audit()
-
