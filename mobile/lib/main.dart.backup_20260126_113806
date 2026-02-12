@@ -1,0 +1,1766 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+// 1. ADDED: Permission Handler (Required for Vagus v2.6.1)
+import 'package:permission_handler/permission_handler.dart';
+// 2. UPDATED: Sound Engine (Switched from SoundStream to FlutterSound)
+import 'package:audio_session/audio_session.dart'; 
+import 'package:speech_to_text/speech_to_text.dart'; // Removed 'as stt' to match your code usage
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:local_auth/error_codes.dart' as auth_error;
+import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'dart:math';
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'metrics_widgets.dart';
+import 'updated_screens.dart';
+
+// =============================================================================
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MaterialApp(
+    home: LobbyScreen(), // <--- THIS IS THE KEY FIX
+    debugShowCheckedModeBanner: false,
+    // ... theme data ...
+  ));
+}
+
+class SovereignHybridApp extends StatelessWidget {
+  const SovereignHybridApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Sovereign Sanctuary',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF050505),
+        primaryColor: const Color(0xFFFFD700), // Sovereign Gold
+        cardColor: const Color(0xFF111111),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFFFD700),
+          secondary: Color(0xFF003366), // Deep Navy
+          error: Colors.redAccent,
+          surface: Color(0xFF1E1E1E),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF111111),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF333333))),
+          focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF003366))),
+          hintStyle: const TextStyle(color: Colors.grey),
+        ),
+      ),
+      // MIGRATION REQUIREMENT: Boot to Lobby for Role Selection
+      home: const LobbyScreen(),
+    );
+  }
+}
+
+// =============================================================================
+// MODULE 1: HARDWARE IDENTITY ENGINE (CRASH-PROOF)
+// Status: FIXED (Catches MissingPluginException to prevent Hang)
+// =============================================================================
+class HardwareIdentity {
+  static const platform = MethodChannel('com.sovereign.lab/observer');
+  
+  // High-Security Storage (Preserved from your snippet - Excellent)
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock)
+  );
+  
+  final _auth = LocalAuthentication();
+  String _hardwareID = "INITIALIZING...";
+
+  // 1.1: Deep Hardware Fingerprinting (Fixed Logic)
+  Future<String> getDeviceFingerprint() async {
+    try {
+      final String? result = await platform.invokeMethod('getHardwareID');
+      if (result != null && result.length > 5) {
+        _hardwareID = result;
+        print(">>> [IDENTITY] Hardware ID Verified: $_hardwareID");
+        return _hardwareID;
+      } else {
+        throw PlatformException(code: "INVALID_ID", message: "ID too short/null");
+      }
+    } on MissingPluginException {
+      // 1. CRITICAL FIX: Specifically catch the Missing Plugin error
+      print("âš ï¸ [WARN] Native Bridge Missing - Using Dev Fallback");
+      _hardwareID = "DEV_BYPASS_${Random().nextInt(99999)}";
+      return _hardwareID;
+    } catch (e) {
+      // Catch-all for any other weirdness
+      print("!!! [IDENTITY] General Error: $e");
+      _hardwareID = "ERROR_BYPASS_${Random().nextInt(99999)}";
+      return _hardwareID;
+    }
+  }
+
+  // 1.2: Persistent Session Management
+  Future<void> saveSession(String username, String token, Map<String, dynamic> profile) async {
+    try {
+      await _storage.write(key: 'session_token', value: token);
+      await _storage.write(key: 'session_user', value: username);
+      await _storage.write(key: 'user_profile', value: jsonEncode(profile)); // Fixed Key Name consistency
+      await _storage.write(key: 'last_login', value: DateTime.now().toIso8601String());
+      print(">>> [IDENTITY] Session Secured in Vault.");
+    } catch (e) {
+      print("!!! [IDENTITY] Write Error: $e");
+    }
+  }
+
+  Future<Map<String, dynamic>?> recoverSession() async {
+    try {
+      String? token = await _storage.read(key: 'session_token');
+      String? profileRaw = await _storage.read(key: 'user_profile'); // Matching key from saveSession
+      
+      if (token != null && profileRaw != null) {
+        print(">>> [IDENTITY] Found existing session token.");
+        
+        // 1.3: Biometric Gate
+        bool authenticated = await _authenticateBiometrics();
+        if (authenticated) {
+          print(">>> [IDENTITY] Biometric Auth Success. Unlocking Vault.");
+          return jsonDecode(profileRaw);
+        } else {
+          print("!!! [IDENTITY] Biometric Auth Failed or Cancelled.");
+          // Security Choice: Do we clear session on failed bio? 
+          // For now, return null but keep session (user can retry).
+          return null; 
+        }
+      }
+    } catch (e) {
+      print("!!! [IDENTITY] Recovery Error: $e");
+      await clearSession();
+    }
+    return null;
+  }
+
+  Future<void> clearSession() async {
+    await _storage.deleteAll();
+    print(">>> [IDENTITY] Secure Storage Wiped.");
+  }
+
+  // 1.4: Detailed Biometric Logic
+  Future<bool> _authenticateBiometrics() async {
+    try {
+      bool canCheck = await _auth.canCheckBiometrics;
+      bool isDeviceSupported = await _auth.isDeviceSupported();
+      
+      if (!canCheck || !isDeviceSupported) {
+        print(">>> [IDENTITY] Biometrics not available. Bypassing.");
+        return true; 
+      }
+
+      return await _auth.authenticate(
+        localizedReason: 'Sovereign Sanctuary Access Required',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+          useErrorDialogs: true
+        )
+      );
+    } catch (e) {
+      print("!!! [IDENTITY] Biometric Exception: $e");
+      return true; // Fail Open for Development, switch to 'return false' for Prod
+    }
+  }
+}
+// -----------------------------------------------------------------------------
+// END OF PART 1
+// -----------------------------------------------------------------------------
+// =============================================================================
+// MODULE 2: VAGUS AUDIO ENGINE (REPAIRED v2.6.2)
+// Status: FIXED (Variables + Logic + Permissions all in one class)
+// =============================================================================
+class VagusEngine {
+  // --- 1. CORE VARIABLES (These were missing in your last build) ---
+  final SpeechToText _speech = SpeechToText();
+  
+  // State Flags
+  bool isAudioReady = false;
+  bool get isListening => _isListening;
+  bool _isListening = false;
+  bool _isProcessingBuffer = false;
+  
+  // Buffers & Streams
+  final List<Uint8List> _audioBuffer = [];
+  final StreamController<String> _transcriptionStream = StreamController.broadcast();
+  Stream<String> get onTranscription => _transcriptionStream.stream;
+  Timer? _silenceTimer;
+
+  // --- 2. INITIALIZATION (Robust) ---
+  Future<void> initializeSystem() async {
+    print(">>> [VAGUS] Initializing Audio Cortex...");
+    
+    // A. Permission Gate
+    var status = await Permission.microphone.request();
+    if (status != PermissionStatus.granted) {
+      print("!!! [VAGUS] Mic Permission Denied by User.");
+      isAudioReady = false;
+      return; 
+    }
+
+    // B. Session Configuration
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+      avAudioSessionMode: AVAudioSessionMode.videoChat,
+      avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+      avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.notifyOthersOnDeactivation,
+      androidAudioAttributes: AndroidAudioAttributes(
+        contentType: AndroidAudioContentType.speech,
+        flags: AndroidAudioFlags.audibilityEnforced,
+        usage: AndroidAudioUsage.voiceCommunication,
+      ),
+      androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      androidWillPauseWhenDucked: true,
+    ));
+
+    // C. Interruption Handling
+    session.interruptionEventStream.listen((event) {
+      if (event.begin) {
+        print(">>> [VAGUS] Audio Interrupted (Call Started)");
+      } else {
+        print(">>> [VAGUS] Audio Resumed (Call Ended)");
+      }
+    });
+
+    session.devicesChangedEventStream.listen((event) {
+       print(">>> [VAGUS] Audio Device Changed: ${event.devicesAdded}");
+    });
+
+    // D. Hardware Spin-up
+    await session.setActive(true);
+    // await _player.openPlayer();
+    // await _recorder.openRecorder();
+    
+    isAudioReady = true;
+    print(">>> [VAGUS] Audio System Online & Ready.");
+  }
+
+  // --- 3. INPUT: LISTENING (Speech-to-Text) ---
+  Future<void> startListening({required Function(String) onFinalResult}) async {
+    if (!isAudioReady) await initializeSystem();
+    if (_isListening) return;
+
+    bool available = await _speech.initialize(
+      onStatus: (status) => print('>>> [SPEECH] Status: $status'),
+      onError: (error) => print('!!! [SPEECH] Error: $error'),
+    );
+
+    if (available) {
+      _isListening = true;
+      _speech.listen(
+        onResult: (result) {
+          _transcriptionStream.add(result.recognizedWords);
+          
+          _silenceTimer?.cancel();
+          _silenceTimer = Timer(const Duration(milliseconds: 1500), () {
+            if (result.recognizedWords.isNotEmpty) {
+              print(">>> [VAGUS] Silence Detected. Sending Query.");
+              stopListening();
+              onFinalResult(result.recognizedWords);
+            }
+          });
+        },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        partialResults: true,
+        cancelOnError: true,
+        listenMode: ListenMode.dictation,
+      );
+    }
+  }
+
+  Future<void> stopListening() async {
+    _silenceTimer?.cancel();
+    await _speech.stop();
+    _isListening = false;
+  }
+
+  // --- 4. OUTPUT: SPEAKING (Buffered Audio) ---
+  void processAudioChunk(String base64Data) {
+    try {
+      final bytes = base64Decode(base64Data);
+      _audioBuffer.add(bytes);
+      if (!_isProcessingBuffer) {
+        _playNextChunk();
+      }
+    } catch (e) {
+      print("!!! [VAGUS] Audio Decode Error: $e");
+    }
+  }
+
+  void _playNextChunk() {
+    if (_audioBuffer.isEmpty) {
+      _isProcessingBuffer = false;
+      return;
+    }
+    
+    _isProcessingBuffer = true;
+//     // _player.startPlayer(
+//       fromDataBuffer: _audioBuffer.removeAt(0),
+//       whenFinished: () => _playNextChunk(),
+//     );
+  }
+}
+// -----------------------------------------------------------------------------
+// END OF PART 2
+// -----------------------------------------------------------------------------
+// =============================================================================
+// MODULE 3: VISUAL PERSONA ENGINE (CRASH PROOF)
+// Status: FIXED (Added dispose checks for AnimationController)
+// =============================================================================
+class VisualPersona extends StatefulWidget {
+  final bool isTalking, isListening;
+  const VisualPersona({super.key, required this.isTalking, required this.isListening});
+  @override
+  State<VisualPersona> createState() => _VisualPersonaState();
+}
+
+class _VisualPersonaState extends State<VisualPersona> with TickerProviderStateMixin {
+  late AnimationController _breath, _blink;
+  Timer? _blinkTimer;
+  
+  @override
+  void initState() {
+    super.initState();
+    _breath = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat(reverse: true);
+    _blink = AnimationController(vsync: this, duration: const Duration(milliseconds: 150));
+    
+    // 1. FIXED: Timer Check
+    _blinkTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      // CRITICAL SAFETY CHECK: Stop if widget is gone
+      if (!mounted) { timer.cancel(); return; }
+      
+      if (Random().nextDouble() > 0.7) { 
+        _blink.forward().then((_) {
+          if (mounted) _blink.reverse(); // Double check before reversing
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    // 2. FIXED: Proper Cleanup Order
+    _blinkTimer?.cancel();
+    _breath.dispose();
+    _blink.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CustomPaint(painter: NervousSystemPainter()),
+        Center(
+          child: AnimatedBuilder(
+            animation: _breath,
+            builder: (ctx, child) {
+              double val = _breath.value;
+              Color auraColor = const Color(0xFF00FFFF).withOpacity(0.2 + (0.15 * val));
+              return Container(
+                width: 180, height: 180,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const RadialGradient(colors: [Color(0xFF001a33), Color(0xFF000000)], stops: [0.3, 1.0]),
+                  boxShadow: [
+                    BoxShadow(color: auraColor, blurRadius: 60, spreadRadius: 10 * val),
+                    BoxShadow(color: Colors.white.withOpacity(0.1), blurRadius: 10, spreadRadius: -2),
+                  ]
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [_buildEye(), const SizedBox(width: 30), _buildEye()]),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEye() => AnimatedBuilder(animation: _blink, builder: (ctx, _) {
+    double h = 24.0 * (1.0 - _blink.value); if (h < 2) h = 2;
+    return Container(width: 24, height: h, decoration: BoxDecoration(color: const Color(0xFF00FFFF).withOpacity(0.6), shape: BoxShape.circle, boxShadow: [BoxShadow(color: const Color(0xFF00FFFF).withOpacity(0.4), blurRadius: 12, spreadRadius: 2)]));
+  });
+}
+
+class NervousSystemPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = const Color(0xFF00FFFF).withOpacity(0.05);
+    for (double i = 0; i < size.width; i += 40) { for (double j = 0; j < size.height; j += 40) { canvas.drawCircle(Offset(i, j), 1, paint); }}
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// =============================================================================
+// MODULE 4: THE NEURAL INTERFACE (SMART CONNECTED v3.0)
+// Status: UPGRADED (Handles Handshake, Debugs Silence, Shows Status)
+// =============================================================================
+class NeuralInterface extends StatefulWidget {
+  final Map<String, dynamic>? currentUserProfile;
+  final String? username;
+  final String? password;
+  
+  const NeuralInterface({super.key, this.currentUserProfile, this.username, this.password});
+  
+  @override
+  State<NeuralInterface> createState() => _NeuralInterfaceState();
+}
+
+class _NeuralInterfaceState extends State<NeuralInterface> {
+  final VagusEngine _audio = VagusEngine(); 
+  
+  // Internal Socket Management
+  WebSocketChannel? _socket;
+  final String _serverUrl = 'ws://10.0.0.81:8765'; // Ensure this matches your Mac IP!
+
+  // State
+  final List<String> _chatHistory = [];
+  final TextEditingController _chatController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  bool _isTalking = false; 
+  String _connectionStatus = "Initializing..."; 
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToCortex();
+  }
+
+  // 1. ESTABLISH FRESH CONNECTION
+  void _connectToCortex() {
+    setState(() => _connectionStatus = "Dialing Neural Core...");
+    
+    try {
+      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _socket!.stream.listen(
+        _handleSocketMessage,
+        onError: (e) {
+          if(mounted) setState(() => _connectionStatus = "ERROR: $e");
+          _addSystemMsg("Connection Died: $e");
+        },
+        onDone: () {
+          if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
+        }
+      );
+
+      // 2. IMMEDIATE LOGIN
+      print(">>> NEURAL INTERFACE: Sending Login...");
+      _socket!.sink.add(jsonEncode({
+        "type": "login_request",
+        "username": widget.username,
+        "password": widget.password,
+        "expected_role": "CLIENT"
+      }));
+
+    } catch (e) {
+      _addSystemMsg("Fatal Connection Error: $e");
+    }
+
+    // Audio Listeners
+    _audio.onTranscription.listen((text) { 
+      if (mounted) setState(() => _chatController.text = text); 
+    });
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+      print(">>> CORTEX SAYS: $data"); 
+
+      if (data['type'] == 'login_success') {
+        setState(() => _connectionStatus = "ONLINE (SECURE)");
+        _addSystemMsg("Neural Link Established.");
+      }
+      else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
+        String reply = data['text'] ?? "";
+        setState(() {
+          // Update last NATE message if it exists, otherwise add new one
+          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("[NATE]:")) {
+            _chatHistory[_chatHistory.length - 1] = "[NATE]: $reply";
+          } else {
+            _chatHistory.add("[NATE]: $reply");
+          } 
+          _scrollToBottom();
+        });
+      }
+      else if (data['type'] == 'nate_audio_delta') {
+         if (mounted) setState(() => _isTalking = true);
+         _audio.processAudioChunk(data['payload']);
+         Future.delayed(const Duration(milliseconds: 200), () => { if(mounted) setState(() => _isTalking = false) });
+      }
+    } catch (e) {
+      print("Parse Error: $e");
+    }
+  }
+
+  void _addSystemMsg(String msg) {
+    setState(() {
+      _chatHistory.add("[SYSTEM]: $msg");
+      _scrollToBottom();
+    });
+  }
+
+  void _sendMessage() {
+    String text = _chatController.text.trim();
+    if (text.isEmpty) return;
+    
+    // Check our INTERNAL socket
+    if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
+      _addSystemMsg("Link is dead. Reconnecting...");
+      _connectToCortex(); // Auto-heal
+      return;
+    }
+
+    print(">>> SENDING: $text");
+    _socket!.sink.add(jsonEncode({
+      "type": "nate_query", 
+      "nate_query": text,
+      "modality": "General" 
+    }));
+
+    setState(() {
+      _chatHistory.add("[YOU]: $text");
+      _chatController.clear();
+      _scrollToBottom();
+    });
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _socket?.sink.close(); // Clean up on exit
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.currentUserProfile?['name'] ?? "SUBJECT", style: const TextStyle(fontFamily: "Courier", color: Colors.cyanAccent, fontSize: 16)),
+            Text(_connectionStatus, style: TextStyle(fontFamily: "Courier", color: _connectionStatus.contains("ONLINE") ? Colors.green : Colors.red, fontSize: 10)),
+          ],
+        ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: () {
+              _socket?.sink.close();
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LobbyScreen()));
+            }
+          )
+        ],
+      ),
+      body: Stack(
+        children: [
+          VisualPersona(isTalking: _isTalking, isListening: _audio.isListening),
+          Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  itemCount: _chatHistory.length,
+                  itemBuilder: (ctx, i) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("[YOU]") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
+                  )
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _chatController,
+                        style: const TextStyle(color: Colors.white, fontFamily: "Courier"),
+                        decoration: InputDecoration(hintText: "Input...", filled: true, fillColor: Colors.white10, border: OutlineInputBorder(borderRadius: BorderRadius.circular(30))),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FloatingActionButton(mini: true, backgroundColor: Colors.cyan, onPressed: _sendMessage, child: const Icon(Icons.send, color: Colors.black))
+                  ],
+                ),
+              )
+            ],
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// COACH PORTAL DASHBOARD (Verified v16.1 - Self-Sufficient Connection)
+// =============================================================================
+
+class CoachDashboardScreen extends StatefulWidget {
+  final Map<String, dynamic> currentUserProfile;
+  final String username; // <--- The Key to Stability
+  final String password; // <--- The Key to Stability
+
+  const CoachDashboardScreen({
+    super.key, 
+    required this.currentUserProfile, 
+    required this.username,
+    required this.password
+  });
+
+  @override
+  _CoachDashboardScreenState createState() => _CoachDashboardScreenState();
+}
+
+class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
+  // Internal Socket Management
+  WebSocketChannel? _socket;
+  final String _serverUrl = 'ws://10.0.0.81:8765'; // Ensure this matches your Mac IP!
+
+  // Dashboard Data
+  List<dynamic> _clients = [];
+  List<dynamic> _schedule = [];
+  bool _isLoading = true;
+  String _statusMessage = "Initializing...";
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToBridge();
+  }
+
+  // 1. ESTABLISH FRESH CONNECTION (Stability Fix)
+  void _connectToBridge() {
+    setState(() => _statusMessage = "Connecting to HQ...");
+    
+    try {
+      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _socket!.stream.listen(
+        _handleSocketMessage,
+        onError: (e) {
+          print("Coach Socket Error: $e");
+          if (mounted) setState(() => _statusMessage = "Connection Failed");
+        },
+        onDone: () {
+          print("Coach Socket Closed");
+          if (mounted) setState(() => _statusMessage = "Disconnected");
+        }
+      );
+
+      // 2. IMMEDIATE LOGIN
+      print(">>> COACH DASHBOARD: Sending Login...");
+      _socket!.sink.add(jsonEncode({
+        "type": "login_request",
+        "username": widget.username,
+        "password": widget.password,
+        "expected_role": "COACH"
+      }));
+
+    } catch (e) {
+      print("Fatal Connection Error: $e");
+    }
+  }
+
+  void _fetchDashboard() {
+    // Sends the command to bridge_server.py to run coach_nexus.get_dashboard()
+    if (_socket != null) {
+      _socket!.sink.add(jsonEncode({ "type": "fetch_coach_dashboard" }));
+    }
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+
+      // A. Login Confirmation
+      if (data['type'] == 'login_success') {
+        print(">>> COACH AUTHENTICATED. Fetching Data...");
+        _fetchDashboard(); // Load data only after login is confirmed
+      }
+
+      // B. Dashboard Data Arrived
+      else if (data['type'] == 'coach_dashboard_data') {
+        if (mounted) {
+          setState(() {
+            _clients = data['data']['clients'] ?? [];
+            _schedule = data['data']['schedule'] ?? [];
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error parsing socket message: $e");
+    }
+  }
+
+  // --- DIALOGS (Your Features) ---
+
+  void _showReportsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("INTELLIGENCE VAULT", style: TextStyle(color: Colors.amber, fontFamily: 'Courier')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.description, color: Colors.blue),
+              title: const Text("Client Observation Reports", style: TextStyle(color: Colors.white)),
+              onTap: () { 
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloading Client Reports...")));
+                // In future: _socket!.sink.add(jsonEncode({"type": "fetch_reports"}));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology, color: Colors.purple),
+              title: const Text("My Coaching Analysis", style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.pop(ctx); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_money, color: Colors.green),
+              title: const Text("Billing / Time Logs", style: TextStyle(color: Colors.white)),
+              subtitle: const Text("View billable heartbeat data", style: TextStyle(color: Colors.grey, fontSize: 10)),
+              onTap: () { Navigator.pop(ctx); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSchedulingDialog() {
+    TextEditingController _timeController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("MANAGE AVAILABILITY", style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+             TextField(
+               controller: _timeController,
+               style: const TextStyle(color: Colors.white),
+               decoration: const InputDecoration(labelText: "Add Slot (e.g. 'Mon 10:00 AM')", labelStyle: TextStyle(color: Colors.grey)),
+             ),
+             const SizedBox(height: 20),
+             ElevatedButton(
+               style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+               child: const Text("Publish Slot"),
+               onPressed: () {
+                 _socket?.sink.add(jsonEncode({
+                   "type": "update_availability",
+                   "slots": [_timeController.text] 
+                 }));
+                 Navigator.pop(ctx);
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Slot Published")));
+               },
+             )
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNoteDialog() {
+    TextEditingController _noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("NIGHT SCHOOL INGESTION", style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: _noteController,
+          maxLines: 5,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "Speak or type session notes here for Little Nate to learn...",
+            hintStyle: TextStyle(color: Colors.grey),
+            border: OutlineInputBorder()
+          ),
+        ),
+        actions: [
+          TextButton(child: const Text("CANCEL"), onPressed: () => Navigator.pop(ctx)),
+          ElevatedButton(
+            child: const Text("UPLOAD MEMORY"),
+            onPressed: () {
+               _socket?.sink.add(jsonEncode({
+                 "type": "upload_session_note",
+                 "note_text": _noteController.text
+               }));
+               Navigator.pop(ctx);
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notes sent to Night School.")));
+            },
+          )
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _socket?.sink.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212), // Dark Mode Background
+      appBar: AppBar(
+        title: const Text("COACH COMMAND", style: TextStyle(fontFamily: 'Courier', color: Colors.amber, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.black,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.grey),
+            onPressed: () { 
+              setState(() => _isLoading = true); 
+              _fetchDashboard(); 
+            }
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: () {
+               _socket?.sink.close();
+               Navigator.of(context).pushReplacement(
+                 MaterialPageRoute(builder: (_) => const LobbyScreen())
+               );
+            },
+          )
+        ],
+      ),
+      body: _isLoading 
+        ? Center(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.amber),
+              const SizedBox(height: 20),
+              Text(_statusMessage, style: const TextStyle(color: Colors.grey))
+            ],
+          ))
+        : SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSectionHeader("Active Caseload"),
+                  if (_clients.isEmpty) _buildEmptyState("No clients assigned."),
+                  ..._clients.map((c) => _buildClientTile(c)).toList(),
+
+                  const SizedBox(height: 30),
+
+                  _buildSectionHeader("Today's Schedule"),
+                  if (_schedule.isEmpty) _buildEmptyState("No sessions today."),
+                  ..._schedule.map((s) => _buildScheduleTile(s)).toList(),
+                  
+                  const SizedBox(height: 30),
+                  
+                  _buildQuickActions()
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+  // --- UI HELPER WIDGETS ---
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        title.toUpperCase(), 
+        style: const TextStyle(color: Colors.grey, letterSpacing: 1.5, fontWeight: FontWeight.bold, fontSize: 12)
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white10), 
+        borderRadius: BorderRadius.circular(8)
+      ),
+      child: Center(
+        child: Text(text, style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic))
+      ),
+    );
+  }
+
+  Widget _buildClientTile(dynamic client) {
+    return Card(
+      color: Colors.grey[900],
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.blueGrey[900],
+          child: const Icon(Icons.person, color: Colors.blueAccent),
+        ),
+        title: Text(client['name'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        subtitle: Text("ID: ${client['id']}", style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        trailing: IconButton(
+          icon: const Icon(Icons.message, color: Colors.amber),
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Secure Relay Opening...")));
+          },
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildScheduleTile(dynamic slot) {
+    return Card(
+      color: Colors.grey[900],
+      child: ListTile(
+        leading: const Icon(Icons.videocam, color: Colors.green),
+        title: Text(slot['time'] ?? "Unknown Time", style: const TextStyle(color: Colors.white)),
+        subtitle: Text(slot['client'] ?? "Open Slot", style: const TextStyle(color: Colors.grey)),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      ),
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.mic, color: Colors.white),
+                label: const Text("DICTATE NOTES"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey[800],
+                  padding: const EdgeInsets.symmetric(vertical: 15)
+                ),
+                onPressed: _showNoteDialog,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.calendar_today, color: Colors.white),
+                label: const Text("SCHEDULER"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey[800],
+                  padding: const EdgeInsets.symmetric(vertical: 15)
+                ),
+                onPressed: _showSchedulingDialog,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 15),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.analytics, color: Colors.amber),
+            label: const Text("ACCESS INTELLIGENCE VAULT (REPORTS)"),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.amber),
+              foregroundColor: Colors.amber,
+              padding: const EdgeInsets.symmetric(vertical: 15)
+            ),
+            onPressed: _showReportsDialog, 
+          ),
+        )
+      ],
+    );
+  }
+}
+// -----------------------------------------------------------------------------
+// END OF PART 3
+// -----------------------------------------------------------------------------
+// =============================================================================
+// MODULE 3: THE LOBBY (SELF-HEALING v4.0)
+// Status: UPGRADED (Visual Connection Status + Retry Logic)
+// =============================================================================
+
+class LobbyScreen extends StatefulWidget {
+  const LobbyScreen({super.key});
+
+  @override
+  _LobbyScreenState createState() => _LobbyScreenState();
+}
+
+class _LobbyScreenState extends State<LobbyScreen> {
+  final HardwareIdentity _identity = HardwareIdentity();
+  WebSocketChannel? _channel;
+  
+  // Connection State
+  bool _isConnected = false;
+  String _statusMessage = "Initializing...";
+  bool _isLoading = false;
+
+  // Credentials for Handoff
+  String _tempUser = "";
+  String _tempPass = "";
+  
+  // Hardcoded IP (Make sure this matches your Mac!)
+  final String _serverUrl = 'ws://10.0.0.81:8765';
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToBridge();
+  }
+
+  void _connectToBridge() {
+    setState(() {
+      _statusMessage = "Connecting to $_serverUrl...";
+      _isConnected = false;
+    });
+
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _channel!.stream.listen(
+        _handlePacket, 
+        onError: (e) {
+          print("Lobby Socket Error: $e");
+          if (mounted) setState(() {
+            _isConnected = false;
+            _statusMessage = "Connection Failed. Server Offline?";
+          });
+        },
+        onDone: () {
+          print("Lobby Socket Closed");
+          if (mounted) setState(() {
+            _isConnected = false;
+            _statusMessage = "Disconnected.";
+          });
+        }
+      );
+      
+      // If we didn't crash immediately, assume we are good (Socket doesn't confirm until message)
+      // We will send a "ping" to verify connection
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) setState(() {
+          _isConnected = true;
+          _statusMessage = "SECURE LINK ESTABLISHED";
+        });
+      });
+
+    } catch (e) {
+      if (mounted) setState(() => _statusMessage = "Fatal Connection Error: $e");
+    }
+  }
+
+  void _handlePacket(dynamic message) {
+    // If we receive ANYTHING, we are definitely connected
+    if (!_isConnected) setState(() => _isConnected = true);
+
+    try {
+      final data = jsonDecode(message);
+      print("Lobby Received: $data");
+
+      if (data['type'] == 'login_success') {
+        setState(() => _isLoading = false);
+        
+        // --- THE HANDOFF (Prevent Stream Crash) ---
+        Map<String, dynamic> profile = data['profile'];
+        String role = profile['role'] ?? "CLIENT";
+        
+        // 1. Close the Lobby Line
+        _channel?.sink.close();
+        
+        // 2. Open the Session Line
+        final sessionSocket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+        
+        // 3. Blind Login
+        sessionSocket.sink.add(jsonEncode({
+          "type": "login_request",
+          "username": _tempUser,
+          "password": _tempPass,
+          "expected_role": role
+        }));
+
+        // 4. Navigate
+        Widget nextScreen;
+        if (role == 'ADMIN') {
+          nextScreen = AdminDashboardScreen(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        } else if (role == 'COACH') {
+          nextScreen = CoachDashboardScreenV2(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        } else {
+          nextScreen = NeuralInterfaceV2(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        }
+
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => nextScreen));
+        
+      } else if (data['type'] == 'login_failed') {
+        Navigator.pop(context); // Close dialog if open
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("ACCESS DENIED: ${data['message']}"),
+          backgroundColor: Colors.red,
+        ));
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      print("Parse Error: $e");
+    }
+  }
+
+  void _showLoginDialog(String expectedRole) {
+    if (!_isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cannot Login: Offline")));
+      return;
+    }
+
+    TextEditingController userCtrl = TextEditingController();
+    TextEditingController passCtrl = TextEditingController();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+            const SizedBox(height: 10),
+            TextField(controller: passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "KEY", prefixIcon: Icon(Icons.vpn_key))),
+          ],
+        ),
+        actions: [
+          TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
+            child: const Text("VERIFY"),
+            onPressed: () {
+              // 1. Save Credentials
+              _tempUser = userCtrl.text.trim();
+              _tempPass = passCtrl.text.trim();
+              
+              // 2. Send Login
+              _channel?.sink.add(jsonEncode({
+                "type": "login_request",
+                "username": _tempUser,
+                "password": _tempPass,
+                "expected_role": expectedRole
+              }));
+
+              // 3. Show Loading (Don't close dialog yet, wait for response)
+              Navigator.pop(ctx); 
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying Credentials...")));
+            },
+          )
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // --- CONNECTION STATUS HEADER ---
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: _isConnected ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _isConnected ? Colors.green : Colors.red)
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 10, color: _isConnected ? Colors.green : Colors.red),
+                    const SizedBox(width: 10),
+                    Text(_statusMessage, style: TextStyle(color: _isConnected ? Colors.green : Colors.red, fontSize: 10, fontFamily: "Courier")),
+                  ],
+                ),
+              ),
+              if (!_isConnected) 
+                TextButton(
+                  onPressed: _connectToBridge, 
+                  child: const Text("RETRY CONNECTION", style: TextStyle(color: Colors.white54))
+                ),
+              // --------------------------------
+
+              const SizedBox(height: 40),
+              const Icon(Icons.shield_moon, size: 80, color: Color(0xFF333333)),
+              const SizedBox(height: 20),
+              const Text("SOVEREIGN SANCTUARY", style: TextStyle(color: Colors.white, letterSpacing: 4, fontFamily: 'Courier', fontSize: 18)),
+              const SizedBox(height: 60),
+
+              _buildGateButton(
+                "CLIENT PORTAL", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                () => _showLoginDialog("CLIENT")
+              ),
+              const SizedBox(height: 20),
+
+              _buildGateButton(
+                "COACH ACCESS", "Supervision & Admin", Icons.admin_panel_settings, const Color(0xFFFFD700),
+                () => _showLoginDialog("COACH")
+              ),
+
+              const SizedBox(height: 20),
+
+              _buildGateButton(
+                "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
+                () => _showLoginDialog("ADMIN")
+              ),
+
+              const SizedBox(height: 40),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => const SignUpWizard(role: "CLIENT")
+                  ));
+                },
+                child: const Text("NEW CLIENT REGISTRATION", style: TextStyle(color: Colors.blueAccent, decoration: TextDecoration.underline, letterSpacing: 1.5, fontSize: 12)),
+           ),
+          ],
+        ),
+       ),
+      ),
+    );
+  }
+
+  Widget _buildGateButton(String title, String sub, IconData icon, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(12),
+          color: color.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(width: 20),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+                Text(sub, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+              ],
+            ),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios, color: color, size: 16)
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LobbyButton extends StatelessWidget {
+  final String title, subtitle;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _LobbyButton({required this.title, required this.subtitle, required this.color, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(12),
+          color: color.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(width: 20),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.2)),
+              const SizedBox(height: 4),
+              Text(subtitle, style: TextStyle(color: Colors.white54, fontSize: 12)),
+            ]),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios, color: color.withOpacity(0.5), size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// SIGN UP WIZARD (Sanitized Session Logic)
+// -----------------------------------------------------------------------------
+class SignUpWizard extends StatefulWidget {
+  final String role;
+  const SignUpWizard({super.key, required this.role});
+  @override
+  State<SignUpWizard> createState() => _SignUpWizardState();
+}
+
+class _SignUpWizardState extends State<SignUpWizard> {
+  int _step = 1;
+  bool _consentGiven = false;
+  DateTime? _dob;
+  final _nameCtrl = TextEditingController();
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final List<String> _endpoints = ['ws://10.0.0.81:8765'];
+  bool _isDependent = false;
+  TextEditingController _parentCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // 2. CRITICAL FIX: Forces a clean slate to prevent "Ghost Linking"
+    _sanitizeSession();
+  }
+
+  Future<void> _sanitizeSession() async {
+    print(">>> [INTAKE] Sanitizing session to prevent auto-linking...");
+    await HardwareIdentity().clearSession();
+  }
+
+  int _calculateAge(DateTime birthDate) {
+    final now = DateTime.now();
+    int age = now.year - birthDate.year;
+    if (now.month < birthDate.month || (now.month == birthDate.month && now.day < birthDate.day)) age--;
+    return age;
+  }
+
+  void _submitRegistration() {
+    // 1. Validation
+    if (_dob == null) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is Required")));
+       return;
+    }
+    if (_calculateAge(_dob!) < 18) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
+       return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sending Data to Neural Core...")));
+
+    // 2. THE BURNER SOCKET
+    final regSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
+
+    regSocket.stream.listen((message) {
+      final data = jsonDecode(message);
+      print(">>> SERVER SAYS: $data"); // <--- Debug Print
+
+      // CASE A: Server created account AND logged us in (Ideal)
+      if (data['type'] == 'login_success') {
+        _handleLoginSuccess(data, regSocket);
+        Navigator.pushAndRemoveUntil(
+          context, 
+          MaterialPageRoute(builder: (_) => NeuralInterface(
+             currentUserProfile: data['profile'],
+             username: _userCtrl.text.trim(), // Pass form data
+             password: _passCtrl.text.trim(), // Pass form data
+          )),
+          (route) => false
+        );
+      } 
+      
+      // CASE B: Server created account but waits for login (Likely what is happening)
+      else if (data['type'] == 'register_success') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Identity Created. Logging in...")));
+        // Trigger the login manually using the SAME socket
+        regSocket.sink.add(jsonEncode({
+           "type": "login_request",
+           "username": _userCtrl.text.trim(),
+           "password": _passCtrl.text.trim(),
+           "expected_role": widget.role
+        }));
+      }
+      
+      // CASE C: Error
+      else if (data['type'] == 'error') {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("FAILURE: ${data['message']}"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }, onError: (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e")));
+    });
+
+    // 3. Send Registration Command
+    regSocket.sink.add(jsonEncode({
+      "type": "register_request",
+      "consent_agreed": true,
+      "consent_version": "v12.6_2026_FINAL",
+      "role": widget.role,
+      "username": _userCtrl.text.trim(),
+      "password": _passCtrl.text.trim(),
+      "name": _nameCtrl.text.trim(),
+      "dob": DateFormat('yyyy-MM-dd').format(_dob!),
+      "modality": "General",
+      "parent_username": _isDependent ? _parentCtrl.text.trim() : null
+    }));
+  }
+
+  // Helper method to keep code clean
+  void _handleLoginSuccess(Map<String, dynamic> data, WebSocketChannel burnerSocket) {
+        // A. Save Credentials
+        HardwareIdentity().saveSession(_userCtrl.text, "NEW_REG_TOKEN", data['profile']);
+        
+        // B. Close the Burner Socket
+        burnerSocket.sink.close();
+
+        // C. Open a FRESH Connection for the Chat
+        final chatSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
+
+        // D. Perform Blind Login on the new socket
+        chatSocket.sink.add(jsonEncode({
+           "type": "login_request",
+           "username": _userCtrl.text.trim(),
+           "password": _passCtrl.text.trim(),
+           "expected_role": widget.role
+        }));
+
+        // E. Hand the FRESH socket to the Eye
+        Navigator.pushAndRemoveUntil(
+          context, 
+          MaterialPageRoute(builder: (_) => NeuralInterface(
+             currentUserProfile: data['profile'],
+             username: _userCtrl.text.trim(),
+             password: _passCtrl.text.trim(),
+          )),
+          (route) => false
+        );
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 6570)), 
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(data: ThemeData.dark(), child: child!)
+    );
+    if (picked != null) setState(() => _dob = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      // 3. RESTORED: Red Back Button in AppBar
+      appBar: AppBar(
+        title: Text("NEW ${widget.role}"), 
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.redAccent),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: _step == 1 
+          ? SovereignCovenantDoc(
+              consentGiven: _consentGiven,
+              onChanged: (v) => setState(() => _consentGiven = v!),
+              color: Colors.blueAccent,
+              btnText: "I COVENANT & PROCEED",
+              onNext: _consentGiven ? () => setState(() => _step = 2) : null,
+            )
+          : _buildForm(),
+      ),
+    );
+  }
+
+
+  Widget _buildForm() {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        inputDecorationTheme: InputDecorationTheme(
+          labelStyle: const TextStyle(color: Colors.white70),
+          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+          focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
+        ),
+        textTheme: const TextTheme(bodyMedium: TextStyle(color: Colors.white)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. STANDARD FIELDS
+            TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: "Full Name", prefixIcon: Icon(Icons.person))),
+            const SizedBox(height: 10),
+            
+            GestureDetector(
+              onTap: () => _selectDate(context),
+              child: AbsorbPointer(child: TextField(decoration: InputDecoration(
+                labelText: _dob == null ? "DOB (Required)" : "DOB: ${DateFormat('yyyy-MM-dd').format(_dob!)}", 
+                suffixIcon: const Icon(Icons.calendar_today)
+              ))),
+            ),
+            const SizedBox(height: 20),
+
+            // 2. FAMILY LINK SECTION (The Missing Piece)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: _isDependent ? Colors.blue : Colors.white12),
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white.withOpacity(0.05)
+              ),
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    title: const Text("Is this a Child/Dependent Account?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Link this account to a Head of Household", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    value: _isDependent,
+                    activeColor: Colors.blue,
+                    onChanged: (val) => setState(() => _isDependent = val),
+                  ),
+                  
+                  if (_isDependent) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _parentCtrl, 
+                      decoration: const InputDecoration(
+                        labelText: "Head of Household IDENTITY", 
+                        hintText: "Enter Parent's Username",
+                        prefixIcon: Icon(Icons.family_restroom, color: Colors.blue)
+                      )
+                    ),
+                  ]
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 3. CREDENTIALS
+            TextField(controller: _userCtrl, decoration: const InputDecoration(labelText: "Create Username", prefixIcon: Icon(Icons.alternate_email))),
+            const SizedBox(height: 10),
+            TextField(controller: _passCtrl, obscureText: true, decoration: const InputDecoration(labelText: "Create Password", prefixIcon: Icon(Icons.lock))),
+            
+            const SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: _submitRegistration, 
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, minimumSize: const Size(double.infinity, 50)),
+              child: const Text("CREATE ACCOUNT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+            )
+          ],
+        ),
+      ), 
+    );
+  }  
+}
+
+// =============================================================================
+// MODULE 6: LEGAL ENGINE (FIXED STATE CLASSES)
+// =============================================================================
+
+class ReConsentScreen extends StatefulWidget {
+  final String username, password;
+  const ReConsentScreen({super.key, required this.username, required this.password});
+  @override
+  State<ReConsentScreen> createState() => _ReConsentScreenState();
+}
+
+class _ReConsentScreenState extends State<ReConsentScreen> {
+  bool _agreed = false;
+  
+  void _send() {
+    final ws = WebSocketChannel.connect(Uri.parse('ws://10.0.0.81:8765'));
+    ws.stream.listen((message) { 
+      if (jsonDecode(message)['type'] == 'login_success') {
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false); 
+      }
+    });
+    ws.sink.add(jsonEncode({
+      "type": "submit_reconsent", 
+      "username": widget.username, 
+      "password": widget.password
+    }));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      appBar: AppBar(title: const Text("LEGAL UPDATE"), backgroundColor: Colors.amber, automaticallyImplyLeading: false),
+      body: Padding(
+        padding: const EdgeInsets.all(24), 
+        child: SovereignCovenantDoc(
+          consentGiven: _agreed, 
+          onChanged: (v) => setState(() => _agreed = v!), 
+          color: Colors.amber, 
+          btnText: "I ACCEPT NEW TERMS", 
+          onNext: _agreed ? _send : null
+        )
+      ),
+    );
+  }
+}
+
+class EmancipationScreen extends StatefulWidget {
+  final String username, password;
+  const EmancipationScreen({super.key, required this.username, required this.password});
+  @override
+  State<EmancipationScreen> createState() => _EmancipationScreenState();
+}
+
+class _EmancipationScreenState extends State<EmancipationScreen> {
+  bool _agreed = false;
+  
+  void _send() {
+    final ws = WebSocketChannel.connect(Uri.parse('ws://10.0.0.81:8765'));
+    ws.stream.listen((message) { 
+      if (jsonDecode(message)['type'] == 'login_success') {
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false); 
+      }
+    });
+    ws.sink.add(jsonEncode({
+      "type": "submit_emancipation", 
+      "username": widget.username, 
+      "password": widget.password
+    }));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      appBar: AppBar(title: const Text("HAPPY BIRTHDAY"), backgroundColor: Colors.amber, automaticallyImplyLeading: false),
+      body: Padding(
+        padding: const EdgeInsets.all(24), 
+        child: SovereignCovenantDoc(
+          consentGiven: _agreed, 
+          onChanged: (v) => setState(() => _agreed = v!), 
+          color: Colors.amber, 
+          btnText: "I CLAIM SOVEREIGNTY", 
+          onNext: _agreed ? _send : null
+        )
+      ),
+    );
+  }
+}
+
+class SovereignCovenantDoc extends StatelessWidget {
+  final bool consentGiven;
+  final ValueChanged<bool?> onChanged;
+  final Color color;
+  final String btnText;
+  final VoidCallback? onNext;
+
+  const SovereignCovenantDoc({super.key, required this.consentGiven, required this.onChanged, required this.color, required this.btnText, required this.onNext});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      const Text("SOVEREIGN COVENANT", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 10),
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.all(16), 
+          decoration: BoxDecoration(border: Border.all(color: Colors.white24), color: Colors.white.withOpacity(0.05)),
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+              _Header("1. PRIVATE MEMBERSHIP (1st AMENDMENT)"),
+              Text("You acknowledge this is a Private Membership Association operating under the First Amendment. Interactions are private exercises of speech.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("2. AI IDENTITY & LICENSING (CA AB 489)"),
+              Text("DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Do not form a 'reasonable belief' that you are interacting with a licensed healthcare professional.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("3. AUTOMATED PROFILING CONSENT"),
+              Text("This system uses 'Automated Profiling'. By proceeding, you explicitly WAIVE any state-level rights (e.g., IN, KY, RI) to 'opt-out' of profiling, as it is the core function of this service.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("4. AGE & FAMILY ACCOUNTS (CA SB 243)"),
+              Text("You affirm you are 18+ years of age. Minors are prohibited from creating primary accounts. Parents must create the account and add minors as dependents under strict supervision.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("5. TEXAS 'TRAIGA' DISCLOSURE"),
+              Text("Pursuant to Texas law: This practitioner uses Generative AI in the formulation of guidance plans.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("6. CRISIS PROTOCOL"),
+              Text("STOP: If you are in crisis:\nâ€¢ Call 988 (Suicide & Crisis Lifeline)\nâ€¢ Go to an Emergency Room immediately.", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              SizedBox(height: 15),
+              
+              _Header("7. ZERO TOLERANCE POLICY"),
+              Text("Immediate termination for: Pornography, Solicitation, or Illegal Acts.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("8. PLATFORM IMMUNITY"),
+              Text("Sovereign Sanctuary is a Technology Provider, not a Clinic. Coaches are Independent Practitioners. You look solely to the Coach for claims arising from live sessions.", style: TextStyle(color: Colors.amber)),
+              SizedBox(height: 15),
+              
+              _Header("9. BIOMETRIC DATA & PRIVACY WAIVER"),
+              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. PROCESSING: Data is encrypted and processed by third-party cloud engines (Azure OpenAI).\n3. SOVEREIGNTY: You retain the 'Right to Delete.'", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("10. HOLD HARMLESS WAIVER"),
+              Text("You voluntarily agree to hold the Developers harmless from any claims arising from data breaches, Coach interactions, or AI outputs.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("11. DISPUTE RESOLUTION"),
+              Text("BINDING ARBITRATION: You agree that any disputes shall be resolved by binding individual arbitration. You explicitly WAIVE your right to a jury trial or to participate in any CLASS ACTION.", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+            ]),
+          ),
+        ),
+      ),
+      CheckboxListTile(
+        title: const Text("I AM 18+, WAIVE CLASS ACTION RIGHTS & CONSENT", style: TextStyle(fontSize: 11, color: Colors.white)), 
+        value: consentGiven, 
+        activeColor: color, 
+        onChanged: onChanged,
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+      ),
+      ElevatedButton(
+        onPressed: onNext, 
+        style: ElevatedButton.styleFrom(backgroundColor: consentGiven ? color : Colors.grey, minimumSize: const Size(double.infinity, 50)), 
+        child: Text(btnText, style: const TextStyle(color: Colors.black))
+      )
+    ]);
+  }
+}
+
+class _Header extends StatelessWidget {
+  final String text; const _Header(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 5), child: Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)));
+}

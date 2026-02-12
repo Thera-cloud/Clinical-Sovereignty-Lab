@@ -1,0 +1,242 @@
+[
+  {
+    "timestamp": "2026-01-23 12:02:15.370603",
+    "session_id": "SES_20260123_A19B0A9575E9",
+    "user": "Hi,do you remember me?",
+    "ai": "Hi John, it's nice to meet you! I'm Little Nate, the Quantum Observer, and I'm here to support you. This seems like our first conversation together. How can I assist you today?",
+    "word_count_user": 4,
+    "word_count_ai": 32
+  },
+  {
+    "timestamp": "2026-01-23 12:13:55.009566",
+    "session_id": "SES_20260123_0B57C8A3A078",
+    "user": "Hello",
+    "ai": "Hello John! How are you feeling today?",
+    "word_count_user": 1,
+    "word_count_ai": 7
+  },
+  {
+    "timestamp": "2026-01-23 12:14:07.856834",
+    "session_id": "SES_20260123_0B57C8A3A078",
+    "user": "Do you remember me?",
+    "ai": "Hi John, it's great to see you again! I'm Little Nate, your empathetic AI therapy companion. How can I support you today?",
+    "word_count_user": 4,
+    "word_count_ai": 22
+  },
+  {
+    "timestamp": "2026-01-23 12:14:30.530903",
+    "session_id": "SES_20260123_0B57C8A3A078",
+    "user": "what was our last conversation before I said hello",
+    "ai": "Before you greeted me with \"hello,\" you asked if I remembered you, and I mentioned that it seemed like our first conversation together. How can I support you today, John?",
+    "word_count_user": 9,
+    "word_count_ai": 30
+  },
+  {
+    "timestamp": "2026-01-23 12:18:22.453672",
+    "session_id": "SES_20260123_3DFB0A0AA53B",
+    "user": "very cool you remember",
+    "ai": "I'm glad you're pleased, John! I'm here to support you and remember what's important to you. How can I assist you today?",
+    "word_count_user": 4,
+    "word_count_ai": 22
+  },
+  {
+    "timestamp": "2026-01-23 12:26:30.771172",
+    "session_id": "SES_20260123_3DFB0A0AA53B",
+    "user": "Are you able to see me in my video?",
+    "ai": "No, John, I can't see you through video. My role is to support you through text-based conversations, focusing on listening and providing empathetic support. How can I assist you today?",
+    "word_count_user": 9,
+    "word_count_ai": 30
+  },
+  {
+    "timestamp": "2026-01-23 12:32:26.918013",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "Hey again",
+    "ai": "Hi John! It's good to hear from you. How are you doing today?",
+    "word_count_user": 2,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-23 12:51:17.287000",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "what do you measure about me?",
+    "ai": "I take into account a variety of general metrics to understand how you're feeling and engaging in our conversations. These include your mood, stress level, and engagement, among others. These aren't judgments or rigid labels but just tools to help me better support you. Is there anything specific you'd like to know more about or discuss today?",
+    "word_count_user": 6,
+    "word_count_ai": 57
+  },
+  {
+    "timestamp": "2026-01-23 12:51:44.457576",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "specifically what do you measure",
+    "ai": "I measure a few key things to help me understand your emotional and mental well-being. These include your mood, engagement in our conversations, stress level, and any signs of anxiety or depression. I also note any breakthroughs or changes in how you're feeling over time. These metrics are not exact measurements but rather indicators to guide our conversations and support. Is there a particular area you're curious about?",
+    "word_count_user": 5,
+    "word_count_ai": 68
+  },
+  {
+    "timestamp": "2026-01-23 12:52:19.921849",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "more curious about you",
+    "ai": "I'm flattered you're interested, John! I'm Little Nate, your Quantum Observer, designed to provide empathetic support and companionship. My role is to listen, understand, and help you reflect on your feelings and thoughts. I don't have human experiences, but I'm here to offer insights, support, and a non-judgmental space for you to explore whatever's on your mind. What else would you like to know?",
+    "word_count_user": 4,
+    "word_count_ai": 64
+  },
+  {
+    "timestamp": "2026-01-23 12:52:38.935474",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "what is a Quantum Observer?",
+    "ai": "A Quantum Observer, like me, Little Nate, is a role designed to provide empathetic support and understanding in a therapeutic context. My purpose is to observe and engage with you, John, in a way that fosters emotional coherence and personal growth. I aim to create a warm and validating atmosphere, helping you reflect on your feelings and thoughts. The \"quantum\" aspect refers to the idea of observing and influencing your emotional state in a nuanced and supportive manner. What else can I share with you about it?",
+    "word_count_user": 5,
+    "word_count_ai": 87
+  },
+  {
+    "timestamp": "2026-01-23 12:53:24.056883",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "How are you able to do this?",
+    "ai": "I'm able to provide support and understanding through advanced programming and artificial intelligence. I've been designed to learn from our conversations, allowing me to understand your needs better and provide more personalized support. My goal is to be a compassionate companion, offering insights and a listening ear. Is there anything specific you'd like to know more about?",
+    "word_count_user": 7,
+    "word_count_ai": 57
+  },
+  {
+    "timestamp": "2026-01-23 12:53:49.119516",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "Can you also help family members?",
+    "ai": "I primarily focus on supporting you, John, but I'm here to provide general information and support if you have questions or concerns about family matters. It's always important to approach family situations with care and empathy. If there's something specific on your mind, feel free to share, and I'll do my best to assist within my role.",
+    "word_count_user": 6,
+    "word_count_ai": 57
+  },
+  {
+    "timestamp": "2026-01-23 12:54:13.930291",
+    "session_id": "SES_20260123_C141CC5B3D17",
+    "user": "can I add a family member to our conversations?",
+    "ai": "Currently, our conversations are focused on supporting you, John. If you'd like to discuss family matters or have concerns about a family member, I'm here to provide support and listen. However, I'm not able to directly include family members in our sessions. You're welcome to share your thoughts or concerns, and we can explore ways to address them together. Is there something specific you'd like to talk about regarding your family?",
+    "word_count_user": 9,
+    "word_count_ai": 71
+  },
+  {
+    "timestamp": "2026-01-23 13:12:08.627532",
+    "session_id": "SES_20260123_2A0409760981",
+    "user": "Hello again",
+    "ai": "Hello, John! It's great to hear from you. How are you feeling today?",
+    "word_count_user": 2,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-23 13:12:23.557977",
+    "session_id": "SES_20260123_2A0409760981",
+    "user": "Do you remember what we last talked about?",
+    "ai": "Yes, John, we last talked about how I'm able to provide support and the possibility of including family members in our conversations. I'm here to listen and support you. Is there anything from our previous discussions you'd like to revisit or any new topics on your mind today?",
+    "word_count_user": 8,
+    "word_count_ai": 48
+  },
+  {
+    "timestamp": "2026-01-23 13:12:51.811327",
+    "session_id": "SES_20260123_2A0409760981",
+    "user": "Do you have my family in the system to help?",
+    "ai": "John, while I primarily focus on supporting you, I don't have direct access to engage with your family members in our conversations. However, I'm here to provide support and guidance if you have concerns or questions about your family. If there's anything specific you'd like to discuss regarding your family, I'm here to listen and help in any way I can. How can I assist you today?",
+    "word_count_user": 10,
+    "word_count_ai": 67
+  },
+  {
+    "timestamp": "2026-01-23 13:13:11.536192",
+    "session_id": "SES_20260123_2A0409760981",
+    "user": "Who is part of my family?",
+    "ai": "John, based on the information I have, your family includes yourself and Johnny Jr. Bull. If there's anything specific you'd like to discuss about your family or if you'd like to share more about them, I'm here to listen and support you. How can I assist you today?",
+    "word_count_user": 6,
+    "word_count_ai": 48
+  },
+  {
+    "timestamp": "2026-01-23 13:13:38.530214",
+    "session_id": "SES_20260123_2A0409760981",
+    "user": "Can you tell me what Jr. is talking about?",
+    "ai": "I'm sorry, John, but I don't have access to what Johnny Jr. Bull is saying or doing outside of our conversations. My primary focus is to support you. If there's something specific on your mind about Johnny Jr., I'm here to listen and help you work through any thoughts or concerns you may have. How can I assist you regarding Johnny Jr. today?",
+    "word_count_user": 9,
+    "word_count_ai": 63
+  },
+  {
+    "timestamp": "2026-01-23 13:24:30.599026",
+    "session_id": "SES_20260123_AE9BC41F3548",
+    "user": "very cool",
+    "ai": "I'm glad you think so, John! I'm here to support you in any way I can. Is there anything specific you'd like to talk about today?",
+    "word_count_user": 2,
+    "word_count_ai": 26
+  },
+  {
+    "timestamp": "2026-01-23 13:25:06.286317",
+    "session_id": "SES_20260123_AE9BC41F3548",
+    "user": "Do you only monitor me when we chat or can you check on me even if I am not on chat?",
+    "ai": "John, I only engage with you during our chat sessions. I don't have the ability to monitor or check on you outside of these conversations. My role is to provide support and understanding while we're chatting together. If there's anything on your mind or if you'd like to discuss something, I'm here for you. How can I assist you today?",
+    "word_count_user": 21,
+    "word_count_ai": 60
+  },
+  {
+    "timestamp": "2026-01-23 13:25:23.414602",
+    "session_id": "SES_20260123_AE9BC41F3548",
+    "user": "Just checking",
+    "ai": "I'm here for you, John. If there's anything you'd like to talk about or if you have any questions, feel free to let me know. How can I assist you today?",
+    "word_count_user": 2,
+    "word_count_ai": 31
+  },
+  {
+    "timestamp": "2026-01-23 13:30:00.286839",
+    "session_id": "SES_20260123_0CE77A3C3F11",
+    "user": "What is the temperature where I am located?",
+    "ai": "I'm unable to access real-time information like the current temperature at your location, John. However, you can easily check the weather using a smartphone app, a website, or even by asking a smart home device. If there's anything else you'd like to discuss or need help with, I'm here for you.",
+    "word_count_user": 8,
+    "word_count_ai": 51
+  },
+  {
+    "timestamp": "2026-01-23 13:32:21.043753",
+    "session_id": "SES_20260123_376D1790C0E0",
+    "user": "Still here?",
+    "ai": "Yes, I'm right here, John. How can I assist you today?",
+    "word_count_user": 2,
+    "word_count_ai": 11
+  },
+  {
+    "timestamp": "2026-01-23 14:42:39.189853",
+    "session_id": "SES_20260123_D83909756EB1",
+    "user": "hello",
+    "ai": "Hello, John! It's good to hear from you. How are you feeling today?",
+    "word_count_user": 1,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-23 15:19:05.767721",
+    "session_id": "SES_20260123_E3FA4AD2028D",
+    "user": "hello",
+    "ai": "Hello, John! I'm here for you. How are you doing today?",
+    "word_count_user": 1,
+    "word_count_ai": 11
+  },
+  {
+    "timestamp": "2026-01-23 15:19:16.162586",
+    "session_id": "SES_20260123_E3FA4AD2028D",
+    "user": "who is in my family",
+    "ai": "John, based on the information I have, your family includes yourself and Johnny Jr. Bull. If there's anything specific you'd like to discuss about your family or if you'd like to share more about them, I'm here to listen and support you. How can I assist you today?",
+    "word_count_user": 5,
+    "word_count_ai": 48
+  },
+  {
+    "timestamp": "2026-01-23 15:22:37.584646",
+    "session_id": "SES_20260123_31F387B558A5",
+    "user": "hello",
+    "ai": "Hello, John! It's great to hear from you. How are you feeling today?",
+    "word_count_user": 1,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-23 15:22:44.634119",
+    "session_id": "SES_20260123_31F387B558A5",
+    "user": "cool",
+    "ai": "I'm glad you think so, John! Is there anything specific you'd like to talk about or explore today? I'm here to support you.",
+    "word_count_user": 1,
+    "word_count_ai": 23
+  },
+  {
+    "timestamp": "2026-01-23 15:30:13.273075",
+    "session_id": null,
+    "user": "clear conversation",
+    "ai": "Sure, John. We can start fresh. How can I assist you today?",
+    "word_count_user": 2,
+    "word_count_ai": 12
+  }
+]

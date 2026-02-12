@@ -1,0 +1,282 @@
+.container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout {
+  display: flex;
+  flex: 1;
+}
+
+.main {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  background: var(--bg-dark);
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.statsRow {
+  grid-column: span 2;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.statCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.statCard.gold { border-color: var(--gold-dim); }
+.statCard.red { border-color: var(--red-dim); }
+.statCard.green { border-color: var(--green-dim); }
+.statCard.cyan { border-color: var(--cyan-dim); }
+
+.statIcon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.statValue {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.statCard.red .statValue { color: var(--red); }
+.statCard.green .statValue { color: var(--green); }
+.statCard.cyan .statValue { color: var(--cyan); }
+
+.statLabel {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 4px;
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cardHeader h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.badge {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge.danger {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.quickActions {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  padding: 20px;
+}
+
+.quickAction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 11px;
+  transition: all 0.2s;
+}
+
+.quickAction:hover {
+  border-color: var(--gold);
+  background: var(--gold-dim);
+}
+
+.quickIcon {
+  font-size: 24px;
+}
+
+.clientList, .crisisList {
+  padding: 12px;
+}
+
+.clientItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.clientItem:hover {
+  background: var(--bg-elevated);
+}
+
+.clientAvatar {
+  width: 40px;
+  height: 40px;
+  background: var(--cyan-dim);
+  border: 2px solid var(--cyan);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.clientInfo {
+  flex: 1;
+}
+
+.clientName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.clientMeta {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.clientMetrics {
+  text-align: right;
+}
+
+.coherence {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--cyan);
+}
+
+.crisisItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: var(--red-dim);
+  border: 1px solid rgba(255, 59, 59, 0.2);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.crisisSeverity {
+  width: 12px;
+  height: 12px;
+  background: var(--red);
+  border-radius: 50%;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.crisisInfo {
+  flex: 1;
+}
+
+.crisisUser {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.crisisTrigger {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.crisisBtn {
+  padding: 8px 16px;
+  background: var(--red);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.btn {
+  padding: 8px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.clientsGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.clientsGrid h2 {
+  font-size: 18px;
+}
+
+.clientRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.clientRow .clientName {
+  flex: 1;
+}
+
+.clientTier {
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.clientCoherence {
+  color: var(--cyan);
+  font-weight: 600;
+}

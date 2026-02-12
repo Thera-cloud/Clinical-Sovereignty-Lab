@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Cohort Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .icon.red { background: rgba(255,59,59,0.15); }
+        .icon.orange { background: rgba(255,149,0,0.15); }
+        .card-body { padding: 20px; }
+        .filter-section { margin-bottom: 20px; }
+        .filter-title { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+        .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+        .checkbox-item input { width: 16px; height: 16px; }
+        .platform-stat { text-align: center; padding: 24px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
+        .platform-stat-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
+        .platform-stat-value { font-size: 48px; font-weight: 700; color: var(--purple); margin: 8px 0; }
+        .platform-stat-sub { font-size: 11px; color: var(--text-secondary); }
+        .chart-container { height: 280px; background: var(--bg-elevated); border-radius: 10px; padding: 16px; position: relative; }
+        .chart-container canvas { width: 100% !important; height: 100% !important; }
+        .cohort-item { margin-bottom: 16px; }
+        .cohort-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .cohort-label { font-size: 11px; font-weight: 600; }
+        .cohort-value { font-size: 11px; color: var(--purple); }
+        .cohort-bar { height: 8px; background: var(--bg-dark); border-radius: 4px; overflow: hidden; }
+        .cohort-fill { height: 100%; background: linear-gradient(90deg, var(--purple), var(--cyan)); border-radius: 4px; transition: width 0.3s; }
+        .cohort-meta { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        .treatment-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .treatment-name { font-size: 11px; font-weight: 600; }
+        .treatment-effect { font-size: 14px; font-weight: 700; }
+        .treatment-effect.positive { color: var(--green); }
+        .treatment-effect.baseline { color: var(--text-secondary); }
+        .insight-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--purple); }
+        .insight-text { font-size: 11px; line-height: 1.5; }
+        .sample-badge { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--bg-elevated); border-radius: 6px; font-size: 10px; margin-bottom: 8px; width: 100%; }
+        .export-btn { width: 100%; padding: 12px; background: var(--purple); color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+        .export-btn:hover { background: var(--cyan); }
+        .export-btn.secondary { background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); }
+        .export-btn.secondary:hover { border-color: var(--purple); }
+        .empty-state { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 11px; }
+        .dist-chart-container { height: 200px; background: var(--bg-elevated); border-radius: 10px; padding: 12px; margin-bottom: 16px; position: relative; }
+        .dist-chart-container canvas { width: 100% !important; height: 100% !important; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">+ Back to Lab</a>
+    </div>
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item active"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <main class="main-content">
+        <!-- LEFT PANEL: Filters -->
+        <aside>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">📊</div> Study Filters</div></div>
+                <div class="card-body">
+                    <div class="filter-section">
+                        <div class="filter-title">Age Groups</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="age" data-val="18-25"> 18-25 years</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="age" data-val="26-35"> 26-35 years</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="age" data-val="36-50"> 36-50 years</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="age" data-val="51+"> 51+ years</label>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Diagnosis Categories</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="dx" data-val="anxiety"> Anxiety</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="dx" data-val="depression"> Depression</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="dx" data-val="ptsd"> PTSD</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="dx" data-val="none"> No Diagnosis</label>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Treatment Modalities</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="tx" data-val="ai_only"> AI Only</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="tx" data-val="ai_coach"> AI + Coach</label>
+                            <label class="checkbox-item"><input type="checkbox" checked data-filter="tx" data-val="family"> Family Therapy</label>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Time Range</div>
+                        <select id="time-range" style="width:100%;padding:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;">
+                            <option value="30d" selected>Last 30 days</option>
+                            <option value="90d">Last 90 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL -->
+        <section>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🌐</div> Platform-Wide C<sub>emo</sub></div></div>
+                <div class="card-body">
+                    <div class="platform-stat">
+                        <div class="platform-stat-label">Population Average</div>
+                        <div class="platform-stat-value" id="platform-avg">--</div>
+                        <div class="platform-stat-sub" id="platform-sub">Across all active participants</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Age Group Bar Chart -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">📊</div> Age Group Analysis</div></div>
+                <div class="card-body">
+                    <div class="chart-container"><canvas id="age-chart"></canvas></div>
+                    <div id="age-bars" style="margin-top:20px;"></div>
+                </div>
+            </div>
+
+            <!-- Diagnosis Breakdown -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon green">🏥</div> Diagnosis Category Breakdown</div></div>
+                <div class="card-body" id="diagnosis-body"><div class="empty-state">Awaiting data...</div></div>
+            </div>
+
+            <!-- Treatment Modality (Patent 3) -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon gold">💊</div> Treatment Modality Effectiveness</div></div>
+                <div class="card-body" id="treatment-body"><div class="empty-state">Awaiting data...</div></div>
+            </div>
+
+            <!-- Patent 2: Crisis Perception Distribution -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon red">🎯</div> Crisis Perception Distribution</div></div>
+                <div class="card-body">
+                    <div class="dist-chart-container"><canvas id="crisis-dist-chart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Patent 2: Shame Masking Distribution -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon orange">🛡️</div> Shame Masking Distribution</div></div>
+                <div class="card-body">
+                    <div class="dist-chart-container"><canvas id="shame-dist-chart"></canvas></div>
+                </div>
+            </div>
+
+            <!-- Patent 2: PMB Reactivity Distribution -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🔮</div> PMB Reactivity Distribution</div></div>
+                <div class="card-body">
+                    <div class="dist-chart-container"><canvas id="pmb-dist-chart"></canvas></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL -->
+        <aside>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">📋</div> Study Overview</div></div>
+                <div class="card-body">
+                    <div class="sample-badge"><span>👥</span><span id="stat-participants"><strong>--</strong> participants</span></div>
+                    <div class="sample-badge"><span>📊</span><span id="stat-sessions"><strong>--</strong> total sessions</span></div>
+                    <div class="sample-badge"><span>📅</span><span id="stat-period"><strong>30</strong> day period</span></div>
+                    <div class="sample-badge"><span>🎯</span><span id="stat-cee-avg"><strong>--</strong> CEE events avg/user</span></div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon green">💡</div> Key Findings</div></div>
+                <div class="card-body" id="findings-body"><div class="empty-state">Awaiting data...</div></div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon gold">📄</div> Export Data</div></div>
+                <div class="card-body">
+                    <button class="export-btn" id="btn-csv">📥 Export CSV Data</button>
+                    <div style="font-size:9px;color:var(--text-secondary);margin-top:12px;line-height:1.4;">
+                        Includes: Population statistics, cohort breakdowns, treatment efficacy, patent metric distributions
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) window.location.href = "index.html";
+
+        var ws = null, authenticated = false;
+        var lastCohortData = null;
+        var ageChart = null, crisisDistChart = null, shameDistChart = null, pmbDistChart = null;
+
+        function escapeHtml(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+        function getFilters() {
+            var ages = [], dxs = [], txs = [];
+            document.querySelectorAll('input[data-filter="age"]:checked').forEach(function(cb) { ages.push(cb.dataset.val); });
+            document.querySelectorAll('input[data-filter="dx"]:checked').forEach(function(cb) { dxs.push(cb.dataset.val); });
+            document.querySelectorAll('input[data-filter="tx"]:checked').forEach(function(cb) { txs.push(cb.dataset.val); });
+            return { age_groups: ages, diagnoses: dxs, treatment_types: txs, time_range: document.getElementById("time-range").value };
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data;
+                try { data = JSON.parse(event.data); } catch(e) { console.error("[Cohort] Bad JSON:", e); return; }
+                console.log("[Cohort] WS msg:", data.type, data.error || "");
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("[Cohort] Authenticated. Requesting cohort stats...");
+                    requestCohortStats();
+                }
+                if (data.type === "cohort_stats") {
+                    console.log("[Cohort] Got cohort_stats. participants:", data.total_participants, "avg:", data.platform_avg_c_emo);
+                    displayCohortStats(data);
+                }
+                if (data.type === "error") { console.warn("[Cohort] Server error:", data.message); }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connectWebSocket, 3000); };
+        }
+
+        function requestCohortStats() {
+            if (ws && ws.readyState === 1 && authenticated) {
+                ws.send(JSON.stringify({ type: "admin_get_cohort_stats", filters: getFilters() }));
+            }
+        }
+
+        // ==================== CHARTS ====================
+        var chartDefaults = { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } };
+
+        function initCharts() {
+            ageChart = new Chart(document.getElementById("age-chart").getContext("2d"), {
+                type: "bar",
+                data: { labels: [], datasets: [] },
+                options: Object.assign({}, chartDefaults, {
+                    scales: {
+                        x: { ticks: { color: "#888", font: { size: 10 } }, grid: { display: false } },
+                        y: { min: 0, max: 1, ticks: { color: "#888", font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.05)" } }
+                    }
+                })
+            });
+
+            crisisDistChart = new Chart(document.getElementById("crisis-dist-chart").getContext("2d"), {
+                type: "bar",
+                data: { labels: ["NORMALIZER", "MINIMIZER", "AMPLIFIER", "CALIBRATED"], datasets: [{ data: [0,0,0,0], backgroundColor: ["#00D4FF","#FF9500","#FF3B3B","#00FF88"] }] },
+                options: Object.assign({}, chartDefaults, { scales: { x: { ticks: { color: "#888", font: { size: 9 } }, grid: { display: false } }, y: { ticks: { color: "#888", font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.05)" } } } })
+            });
+
+            shameDistChart = new Chart(document.getElementById("shame-dist-chart").getContext("2d"), {
+                type: "bar",
+                data: { labels: ["FEAR", "ANGER", "WITHDRAWAL", "PEOPLE_PLEASING"], datasets: [{ data: [0,0,0,0], backgroundColor: ["#FF9500","#FF3B3B","#4A90D9","#9D4EDD"] }] },
+                options: Object.assign({}, chartDefaults, { scales: { x: { ticks: { color: "#888", font: { size: 9 } }, grid: { display: false } }, y: { ticks: { color: "#888", font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.05)" } } } })
+            });
+
+            pmbDistChart = new Chart(document.getElementById("pmb-dist-chart").getContext("2d"), {
+                type: "bar",
+                data: { labels: ["FIGHT", "FLIGHT", "FREEZE", "FAWN"], datasets: [{ data: [0,0,0,0], backgroundColor: ["#FF3B3B","#FF9500","#00D4FF","#9D4EDD"] }] },
+                options: Object.assign({}, chartDefaults, { scales: { x: { ticks: { color: "#888", font: { size: 9 } }, grid: { display: false } }, y: { ticks: { color: "#888", font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.05)" } } } })
+            });
+        }
+
+        // ==================== DISPLAY ====================
+        function displayCohortStats(data) {
+            lastCohortData = data;
+
+            // Platform average
+            if (data.platform_avg_c_emo !== undefined) document.getElementById("platform-avg").textContent = data.platform_avg_c_emo.toFixed(2);
+            if (data.total_participants) document.getElementById("platform-sub").textContent = "Across " + data.total_participants + " active participants";
+
+            // Study Overview
+            if (data.total_participants) document.getElementById("stat-participants").innerHTML = "<strong>" + data.total_participants + "</strong> participants";
+            if (data.total_sessions) document.getElementById("stat-sessions").innerHTML = "<strong>" + data.total_sessions + "</strong> total sessions";
+            if (data.avg_cees_per_user) document.getElementById("stat-cee-avg").innerHTML = "<strong>" + data.avg_cees_per_user + "</strong> CEE events avg/user";
+            var tr = document.getElementById("time-range").value;
+            document.getElementById("stat-period").innerHTML = "<strong>" + (tr === "all" ? "All" : tr.replace("d", "")) + "</strong> day period";
+
+            // Age Group bar chart + bars
+            if (data.by_age_group) {
+                var labels = Object.keys(data.by_age_group);
+                var values = labels.map(function(l) { return data.by_age_group[l].avg_c_emo || 0; });
+                ageChart.data.labels = labels;
+                ageChart.data.datasets = [{ label: "Avg C_emo", data: values, backgroundColor: labels.map(function(_, i) { return ["#9D4EDD", "#00D4FF", "#00FF88", "#FFD700"][i % 4]; }) }];
+                ageChart.update("none");
+
+                document.getElementById("age-bars").innerHTML = labels.map(function(l) {
+                    var g = data.by_age_group[l];
+                    var val = (g.avg_c_emo || 0);
+                    var color = val >= 0.7 ? "var(--green)" : "var(--purple)";
+                    return '<div class="cohort-item"><div class="cohort-header"><span class="cohort-label">' + escapeHtml(l) + ' years</span>' +
+                        '<span class="cohort-value" style="color:' + color + ';">C<sub>emo</sub>: ' + val.toFixed(2) + '</span></div>' +
+                        '<div class="cohort-bar"><div class="cohort-fill" style="width:' + (val * 100) + '%;"></div></div>' +
+                        '<div class="cohort-meta">n = ' + (g.count || 0) + ' participants &bull; ' + (g.sessions || 0) + ' sessions</div></div>';
+                }).join('');
+            }
+
+            // Diagnosis Breakdown
+            var dxEl = document.getElementById("diagnosis-body");
+            if (data.by_diagnosis) {
+                dxEl.innerHTML = Object.entries(data.by_diagnosis).map(function(e) {
+                    var name = e[0], g = e[1];
+                    var val = g.avg_c_emo || 0;
+                    var change = g.change_pct ? (g.change_pct > 0 ? '<span style="color:var(--green);font-size:9px;"> +' + g.change_pct + '%</span>' : '<span style="color:var(--red-critical);font-size:9px;"> ' + g.change_pct + '%</span>') : '';
+                    return '<div class="cohort-item"><div class="cohort-header"><span class="cohort-label">' + escapeHtml(name) + '</span>' +
+                        '<span class="cohort-value">C<sub>emo</sub>: ' + val.toFixed(2) + change + '</span></div>' +
+                        '<div class="cohort-bar"><div class="cohort-fill" style="width:' + (val * 100) + '%;"></div></div>' +
+                        '<div class="cohort-meta">n = ' + (g.count || 0) + '</div></div>';
+                }).join('');
+            } else {
+                dxEl.innerHTML = '<div class="empty-state">No diagnosis data available</div>';
+            }
+
+            // Treatment Modality (Patent 3 validation)
+            var txEl = document.getElementById("treatment-body");
+            if (data.by_treatment_type || data.by_treatment) {
+                var btt = data.by_treatment_type || data.by_treatment;
+                var baseline = null;
+                var entries = Object.entries(btt);
+                if (entries.length > 0) baseline = entries[0][1].avg_c_emo || 0.5;
+                txEl.innerHTML = entries.map(function(e) {
+                    var name = e[0], g = e[1];
+                    var val = g.avg_c_emo || 0;
+                    var pct = baseline && baseline > 0 ? Math.round(((val - baseline) / baseline) * 100) : 0;
+                    var effectClass = pct > 0 ? "positive" : "baseline";
+                    var effectText = pct > 0 ? "+" + pct + "%" : (pct === 0 ? "Baseline" : pct + "%");
+                    var labels = { "ai_only": "AI Only", "ai_coach": "AI + Human Coach", "family": "Family Therapy" };
+                    return '<div class="treatment-item"><div><div class="treatment-name">' + escapeHtml(labels[name] || name) + '</div>' +
+                        '<div style="font-size:9px;color:var(--text-secondary);margin-top:2px;">C<sub>emo</sub>: ' + val.toFixed(2) + ' &bull; n=' + (g.count || 0) + '</div></div>' +
+                        '<div class="treatment-effect ' + effectClass + '">' + effectText + '</div></div>';
+                }).join('');
+            } else {
+                txEl.innerHTML = '<div class="empty-state">No treatment modality data</div>';
+            }
+
+            // Patent 2: Crisis Perception Distribution
+            if (data.crisis_perception_distribution) {
+                var cpd = data.crisis_perception_distribution;
+                crisisDistChart.data.labels = Object.keys(cpd);
+                crisisDistChart.data.datasets[0].data = Object.values(cpd);
+                crisisDistChart.data.datasets[0].backgroundColor = Object.keys(cpd).map(function(k) {
+                    return { NORMALIZER: "#00D4FF", MINIMIZER: "#FF9500", AMPLIFIER: "#FF3B3B", CALIBRATED: "#00FF88" }[k] || "#888";
+                });
+                crisisDistChart.update("none");
+            }
+
+            // Patent 2: Shame Distribution
+            if (data.shame_distribution) {
+                var sd = data.shame_distribution;
+                shameDistChart.data.labels = Object.keys(sd);
+                shameDistChart.data.datasets[0].data = Object.values(sd);
+                shameDistChart.update("none");
+            }
+
+            // Patent 2: PMB Distribution
+            if (data.pmb_distribution) {
+                var pd = data.pmb_distribution;
+                pmbDistChart.data.labels = Object.keys(pd);
+                pmbDistChart.data.datasets[0].data = Object.values(pd);
+                pmbDistChart.update("none");
+            }
+
+            // Key Findings
+            var findingsEl = document.getElementById("findings-body");
+            if (data.key_findings && data.key_findings.length > 0) {
+                findingsEl.innerHTML = data.key_findings.map(function(f) {
+                    return '<div class="insight-item"><div class="insight-text">' + escapeHtml(f) + '</div></div>';
+                }).join('');
+            } else {
+                // Generate findings from the data
+                var findings = [];
+                if (data.by_age_group) {
+                    var best = null, bestVal = 0;
+                    Object.entries(data.by_age_group).forEach(function(e) { if ((e[1].avg_c_emo || 0) > bestVal) { bestVal = e[1].avg_c_emo; best = e[0]; } });
+                    if (best) findings.push("Ages " + best + " demonstrate highest baseline coherence (" + bestVal.toFixed(2) + ")");
+                }
+                if (data.by_treatment_type || data.by_treatment) {
+                    var btt = data.by_treatment_type || data.by_treatment;
+                    if (btt.ai_coach && btt.ai_only) {
+                        var pct = Math.round(((btt.ai_coach.avg_c_emo - btt.ai_only.avg_c_emo) / btt.ai_only.avg_c_emo) * 100);
+                        if (pct > 0) findings.push("AI + Human Coach yields " + pct + "% higher coherence than AI alone");
+                    }
+                }
+                if (data.total_participants) findings.push(data.total_participants + " participants across " + (data.total_sessions || 0) + " sessions analyzed");
+                findingsEl.innerHTML = findings.length > 0
+                    ? findings.map(function(f) { return '<div class="insight-item"><div class="insight-text">' + escapeHtml(f) + '</div></div>'; }).join('')
+                    : '<div class="empty-state">Findings will appear with sufficient data</div>';
+            }
+        }
+
+        // ==================== CSV EXPORT ====================
+        document.getElementById("btn-csv").addEventListener("click", function() {
+            if (!lastCohortData) return alert("No data to export");
+            var rows = ["metric,category,avg_c_emo,count,sessions"];
+            if (lastCohortData.by_age_group) {
+                Object.entries(lastCohortData.by_age_group).forEach(function(e) {
+                    rows.push("age_group," + e[0] + "," + (e[1].avg_c_emo||0) + "," + (e[1].count||0) + "," + (e[1].sessions||0));
+                });
+            }
+            if (lastCohortData.by_diagnosis) {
+                Object.entries(lastCohortData.by_diagnosis).forEach(function(e) {
+                    rows.push("diagnosis," + e[0] + "," + (e[1].avg_c_emo||0) + "," + (e[1].count||0) + ",");
+                });
+            }
+            if (lastCohortData.by_treatment_type) {
+                Object.entries(lastCohortData.by_treatment_type).forEach(function(e) {
+                    rows.push("treatment," + e[0] + "," + (e[1].avg_c_emo||0) + "," + (e[1].count||0) + ",");
+                });
+            }
+            if (lastCohortData.crisis_perception_distribution) {
+                Object.entries(lastCohortData.crisis_perception_distribution).forEach(function(e) { rows.push("crisis_perception," + e[0] + "," + e[1] + ",,"); });
+            }
+            if (lastCohortData.shame_distribution) {
+                Object.entries(lastCohortData.shame_distribution).forEach(function(e) { rows.push("shame_masking," + e[0] + "," + e[1] + ",,"); });
+            }
+            if (lastCohortData.pmb_distribution) {
+                Object.entries(lastCohortData.pmb_distribution).forEach(function(e) { rows.push("pmb_reactivity," + e[0] + "," + e[1] + ",,"); });
+            }
+            var csv = rows.join("\n");
+            var blob = new Blob([csv], { type: "text/csv" });
+            var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+            a.download = "nevedal_cohort_" + document.getElementById("time-range").value + ".csv";
+            a.click();
+        });
+
+        // ==================== FILTER HANDLERS ====================
+        document.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+            cb.addEventListener("change", requestCohortStats);
+        });
+        document.getElementById("time-range").addEventListener("change", requestCohortStats);
+
+        // ==================== INIT ====================
+        initCharts();
+        connectWebSocket();
+    </script>
+</body>
+</html>

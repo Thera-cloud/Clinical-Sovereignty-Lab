@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coach Notes | Night School</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 13px; color: var(--text-secondary); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 8px; }
+        .sub-nav-item { padding: 14px 16px; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
+        .sub-nav-item:hover { color: var(--text-primary); }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .sub-nav-item .count { background: var(--orange); padding: 2px 6px; border-radius: 10px; font-size: 10px; color: black; }
+        
+        /* Buttons */
+        .btn { padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+        .btn-primary { background: var(--green); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,59,59,0.3); }
+        
+        /* Content */
+        .content { padding: 24px; }
+        
+        /* Stats */
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; }
+        .stat-card.pending { border-color: var(--orange); background: rgba(255,149,0,0.1); }
+        .stat-value { font-size: 32px; font-weight: 700; }
+        .stat-value.orange { color: var(--orange); }
+        .stat-value.green { color: var(--green); }
+        .stat-value.red { color: var(--red); }
+        .stat-value.cyan { color: var(--cyan); }
+        .stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Filters */
+        .filters { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
+        .filter-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 20px; font-size: 11px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; }
+        .filter-btn:hover { border-color: var(--purple); }
+        .filter-btn.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        .filter-btn .count { background: var(--orange); padding: 2px 6px; border-radius: 10px; font-size: 9px; color: black; margin-left: 6px; }
+        .connection-status { margin-left: auto; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.connected { background: var(--green); }
+        .status-dot.disconnected { background: var(--red); }
+        
+        /* Notes Grid */
+        .notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+        .note-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; transition: all 0.2s; }
+        .note-card:hover { border-color: var(--purple); }
+        .note-card.pending { border-left: 3px solid var(--orange); }
+        .note-card.approved { border-left: 3px solid var(--green); }
+        .note-card.rejected { border-left: 3px solid var(--red); opacity: 0.7; }
+        .note-card.flagged { border-color: var(--orange); background: rgba(255,149,0,0.05); }
+        
+        .note-header { padding: 14px 16px; background: var(--bg-elevated); display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
+        .coach-avatar { width: 40px; height: 40px; background: var(--cyan-dim); border: 2px solid var(--cyan); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .coach-info { flex: 1; }
+        .coach-name { font-size: 13px; font-weight: 600; }
+        .coach-meta { font-size: 10px; color: var(--text-secondary); }
+        .note-status { padding: 4px 10px; border-radius: 12px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+        .note-status.pending { background: var(--orange); color: black; }
+        .note-status.approved { background: var(--green); color: black; }
+        .note-status.rejected { background: var(--red-dim); color: var(--red); }
+        .note-status.pii { background: var(--red); color: white; }
+        
+        .note-body { padding: 16px; }
+        .note-content { font-size: 13px; line-height: 1.7; padding: 14px; background: var(--bg-dark); border-radius: 8px; border-left: 3px solid var(--cyan); margin-bottom: 12px; }
+        .note-content .pii-highlight { background: var(--red-dim); color: var(--red); padding: 2px 4px; border-radius: 4px; }
+        
+        .note-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .note-tag { padding: 4px 10px; background: var(--bg-elevated); border-radius: 12px; font-size: 10px; color: var(--text-secondary); }
+        .note-tag.category { background: var(--purple-dim); color: var(--purple); }
+        .note-tag.client { background: var(--cyan-dim); color: var(--cyan); }
+        
+        .note-actions { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+        .action-btn { flex: 1; padding: 10px; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; border: none; text-align: center; transition: all 0.2s; }
+        .action-btn.approve { background: var(--green); color: black; }
+        .action-btn.approve:hover { filter: brightness(1.1); }
+        .action-btn.reject { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,59,59,0.3); }
+        .action-btn.reject:hover { background: var(--red); color: white; }
+        .action-btn.redact { background: var(--bg-elevated); color: var(--orange); border: 1px solid var(--orange); }
+        .action-btn.redact:hover { background: var(--orange); color: black; }
+        .action-btn.view { background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border); }
+        
+        /* Empty State */
+        .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); }
+        .empty-state .icon { font-size: 64px; margin-bottom: 20px; opacity: 0.5; }
+        .empty-state h3 { color: var(--text-primary); margin-bottom: 8px; }
+        
+        /* Loading */
+        .loading { text-align: center; padding: 40px; }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        /* Toast */
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 1000; animation: slideIn 0.3s ease; }
+        .toast.success { background: var(--green); color: black; }
+        .toast.error { background: var(--red); color: white; }
+        .toast.info { background: var(--purple); color: white; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        
+        /* Redact Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 600px; max-width: 90%; }
+        .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+        .modal-textarea { width: 100%; padding: 14px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 13px; line-height: 1.6; min-height: 150px; resize: vertical; margin-bottom: 16px; }
+        .modal-hint { font-size: 11px; color: var(--text-secondary); margin-bottom: 16px; padding: 10px; background: var(--orange); background: rgba(255,149,0,0.1); border-radius: 6px; border-left: 3px solid var(--orange); }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Night School Director — Coach Notes Ingestion</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" onclick="approveAllPending()">✓ Approve All Pending</button>
+            <a href="night_school.html" class="btn btn-secondary">← Back to Night School</a>
+        </div>
+    </header>
+    
+    <!-- NAVIGATION -->
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="window.location.href='night_school.html'">🥋 The Dojo</div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_versions.html'">⏱️ Model Versions</div>
+        <div class="sub-nav-item active" onclick="window.location.href='night_school_notes.html'">📝 Coach Notes <span class="count" id="navPendingCount">0</span></div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_curriculum.html'">📚 Curriculum</div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_wisdom.html'">🧠 Wisdom Editor</div>
+    </nav>
+    
+    <!-- CONTENT -->
+    <div class="content">
+        <!-- Stats Row -->
+        <div class="stats-row">
+            <div class="stat-card pending">
+                <div class="stat-value orange" id="pendingCount">0</div>
+                <div class="stat-label">Pending Review</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value green" id="approvedCount">0</div>
+                <div class="stat-label">Ingested</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value red" id="rejectedCount">0</div>
+                <div class="stat-label">Rejected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value cyan" id="coachCount">0</div>
+                <div class="stat-label">Active Coaches</div>
+            </div>
+        </div>
+        
+        <!-- Filters -->
+        <div class="filters">
+            <button class="filter-btn active" data-filter="all" onclick="filterNotes('all', this)">All Notes</button>
+            <button class="filter-btn" data-filter="pending" onclick="filterNotes('pending', this)">Pending <span class="count" id="filterPendingCount">0</span></button>
+            <button class="filter-btn" data-filter="approved" onclick="filterNotes('approved', this)">Approved</button>
+            <button class="filter-btn" data-filter="rejected" onclick="filterNotes('rejected', this)">Rejected</button>
+            <div class="connection-status">
+                <span class="status-dot" id="connectionDot"></span>
+                <span id="connectionText">Connecting...</span>
+            </div>
+        </div>
+        
+        <!-- Notes Grid -->
+        <div id="notesContainer">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading coach notes...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Redact Modal -->
+    <div class="modal" id="redactModal">
+        <div class="modal-content">
+            <div class="modal-title">✏️ Redact Sensitive Information</div>
+            <div class="modal-hint">⚠️ Remove any PII (names, companies, locations, etc.) before approving for ingestion.</div>
+            <textarea class="modal-textarea" id="redactContent"></textarea>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeRedactModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmRedact()">Save & Review</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // === STATE ===
+        var notes = [];
+        var currentFilter = "all";
+        var redactingNoteId = null;
+        var ws = null;
+        var reconnectAttempts = 0;
+        var maxReconnectAttempts = 5;
+        
+        // === INIT ===
+        function init() {
+            // Credential check
+            if (!sessionStorage.getItem("username")) {
+                window.location.href = "index.html";
+                return;
+            }
+            
+            // Role check
+            var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+            if (profile.role !== "ADMIN") {
+                alert("Night School is admin-only.");
+                window.location.href = "command.html";
+                return;
+            }
+            
+            connectWebSocket();
+        }
+        
+        // === WEBSOCKET ===
+        function connectWebSocket() {
+            updateConnectionStatus("connecting");
+            
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            
+            ws.onopen = function() {
+                console.log("[Notes] WebSocket connected");
+                reconnectAttempts = 0;
+                updateConnectionStatus("connected");
+                
+                // Request notes from backend
+                ws.send(JSON.stringify({
+                    type: "get_pending_notes"
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                var data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+            
+            ws.onclose = function() {
+                console.log("[Notes] WebSocket closed");
+                updateConnectionStatus("disconnected");
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    setTimeout(connectWebSocket, 3000);
+                }
+            };
+            
+            ws.onerror = function(err) {
+                console.error("[Notes] WebSocket error:", err);
+            };
+        }
+        
+        function handleMessage(data) {
+            switch (data.type) {
+                case "pending_notes":
+                case "coach_notes_list":
+                    notes = data.notes || [];
+                    renderNotes();
+                    updateCounts();
+                    break;
+                    
+                case "note_approved":
+                    updateNoteStatus(data.note_id, "approved");
+                    showToast("Note ingested into Nate's wisdom!", "success");
+                    break;
+                    
+                case "note_rejected":
+                    updateNoteStatus(data.note_id, "rejected");
+                    showToast("Note rejected", "info");
+                    break;
+                    
+                case "note_redacted":
+                    updateNoteContent(data.note_id, data.content);
+                    showToast("Note redacted - review again before approving", "info");
+                    break;
+                    
+                case "error":
+                    showToast(data.message || "An error occurred", "error");
+                    break;
+            }
+        }
+        
+        function updateConnectionStatus(status) {
+            var dot = document.getElementById("connectionDot");
+            var text = document.getElementById("connectionText");
+            
+            if (status === "connected") {
+                dot.className = "status-dot connected";
+                text.textContent = "Connected";
+            } else if (status === "disconnected") {
+                dot.className = "status-dot disconnected";
+                text.textContent = "Disconnected";
+            } else {
+                dot.className = "status-dot";
+                dot.style.background = "var(--orange)";
+                text.textContent = "Connecting...";
+            }
+        }
+        
+        // === RENDERING ===
+        function renderNotes() {
+            var container = document.getElementById("notesContainer");
+            var filtered = notes;
+            
+            if (currentFilter !== "all") {
+                filtered = notes.filter(function(n) { return n.status === currentFilter; });
+            }
+            
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><h3>No notes found</h3><p>' + 
+                    (currentFilter === "all" ? "No coach notes have been submitted yet." : "No notes match the current filter.") + '</p></div>';
+                return;
+            }
+            
+            var html = '<div class="notes-grid">';
+            
+            for (var i = 0; i < filtered.length; i++) {
+                var n = filtered[i];
+                var hasPII = n.has_pii || n.status === "flagged";
+                
+                html += '<div class="note-card ' + n.status + (hasPII ? ' flagged' : '') + '" data-id="' + n.id + '">';
+                
+                // Header
+                html += '<div class="note-header">';
+                html += '<div class="coach-avatar">' + (n.avatar || '👨‍⚕️') + '</div>';
+                html += '<div class="coach-info">';
+                html += '<div class="coach-name">' + escapeHtml(n.coach || 'Unknown Coach') + '</div>';
+                html += '<div class="coach-meta">' + escapeHtml(n.session || '') + ' • ' + escapeHtml(n.date || 'Unknown date') + '</div>';
+                html += '</div>';
+                
+                if (hasPII) {
+                    html += '<span class="note-status pii">⚠ PII</span>';
+                } else {
+                    html += '<span class="note-status ' + n.status + '">' + n.status.toUpperCase() + '</span>';
+                }
+                html += '</div>';
+                
+                // Body
+                html += '<div class="note-body">';
+                
+                // Content with PII highlighting
+                var content = escapeHtml(n.content || '');
+                if (n.pii_matches && n.pii_matches.length > 0) {
+                    for (var p = 0; p < n.pii_matches.length; p++) {
+                        var pii = escapeHtml(n.pii_matches[p]);
+                        content = content.replace(new RegExp(pii, 'gi'), '<span class="pii-highlight">[' + pii + ']</span>');
+                    }
+                }
+                html += '<div class="note-content">' + content + '</div>';
+                
+                // Tags
+                html += '<div class="note-tags">';
+                if (n.category) {
+                    html += '<span class="note-tag category">' + escapeHtml(n.category) + '</span>';
+                }
+                if (n.client_id) {
+                    html += '<span class="note-tag client">Client: ' + escapeHtml(n.client_id.substring(0, 8)) + '...</span>';
+                }
+                if (n.tags) {
+                    for (var t = 0; t < n.tags.length; t++) {
+                        html += '<span class="note-tag">' + escapeHtml(n.tags[t]) + '</span>';
+                    }
+                }
+                html += '</div>';
+                
+                // Actions based on status
+                if (n.status === "pending" || n.status === "flagged") {
+                    html += '<div class="note-actions">';
+                    if (hasPII) {
+                        html += '<button class="action-btn redact" onclick="openRedactModal(\'' + n.id + '\')">✏️ Redact & Review</button>';
+                    } else {
+                        html += '<button class="action-btn approve" onclick="approveNote(\'' + n.id + '\')">✓ Ingest</button>';
+                    }
+                    html += '<button class="action-btn reject" onclick="rejectNote(\'' + n.id + '\')">✗ Reject</button>';
+                    html += '</div>';
+                } else if (n.status === "approved") {
+                    html += '<div class="note-actions">';
+                    html += '<button class="action-btn view" onclick="viewInWisdom(\'' + n.id + '\')">🧠 View in Wisdom</button>';
+                    html += '</div>';
+                }
+                
+                html += '</div></div>';
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function updateCounts() {
+            var pending = notes.filter(function(n) { return n.status === "pending" || n.status === "flagged"; }).length;
+            var approved = notes.filter(function(n) { return n.status === "approved"; }).length;
+            var rejected = notes.filter(function(n) { return n.status === "rejected"; }).length;
+            
+            var coaches = {};
+            notes.forEach(function(n) { if (n.coach) coaches[n.coach] = true; });
+            
+            document.getElementById("pendingCount").textContent = pending;
+            document.getElementById("approvedCount").textContent = approved;
+            document.getElementById("rejectedCount").textContent = rejected;
+            document.getElementById("coachCount").textContent = Object.keys(coaches).length;
+            
+            document.getElementById("navPendingCount").textContent = pending;
+            document.getElementById("filterPendingCount").textContent = pending;
+        }
+        
+        // === ACTIONS ===
+        function filterNotes(filter, btn) {
+            currentFilter = filter;
+            document.querySelectorAll(".filter-btn").forEach(function(b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            renderNotes();
+        }
+        
+        function approveNote(id) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "approve_note",
+                    note_id: id
+                }));
+                
+                // Optimistic update
+                updateNoteStatus(id, "approved");
+            } else {
+                // Fallback for offline mode
+                updateNoteStatus(id, "approved");
+                showToast("Note approved (offline - will sync when connected)", "info");
+            }
+        }
+        
+        function rejectNote(id) {
+            if (!confirm("Reject this note? It will not be added to Nate's training.")) return;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "reject_note",
+                    note_id: id
+                }));
+                
+                updateNoteStatus(id, "rejected");
+            } else {
+                updateNoteStatus(id, "rejected");
+                showToast("Note rejected (offline - will sync when connected)", "info");
+            }
+        }
+        
+        function openRedactModal(id) {
+            var note = notes.find(function(n) { return n.id === id; });
+            if (!note) return;
+            
+            redactingNoteId = id;
+            document.getElementById("redactContent").value = note.content;
+            document.getElementById("redactModal").classList.add("active");
+        }
+        
+        function closeRedactModal() {
+            redactingNoteId = null;
+            document.getElementById("redactModal").classList.remove("active");
+        }
+        
+        function confirmRedact() {
+            if (!redactingNoteId) return;
+            
+            var newContent = document.getElementById("redactContent").value;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: "redact_note",
+                    note_id: redactingNoteId,
+                    content: newContent
+                }));
+            }
+            
+            // Update locally
+            updateNoteContent(redactingNoteId, newContent);
+            
+            // Clear PII flag
+            var note = notes.find(function(n) { return n.id === redactingNoteId; });
+            if (note) {
+                note.has_pii = false;
+                note.pii_matches = [];
+                note.status = "pending";
+            }
+            
+            closeRedactModal();
+            renderNotes();
+            showToast("Note redacted - review and approve when ready", "success");
+        }
+        
+        function approveAllPending() {
+            var pending = notes.filter(function(n) { 
+                return (n.status === "pending" || n.status === "flagged") && !n.has_pii; 
+            });
+            
+            if (pending.length === 0) {
+                alert("No pending notes to approve.\n\nNotes with PII must be redacted first.");
+                return;
+            }
+            
+            if (!confirm("Approve " + pending.length + " pending note(s)?\n\nThis will add them to Nate's wisdom.")) return;
+            
+            pending.forEach(function(n) {
+                approveNote(n.id);
+            });
+        }
+        
+        function viewInWisdom(id) {
+            window.location.href = "night_school_wisdom.html?highlight=" + id;
+        }
+        
+        // === HELPERS ===
+        function updateNoteStatus(id, status) {
+            for (var i = 0; i < notes.length; i++) {
+                if (notes[i].id === id) {
+                    notes[i].status = status;
+                    break;
+                }
+            }
+            renderNotes();
+            updateCounts();
+        }
+        
+        function updateNoteContent(id, content) {
+            for (var i = 0; i < notes.length; i++) {
+                if (notes[i].id === id) {
+                    notes[i].content = content;
+                    break;
+                }
+            }
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            var div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showToast(message, type) {
+            var toast = document.createElement("div");
+            toast.className = "toast " + (type || "info");
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 3000);
+        }
+        
+        // === MOCK DATA (for testing without backend) ===
+        function loadMockData() {
+            notes = [
+                {
+                    id: "note_001",
+                    coach: "Dr. Sarah Smith",
+                    avatar: "👩‍⚕️",
+                    session: "Session #847",
+                    date: "2 hours ago",
+                    status: "pending",
+                    content: "Client showed breakthrough in boundary-setting today. Key insight: Using 'I feel' statements helped client express needs without triggering defensiveness in partner. Recommend adding this to communication module.",
+                    category: "communication",
+                    tags: ["boundaries", "relationships", "breakthrough"],
+                    has_pii: false
+                },
+                {
+                    id: "note_002",
+                    coach: "Coach Marcus",
+                    avatar: "👨‍⚕️",
+                    session: "Session #892",
+                    date: "3 hours ago",
+                    status: "flagged",
+                    has_pii: true,
+                    pii_matches: ["Company Name", "John Smith"],
+                    content: "Client mentioned their SSN during session. Noted that she works at Company Name and her manager John Smith has been the source of her anxiety. Consider exploring workplace dynamics...",
+                    category: "workplace",
+                    tags: ["anxiety", "work stress"]
+                },
+                {
+                    id: "note_003",
+                    coach: "Coach Hope",
+                    avatar: "👩‍💼",
+                    session: "Session #812",
+                    date: "5 hours ago",
+                    status: "pending",
+                    content: "Breakthrough: Client connected workplace boundary issues to childhood dynamics where she was always the 'peacekeeper' in family conflicts. Recommend exploring family-of-origin patterns. The '3-breath technique' was particularly effective for grounding during emotional moments.",
+                    category: "family_dynamics",
+                    tags: ["breakthrough", "childhood patterns", "grounding"],
+                    has_pii: false
+                },
+                {
+                    id: "note_004",
+                    coach: "Dr. Chen",
+                    avatar: "👨‍💼",
+                    session: "Session #831",
+                    date: "Yesterday",
+                    status: "approved",
+                    content: "EMDR session showed significant progress. Client's SUD score dropped from 8 to 3 when processing childhood memory. Key insight: linking current fear response to specific childhood event. Bilateral stimulation was most effective at 1.5 second intervals.",
+                    category: "trauma",
+                    tags: ["EMDR", "progress", "trauma processing"],
+                    has_pii: false
+                },
+                {
+                    id: "note_005",
+                    coach: "Dr. Sarah Smith",
+                    avatar: "👩‍⚕️",
+                    session: "Session #798",
+                    date: "2 days ago",
+                    status: "rejected",
+                    content: "General check-in session. No significant breakthroughs.",
+                    category: "general",
+                    tags: [],
+                    has_pii: false
+                }
+            ];
+            
+            renderNotes();
+            updateCounts();
+        }
+        
+        // Auto-load mock data if no backend response in 3 seconds
+        setTimeout(function() {
+            if (notes.length === 0) {
+                console.log("[Notes] Loading mock data (no backend response)");
+                loadMockData();
+            }
+        }, 3000);
+        
+        window.onload = init;
+    </script>
+</body>
+</html>

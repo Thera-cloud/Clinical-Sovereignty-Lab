@@ -1,0 +1,772 @@
+"""
+LITTLE NATE — SkyEye Social Media Hub API
+All endpoints for the social media autonomy dashboard.
+27 endpoints covering: overview, platforms, activity, approvals,
+compliance, drip suggestions, history, sessions, pulse, chat,
+live expressions, social interactions, and social memory.
+"""
+
+import json
+from fastapi import APIRouter, HTTPException, Request, Query
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+
+router = APIRouter(prefix="/api/skyeye", tags=["skyeye"])
+
+
+# =============================================================================
+# REQUEST MODELS
+# =============================================================================
+
+class ModeUpdate(BaseModel):
+    mode: str  # full/approval/observation
+
+class ActivityEntry(BaseModel):
+    platform: Optional[str] = None
+    type: str
+    content: Optional[str] = None
+    compliance_note: Optional[str] = None
+    pillar: Optional[str] = None
+    severity: Optional[str] = "info"
+    metadata: Optional[dict] = None
+
+class ApprovalAction(BaseModel):
+    action: str  # approve/review/reject
+
+class ChatMessage(BaseModel):
+    message: str
+
+class ExpressionCapture(BaseModel):
+    raw_text: str
+    emotion_tag: Optional[str] = "gratitude"
+    session_type: Optional[str] = "individual"
+
+class ExpressionPost(BaseModel):
+    platform: str
+
+class SocialInteractionEntry(BaseModel):
+    platform: str
+    platform_handle: str
+    interaction_type: str  # comment/reply/dm/like/mention
+    nate_message: Optional[str] = None
+    user_message: Optional[str] = None
+    user_interests_detected: Optional[List[str]] = None
+    sentiment: Optional[str] = "neutral"
+
+class SocialMemoryMatch(BaseModel):
+    platform_handle: str
+    platform: str
+    user_id: str
+
+
+# =============================================================================
+# 1. OVERVIEW
+# =============================================================================
+
+@router.get("/overview")
+async def get_overview(request: Request):
+    """Aggregated SkyEye metrics for the Command Center."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Total followers
+        total_followers = await conn.fetchval(
+            "SELECT COALESCE(SUM(followers), 0) FROM skyeye_platforms WHERE enabled = TRUE"
+        )
+        # Average engagement
+        avg_engagement = await conn.fetchval(
+            "SELECT COALESCE(AVG(engagement), 0) FROM skyeye_platforms WHERE enabled = TRUE"
+        )
+        # Total posts
+        total_posts = await conn.fetchval(
+            "SELECT COALESCE(SUM(posts), 0) FROM skyeye_platforms WHERE enabled = TRUE"
+        )
+        # Compliance score (percentage of compliant platforms)
+        total_platforms = await conn.fetchval(
+            "SELECT COUNT(*) FROM skyeye_platforms WHERE enabled = TRUE"
+        )
+        compliant = await conn.fetchval(
+            "SELECT COUNT(*) FROM skyeye_platforms WHERE compliance_status = 'compliant' AND enabled = TRUE"
+        )
+        compliance_score = round((compliant / max(total_platforms, 1)) * 100)
+        # Pending approvals
+        pending_approvals = await conn.fetchval(
+            "SELECT COUNT(*) FROM skyeye_approvals WHERE status = 'pending'"
+        )
+        # Pending expressions
+        pending_expressions = await conn.fetchval(
+            "SELECT COUNT(*) FROM skyeye_live_expressions WHERE approved = FALSE"
+        )
+        # Today's activity count
+        today_activity = await conn.fetchval(
+            "SELECT COUNT(*) FROM skyeye_activity WHERE created_at >= CURRENT_DATE"
+        )
+        # Security events today
+        security_events = await conn.fetchval(
+            """SELECT COUNT(*) FROM skyeye_activity
+               WHERE created_at >= CURRENT_DATE
+               AND type IN ('security_threat','social_engineering_attempt','suspicious_link',
+                           'account_security','ddos_suspected','data_extraction_attempt','recon_attempt',
+                           'bot_detected','bot_swarm')"""
+        )
+
+    return {
+        "total_followers": total_followers,
+        "avg_engagement": float(avg_engagement),
+        "total_posts": total_posts,
+        "compliance_score": compliance_score,
+        "pending_approvals": pending_approvals,
+        "pending_expressions": pending_expressions,
+        "today_activity": today_activity,
+        "security_events_today": security_events
+    }
+
+
+# =============================================================================
+# 2-3. PLATFORMS
+# =============================================================================
+
+@router.get("/platforms")
+async def get_platforms(request: Request):
+    """All platform configs with current mode."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, name, display_name, tier, control_mode, followers,
+                      engagement, posts, content_type, aigc_method,
+                      compliance_status, icon, color, enabled
+               FROM skyeye_platforms
+               ORDER BY tier, display_name"""
+        )
+    return [dict(r) for r in rows]
+
+
+@router.put("/platforms/{platform_id}/mode")
+async def update_platform_mode(platform_id: int, body: ModeUpdate, request: Request):
+    """Change control mode for a platform."""
+    if body.mode not in ("full", "approval", "observation"):
+        raise HTTPException(status_code=400, detail="Mode must be full/approval/observation")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE skyeye_platforms SET control_mode = $1, updated_at = NOW()
+               WHERE id = $2 RETURNING id, name, control_mode""",
+            body.mode, platform_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Platform not found")
+        # Log activity
+        await conn.execute(
+            """INSERT INTO skyeye_activity (platform, type, content)
+               VALUES ($1, 'mode_change', $2)""",
+            row["name"], f"Control mode changed to {body.mode}"
+        )
+    return dict(row)
+
+
+# =============================================================================
+# 4-5. ACTIVITY
+# =============================================================================
+
+@router.get("/activity")
+async def get_activity(
+    request: Request,
+    platform: Optional[str] = None,
+    type: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0)
+):
+    """Activity feed with pagination and filters."""
+    pool = request.app.state.db_pool
+    conditions = []
+    params = []
+    idx = 1
+
+    if platform:
+        conditions.append(f"platform = ${idx}")
+        params.append(platform)
+        idx += 1
+    if type:
+        conditions.append(f"type = ${idx}")
+        params.append(type)
+        idx += 1
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""SELECT id, platform, type, content, compliance_note, pillar,
+                       severity, metadata, created_at
+                FROM skyeye_activity
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ${idx} OFFSET ${idx + 1}""",
+            *params, limit, offset
+        )
+    return [
+        {**dict(r), "metadata": json.loads(r["metadata"]) if r["metadata"] else {},
+         "created_at": r["created_at"].isoformat()}
+        for r in rows
+    ]
+
+
+@router.post("/activity")
+async def log_activity(entry: ActivityEntry, request: Request):
+    """Log a new activity entry."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO skyeye_activity (platform, type, content, compliance_note, pillar, severity, metadata)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id, created_at""",
+            entry.platform, entry.type, entry.content,
+            entry.compliance_note, entry.pillar, entry.severity,
+            json.dumps(entry.metadata or {})
+        )
+    return {"id": row["id"], "created_at": row["created_at"].isoformat()}
+
+
+# =============================================================================
+# 6-8. APPROVALS
+# =============================================================================
+
+@router.get("/approvals")
+async def get_approvals(request: Request, status: str = Query(default="pending")):
+    """Get approval queue items by status."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, platform, type, content, priority, reason, status,
+                      auto_approved, created_at, resolved_at, resolved_by
+               FROM skyeye_approvals
+               WHERE status = $1
+               ORDER BY
+                   CASE priority WHEN 'safety' THEN 0 WHEN 'critical' THEN 1
+                                 WHEN 'high' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
+                   created_at DESC""",
+            status
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve_item(approval_id: int, request: Request):
+    """Approve a queue item."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE skyeye_approvals
+               SET status = 'approved', resolved_at = NOW(), resolved_by = 'admin'
+               WHERE id = $1 RETURNING id, platform, type, content""",
+            approval_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Approval item not found")
+        await conn.execute(
+            """INSERT INTO skyeye_activity (platform, type, content)
+               VALUES ($1, 'approval_granted', $2)""",
+            row["platform"], f"Approved: {row['content'][:100]}"
+        )
+    return {"status": "approved", "id": row["id"]}
+
+
+@router.post("/approvals/{approval_id}/reject")
+async def reject_item(approval_id: int, request: Request):
+    """Reject a queue item."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE skyeye_approvals
+               SET status = 'rejected', resolved_at = NOW(), resolved_by = 'admin'
+               WHERE id = $1 RETURNING id""",
+            approval_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Approval item not found")
+    return {"status": "rejected", "id": row["id"]}
+
+
+# =============================================================================
+# 9. COMPLIANCE
+# =============================================================================
+
+@router.get("/compliance")
+async def get_compliance(request: Request):
+    """Compliance metrics and per-platform matrix."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Get latest audit per platform
+        rows = await conn.fetch(
+            """SELECT DISTINCT ON (platform)
+                      id, platform, aigc_labels_applied, bio_disclosure,
+                      anti_bot, public_figure, ftc_compliant, coppa_compliant,
+                      special_notes, audited_at
+               FROM skyeye_compliance
+               ORDER BY platform, audited_at DESC"""
+        )
+        matrix = [dict(r) for r in rows]
+
+        # Calculate overall score
+        total_checks = 0
+        passed_checks = 0
+        for m in matrix:
+            for field in ["aigc_labels_applied", "bio_disclosure", "anti_bot",
+                          "public_figure", "ftc_compliant", "coppa_compliant"]:
+                total_checks += 1
+                if m.get(field):
+                    passed_checks += 1
+
+        overall_score = round((passed_checks / max(total_checks, 1)) * 100)
+
+    return {
+        "overall_score": overall_score,
+        "total_checks": total_checks,
+        "passed_checks": passed_checks,
+        "matrix": matrix
+    }
+
+
+# =============================================================================
+# 10-11. DRIP SUGGESTIONS
+# =============================================================================
+
+@router.get("/drip-suggestions")
+async def get_drip_suggestions(request: Request):
+    """Get drip campaign bridge suggestions."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, topic, insight, confidence, source, status, created_at
+               FROM skyeye_drip_suggestions
+               ORDER BY confidence DESC, created_at DESC"""
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/drip-suggestions/{suggestion_id}/action")
+async def drip_suggestion_action(suggestion_id: int, body: ApprovalAction, request: Request):
+    """Act on a drip suggestion (approve/review/reject)."""
+    if body.action not in ("approve", "review", "reject"):
+        raise HTTPException(status_code=400, detail="Action must be approve/review/reject")
+    pool = request.app.state.db_pool
+    status_map = {"approve": "approved", "review": "reviewed", "reject": "rejected"}
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE skyeye_drip_suggestions SET status = $1
+               WHERE id = $2 RETURNING id, topic, status""",
+            status_map[body.action], suggestion_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+    return dict(row)
+
+
+# =============================================================================
+# 12. HISTORY
+# =============================================================================
+
+@router.get("/history")
+async def get_history(
+    request: Request,
+    limit: int = Query(default=100, le=500),
+    offset: int = Query(default=0, ge=0)
+):
+    """Session history log."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT h.id, h.platform, h.action, h.detail, h.session_id, h.created_at
+               FROM skyeye_history h
+               ORDER BY h.created_at DESC
+               LIMIT $1 OFFSET $2""",
+            limit, offset
+        )
+    return [dict(r) for r in rows]
+
+
+# =============================================================================
+# 13-15. SESSIONS + PULSE
+# =============================================================================
+
+@router.get("/sessions")
+async def get_sessions(request: Request):
+    """Session schedule info."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Current or next session
+        current = await conn.fetchrow(
+            """SELECT id, session_start, session_end, platforms_visited,
+                      total_actions, status, notes
+               FROM skyeye_sessions
+               WHERE status IN ('active', 'scheduled')
+               ORDER BY session_start ASC
+               LIMIT 1"""
+        )
+        # Recent completed sessions
+        recent = await conn.fetch(
+            """SELECT id, session_start, session_end, platforms_visited,
+                      total_actions, status
+               FROM skyeye_sessions
+               WHERE status = 'completed'
+               ORDER BY session_end DESC
+               LIMIT 5"""
+        )
+
+    return {
+        "current_session": dict(current) if current else None,
+        "recent_sessions": [dict(r) for r in recent]
+    }
+
+
+@router.get("/pulse")
+async def get_pulse(request: Request):
+    """
+    Live pulse: current state + last 3 actions.
+    Polled every 30s by the frontend.
+    """
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Current session status
+        session = await conn.fetchrow(
+            """SELECT id, status FROM skyeye_sessions
+               WHERE status = 'active' LIMIT 1"""
+        )
+        state = "active" if session else "resting"
+
+        # Last 3 actions
+        actions = await conn.fetch(
+            """SELECT platform, type, content, created_at
+               FROM skyeye_activity
+               ORDER BY created_at DESC LIMIT 3"""
+        )
+
+    return {
+        "state": state,
+        "session_id": session["id"] if session else None,
+        "last_actions": [
+            {
+                "platform": a["platform"],
+                "type": a["type"],
+                "content": (a["content"] or "")[:100],
+                "timestamp": a["created_at"].isoformat()
+            }
+            for a in actions
+        ]
+    }
+
+
+@router.post("/sessions/toggle")
+async def toggle_session(request: Request):
+    """Wake/rest toggle — start or end a session."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Check if there's an active session
+        active = await conn.fetchrow(
+            "SELECT id FROM skyeye_sessions WHERE status = 'active' LIMIT 1"
+        )
+        if active:
+            # End the session
+            await conn.execute(
+                """UPDATE skyeye_sessions
+                   SET status = 'completed', session_end = NOW()
+                   WHERE id = $1""",
+                active["id"]
+            )
+            await conn.execute(
+                """INSERT INTO skyeye_activity (type, content)
+                   VALUES ('rest', 'Little Nate entering rest mode')"""
+            )
+            return {"action": "rest", "session_id": active["id"]}
+        else:
+            # Start a new session
+            row = await conn.fetchrow(
+                """INSERT INTO skyeye_sessions (session_start, status)
+                   VALUES (NOW(), 'active')
+                   RETURNING id, session_start"""
+            )
+            await conn.execute(
+                """INSERT INTO skyeye_activity (type, content)
+                   VALUES ('wake', 'Little Nate is now active on social media')"""
+            )
+            return {
+                "action": "wake",
+                "session_id": row["id"],
+                "session_start": row["session_start"].isoformat()
+            }
+
+
+# =============================================================================
+# 16-17. CHAT
+# =============================================================================
+
+@router.get("/chat")
+async def get_chat(request: Request, limit: int = Query(default=50, le=200)):
+    """Get chat message history."""
+    from app.services.skyeye_chat import SkyEyeChatService
+    service = SkyEyeChatService(request.app.state.db_pool)
+    return await service.get_chat_history(limit=limit)
+
+
+@router.post("/chat")
+async def send_chat(body: ChatMessage, request: Request):
+    """Send a message from Big Nate and get Little Nate's AI response."""
+    from app.services.skyeye_chat import SkyEyeChatService
+    service = SkyEyeChatService(request.app.state.db_pool)
+    return await service.send_message(body.message)
+
+
+# =============================================================================
+# 18-23. LIVE EXPRESSIONS
+# =============================================================================
+
+@router.get("/expressions")
+async def get_expressions(
+    request: Request,
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0)
+):
+    """Live expressions feed (approved, anonymized client moments)."""
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+    expressions = await service.get_approved_expressions(limit=limit, offset=offset)
+    stats = await service.get_expression_stats()
+    return {"expressions": expressions, "stats": stats}
+
+
+@router.get("/expressions/pending")
+async def get_pending_expressions(request: Request):
+    """Expressions awaiting admin approval."""
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+    return await service.get_pending_expressions()
+
+
+@router.post("/expressions/{expression_id}/approve")
+async def approve_expression(expression_id: int, request: Request):
+    """Approve an expression for the live wall."""
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+    return await service.approve_expression(expression_id)
+
+
+@router.post("/expressions/{expression_id}/reject")
+async def reject_expression(expression_id: int, request: Request):
+    """Reject/delete an expression."""
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+    return await service.reject_expression(expression_id)
+
+
+@router.post("/expressions/{expression_id}/post")
+async def post_expression(expression_id: int, body: ExpressionPost, request: Request):
+    """Format and mark an expression as posted to a platform."""
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+
+    # Format in Little Nate's voice
+    formatted = await service.format_for_posting(expression_id)
+    if "error" in formatted:
+        raise HTTPException(status_code=404, detail=formatted["error"])
+
+    # Mark as posted (actual social media API call would go here when connected)
+    result = await service.mark_as_posted(
+        expression_id, body.platform, formatted["formatted_post"]
+    )
+    result["formatted_post"] = formatted["formatted_post"]
+    return result
+
+
+@router.post("/expressions/capture")
+async def capture_expression(body: ExpressionCapture, request: Request):
+    """
+    Internal endpoint: capture a new anonymized expression.
+    Called by the session/therapy system when a CEE is detected.
+    """
+    from app.services.skyeye_expressions import SkyEyeExpressionsService
+    service = SkyEyeExpressionsService(request.app.state.db_pool)
+    return await service.capture_expression(
+        raw_text=body.raw_text,
+        emotion_tag=body.emotion_tag,
+        session_type=body.session_type
+    )
+
+
+# =============================================================================
+# 24-25. SOCIAL INTERACTIONS
+# =============================================================================
+
+@router.get("/social-interactions")
+async def get_social_interactions(
+    request: Request,
+    platform: Optional[str] = None,
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0)
+):
+    """List recent social media interactions."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        if platform:
+            rows = await conn.fetch(
+                """SELECT id, platform, platform_handle, interaction_type,
+                          nate_message, user_message, user_interests_detected,
+                          sentiment, created_at
+                   FROM skyeye_social_interactions
+                   WHERE platform = $1
+                   ORDER BY created_at DESC
+                   LIMIT $2 OFFSET $3""",
+                platform, limit, offset
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT id, platform, platform_handle, interaction_type,
+                          nate_message, user_message, user_interests_detected,
+                          sentiment, created_at
+                   FROM skyeye_social_interactions
+                   ORDER BY created_at DESC
+                   LIMIT $1 OFFSET $2""",
+                limit, offset
+            )
+    return [dict(r) for r in rows]
+
+
+@router.post("/social-interactions")
+async def log_social_interaction(entry: SocialInteractionEntry, request: Request):
+    """Log a new social interaction."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO skyeye_social_interactions
+               (platform, platform_handle, interaction_type, nate_message,
+                user_message, user_interests_detected, sentiment)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id, created_at""",
+            entry.platform, entry.platform_handle, entry.interaction_type,
+            entry.nate_message, entry.user_message,
+            entry.user_interests_detected or [],
+            entry.sentiment
+        )
+
+        # Update or create social memory
+        existing = await conn.fetchrow(
+            """SELECT id, interaction_count, interests
+               FROM skyeye_social_memory
+               WHERE platform_handle = $1 AND platform = $2""",
+            entry.platform_handle, entry.platform
+        )
+
+        if existing:
+            # Merge interests
+            current_interests = list(existing["interests"] or [])
+            new_interests = list(set(current_interests + (entry.user_interests_detected or [])))
+            await conn.execute(
+                """UPDATE skyeye_social_memory
+                   SET interaction_count = interaction_count + 1,
+                       interests = $1,
+                       last_interaction = NOW(),
+                       updated_at = NOW()
+                   WHERE id = $2""",
+                new_interests, existing["id"]
+            )
+        else:
+            await conn.execute(
+                """INSERT INTO skyeye_social_memory
+                   (platform_handle, platform, interaction_count, interests, last_interaction)
+                   VALUES ($1, $2, 1, $3, NOW())""",
+                entry.platform_handle, entry.platform,
+                entry.user_interests_detected or []
+            )
+
+    return {"id": row["id"], "created_at": row["created_at"].isoformat()}
+
+
+# =============================================================================
+# 26-27. SOCIAL MEMORY
+# =============================================================================
+
+@router.get("/social-memory/{handle}")
+async def get_social_memory(handle: str, request: Request, platform: Optional[str] = None):
+    """Retrieve Little Nate's accumulated memory for a social media handle."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        if platform:
+            row = await conn.fetchrow(
+                """SELECT id, platform_handle, platform, interaction_count,
+                          interests, tone_notes, last_interaction,
+                          signup_matched, matched_user_id, summary,
+                          created_at, updated_at
+                   FROM skyeye_social_memory
+                   WHERE platform_handle = $1 AND platform = $2""",
+                handle, platform
+            )
+        else:
+            row = await conn.fetchrow(
+                """SELECT id, platform_handle, platform, interaction_count,
+                          interests, tone_notes, last_interaction,
+                          signup_matched, matched_user_id, summary,
+                          created_at, updated_at
+                   FROM skyeye_social_memory
+                   WHERE platform_handle = $1
+                   ORDER BY interaction_count DESC
+                   LIMIT 1""",
+                handle
+            )
+    if not row:
+        raise HTTPException(status_code=404, detail="No social memory found for this handle")
+    result = dict(row)
+    result["matched_user_id"] = str(result["matched_user_id"]) if result["matched_user_id"] else None
+    return result
+
+
+@router.post("/social-memory/match")
+async def match_social_memory(body: SocialMemoryMatch, request: Request):
+    """Match a newly signed-up user to their social media handle."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE skyeye_social_memory
+               SET signup_matched = TRUE, matched_user_id = $1, updated_at = NOW()
+               WHERE platform_handle = $2 AND platform = $3
+               RETURNING id, platform_handle, platform, interests, summary""",
+            body.user_id, body.platform_handle, body.platform
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="No social memory found for this handle/platform")
+
+        # Log the match as activity
+        await conn.execute(
+            """INSERT INTO skyeye_activity (platform, type, content)
+               VALUES ($1, 'social_memory_match', $2)""",
+            row["platform"],
+            f"Social follower @{row['platform_handle']} signed up and matched"
+        )
+
+    return {
+        "status": "matched",
+        "id": row["id"],
+        "platform_handle": row["platform_handle"],
+        "platform": row["platform"],
+        "interests": list(row["interests"] or []),
+        "summary": row["summary"]
+    }
+
+
+@router.get("/social-memory/unmatched")
+async def get_unmatched_profiles(
+    request: Request,
+    min_interactions: int = Query(default=3, ge=1),
+    limit: int = Query(default=50, le=200)
+):
+    """List social profiles with high interaction counts that haven't signed up yet."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, platform_handle, platform, interaction_count,
+                      interests, tone_notes, last_interaction, summary
+               FROM skyeye_social_memory
+               WHERE signup_matched = FALSE
+                 AND interaction_count >= $1
+               ORDER BY interaction_count DESC
+               LIMIT $2""",
+            min_interactions, limit
+        )
+    return [dict(r) for r in rows]

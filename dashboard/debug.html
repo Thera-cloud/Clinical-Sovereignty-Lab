@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Console</title>
+    <style>
+        body { background: #0a0a0a; color: #00ff88; font-family: monospace; padding: 20px; }
+        .log { background: #1a1a1a; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; }
+        .error { color: #ff3b3b; }
+        .success { color: #00ff88; }
+        button { background: #FFD700; color: black; padding: 10px 20px; margin: 10px 5px; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Debug Console</h1>
+    <button onclick="setSession()">Set Admin Session</button>
+    <button onclick="testConnection()">Test Connection</button>
+    <button onclick="goToEye()">Go to The Eye</button>
+    <button onclick="clearLogs()">Clear</button>
+    <div id="logs"></div>
+
+    <script>
+        let ws = null;
+        
+        function log(msg, type = "info") {
+            const div = document.createElement("div");
+            div.className = "log " + type;
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            document.getElementById("logs").prepend(div);
+        }
+
+        function setSession() {
+            sessionStorage.setItem("username", "admin1");
+            sessionStorage.setItem("password", "admin123");
+            sessionStorage.setItem("profile", JSON.stringify({
+                role: "ADMIN",
+                name: "Admin User",
+                hardware_id: "ADMIN_001"
+            }));
+            log("✅ Session storage set", "success");
+        }
+
+        function testConnection() {
+            log("🔌 Connecting to wss://api.sovereignsanctuary.net/ws...");
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            
+            ws.onopen = () => {
+                log("✅ Connected!", "success");
+                
+                // Try to login
+                const loginMsg = {
+                    type: "login_request",
+                    username: "adm                    password: "admin123",
+                    expected_role: "ADMIN",
+                    hardware_id: "DEBUG_001"
+                };
+                log("➡️ Sending: " + JSON.stringify(loginMsg));
+                ws.send(JSON.stringify(loginMsg));
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                log("⬅️ Received: " + JSON.stringify(data, null, 2), "success");
+                
+                // If login successful, try admin_get_stats
+                if (data.type === "login_success") {
+                    setTimeout(() => {
+                        const statsMsg = {type: "admin_get_stats"};
+                        log("➡️ Sending: " + JSON.stringify(statsMsg));
+                        ws.send(JSON.stringify(statsMsg));
+                    }, 500);
+                }
+            };
+            
+            ws.onerror =                log("❌ Error: " + err, "error");
+            };
+            
+            ws.onclose = () => {
+                log("🔴 Connection closed");
+            };
+        }
+
+        function goToEye() {
+            window.location.href = "the_eye.html";
+        }
+
+        function clearLogs() {
+            document.getElementById("logs").innerHTML = "";
+        }
+    </script>
+</body>
+</html>

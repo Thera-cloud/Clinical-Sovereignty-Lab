@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Longitudinal Study</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .back-btn:hover { border-color: var(--purple); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 280px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .card-body { padding: 20px; }
+        
+        /* Time Range Selector */
+        .time-range { margin-bottom: 20px; }
+        .range-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .range-option { padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; text-align: center; font-size: 11px; cursor: pointer; }
+        .range-option.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        
+        /* Filters */
+        .filter-section { margin-bottom: 20px; }
+        .filter-title { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+        .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+        .checkbox-item input { width: 16px; height: 16px; }
+        
+        /* Export Buttons */
+        .export-btn { width: 100%; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; cursor: pointer; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; justify-content: center; }
+        .export-btn:hover { border-color: var(--purple); }
+        
+        /* Timeline Graph */
+        .timeline-graph { height: 340px; background: var(--bg-elevated); border-radius: 10px; padding: 20px; position: relative; }
+        .graph-placeholder { text-align: center; padding: 120px 20px; color: var(--text-secondary); font-size: 12px; }
+        
+        /* CEE Events List */
+        .cee-event { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--green); }
+        .cee-marker { width: 12px; height: 12px; background: var(--green); border-radius: 50%; }
+        .cee-info { flex: 1; }
+        .cee-time { font-size: 10px; color: var(--text-secondary); }
+        .cee-details { font-size: 11px; font-weight: 600; margin-top: 2px; }
+        .cee-context { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Statistics Cards */
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .stat-card { background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center; }
+        .stat-value { font-size: 32px; font-weight: 700; color: var(--purple); }
+        .stat-label { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Trend Indicator */
+        .trend { display: flex; align-items: center; gap: 6px; justify-content: center; margin-top: 8px; font-size: 11px; }
+        .trend.up { color: var(--green); }
+        .trend.down { color: var(--red-critical); }
+        .trend.stable { color: var(--gold); }
+        
+        /* Breakthrough Timeline */
+        .breakthrough-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
+        .bt-date { font-size: 10px; color: var(--cyan); font-weight: 600; }
+        .bt-score { font-size: 14px; font-weight: 700; margin-top: 4px; }
+        .bt-duration { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
+    </div>
+
+    <!-- Sub Navigation -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item active"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Controls -->
+        <aside>
+            <!-- Time Range -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📅</div> Time Range</div>
+                </div>
+                <div class="card-body">
+                    <div class="time-range">
+                        <div class="range-options">
+                            <div class="range-option" data-range="7d">7 days</div>
+                            <div class="range-option active" data-range="30d">30 days</div>
+                            <div class="range-option" data-range="90d">90 days</div>
+                            <div class="range-option" data-range="all">All time</div>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <div class="filter-title">Display Options</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="show-cees"> Show CEE markers
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="show-avg"> Show average line
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="show-trend"> Trend line
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <div class="filter-title">Export Data</div>
+                        <button class="export-btn">📄 Download PDF Report</button>
+                        <button class="export-btn">📊 Export CSV Data</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Subject Selector -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">👤</div> Subject</div>
+                </div>
+                <div class="card-body">
+                    <select id="subject-select" style="width: 100%; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px;">
+                        <option value="CLIENT_EMMA_ID">Emma T. (14 sessions)</option>
+                        <option value="CLIENT_JOHN_ID">John D. (8 sessions)</option>
+                        <option value="CLIENT_SARAH_ID">Sarah M. (23 sessions)</option>
+                    </select>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Timeline -->
+        <section>
+            <!-- Historical Timeline Graph -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📈</div> C<sub>emo</sub> Trajectory (30 days)</div>
+                    <span id="data-points" style="font-size: 10px; color: var(--text-secondary);">0 data points</span>
+                </div>
+                <div class="card-body">
+                    <div class="timeline-graph">
+                        <div class="graph-placeholder">
+                            Historical C<sub>emo</sub> graph will display here<br>
+                            <span style="font-size: 10px; margin-top: 8px; display: block;">Requires nevedal_get_history handler with time-series data</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CEE Events List -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🟢</div> Coherent Emotional Events</div>
+                    <span id="cee-total" style="font-size: 10px; color: var(--green);">0 events</span>
+                </div>
+                <div class="card-body" id="cee-events-list">
+                    <div class="cee-event">
+                        <div class="cee-marker"></div>
+                        <div class="cee-info">
+                            <div class="cee-time">Jan 25, 2026 • 14:23:12</div>
+                            <div class="cee-details">C<sub>emo</sub>: 0.89 • Duration: 45 seconds</div>
+                            <div class="cee-context">Context: Discussing childhood memories with father</div>
+                        </div>
+                    </div>
+                    <div class="cee-event">
+                        <div class="cee-marker"></div>
+                        <div class="cee-info">
+                            <div class="cee-time">Jan 24, 2026 • 16:12:34</div>
+                            <div class="cee-details">C<sub>emo</sub>: 0.92 • Duration: 62 seconds</div>
+                            <div class="cee-context">Context: Breakthrough realization about anxiety triggers</div>
+                        </div>
+                    </div>
+                    <div class="cee-event">
+                        <div class="cee-marker"></div>
+                        <div class="cee-info">
+                            <div class="cee-time">Jan 22, 2026 • 10:45:18</div>
+                            <div class="cee-details">C<sub>emo</sub>: 0.86 • Duration: 38 seconds</div>
+                            <div class="cee-context">Context: Expressing gratitude for support system</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Statistics -->
+        <aside>
+            <!-- Statistics Overview -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">📊</div> Statistics</div>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid">
+                        <div class="stat-card">
+                            <div class="stat-value" id="avg-c-emo">0.68</div>
+                            <div class="stat-label">Avg C<sub>emo</sub></div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="peak-c-emo">0.89</div>
+                            <div class="stat-label">Peak</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="low-c-emo">0.42</div>
+                            <div class="stat-label">Lowest</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-cees">34</div>
+                            <div class="stat-label">Total CEEs</div>
+                        </div>
+                    </div>
+                    <div class="trend up">
+                        <span>↑</span>
+                        <span id="trend-text">Improving trend (+12% vs previous period)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CEE Frequency -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📈</div> CEE Frequency</div>
+                </div>
+                <div class="card-body">
+                    <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">By Week</div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 10px; color: var(--text-secondary);">Week 1</span>
+                            <span style="font-size: 12px; font-weight: 600;">2 events</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 10px; color: var(--text-secondary);">Week 2</span>
+                            <span style="font-size: 12px; font-weight: 600;">5 events</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 10px; color: var(--text-secondary);">Week 3</span>
+                            <span style="font-size: 12px; font-weight: 600; color: var(--green);">8 events ↑</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 10px; color: var(--text-secondary);">Week 4</span>
+                            <span style="font-size: 12px; font-weight: 600; color: var(--green);">11 events ↑</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Breakthrough Moments -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">⭐</div> Breakthroughs</div>
+                </div>
+                <div class="card-body">
+                    <div class="breakthrough-item">
+                        <div class="bt-date">Jan 24, 2026 • 16:12</div>
+                        <div class="bt-score">C<sub>emo</sub>: 0.92</div>
+                        <div class="bt-duration">Duration: 62s</div>
+                    </div>
+                    <div class="breakthrough-item">
+                        <div class="bt-date">Jan 18, 2026 • 14:45</div>
+                        <div class="bt-score">C<sub>emo</sub>: 0.88</div>
+                        <div class="bt-duration">Duration: 51s</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Authentication check
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) {
+            window.location.href = "index.html";
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let authenticated = false;
+        let currentSubject = "CLIENT_EMMA_ID";
+        let timeRange = "30d";
+
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            
+            ws.onopen = function() {
+                console.log("✅ WebSocket connected");
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username: username,
+                    password: password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log("📩 Received:", data.type);
+                
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("🔓 Authenticated! Requesting history...");
+                    requestHistory();
+                }
+                
+                if (data.type === "nevedal_history") {
+                    displayHistory(data);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error("❌ WebSocket error:", error);
+            };
+        }
+
+        function requestHistory() {
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({
+                    type: "nevedal_get_history",
+                    user_id: currentSubject,
+                    time_range: timeRange
+                }));
+                console.log("📡 Requested history for:", currentSubject, timeRange);
+            }
+        }
+
+        function displayHistory(data) {
+            console.log("📈 Displaying history:", data);
+            
+            // Update statistics
+            if (data.statistics) {
+                const s = data.statistics;
+                if (s.avg_c_emo !== undefined) 
+                    document.getElementById("avg-c-emo").textContent = s.avg_c_emo.toFixed(2);
+                if (s.peak_c_emo !== undefined) 
+                    document.getElementById("peak-c-emo").textContent = s.peak_c_emo.toFixed(2);
+                if (s.lowest_c_emo !== undefined) 
+                    document.getElementById("low-c-emo").textContent = s.lowest_c_emo.toFixed(2);
+                if (s.total_cees !== undefined) 
+                    document.getElementById("total-cees").textContent = s.total_cees;
+            }
+            
+            // Update CEE events list
+            if (data.cee_events && data.cee_events.length > 0) {
+                document.getElementById("cee-total").textContent = data.cee_events.length + " events";
+                // Would populate CEE list here with real data
+            }
+            
+            // Update data points count
+            if (data.timeline) {
+                document.getElementById("data-points").textContent = data.timeline.length + " data points";
+            }
+        }
+
+        // Time range selection
+        document.querySelectorAll(".range-option").forEach(option => {
+            option.addEventListener("click", function() {
+                document.querySelectorAll(".range-option").forEach(o => o.classList.remove("active"));
+                this.classList.add("active");
+                timeRange = this.dataset.range;
+                requestHistory();
+            });
+        });
+
+        // Subject selection
+        document.getElementById("subject-select").addEventListener("change", function() {
+            currentSubject = this.value;
+            requestHistory();
+        });
+
+        // Initialize
+        connectWebSocket();
+        
+        console.log("📈 Nevedal Lab Longitudinal Study initialized");
+    </script>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Little Nate Avatar</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #050505;
+      }
+      html, body {
+        height: 100%;
+        width: 100%;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas3d"></canvas>
+    <script type="module">
+      import { Application } from './runtime.js';
+      
+      const canvas = document.getElementById('canvas3d');
+      const app = new Application(canvas);
+      
+      let splineApp = null;
+      let currentExpression = 'neutral';
+      
+      // Maps expression → variable data from scene
+      let variableMap = {};
+      // Reference to the VariableChange handler
+      let vcHandler = null;
+      
+      function setAvatarState(expression) {
+        if (!splineApp) return;
+        if (expression === currentExpression) return;
+        
+        const varKey = 'to_' + expression;
+        const varObj = variableMap[varKey];
+        
+        if (!varObj) {
+          console.warn('[SplineAvatar] No variable for:', varKey);
+          return;
+        }
+        
+        console.log('[SplineAvatar] Changing:', currentExpression, '→', expression);
+        currentExpression = expression;
+        
+        console.log('[SplineAvatar] Step 1: varObj found, name:', varObj.name);
+        
+        // Modify the variable value in the shared data
+        const newValue = 'trigger_' + Date.now();
+        console.log('[SplineAvatar] Step 2: setting value to', newValue);
+        
+        try {
+          // Update the raw variable data that the handler watches
+          varObj.raw.data.value.textValue = newValue;
+          console.log('[SplineAvatar] Step 3: raw data updated');
+        } catch(e) {
+          console.log('[SplineAvatar] Step 3 error:', e.message);
+        }
+        
+        // Update _variablesCache
+        try {
+          if (splineApp._variablesCache instanceof Map) {
+            splineApp._variablesCache.set(varObj.name, varObj.raw.data);
+            console.log('[SplineAvatar] Step 4: cache updated');
+          }
+        } catch(e) {
+          console.log('[SplineAvatar] Step 4 error:', e.message);
+        }
+        
+        // Try setVariable with the Spline variable NAME (not our key)
+        try {
+          splineApp.setVariable(varObj.name, newValue);
+          console.log('[SplineAvatar] Step 5: setVariable called');
+        } catch(e) {
+          console.log('[SplineAvatar] Step 5 error:', e.message);
+        }
+        
+        // Try publish on event manager
+        try {
+          const em = app._eventManager;
+          if (em && typeof em.publish === 'function') {
+            em.publish('VariableChange', {
+              variable: varObj.raw.data,
+              name: varObj.name,
+              id: varObj.raw.id,
+              value: newValue,
+            });
+            console.log('[SplineAvatar] Step 6: published VariableChange');
+          }
+        } catch(e) {
+          console.log('[SplineAvatar] Step 6 error:', e.message);
+        }
+        
+        // Try triggering onFrame on the VC handler directly
+        try {
+          if (vcHandler && typeof vcHandler.onFrame === 'function') {
+            vcHandler.onFrame();
+            console.log('[SplineAvatar] Step 7: onFrame called');
+          }
+        } catch(e) {
+          console.log('[SplineAvatar] Step 7 error:', e.message);
+        }
+        
+        // Force render
+        try { splineApp.requestRender(); } catch(e) {}
+      }
+      
+      window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'setExpression') {
+          setAvatarState(event.data.expression);
+        }
+      });
+      
+      const sceneUrl = new URL('./scene.splinecode', window.location.href).href;
+      
+      app.load(sceneUrl).then(() => {
+        splineApp = app;
+        console.log('[SplineAvatar] Scene loaded!');
+        
+        // Read variables from scene data
+        const sharedData = app._data && app._data.shared;
+        const dataVars = sharedData ? sharedData.variables : null;
+        
+        if (dataVars && Array.isArray(dataVars)) {
+          console.log('[SplineAvatar] Found', dataVars.length, 'variables');
+          for (const v of dataVars) {
+            const name = v.data ? v.data.name : null;
+            const textValue = v.data && v.data.value ? v.data.value.textValue : null;
+            console.log('[SplineAvatar] Var:', name, '=', textValue);
+            
+            if (textValue) {
+              variableMap[textValue] = {
+                name: name,
+                id: v.id,
+                raw: v,
+              };
+            }
+            
+            // Populate _variablesCache
+            if (name && splineApp._variablesCache instanceof Map) {
+              splineApp._variablesCache.set(name, v.data);
+            }
+          }
+          console.log('[SplineAvatar] Map keys:', Object.keys(variableMap));
+          console.log('[SplineAvatar] Cache size:', splineApp._variablesCache.size);
+        }
+        
+        // Get the VariableChange handler
+        const em = app._eventManager;
+        if (em && em.handlers) {
+          vcHandler = em.handlers.VariableChange;
+          if (vcHandler) {
+            console.log('[SplineAvatar] VC handler found');
+            
+            // Inspect variablesToWatch
+            if (vcHandler.variablesToWatch) {
+              console.log('[SplineAvatar] variablesToWatch:', vcHandler.variablesToWatch);
+              console.log('[SplineAvatar] variablesToWatch type:', typeof vcHandler.variablesToWatch, Array.isArray(vcHandler.variablesToWatch) ? 'array' : '');
+              if (vcHandler.variablesToWatch instanceof Map) {
+                console.log('[SplineAvatar] variablesToWatch size:', vcHandler.variablesToWatch.size);
+                vcHandler.variablesToWatch.forEach((v, k) => {
+                  console.log('[SplineAvatar] Watching:', k, '→', JSON.stringify(v).substring(0, 100));
+                });
+              } else if (Array.isArray(vcHandler.variablesToWatch)) {
+                console.log('[SplineAvatar] Watching:', vcHandler.variablesToWatch.length, 'vars');
+                vcHandler.variablesToWatch.forEach((v, i) => {
+                  console.log('[SplineAvatar] Watch', i, ':', JSON.stringify(v).substring(0, 100));
+                });
+              } else {
+                const keys = Object.keys(vcHandler.variablesToWatch);
+                console.log('[SplineAvatar] Watching keys:', keys);
+              }
+            }
+            
+            // Inspect events
+            if (vcHandler.events) {
+              console.log('[SplineAvatar] VC events:', vcHandler.events.length || Object.keys(vcHandler.events).length, 'events');
+              const evts = Array.isArray(vcHandler.events) ? vcHandler.events : Object.values(vcHandler.events);
+              for (let i = 0; i < Math.min(evts.length, 3); i++) {
+                console.log('[SplineAvatar] Event', i, ':', JSON.stringify(evts[i]).substring(0, 200));
+              }
+            }
+            
+            // Check onFrame
+            if (typeof vcHandler.onFrame === 'function') {
+              console.log('[SplineAvatar] onFrame:', vcHandler.onFrame.toString().substring(0, 300));
+            }
+          }
+        }
+        
+        console.log('[SplineAvatar] === READY ===');
+        window.parent.postMessage({ type: 'spline_ready' }, '*');
+        
+      }).catch(err => {
+        console.error('[SplineAvatar] Load error:', err);
+      });
+    </script>
+  </body>
+</html>

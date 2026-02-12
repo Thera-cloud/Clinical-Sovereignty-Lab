@@ -1,0 +1,132 @@
+{
+  "daily_stats": {
+    "2026-01-23": {
+      "logins": 339,
+      "registrations": 5,
+      "messages_sent": 59,
+      "sessions_started": 339,
+      "tokens_used": 5765,
+      "unique_users": [
+        "CLIENT_TESTUSER2_ID",
+        "CLIENT_J.BULL_ID",
+        "ADMIN_ADMIN1_ID"
+      ],
+      "active_users": [
+        "ADMIN_ADMIN1_ID",
+        "COACH_COACH1_ID",
+        "CLIENT_J.BULL_ID"
+      ]
+    },
+    "2026-01-24": {
+      "logins": 37,
+      "registrations": 0,
+      "messages_sent": 29,
+      "tokens_used": 6760,
+      "sessions_started": 37,
+      "active_users": [
+        "ADMIN_ADMIN1_ID",
+        "COACH_COACH1_ID"
+      ]
+    },
+    "2026-01-25": {
+      "logins": 49,
+      "registrations": 0,
+      "messages_sent": 6,
+      "tokens_used": 830,
+      "sessions_started": 66,
+      "active_users": [
+        "ADMIN_ADMIN1_ID"
+      ]
+    },
+    "2026-01-26": {
+      "logins": 260,
+      "registrations": 0,
+      "messages_sent": 11,
+      "tokens_used": 600,
+      "sessions_started": 261,
+      "active_users": [
+        "ADMIN_ADMIN1_ID",
+        "CLIENT_001",
+        "CLIENT_001B"
+      ]
+    },
+    "2026-01-27": {
+      "logins": 128,
+      "registrations": 0,
+      "messages_sent": 1,
+      "tokens_used": 360,
+      "sessions_started": 128,
+      "active_users": [
+        "CLIENT_001",
+        "CLIENT_001B"
+      ]
+    },
+    "2026-01-28": {
+      "logins": 208,
+      "registrations": 0,
+      "messages_sent": 7,
+      "tokens_used": 710,
+      "sessions_started": 208,
+      "active_users": [
+        "CLIENT_001",
+        "CLIENT_001B"
+      ]
+    },
+    "2026-01-29": {
+      "logins": 242,
+      "registrations": 0,
+      "messages_sent": 39,
+      "tokens_used": 3010,
+      "sessions_started": 242,
+      "active_users": [
+        "CLIENT_001",
+        "CLIENT_001B"
+      ]
+    },
+    "2026-01-30": {
+      "logins": 30,
+      "registrations": 0,
+      "messages_sent": 47,
+      "tokens_used": 12060,
+      "sessions_started": 33,
+      "active_users": [
+        "CLIENT_001",
+        "CLIENT_001B",
+        "ADMIN_ADMIN1_ID"
+      ]
+    },
+    "2026-01-31": {
+      "logins": 171,
+      "registrations": 0,
+      "messages_sent": 48,
+      "tokens_used": 5450,
+      "sessions_started": 173,
+      "active_users": [
+        "CLIENT_001",
+        "CLIENT_001B",
+        "ADMIN_ADMIN1_ID",
+        "COACH_001"
+      ]
+    },
+    "2026-02-01": {
+      "logins": 88,
+      "registrations": 0,
+      "messages_sent": 35,
+      "tokens_used": 7800,
+      "sessions_started": 89,
+      "active_users": [
+        "ADMIN_ADMIN1_ID",
+        "CLIENT_001",
+        "CLIENT_001B",
+        "COACH_001"
+      ]
+    }
+  },
+  "platform_totals": {
+    "total_users": 5,
+    "total_sessions": 1576,
+    "total_messages": 282,
+    "total_tokens_used": 43345
+  },
+  "last_updated": "2026-01-23 12:54:13.943959"
+}

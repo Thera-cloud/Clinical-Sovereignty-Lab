@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Sanctuary — Golden Ticket</title>
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #1a1a1a;
+            --gold: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            --cyan: #4ECDC4;
+            --purple: #9D4EDD;
+            --red: #EF4444;
+            --green: #22C55E;
+            --text-primary: #E8D5A3;
+            --text-secondary: #8B7355;
+            --text-body: #d4d4d4;
+            --border: #2a2a2a;
+            --radius: 12px;
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+        body {
+            background: var(--bg-void);
+            color: var(--text-body);
+            font-family: var(--font-body);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .ticket-container {
+            max-width: 600px;
+            width: 100%;
+            padding: 24px;
+        }
+
+        /* Loading / Error */
+        .state-screen {
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 24px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Ticket Card */
+        .ticket-card {
+            background: var(--bg-chamber);
+            border: 2px solid var(--gold-dim);
+            border-radius: 16px;
+            overflow: hidden;
+            animation: fadeIn 0.6s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .ticket-glow {
+            height: 4px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        }
+
+        .ticket-header {
+            text-align: center;
+            padding: 40px 32px 24px;
+        }
+
+        .ticket-header .brand {
+            font-family: var(--font-display);
+            font-size: 12px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: var(--gold-dim);
+            margin-bottom: 20px;
+        }
+
+        .ticket-header h1 {
+            font-family: var(--font-display);
+            font-size: 36px;
+            font-weight: 600;
+            color: var(--gold);
+            margin-bottom: 8px;
+        }
+
+        .ticket-header .greeting {
+            font-size: 18px;
+            color: var(--text-primary);
+            font-family: var(--font-display);
+        }
+
+        .ticket-divider {
+            display: flex;
+            align-items: center;
+            padding: 0 32px;
+            gap: 16px;
+        }
+
+        .ticket-divider .line {
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .ticket-divider .icon {
+            color: var(--gold-dim);
+            font-size: 20px;
+        }
+
+        /* Assessment Preview */
+        .assessment-section {
+            padding: 24px 32px;
+        }
+
+        .section-label {
+            font-family: var(--font-display);
+            font-size: 13px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--cyan);
+            margin-bottom: 12px;
+        }
+
+        .assessment-preview {
+            background: var(--bg-elevated);
+            border-radius: 8px;
+            padding: 20px;
+            line-height: 1.7;
+            color: var(--text-body);
+            font-style: italic;
+            border-left: 3px solid var(--gold-dim);
+        }
+
+        /* Goals */
+        .goals-list {
+            list-style: none;
+            padding: 0 32px 24px;
+        }
+
+        .goal-item {
+            display: flex;
+            gap: 12px;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .goal-item:last-child { border-bottom: none; }
+
+        .goal-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold-dim), var(--gold));
+            color: var(--bg-void);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .goal-content h4 {
+            color: var(--text-primary);
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .goal-content p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Legacy */
+        .legacy-section {
+            padding: 0 32px 32px;
+            text-align: center;
+        }
+
+        .legacy-text {
+            font-family: var(--font-display);
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--gold-bright);
+            line-height: 1.5;
+            font-style: italic;
+        }
+
+        /* CTA */
+        .cta-section {
+            padding: 24px 32px 40px;
+            text-align: center;
+        }
+
+        .btn-redeem {
+            display: inline-block;
+            width: 100%;
+            padding: 18px 32px;
+            background: linear-gradient(135deg, var(--gold), var(--gold-bright));
+            color: var(--bg-void);
+            border: none;
+            border-radius: 10px;
+            font-family: var(--font-body);
+            font-size: 17px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-redeem:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(201, 169, 98, 0.3);
+        }
+
+        .btn-redeem:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .cta-subtext {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 12px;
+        }
+
+        .expiry-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 16px;
+        }
+
+        .expiry-badge.valid {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--green);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+
+        .expiry-badge.expired {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--red);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        /* Password field */
+        .password-field {
+            margin-top: 16px;
+        }
+
+        .password-field label {
+            display: block;
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-align: left;
+        }
+
+        .password-field input {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-body);
+            font-family: var(--font-body);
+            font-size: 15px;
+            outline: none;
+        }
+
+        .password-field input:focus {
+            border-color: var(--gold-dim);
+        }
+
+        /* Success */
+        .success-section {
+            text-align: center;
+            padding: 48px 32px;
+        }
+
+        .success-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin: 0 auto 20px;
+        }
+
+        .success-section h2 {
+            font-family: var(--font-display);
+            color: var(--gold);
+            font-size: 28px;
+            margin-bottom: 12px;
+        }
+
+        @media (max-width: 480px) {
+            .ticket-header { padding: 32px 20px 20px; }
+            .ticket-header h1 { font-size: 28px; }
+            .assessment-section, .goals-list, .legacy-section, .cta-section { padding-left: 20px; padding-right: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="ticket-container" id="app">
+    <!-- Loading -->
+    <div class="state-screen" id="loading">
+        <div class="spinner"></div>
+        <p style="color: var(--text-secondary)">Validating your Golden Ticket...</p>
+    </div>
+
+    <!-- Error -->
+    <div class="state-screen" id="error" style="display:none">
+        <p style="color: var(--red); font-size: 20px; font-family: var(--font-display); margin-bottom: 12px;" id="error-title">Invalid Ticket</p>
+        <p style="color: var(--text-secondary);" id="error-message">This ticket is not valid.</p>
+    </div>
+
+    <!-- Ticket -->
+    <div class="ticket-card" id="ticket" style="display:none">
+        <div class="ticket-glow"></div>
+
+        <div class="ticket-header">
+            <div class="brand">Sovereign Sanctuary</div>
+            <h1>Golden Ticket</h1>
+            <p class="greeting" id="greeting"></p>
+        </div>
+
+        <div class="ticket-divider">
+            <div class="line"></div>
+            <div class="icon">&#10022;</div>
+            <div class="line"></div>
+        </div>
+
+        <!-- Assessment Preview -->
+        <div class="assessment-section" id="assessment-section">
+            <div class="section-label">Your Assessment Preview</div>
+            <div class="assessment-preview" id="assessment-text"></div>
+        </div>
+
+        <!-- Goals -->
+        <div style="padding: 0 32px;">
+            <div class="section-label">Your Coaching Goals</div>
+        </div>
+        <ul class="goals-list" id="goals-list"></ul>
+
+        <!-- Legacy -->
+        <div class="legacy-section" id="legacy-section" style="display:none">
+            <div class="section-label" style="margin-bottom: 16px;">Your Legacy Statement</div>
+            <p class="legacy-text" id="legacy-text"></p>
+        </div>
+
+        <div class="ticket-divider">
+            <div class="line"></div>
+            <div class="icon">&#10022;</div>
+            <div class="line"></div>
+        </div>
+
+        <!-- CTA -->
+        <div class="cta-section">
+            <div class="password-field">
+                <label for="password">Choose a password for your account (optional — we'll generate one if blank)</label>
+                <input type="password" id="password" placeholder="Enter a secure password">
+            </div>
+
+            <button class="btn-redeem" id="btn-redeem" onclick="redeem()">
+                Start Your Journey
+            </button>
+            <p class="cta-subtext">Your 14-day free trial begins immediately. No credit card required.</p>
+            <div id="expiry-badge-container"></div>
+        </div>
+    </div>
+
+    <!-- Success -->
+    <div class="state-screen" id="success" style="display:none">
+        <div class="ticket-card" style="padding: 0;">
+            <div class="ticket-glow"></div>
+            <div class="success-section">
+                <div class="success-icon">&#10003;</div>
+                <h2>Welcome to the Sanctuary</h2>
+                <p style="color: var(--text-body); line-height: 1.7; margin-bottom: 20px;">
+                    Your account has been created. Little Nate already knows your story — your first session won't start from zero.
+                </p>
+                <p style="color: var(--text-secondary); font-size: 14px;">
+                    Check your email for login instructions. Download the app and sign in to begin.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+const params = new URLSearchParams(window.location.search);
+const ticketToken = params.get('token');
+let ticketData = null;
+
+async function init() {
+    if (!ticketToken) {
+        showError('Missing Token', 'No ticket token provided. Please use the link from your email.');
+        return;
+    }
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/golden-ticket/validate/${ticketToken}`);
+        if (!resp.ok) throw new Error('Invalid ticket');
+        ticketData = await resp.json();
+
+        if (ticketData.status === 'already_redeemed') {
+            showError('Already Redeemed', 'This Golden Ticket has already been used. Check your email for login details.');
+            return;
+        }
+
+        // Render ticket
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('ticket').style.display = 'block';
+
+        // Greeting
+        const name = ticketData.first_name || 'Friend';
+        document.getElementById('greeting').textContent = `Welcome, ${name}. We've been waiting for you.`;
+
+        // Assessment
+        if (ticketData.assessment_preview) {
+            document.getElementById('assessment-text').textContent = ticketData.assessment_preview;
+        } else {
+            document.getElementById('assessment-section').style.display = 'none';
+        }
+
+        // Goals
+        const goalsList = document.getElementById('goals-list');
+        const goals = ticketData.goals || [];
+        if (goals.length > 0) {
+            goals.forEach((g, i) => {
+                const li = document.createElement('li');
+                li.className = 'goal-item';
+                li.innerHTML = `
+                    <div class="goal-number">${i + 1}</div>
+                    <div class="goal-content">
+                        <h4>${g.title || 'Goal ' + (i + 1)}</h4>
+                        <p>${g.description || ''}</p>
+                    </div>`;
+                goalsList.appendChild(li);
+            });
+        }
+
+        // Legacy
+        if (ticketData.legacy_statement) {
+            document.getElementById('legacy-section').style.display = 'block';
+            document.getElementById('legacy-text').textContent = `"${ticketData.legacy_statement}"`;
+        }
+
+        // Expiry
+        const expiryContainer = document.getElementById('expiry-badge-container');
+        if (ticketData.status === 'expired') {
+            expiryContainer.innerHTML = '<div class="expiry-badge expired">Expired — you can still sign up, but the free trial may not apply</div>';
+        } else if (ticketData.expires_at) {
+            const exp = new Date(ticketData.expires_at);
+            const days = Math.ceil((exp - new Date()) / (1000 * 60 * 60 * 24));
+            expiryContainer.innerHTML = `<div class="expiry-badge valid">Expires in ${days} day${days !== 1 ? 's' : ''}</div>`;
+        }
+
+    } catch (e) {
+        showError('Invalid Ticket', e.message || 'This ticket could not be validated.');
+    }
+}
+
+function showError(title, msg) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error-title').textContent = title;
+    document.getElementById('error-message').textContent = msg;
+}
+
+async function redeem() {
+    const btn = document.getElementById('btn-redeem');
+    btn.disabled = true;
+    btn.textContent = 'Creating your account...';
+
+    const password = document.getElementById('password').value || null;
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/golden-ticket/redeem`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                token: ticketToken,
+                password: password
+            })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Redemption failed');
+        }
+
+        // Show success
+        document.getElementById('ticket').style.display = 'none';
+        document.getElementById('success').style.display = 'block';
+
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Try Again';
+        alert('Error: ' + e.message);
+    }
+}
+
+init();
+</script>
+
+</body>
+</html>

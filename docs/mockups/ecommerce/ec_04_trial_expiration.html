@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continue Your Journey — Little Nate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #161616;
+            --border-subtle: #1A1A1A;
+            --border-active: #2A2A2A;
+            --gold-primary: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            --cyan-primary: #4ECDC4;
+            --cyan-dim: #2D7A75;
+            --text-primary: #F5F5F5;
+            --text-secondary: #9A9A9A;
+            --text-muted: #5A5A5A;
+            --success: #4ADE80;
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        
+        .ambient-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .ambient-bg::before { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(ellipse at 30% 30%, rgba(201, 169, 98, 0.04) 0%, transparent 50%), radial-gradient(ellipse at 70% 70%, rgba(78, 205, 196, 0.03) 0%, transparent 50%); animation: ambientDrift 30s ease-in-out infinite; }
+        @keyframes ambientDrift { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-3%, -3%) rotate(3deg); } }
+        
+        .modal-container { position: relative; z-index: 1; width: 100%; max-width: 600px; padding: 20px; }
+        
+        .upgrade-modal { background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 4px; overflow: hidden; animation: modalEnter 0.5s ease; }
+        @keyframes modalEnter { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .modal-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 300px; height: 1px; background: linear-gradient(90deg, transparent, var(--gold-primary), transparent); }
+        
+        .modal-header { padding: 48px 48px 32px; text-align: center; position: relative; }
+        .modal-header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 120px; background: linear-gradient(180deg, rgba(201, 169, 98, 0.05) 0%, transparent 100%); }
+        
+        .sanctuary-icon { width: 64px; height: 64px; margin: 0 auto 24px; position: relative; }
+        .sanctuary-icon svg { width: 100%; height: 100%; stroke: var(--gold-primary); stroke-width: 1; fill: none; }
+        .sanctuary-icon::after { content: ''; position: absolute; inset: -16px; background: radial-gradient(circle, rgba(201, 169, 98, 0.15) 0%, transparent 70%); animation: iconPulse 3s ease-in-out infinite; }
+        @keyframes iconPulse { 0%, 100% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.05); } }
+        
+        .modal-header h1 { font-family: var(--font-display); font-size: 36px; font-weight: 300; margin-bottom: 12px; position: relative; }
+        .modal-header p { font-size: 15px; color: var(--text-secondary); line-height: 1.6; position: relative; }
+        
+        .journey-stats { padding: 0 48px 40px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 20px; text-align: center; }
+        .stat-value { font-family: var(--font-display); font-size: 36px; font-weight: 300; color: var(--cyan-primary); margin-bottom: 4px; }
+        .stat-label { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); }
+        
+        .divider { height: 1px; background: linear-gradient(90deg, transparent, var(--border-subtle), transparent); margin: 0 48px; }
+        
+        .plan-options { padding: 40px 48px; }
+        .plan-options h2 { font-family: var(--font-display); font-size: 24px; font-weight: 400; text-align: center; margin-bottom: 24px; }
+        
+        .plans { display: flex; gap: 16px; }
+        .plan-card { flex: 1; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 24px; cursor: pointer; transition: all 0.3s ease; position: relative; }
+        .plan-card:hover { border-color: var(--border-active); transform: translateY(-2px); }
+        .plan-card.featured { border-color: var(--gold-dim); }
+        .plan-card.featured::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--gold-primary), transparent); }
+        
+        .plan-badge { position: absolute; top: -10px; right: 16px; background: var(--gold-primary); color: var(--bg-void); font-size: 9px; font-weight: 600; letter-spacing: 1px; padding: 4px 10px; border-radius: 1px; text-transform: uppercase; }
+        
+        .plan-name { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+        .plan-title { font-family: var(--font-display); font-size: 22px; font-weight: 400; margin-bottom: 16px; }
+        .plan-card.featured .plan-title { color: var(--gold-bright); }
+        
+        .plan-price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 20px; }
+        .plan-price .currency { font-size: 16px; color: var(--text-secondary); }
+        .plan-price .amount { font-family: var(--font-display); font-size: 40px; font-weight: 300; }
+        .plan-price .period { font-size: 13px; color: var(--text-muted); }
+        
+        .plan-features { list-style: none; margin-bottom: 24px; }
+        .plan-features li { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-secondary); padding: 8px 0; }
+        .plan-features li svg { width: 14px; height: 14px; stroke: var(--success); stroke-width: 2; fill: none; flex-shrink: 0; }
+        
+        .plan-btn { width: 100%; padding: 14px; font-family: var(--font-body); font-size: 12px; font-weight: 500; letter-spacing: 1px; text-transform: uppercase; border-radius: 2px; cursor: pointer; transition: all 0.2s ease; }
+        .plan-btn.outline { background: transparent; border: 1px solid var(--border-active); color: var(--text-primary); }
+        .plan-btn.outline:hover { background: var(--bg-elevated); }
+        .plan-btn.primary { background: var(--gold-primary); border: 1px solid var(--gold-primary); color: var(--bg-void); }
+        .plan-btn.primary:hover { background: var(--gold-bright); border-color: var(--gold-bright); }
+        
+        .modal-footer { padding: 24px 48px 32px; text-align: center; }
+        .maybe-later { background: none; border: none; color: var(--text-muted); font-size: 13px; cursor: pointer; padding: 8px 16px; transition: color 0.2s ease; }
+        .maybe-later:hover { color: var(--text-secondary); }
+        .grace-note { font-size: 12px; color: var(--text-muted); margin-top: 12px; }
+    </style>
+</head>
+<body>
+    <div class="ambient-bg"></div>
+    
+    <div class="modal-container">
+        <div class="upgrade-modal">
+            <div class="modal-glow"></div>
+            
+            <div class="modal-header">
+                <div class="sanctuary-icon">
+                    <svg viewBox="0 0 64 64">
+                        <circle cx="32" cy="32" r="28"/>
+                        <path d="M32 12 L32 52"/>
+                        <path d="M20 24 L32 12 L44 24"/>
+                        <circle cx="32" cy="32" r="8"/>
+                    </svg>
+                </div>
+                <h1>Your trial journey has been meaningful.</h1>
+                <p>In just 7 days, you've begun something profound. To continue your path of growth and self-discovery...</p>
+            </div>
+            
+            <div class="journey-stats">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">12</div>
+                        <div class="stat-label">Sessions</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">+23%</div>
+                        <div class="stat-label">Coherence</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">47</div>
+                        <div class="stat-label">Insights</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div class="plan-options">
+                <h2>Continue Your Path</h2>
+                
+                <div class="plans">
+                    <div class="plan-card">
+                        <div class="plan-name">Standard</div>
+                        <div class="plan-title">Inner Chamber</div>
+                        <div class="plan-price">
+                            <span class="currency">$</span>
+                            <span class="amount">49</span>
+                            <span class="period">/month</span>
+                        </div>
+                        <ul class="plan-features">
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Unlimited Nate AI</li>
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Voice conversations</li>
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Full progress tracking</li>
+                        </ul>
+                        <button class="plan-btn outline">Enter Chamber</button>
+                    </div>
+                    
+                    <div class="plan-card featured">
+                        <div class="plan-badge">Recommended</div>
+                        <div class="plan-name">Premium</div>
+                        <div class="plan-title">Sovereign Circle</div>
+                        <div class="plan-price">
+                            <span class="currency">$</span>
+                            <span class="amount">149</span>
+                            <span class="period">/month</span>
+                        </div>
+                        <ul class="plan-features">
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Everything in Standard</li>
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Nevedal biometrics</li>
+                            <li><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg> Family linking + coaching</li>
+                        </ul>
+                        <button class="plan-btn primary">Join the Circle</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="maybe-later">Maybe later</button>
+                <p class="grace-note">You have 3 more days of grace period remaining</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Community Health</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        
+        .main-content { padding: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-subtitle { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+        .card-body { padding: 24px; }
+        
+        .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+        .health-metric { }
+        .health-label { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; }
+        .health-status { font-weight: 600; }
+        .health-status.excellent { color: var(--green); }
+        .health-status.good { color: var(--cyan); }
+        .health-status.moderate { color: var(--orange); }
+        .health-status.poor { color: var(--red-critical); }
+        
+        .health-bar { height: 12px; background: var(--bg-dark); border-radius: 6px; overflow: hidden; }
+        .health-fill { height: 100%; border-radius: 6px; transition: width 0.5s; }
+        
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👁️</div>
+            <div>
+                <div class="logo-text">THE EYE</div>
+                <div class="page-title">Commu Wellness</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">← Back to The Eye</a>
+    </header>
+
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="window.location.href='the_eye.html'" style="cursor: pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_monitor.html'">Live Monitor</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_crisis.html'">Crisis</div>
+        <div class="sub-nav-item active">Community</div>
+    </nav>
+
+    <main class="main-content">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">💚 Community Nevedal State</div>
+                <div class="card-subtitle">Aggregate emotional health ol users</div>
+            </div>
+            <div class="card-body">
+                <div id="health-metrics" class="health-grid">
+                    <div class="loading">Loading community metrics...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        if (!sessionStorage.getItem("username")) {
+            window.location.href = "index.html";
+        }
+
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (profile.role !== "ADMIN") {
+            alert("Admin access required");
+            window.location.href = "command.html";
+        }
+
+        const ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+
+        ws.onopen = function() {
+            console.log("Connected to bridge server");
+            ws.send(JSON.stringify({type: "admin_get_stats"}));
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("Received:", data);
+            
+            if (data.type === "admin_stats") {
+                displayCommunityHealth(data.stats);
+            }
+        };
+
+        function displayCommunityHealth(stats) {
+            // Calculate mock community metrics (replace with real data when available)
+            const metrics = [
+                {
+                    label: "Community Anxiety Level",
+                    value: 65,
+                    status: "MODERATE",
+                    color: "linear-gradient(90deg, var(--green), var(--orange))"
+                },
+                {
+                    label: "Emotional Stability Index",
+                    value: 78,
+                    status: "GOOD",
+                    color: "linear-gradient(90deg, var(--cyan), var(--green))"
+                },
+                {
+                    label: "Platform Engagement",
+                    value: 82,
+                    status: "HIGH",
+                    color: "linear-gradient(90deg, var(--gold), var(--orange))"
+                },
+                {
+                    label: "Breakthrough Rate",
+                    value: 91,
+                    status: "EXCELLENT",
+                    color: "var(--green)"
+                }
+            ];
+
+            document.getElementById("health-metrics").innerHTML = metrics.map(metric => `
+                <div class="health-metric">
+                    <div class="health-label">
+                        <span>${metric.label}</span>
+                        <span class="health-status ${metric.status.toLowerCase()}">${metric.status} (${metric.value}%)</span>
+                    </div>
+                    <div class="health-bar">
+                        <div class="health-fill" style="width: ${metric.value}%; background: ${metric.color};"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+    </script>
+</body>
+</html>

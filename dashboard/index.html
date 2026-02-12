@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Login</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #161616;
+            --border-subtle: #1A1A1A;
+            --border-active: #2A2A2A;
+            --gold-primary: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            --cyan-primary: #4ECDC4;
+            --cyan-dim: #2D7A75;
+            --red-critical: #FF3B3B;
+            --text-primary: #F5F5F5;
+            --text-secondary: #9A9A9A;
+            --text-muted: #5A5A5A;
+            --success: #4ADE80;
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .ambient-bg::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(ellipse at 30% 30%, rgba(201, 169, 98, 0.04) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 70%, rgba(78, 205, 196, 0.03) 0%, transparent 50%);
+            animation: ambientDrift 30s ease-in-out infinite;
+        }
+
+        @keyframes ambientDrift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            50% { transform: translate(-3%, -3%) rotate(3deg); }
+        }
+
+        .login-container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 420px;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            overflow: hidden;
+            animation: cardEnter 0.5s ease;
+        }
+
+        @keyframes cardEnter {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card-glow {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold-primary), transparent);
+        }
+
+        .login-header {
+            padding: 48px 40px 32px;
+            text-align: center;
+            position: relative;
+        }
+
+        .login-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: linear-gradient(180deg, rgba(201, 169, 98, 0.05) 0%, transparent 100%);
+        }
+
+        .sanctuary-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 24px;
+            position: relative;
+        }
+
+        .sanctuary-icon svg {
+            width: 100%;
+            height: 100%;
+            stroke: var(--gold-primary);
+            stroke-width: 1;
+            fill: none;
+        }
+
+        .sanctuary-icon::after {
+            content: '';
+            position: absolute;
+            inset: -16px;
+            background: radial-gradient(circle, rgba(201, 169, 98, 0.15) 0%, transparent 70%);
+            animation: iconPulse 3s ease-in-out infinite;
+        }
+
+        @keyframes iconPulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+        }
+
+        .login-header h1 {
+            font-family: var(--font-display);
+            font-size: 28px;
+            font-weight: 300;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .login-header p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            position: relative;
+        }
+
+        .login-form {
+            padding: 0 40px 40px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--gold-dim);
+            box-shadow: 0 0 0 3px rgba(201, 169, 98, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .role-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .role-option {
+            flex: 1;
+            padding: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .role-option:hover {
+            border-color: var(--border-active);
+        }
+
+        .role-option.selected {
+            border-color: var(--gold-primary);
+            background: rgba(201, 169, 98, 0.1);
+        }
+
+        .role-option .icon {
+            font-size: 20px;
+            margin-bottom: 6px;
+        }
+
+        .role-option .label {
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .role-option.selected .label {
+            color: var(--gold-primary);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            background: var(--gold-primary);
+            border: none;
+            border-radius: 4px;
+            color: var(--bg-void);
+            font-family: var(--font-body);
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .login-btn:hover {
+            background: var(--gold-bright);
+        }
+
+        .login-btn:disabled {
+            background: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--red-critical);
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .error-message {
+            background: rgba(255, 59, 59, 0.1);
+            border: 1px solid rgba(255, 59, 59, 0.3);
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            color: var(--red-critical);
+            display: none;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+
+        .login-footer {
+            padding: 20px 40px;
+            border-top: 1px solid var(--border-subtle);
+            text-align: center;
+        }
+
+        .login-footer a {
+            color: var(--text-muted);
+            font-size: 12px;
+            text-decoration: none;
+        }
+
+        .login-footer a:hover {
+            color: var(--gold-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-bg"></div>
+
+    <div class="login-container">
+        <div class="login-card">
+            <div class="card-glow"></div>
+
+            <div class="login-header">
+                <div class="sanctuary-icon">
+                    <svg viewBox="0 0 64 64">
+                        <circle cx="32" cy="32" r="28"/>
+                        <path d="M32 12 L32 52"/>
+                        <path d="M20 24 L32 12 L44 24"/>
+                        <circle cx="32" cy="32" r="8"/>
+                    </svg>
+                </div>
+                <h1>Sovereign Command</h1>
+                <p>Administrative Control Center</p>
+            </div>
+
+            <div class="login-form">
+                <div class="error-message" id="errorMessage"></div>
+
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-input" id="username" placeholder="Enter username" autocomplete="username">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-input" id="password" placeholder="Enter password" autocomplete="current-password">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Access Level</label>
+                    <div class="role-selector">
+                        <div class="role-option selected" data-role="ADMIN" onclick="selectRole(this)">
+                            <div class="icon">👑</div>
+                            <div class="label">Admin</div>
+                        </div>
+                        <div class="role-option" data-role="COACH" onclick="selectRole(this)">
+                            <div class="icon">🎯</div>
+                            <div class="label">Coach</div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="login-btn" id="loginBtn" onclick="attemptLogin()">
+                    Enter Command Center
+                </button>
+
+                <div class="connection-status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Connecting to server...</span>
+                </div>
+            </div>
+
+            <div class="login-footer">
+                <a href="#">Forgot credentials? Contact system administrator</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Legal Consent Update Overlay -->
+    <div id="consentOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:1000;overflow-y:auto;padding:40px 20px;">
+        <div style="max-width:640px;margin:0 auto;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;">
+            <div style="padding:32px 32px 0;text-align:center;">
+                <div style="font-size:10px;letter-spacing:2px;color:var(--gold-dim);text-transform:uppercase;margin-bottom:8px;">Legal Update Required</div>
+                <div style="font-family:var(--font-display);font-size:24px;font-weight:300;color:var(--text-primary);margin-bottom:4px;">Sovereign Covenant</div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:24px;">Updated Terms of Use, Privacy Policy &amp; Therapeutic Waiver &mdash; v13.0_2026</div>
+            </div>
+            <div style="padding:0 32px;max-height:50vh;overflow-y:auto;font-size:12px;color:var(--text-secondary);line-height:1.7;">
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">1. PRIVATE MEMBERSHIP (1st AMENDMENT)</div>
+                <p>You acknowledge this is a Private Membership Association. All interactions are private exercises of speech.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">2. AI IDENTITY &amp; LICENSING (CA AB 489)</div>
+                <p>Little Nate is an AI, NOT a human or licensed professional. Do not form a reasonable belief that you are interacting with a healthcare professional.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">3. AUTOMATED PROFILING CONSENT</div>
+                <p>You explicitly WAIVE state-level opt-out rights for automated profiling, as it is the core function of this service.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">4. AGE &amp; FAMILY ACCOUNTS (CA SB 243)</div>
+                <p>You affirm you are 18+. Minors only via parent/guardian family accounts.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">5. TEXAS TRAIGA DISCLOSURE</div>
+                <p>This practitioner uses Generative AI in formulation of guidance plans.</p>
+                <div style="color:var(--red-critical);font-weight:600;font-size:13px;margin:16px 0 8px;">6. CRISIS PROTOCOL</div>
+                <p style="color:var(--red-critical);">If in crisis: Call 988 (24/7), Call 911, or go to your nearest Emergency Room.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">7. ZERO TOLERANCE POLICY</div>
+                <p>Immediate termination for: Pornography, Solicitation, or Illegal Acts.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">8. PLATFORM IMMUNITY</div>
+                <p>Sovereign Sanctuary is a Technology Provider, not a Clinic. Coaches are Independent Practitioners.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">9. BIOMETRIC DATA &amp; PRIVACY WAIVER</div>
+                <p>You consent to AI analysis of Voice and Facial Geometry. Data encrypted via Azure OpenAI. You retain the Right to Delete.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">NEW: INTELLECTUAL PROPERTY &amp; PATENT NOTICE</div>
+                <p>The platform uses patented algorithms (Nevedal Quantum Emotional Coherence Engine). All algorithmic outputs are proprietary. You may not reproduce, reverse-engineer, or extract any analytical output.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">NEW: THERAPEUTIC SETTING WAIVER</div>
+                <p>This platform is NOT a licensed mental health provider. The Nevedal framework is a research model, not a clinically validated diagnostic tool. You voluntarily assume the inherent emotional risks of self-exploration.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">NEW: DATA RETENTION &amp; ACCOUNT DELETION</div>
+                <p>Deleted accounts are held for 30 days then permanently purged. Anonymized aggregate data may be retained for research. Your data is NEVER sold.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">10. HOLD HARMLESS WAIVER</div>
+                <p>You hold the Developers harmless from claims arising from data breaches, Coach interactions, or AI outputs. Liability capped at 12 months of subscription fees.</p>
+                <div style="color:var(--gold-primary);font-weight:600;font-size:13px;margin:16px 0 8px;">11. DISPUTE RESOLUTION</div>
+                <p style="font-weight:500;color:var(--text-primary);">BINDING ARBITRATION. You WAIVE your right to a jury trial or class action. 30-day informal resolution period required first.</p>
+                <div style="margin:16px 0 8px;padding:12px;background:rgba(201,169,98,0.08);border-radius:6px;border:1px solid rgba(201,169,98,0.2);font-size:11px;color:var(--gold-primary);text-align:center;">
+                    Full agreement available in Settings &gt; Legal &amp; Privacy after login.<br>Contact: support@sovereignsanctuary.net
+                </div>
+            </div>
+            <div style="padding:24px 32px;border-top:1px solid var(--border-subtle);">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:16px;">
+                    <input type="checkbox" id="consentCheckbox" style="width:18px;height:18px;accent-color:var(--gold-primary);">
+                    <span style="font-size:11px;color:var(--text-primary);">I AM 18+, WAIVE CLASS ACTION RIGHTS &amp; CONSENT TO UPDATED TERMS (v13.0_2026)</span>
+                </label>
+                <button id="consentAcceptBtn" disabled onclick="acceptConsent()" style="width:100%;padding:14px;background:var(--text-muted);border:none;border-radius:4px;color:var(--bg-void);font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;cursor:not-allowed;">
+                    Accept &amp; Continue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============================================================================
+        // WEBSOCKET CONNECTION
+        // =============================================================================
+        const SERVER_URL = 'wss://api.sovereignsanctuary.net/ws';
+        let socket = null;
+        let selectedRole = 'ADMIN';
+
+        function connect() {
+            try {
+                socket = new WebSocket(SERVER_URL);
+
+                socket.onopen = () => {
+                    document.getElementById('statusDot').classList.add('connected');
+                    document.getElementById('statusText').textContent = 'Connected to Sovereign Bridge';
+                    document.getElementById('loginBtn').disabled = false;
+                };
+
+                socket.onclose = () => {
+                    document.getElementById('statusDot').classList.remove('connected');
+                    document.getElementById('statusText').textContent = 'Connection lost. Reconnecting...';
+                    document.getElementById('loginBtn').disabled = true;
+                    setTimeout(connect, 3000);
+                };
+
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    document.getElementById('statusText').textContent = 'Connection error';
+                };
+
+                socket.onmessage = handleMessage;
+
+            } catch (e) {
+                console.error('Connection failed:', e);
+                document.getElementById('statusText').textContent = 'Failed to connect';
+            }
+        }
+
+        let _pendingProfile = null;
+        let _pendingToken = null;
+
+        function handleMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+
+                if (data.type === 'login_success') {
+                    // Store session data
+                    sessionStorage.setItem('username', document.getElementById('username').value);
+                    sessionStorage.setItem('profile', JSON.stringify(data.profile));
+                    sessionStorage.setItem('token', data.token);
+                    sessionStorage.setItem('password', document.getElementById('password').value);
+
+                    // Check if consent update needed
+                    if (data.consent_update_needed) {
+                        _pendingProfile = data.profile;
+                        _pendingToken = data.token;
+                        document.getElementById('consentOverlay').style.display = 'block';
+                        document.getElementById('loginBtn').textContent = 'Enter Command Center';
+                        document.getElementById('loginBtn').disabled = false;
+                        return;
+                    }
+                    
+                    // Redirect to command center
+                    window.location.href = 'command.html';
+                    
+                } else if (data.type === 'consent_updated') {
+                    // Consent accepted — update stored profile and proceed
+                    if (data.profile) {
+                        sessionStorage.setItem('profile', JSON.stringify(data.profile));
+                    }
+                    document.getElementById('consentOverlay').style.display = 'none';
+                    window.location.href = 'command.html';
+
+                } else if (data.type === 'login_failed') {
+                    showError(data.message || 'Invalid credentials or insufficient permissions');
+                }
+            } catch (e) {
+                console.error('Message parse error:', e);
+            }
+        }
+
+        function acceptConsent() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                showError('Connection lost. Please refresh and try again.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'accept_consent_update' }));
+            document.getElementById('consentAcceptBtn').textContent = 'Updating...';
+            document.getElementById('consentAcceptBtn').disabled = true;
+        }
+
+        function selectRole(element) {
+            document.querySelectorAll('.role-option').forEach(el => el.classList.remove('selected'));
+            element.classList.add('selected');
+            selectedRole = element.dataset.role;
+        }
+
+        function attemptLogin() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!username || !password) {
+                showError('Please enter username and password');
+                return;
+            }
+
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                showError('Not connected to server. Please wait...');
+                return;
+            }
+
+            hideError();
+            document.getElementById('loginBtn').textContent = 'Authenticating...';
+            document.getElementById('loginBtn').disabled = true;
+
+            socket.send(JSON.stringify({
+                type: 'login_request',
+                username: username,
+                password: password,
+                expected_role: selectedRole,
+                hardware_id: `WEB_${navigator.userAgent.slice(0, 20)}_${Date.now()}`
+            }));
+
+            // Reset button after timeout
+            setTimeout(() => {
+                document.getElementById('loginBtn').textContent = 'Enter Command Center';
+                document.getElementById('loginBtn').disabled = false;
+            }, 5000);
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.classList.add('visible');
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').classList.remove('visible');
+        }
+
+        // Enter key to submit
+        document.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                attemptLogin();
+            }
+        });
+
+        // Consent checkbox toggle
+        document.getElementById('consentCheckbox').addEventListener('change', function() {
+            const btn = document.getElementById('consentAcceptBtn');
+            btn.disabled = !this.checked;
+            btn.style.background = this.checked ? 'var(--gold-primary)' : 'var(--text-muted)';
+            btn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
+        });
+
+        // Initialize
+        connect();
+    </script>
+</body>
+</html>

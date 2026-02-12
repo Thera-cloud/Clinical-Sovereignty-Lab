@@ -1,0 +1,962 @@
+{
+  "nevedal_state": {
+    "C_emo": 0.64,
+    "E_warmth": 1.0,
+    "T_tunnel": 0.2,
+    "GAP": 0.766,
+    "Velocity": -0.009,
+    "Quantum": 0.758,
+    "anxiety_level": 0.0,
+    "depression_indicators": 0,
+    "stress_level": 0,
+    "engagement": 0.7,
+    "session_count": 37,
+    "breakthrough_count": 0,
+    "homework_completion_rate": 0.0,
+    "risk_level": "LOW",
+    "last_risk_assessment": "2026-02-01 15:11:19.927856",
+    "crisis_count": 0,
+    "mood_current": "happy",
+    "mood_trend": "stable",
+    "mood_history": [
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.71
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.59
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.56
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.54
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.52
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "sad",
+        "anxiety": 0,
+        "engagement": 0.49
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.48
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.49
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.56
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.59
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.67
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0.15,
+        "engagement": 0.66
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.58
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.52
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "sad",
+        "anxiety": 0,
+        "engagement": 0.49
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.53
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "sad",
+        "anxiety": 0.15,
+        "engagement": 0.56
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.55
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.63
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.54
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.67
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.53
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "neutral",
+        "anxiety": 0,
+        "engagement": 0.48
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.54
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.54
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.55
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.56
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.6
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.73
+      },
+      {
+        "date": "2026-02-01",
+        "mood": "happy",
+        "anxiety": 0,
+        "engagement": 0.7
+      }
+    ],
+    "sleep_quality": "unknown",
+    "sleep_issues_mentioned": 0
+  },
+  "history": [
+    {
+      "timestamp": "2026-01-23 17:06:32.209949",
+      "C_emo": 0.54,
+      "GAP": 0.462,
+      "Quantum": 0.583,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 17:09:35.515928",
+      "C_emo": 0.5,
+      "GAP": 0.452,
+      "Quantum": 0.598,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:09:49.590598",
+      "C_emo": 0.54,
+      "GAP": 0.495,
+      "Quantum": 0.618,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 17:10:51.573022",
+      "C_emo": 0.5,
+      "GAP": 0.482,
+      "Quantum": 0.605,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:13:52.175662",
+      "C_emo": 0.54,
+      "GAP": 0.498,
+      "Quantum": 0.621,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 17:14:01.646826",
+      "C_emo": 0.5,
+      "GAP": 0.446,
+      "Quantum": 0.567,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:14:07.226547",
+      "C_emo": 0.5,
+      "GAP": 0.416,
+      "Quantum": 0.559,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:14:16.440666",
+      "C_emo": 0.5,
+      "GAP": 0.416,
+      "Quantum": 0.559,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:15:37.374375",
+      "C_emo": 0.5,
+      "GAP": 0.428,
+      "Quantum": 0.572,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 17:40:39.608645",
+      "C_emo": 0.54,
+      "GAP": 0.459,
+      "Quantum": 0.579,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 17:40:42.561548",
+      "C_emo": 0.54,
+      "GAP": 0.465,
+      "Quantum": 0.611,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 17:40:55.675957",
+      "C_emo": 0.45,
+      "GAP": 0.462,
+      "Quantum": 0.586,
+      "anxiety": 0,
+      "mood": "sad"
+    },
+    {
+      "timestamp": "2026-01-23 17:41:10.402989",
+      "C_emo": 0.54,
+      "GAP": 0.501,
+      "Quantum": 0.6,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 19:13:52.945885",
+      "C_emo": 0.54,
+      "GAP": 0.432,
+      "Quantum": 0.575,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-23 20:55:02.507453",
+      "C_emo": 0.5,
+      "GAP": 0.449,
+      "Quantum": 0.595,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 22:49:45.136270",
+      "C_emo": 0.5,
+      "GAP": 0.416,
+      "Quantum": 0.559,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 22:52:28.914276",
+      "C_emo": 0.5,
+      "GAP": 0.482,
+      "Quantum": 0.605,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 22:53:08.726853",
+      "C_emo": 0.5,
+      "GAP": 0.491,
+      "Quantum": 0.615,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-23 22:59:01.522364",
+      "C_emo": 0.5,
+      "GAP": 0.443,
+      "Quantum": 0.563,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:35:37.896699",
+      "C_emo": 0.5,
+      "GAP": 0.461,
+      "Quantum": 0.608,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:40:05.378633",
+      "C_emo": 0.5,
+      "GAP": 0.428,
+      "Quantum": 0.572,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:43:23.168842",
+      "C_emo": 0.5,
+      "GAP": 0.515,
+      "Quantum": 0.641,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:45:37.021076",
+      "C_emo": 0.54,
+      "GAP": 0.591,
+      "Quantum": 0.697,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-24 00:48:17.494992",
+      "C_emo": 0.5,
+      "GAP": 0.464,
+      "Quantum": 0.611,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:48:40.365611",
+      "C_emo": 0.5,
+      "GAP": 0.494,
+      "Quantum": 0.619,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:50:43.778977",
+      "C_emo": 0.54,
+      "GAP": 0.543,
+      "Quantum": 0.62,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-24 00:51:17.831062",
+      "C_emo": 0.5,
+      "GAP": 0.527,
+      "Quantum": 0.629,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:52:15.258586",
+      "C_emo": 0.5,
+      "GAP": 0.515,
+      "Quantum": 0.641,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:53:00.138647",
+      "C_emo": 0.5,
+      "GAP": 0.464,
+      "Quantum": 0.611,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:53:29.400408",
+      "C_emo": 0.54,
+      "GAP": 0.534,
+      "Quantum": 0.611,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-24 00:58:02.135048",
+      "C_emo": 0.5,
+      "GAP": 0.497,
+      "Quantum": 0.597,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:58:13.545629",
+      "C_emo": 0.5,
+      "GAP": 0.458,
+      "Quantum": 0.58,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:58:23.272304",
+      "C_emo": 0.5,
+      "GAP": 0.458,
+      "Quantum": 0.549,
+      "anxiety": 0.15,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:58:38.691603",
+      "C_emo": 0.5,
+      "GAP": 0.431,
+      "Quantum": 0.575,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:59:00.074684",
+      "C_emo": 0.5,
+      "GAP": 0.491,
+      "Quantum": 0.59,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:59:20.588026",
+      "C_emo": 0.5,
+      "GAP": 0.431,
+      "Quantum": 0.575,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 00:59:42.184533",
+      "C_emo": 0.45,
+      "GAP": 0.441,
+      "Quantum": 0.563,
+      "anxiety": 0,
+      "mood": "sad"
+    },
+    {
+      "timestamp": "2026-01-24 00:59:52.178646",
+      "C_emo": 0.5,
+      "GAP": 0.518,
+      "Quantum": 0.595,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:00:11.331171",
+      "C_emo": 0.5,
+      "GAP": 0.503,
+      "Quantum": 0.628,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:00:46.829623",
+      "C_emo": 0.54,
+      "GAP": 0.51,
+      "Quantum": 0.635,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-24 01:01:13.474463",
+      "C_emo": 0.5,
+      "GAP": 0.554,
+      "Quantum": 0.633,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:01:34.785956",
+      "C_emo": 0.5,
+      "GAP": 0.524,
+      "Quantum": 0.601,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:02:32.804360",
+      "C_emo": 0.5,
+      "GAP": 0.53,
+      "Quantum": 0.633,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:03:22.237690",
+      "C_emo": 0.5,
+      "GAP": 0.506,
+      "Quantum": 0.631,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:03:42.424291",
+      "C_emo": 0.5,
+      "GAP": 0.47,
+      "Quantum": 0.617,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-24 01:03:59.009578",
+      "C_emo": 0.54,
+      "GAP": 0.534,
+      "Quantum": 0.611,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-24 01:05:39.448297",
+      "C_emo": 0.5,
+      "GAP": 0.425,
+      "Quantum": 0.569,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-25 19:17:19.126787",
+      "C_emo": 0.5,
+      "GAP": 0.494,
+      "Quantum": 0.593,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-25 19:17:55.344261",
+      "C_emo": 0.5,
+      "GAP": 0.521,
+      "Quantum": 0.623,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-25 19:18:45.382825",
+      "C_emo": 0.5,
+      "GAP": 0.494,
+      "Quantum": 0.593,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-25 19:19:23.780036",
+      "C_emo": 0.54,
+      "GAP": 0.528,
+      "Quantum": 0.629,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-25 19:20:05.716111",
+      "C_emo": 0.5,
+      "GAP": 0.545,
+      "Quantum": 0.624,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-25 19:20:53.457411",
+      "C_emo": 0.5,
+      "GAP": 0.527,
+      "Quantum": 0.599,
+      "anxiety": 0.15,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-26 03:24:39.136784",
+      "C_emo": 0.5,
+      "GAP": 0.413,
+      "Quantum": 0.556,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-26 03:24:51.924867",
+      "C_emo": 0.5,
+      "GAP": 0.512,
+      "Quantum": 0.613,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-26 03:25:04.852819",
+      "C_emo": 0.5,
+      "GAP": 0.452,
+      "Quantum": 0.598,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-26 03:25:30.405178",
+      "C_emo": 0.5,
+      "GAP": 0.455,
+      "Quantum": 0.601,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-30 17:39:31.310786",
+      "C_emo": 0.5,
+      "GAP": 0.455,
+      "Quantum": 0.576,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-31 18:52:22.795397",
+      "C_emo": 0.5,
+      "GAP": 0.536,
+      "Quantum": 0.614,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-01-31 18:52:52.257881",
+      "C_emo": 0.57,
+      "GAP": 0.573,
+      "Quantum": 0.567,
+      "anxiety": 0.3,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-31 18:53:16.110794",
+      "C_emo": 0.61,
+      "GAP": 0.616,
+      "Quantum": 0.617,
+      "anxiety": 0.15,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-01-31 18:53:43.891920",
+      "C_emo": 0.62,
+      "GAP": 0.647,
+      "Quantum": 0.68,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 00:33:25.747964",
+      "C_emo": 0.63,
+      "GAP": 0.759,
+      "Quantum": 0.751,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 00:40:11.537012",
+      "C_emo": 0.59,
+      "GAP": 0.722,
+      "Quantum": 0.712,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 00:42:07.943735",
+      "C_emo": 0.61,
+      "GAP": 0.757,
+      "Quantum": 0.75,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 00:43:59.758051",
+      "C_emo": 0.62,
+      "GAP": 0.725,
+      "Quantum": 0.715,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 00:45:00.082754",
+      "C_emo": 0.63,
+      "GAP": 0.72,
+      "Quantum": 0.709,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 00:53:29.225596",
+      "C_emo": 0.59,
+      "GAP": 0.698,
+      "Quantum": 0.686,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 00:54:00.543428",
+      "C_emo": 0.56,
+      "GAP": 0.68,
+      "Quantum": 0.668,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 00:54:23.318638",
+      "C_emo": 0.5,
+      "GAP": 0.647,
+      "Quantum": 0.634,
+      "anxiety": 0,
+      "mood": "sad"
+    },
+    {
+      "timestamp": "2026-02-01 00:54:54.853297",
+      "C_emo": 0.5,
+      "GAP": 0.644,
+      "Quantum": 0.631,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 00:55:59.426260",
+      "C_emo": 0.5,
+      "GAP": 0.647,
+      "Quantum": 0.634,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 00:59:24.885676",
+      "C_emo": 0.5,
+      "GAP": 0.668,
+      "Quantum": 0.657,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:01:37.708351",
+      "C_emo": 0.5,
+      "GAP": 0.677,
+      "Quantum": 0.667,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:05:37.032866",
+      "C_emo": 0.57,
+      "GAP": 0.729,
+      "Quantum": 0.721,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 01:07:55.823034",
+      "C_emo": 0.55,
+      "GAP": 0.718,
+      "Quantum": 0.68,
+      "anxiety": 0.15,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:09:46.801233",
+      "C_emo": 0.58,
+      "GAP": 0.706,
+      "Quantum": 0.696,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 01:13:32.125530",
+      "C_emo": 0.56,
+      "GAP": 0.68,
+      "Quantum": 0.668,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:13:47.839500",
+      "C_emo": 0.48,
+      "GAP": 0.639,
+      "Quantum": 0.626,
+      "anxiety": 0,
+      "mood": "sad"
+    },
+    {
+      "timestamp": "2026-02-01 01:15:10.322710",
+      "C_emo": 0.49,
+      "GAP": 0.655,
+      "Quantum": 0.643,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:17:20.859965",
+      "C_emo": 0.43,
+      "GAP": 0.64,
+      "Quantum": 0.599,
+      "anxiety": 0.15,
+      "mood": "sad"
+    },
+    {
+      "timestamp": "2026-02-01 01:18:00.225337",
+      "C_emo": 0.45,
+      "GAP": 0.645,
+      "Quantum": 0.634,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 01:19:28.684906",
+      "C_emo": 0.51,
+      "GAP": 0.693,
+      "Quantum": 0.684,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 01:21:14.145250",
+      "C_emo": 0.51,
+      "GAP": 0.666,
+      "Quantum": 0.655,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 15:03:14.158930",
+      "C_emo": 0.55,
+      "GAP": 0.721,
+      "Quantum": 0.713,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:05:09.539432",
+      "C_emo": 0.58,
+      "GAP": 0.691,
+      "Quantum": 0.679,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:06:08.416876",
+      "C_emo": 0.56,
+      "GAP": 0.668,
+      "Quantum": 0.655,
+      "anxiety": 0,
+      "mood": "neutral"
+    },
+    {
+      "timestamp": "2026-02-01 15:06:31.764652",
+      "C_emo": 0.59,
+      "GAP": 0.698,
+      "Quantum": 0.686,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:06:53.359288",
+      "C_emo": 0.61,
+      "GAP": 0.706,
+      "Quantum": 0.695,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:07:22.582944",
+      "C_emo": 0.62,
+      "GAP": 0.713,
+      "Quantum": 0.702,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:08:15.966454",
+      "C_emo": 0.63,
+      "GAP": 0.72,
+      "Quantum": 0.709,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:09:13.313743",
+      "C_emo": 0.64,
+      "GAP": 0.736,
+      "Quantum": 0.726,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:10:25.887226",
+      "C_emo": 0.64,
+      "GAP": 0.775,
+      "Quantum": 0.768,
+      "anxiety": 0,
+      "mood": "happy"
+    },
+    {
+      "timestamp": "2026-02-01 15:11:19.929883",
+      "C_emo": 0.64,
+      "GAP": 0.766,
+      "Quantum": 0.758,
+      "anxiety": 0,
+      "mood": "happy"
+    }
+  ],
+  "last_updated": "2026-02-01 15:11:19.929883",
+  "created_at": "2026-01-23 12:33:59.747589"
+}

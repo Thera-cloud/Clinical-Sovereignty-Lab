@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Settings</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --border: #252525; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2); --gold-text: #C9A962;
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --text-muted: #555555;
+            --font-body: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', monospace;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
+
+        .header { background: linear-gradient(180deg, #1A1A10 0%, var(--bg-dark) 100%); border-bottom: 1px solid var(--gold-dim); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header-left { display: flex; align-items: center; gap: 20px; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 16px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .header-right { display: flex; align-items: center; gap: 12px; }
+        .btn { padding: 8px 16px; border-radius: 8px; font-size: 12px; cursor: pointer; border: none; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-secondary:hover { border-color: var(--gold-dim); }
+
+        .main { max-width: 800px; margin: 0 auto; padding: 32px 24px; }
+        .profile-header { display: flex; align-items: center; gap: 20px; padding: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 32px; }
+        .avatar { width: 64px; height: 64px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+        .profile-name { font-size: 20px; font-weight: 700; }
+        .profile-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 1px; margin-top: 4px; }
+        .badge-green { background: var(--green-dim); color: var(--green); }
+        .badge-gold { background: var(--gold-dim); color: var(--gold); }
+
+        .section { margin-bottom: 28px; }
+        .section-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 11px; font-weight: 700; color: var(--gold-text); letter-spacing: 2px; text-transform: uppercase; }
+        .section-header .icon { font-size: 14px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+
+        .field-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .field-row:last-child { border-bottom: none; }
+        .field-label { width: 160px; font-size: 12px; color: var(--text-secondary); flex-shrink: 0; }
+        .field-value { flex: 1; font-size: 13px; color: var(--text-primary); }
+        .field-input { flex: 1; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body); }
+        .field-input:focus { outline: none; border-color: var(--gold-text); }
+        .field-select { flex: 1; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body); appearance: none; cursor: pointer; }
+        .field-select:focus { outline: none; border-color: var(--gold-text); }
+
+        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+        .status-green { background: var(--green-dim); color: var(--green); }
+        .status-red { background: var(--red-dim); color: var(--red); }
+        .status-gold { background: var(--gold-dim); color: var(--gold); }
+        .status-muted { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .toggle-row:last-child { border-bottom: none; }
+        .toggle-label { font-size: 13px; }
+        .toggle { position: relative; width: 44px; height: 24px; cursor: pointer; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; inset: 0; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 12px; transition: 0.2s; }
+        .toggle-slider::before { content: ''; position: absolute; width: 18px; height: 18px; left: 2px; bottom: 2px; background: var(--text-muted); border-radius: 50%; transition: 0.2s; }
+        .toggle input:checked + .toggle-slider { background: var(--gold-dim); border-color: var(--gold-text); }
+        .toggle input:checked + .toggle-slider::before { transform: translateX(20px); background: var(--gold); }
+
+        .action-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; transition: opacity 0.15s; }
+        .action-row:hover { opacity: 0.8; }
+        .action-row:last-child { border-bottom: none; }
+        .action-icon { font-size: 18px; width: 24px; text-align: center; }
+        .action-text { flex: 1; }
+        .action-title { font-size: 13px; font-weight: 500; }
+        .action-subtitle { font-size: 10px; color: var(--text-secondary); }
+        .action-arrow { color: var(--text-muted); font-size: 14px; }
+        .action-row.danger .action-title { color: var(--red); }
+        .action-row.danger .action-icon { color: var(--red); }
+
+        .btn-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+        .btn-save { padding: 8px 20px; background: var(--gold); color: black; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { padding: 8px 20px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-edit { padding: 6px 14px; background: transparent; color: var(--gold-text); border: 1px solid var(--gold-dim); border-radius: 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+
+        .legal-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 999; overflow-y: auto; padding: 40px 20px; }
+        .legal-content { max-width: 720px; margin: 0 auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; }
+        .legal-close { position: fixed; top: 16px; right: 24px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; z-index: 1000; }
+        .legal-part { font-size: 15px; font-weight: 700; color: var(--gold); margin: 24px 0 12px; letter-spacing: 1px; }
+        .legal-section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 16px 0 6px; }
+        .legal-text { font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px; }
+        .legal-highlight { color: #FF6B6B; font-weight: 500; }
+
+        .delete-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 999; justify-content: center; align-items: center; padding: 20px; }
+        .delete-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; max-width: 440px; width: 100%; }
+        .delete-title { font-size: 18px; font-weight: 700; color: var(--red); margin-bottom: 12px; font-family: var(--font-mono); }
+        .delete-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px; }
+        .delete-input { width: 100%; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; color: var(--red); font-family: var(--font-mono); font-size: 14px; margin-bottom: 16px; }
+        .delete-input:focus { outline: none; border-color: var(--red); }
+        .delete-actions { display: flex; gap: 8px; justify-content: flex-end; }
+        .btn-delete { padding: 10px 20px; background: var(--red); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <div class="logo-icon">&#x1F451;</div>
+                <div>
+                    <div class="logo-text">SOVEREIGN COMMAND</div>
+                    <div class="page-subtitle">Settings</div>
+                </div>
+            </div>
+        </div>
+        <div class="header-right">
+            <a href="command.html" class="btn btn-secondary">&larr; Back to Dashboard</a>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Profile Header -->
+        <div class="profile-header">
+            <div class="avatar" id="settingsAvatar">&#x1F468;&#x200D;&#x2695;&#xFE0F;</div>
+            <div>
+                <div class="profile-name" id="settingsName">Loading...</div>
+                <span class="profile-badge badge-gold" id="settingsCertBadge">COACH</span>
+            </div>
+        </div>
+
+        <!-- Profile Section -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x1F464;</span> PROFILE</div>
+            <div class="card" id="profile-card">
+                <div class="field-row"><div class="field-label">Email</div><div class="field-value" id="prof-email">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Phone</div><div class="field-value" id="prof-phone">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Specialties</div><div class="field-value" id="prof-specialties">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Coaching Style</div><div class="field-value" id="prof-style">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Zoom Link</div><div class="field-value" id="prof-zoom">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Emergency Contact</div><div class="field-value" id="prof-emergency">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Timezone</div><div class="field-value" id="prof-timezone">&mdash;</div></div>
+                <div class="btn-row"><button class="btn-edit" onclick="toggleProfileEdit()">&#x270F;&#xFE0F; Edit</button></div>
+            </div>
+        </div>
+
+        <!-- Practice & Fees -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x1F4B0;</span> PRACTICE & FEES</div>
+            <div class="card" id="practice-card">
+                <div class="field-row"><div class="field-label">Coaching Fee ($/hr)</div><div class="field-value" id="prac-fee">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Payment Mode</div><div class="field-value" id="prac-mode">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Platform Fee</div><div class="field-value" id="prac-platform-fee">30% (min $30)</div></div>
+                <div class="btn-row"><button class="btn-edit" onclick="togglePracticeEdit()">&#x270F;&#xFE0F; Edit</button></div>
+            </div>
+        </div>
+
+        <!-- Tax & Compliance -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x1F4C4;</span> TAX & COMPLIANCE</div>
+            <div class="card">
+                <div class="field-row"><div class="field-label">W-9 Status</div><div class="field-value"><span class="status-badge" id="tax-w9">—</span></div></div>
+                <div class="field-row"><div class="field-label">1099 Status</div><div class="field-value"><span class="status-badge" id="tax-1099">—</span></div></div>
+                <div class="field-row"><div class="field-label">Address Verified</div><div class="field-value" id="tax-address">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">TIN Document</div><div class="field-value" id="tax-tin">&mdash;</div></div>
+            </div>
+        </div>
+
+        <!-- Preferences -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x2699;&#xFE0F;</span> PREFERENCES</div>
+            <div class="card">
+                <div class="toggle-row"><span class="toggle-label">New Client Alerts</span><label class="toggle"><input type="checkbox" id="pref-new-client" checked onchange="saveNotifPrefs()"><span class="toggle-slider"></span></label></div>
+                <div class="toggle-row"><span class="toggle-label">Session Reminders</span><label class="toggle"><input type="checkbox" id="pref-session" checked onchange="saveNotifPrefs()"><span class="toggle-slider"></span></label></div>
+                <div class="toggle-row"><span class="toggle-label">Crisis Alerts</span><label class="toggle"><input type="checkbox" id="pref-crisis" checked onchange="saveNotifPrefs()"><span class="toggle-slider"></span></label></div>
+                <div class="toggle-row"><span class="toggle-label">Night School Updates</span><label class="toggle"><input type="checkbox" id="pref-nightschool" checked onchange="saveNotifPrefs()"><span class="toggle-slider"></span></label></div>
+            </div>
+        </div>
+
+        <!-- Subscription -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x2B50;</span> SUBSCRIPTION</div>
+            <div class="card">
+                <div class="field-row"><div class="field-label">Tier</div><div class="field-value" id="sub-tier">&mdash;</div></div>
+                <div class="field-row"><div class="field-label">Certification</div><div class="field-value"><span class="status-badge" id="sub-cert">—</span></div></div>
+            </div>
+        </div>
+
+        <!-- Legal & Privacy -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x2696;&#xFE0F;</span> LEGAL & PRIVACY</div>
+            <div class="card">
+                <div class="action-row" onclick="showLegalModal()"><div class="action-icon">&#x1F4C3;</div><div class="action-text"><div class="action-title">Terms, Privacy & Waivers</div><div class="action-subtitle">Full legal agreement</div></div><div class="action-arrow">&rsaquo;</div></div>
+                <div class="field-row"><div class="field-label">Consent Version</div><div class="field-value" id="legal-consent">&mdash;</div></div>
+            </div>
+        </div>
+
+        <!-- About & Support -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x2139;&#xFE0F;</span> ABOUT & SUPPORT</div>
+            <div class="card">
+                <div class="field-row"><div class="field-label">App Version</div><div class="field-value">1.0.1 (Web Dashboard)</div></div>
+                <div class="action-row" onclick="window.open('https://sovereignsanctuary.net/help','_blank')"><div class="action-icon">&#x2753;</div><div class="action-text"><div class="action-title">Help & FAQ</div></div><div class="action-arrow">&rsaquo;</div></div>
+                <div class="action-row" onclick="window.open('mailto:support@sovereignsanctuary.net')"><div class="action-icon">&#x2709;&#xFE0F;</div><div class="action-text"><div class="action-title">Contact Support</div><div class="action-subtitle">support@sovereignsanctuary.net</div></div><div class="action-arrow">&rsaquo;</div></div>
+            </div>
+        </div>
+
+        <!-- Account -->
+        <div class="section">
+            <div class="section-header"><span class="icon">&#x1F6E1;&#xFE0F;</span> ACCOUNT</div>
+            <div class="card">
+                <div class="action-row danger" onclick="logout()"><div class="action-icon">&#x1F6AA;</div><div class="action-text"><div class="action-title">Logout</div></div><div class="action-arrow">&rsaquo;</div></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Legal Agreement Modal -->
+    <div class="legal-modal" id="legalModal">
+        <button class="legal-close" onclick="closeLegalModal()">&#x2715; Close</button>
+        <div class="legal-content">
+            <div style="text-align:center;margin-bottom:20px;">
+                <div style="font-size:18px;font-weight:700;color:var(--gold);letter-spacing:3px;">SOVEREIGN SANCTUARY</div>
+                <div style="font-size:12px;color:var(--text-secondary);">Terms of Use, Privacy Policy, and Therapeutic Waiver</div>
+                <div style="font-size:10px;color:var(--gold-text);margin-top:4px;">Consent Version: v13.0_2026</div>
+            </div>
+
+            <div class="legal-part">PART I &mdash; TERMS OF USE</div>
+            <div class="legal-section-title">1. PRIVATE MEMBERSHIP ASSOCIATION (1st AMENDMENT)</div>
+            <div class="legal-text">You acknowledge that Sovereign Sanctuary operates as a Private Membership Association under the protections of the First Amendment. All interactions are private exercises of speech and association.</div>
+            <div class="legal-section-title">2. AI IDENTITY AND LICENSING DISCLOSURE (CA AB 489)</div>
+            <div class="legal-text">"Little Nate" is an AI, NOT a human, NOT a licensed therapist, NOT a licensed medical professional of any kind. Little Nate provides emotional support and coaching companionship &mdash; NOT medical advice, clinical diagnoses, treatment plans, or prescriptions.</div>
+            <div class="legal-section-title">3. AUTOMATED PROFILING CONSENT</div>
+            <div class="legal-text">You explicitly WAIVE state-level rights to opt out of automated profiling, as it is the core function of this service.</div>
+            <div class="legal-section-title">4. AGE VERIFICATION AND FAMILY ACCOUNTS (CA SB 243)</div>
+            <div class="legal-text">You affirm you are 18+. Minors only via parent/guardian family accounts.</div>
+            <div class="legal-section-title">5. TEXAS TRAIGA DISCLOSURE</div>
+            <div class="legal-text">This practitioner uses Generative AI in the formulation of guidance plans and all analytical outputs.</div>
+            <div class="legal-section-title">6. CRISIS PROTOCOL</div>
+            <div class="legal-text legal-highlight">STOP. If in crisis: Call 988 (24/7), Call 911, or go to your nearest Emergency Room. This is NOT an emergency service.</div>
+            <div class="legal-section-title">7. ZERO TOLERANCE POLICY</div>
+            <div class="legal-text">Immediate termination for: Pornography, Solicitation, Illegal activity, Threats of violence, or AI manipulation attempts.</div>
+            <div class="legal-section-title">8. PLATFORM IMMUNITY</div>
+            <div class="legal-text">Sovereign Sanctuary is a Technology Provider, NOT a clinic. Coaches are Independent Practitioners.</div>
+            <div class="legal-section-title">9. INTELLECTUAL PROPERTY &amp; PROPRIETARY TECHNOLOGY</div>
+            <div class="legal-text">The platform incorporates patent-pending technology including the Nevedal Formula, Voice Biometric Extraction, PMB algorithms, Family System Dynamics, Night School, and CEE Window detection. All algorithmic outputs are proprietary. You may not reproduce, reverse-engineer, or extract any algorithmic output.</div>
+
+            <div class="legal-part">PART II &mdash; PRIVACY POLICY</div>
+            <div class="legal-section-title">12. DATA WE COLLECT</div>
+            <div class="legal-text">Account info, voice biometrics (pitch, energy, speech rate, pause ratio), facial geometry (Sovereign Circle only), conversations, emotional/analytical data (C_emo, CEE, PMB, crisis assessments), and technical data.</div>
+            <div class="legal-section-title">13. HOW WE PROCESS YOUR DATA</div>
+            <div class="legal-text">Via Azure OpenAI (encrypted, NOT used for general model training), Stripe (payments), PostgreSQL (encrypted storage). All data encrypted in transit and at rest.</div>
+            <div class="legal-section-title">14. DATA RETENTION</div>
+            <div class="legal-text">Active: retained during membership. Deleted: 30-day hold then permanent purge. Anonymized aggregate retained for research.</div>
+            <div class="legal-section-title">15. DATA SHARING</div>
+            <div class="legal-text">NEVER sold. Shared only with: assigned Coach, Head of Household (aggregate only), law enforcement (when legally compelled).</div>
+            <div class="legal-section-title">16. YOUR PRIVACY RIGHTS</div>
+            <div class="legal-text">California (CCPA/CPRA), Illinois (BIPA), Texas (CUBI), Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island. Right to delete via Settings. Right to data export (transcripts; analytical overlays excluded as platform IP).</div>
+
+            <div class="legal-part">PART III &mdash; THERAPEUTIC SETTING WAIVER</div>
+            <div class="legal-section-title">18. NATURE OF THE SERVICE</div>
+            <div class="legal-text">Platform is NOT a licensed mental health provider. Little Nate is NOT a therapist. No doctor-patient privilege applies to AI interactions.</div>
+            <div class="legal-section-title">19. INFORMED CONSENT FOR EXPERIMENTAL METHODOLOGY</div>
+            <div class="legal-text">The Nevedal Quantum Emotional Coherence framework is a research model, NOT a clinically validated diagnostic tool. "Quantum" and "coherence" are metaphorical frameworks. C_emo scores are algorithmic estimates, not clinical measurements.</div>
+            <div class="legal-section-title">20. ASSUMPTION OF EMOTIONAL RISK</div>
+            <div class="legal-text">Emotional exploration carries inherent risk. You voluntarily assume this risk.</div>
+
+            <div class="legal-part">PART IV &mdash; PATENT &amp; PROPRIETARY TECHNOLOGY NOTICE</div>
+            <div class="legal-section-title">22. PATENT PENDING TECHNOLOGY</div>
+            <div class="legal-text">Provisional patents cover: Nevedal Formula, multi-modal biometric extraction, CEE Window detection, crisis perception modeling, reactivity signatures, family dynamics, ventriloquism detection, Night School, and Judge Nate.</div>
+
+            <div class="legal-part">PART V &mdash; WAIVERS AND DISPUTE RESOLUTION</div>
+            <div class="legal-section-title">25. HOLD HARMLESS &amp; LIMITATION OF LIABILITY</div>
+            <div class="legal-text">You agree to hold Sovereign Sanctuary harmless from all claims. Liability capped at subscription fees paid in prior 12 months.</div>
+            <div class="legal-section-title">27. BINDING ARBITRATION &amp; CLASS ACTION WAIVER</div>
+            <div class="legal-text legal-highlight">All disputes resolved by binding individual arbitration (AAA, California). 30-day informal resolution first. You WAIVE class action and jury trial rights.</div>
+
+            <div style="text-align:center;margin-top:24px;padding:16px;background:var(--gold-dim);border-radius:8px;border:1px solid rgba(201,169,98,0.3);">
+                <div style="font-size:11px;color:var(--gold-text);">Contact: support@sovereignsanctuary.net &bull; Crisis: Call 988 or 911</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Account Modal -->
+    <div class="delete-modal" id="deleteModal">
+        <div class="delete-box">
+            <div class="delete-title">Delete Your Account</div>
+            <div class="delete-desc">Your data will be held for 30 days. If you sign back in within that window, your account will be restored. After 30 days, all data is permanently purged.</div>
+            <div style="font-size:12px;color:var(--text-primary);margin-bottom:8px;">Type DELETE to confirm:</div>
+            <input class="delete-input" id="deleteConfirmInput" placeholder="DELETE">
+            <div class="delete-actions">
+                <button class="btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn-delete" onclick="confirmDelete()">Delete Account</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+
+        var ws = null, authenticated = false;
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function connect() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "COACH", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data; try { data = JSON.parse(event.data); } catch(e) { return; }
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    if (data.profile) { profile = data.profile; sessionStorage.setItem("profile", JSON.stringify(profile)); }
+                    populateSettings();
+                }
+                if (data.type === "profile_updated" && data.profile) {
+                    profile = data.profile;
+                    sessionStorage.setItem("profile", JSON.stringify(profile));
+                    populateSettings();
+                }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connect, 3000); };
+        }
+
+        function populateSettings() {
+            document.getElementById("settingsName").textContent = profile.name || profile.username || "Coach";
+            var cert = profile.certification_status || "PENDING";
+            var certBadge = document.getElementById("settingsCertBadge");
+            certBadge.textContent = cert;
+            certBadge.className = "profile-badge " + (cert === "APPROVED" ? "badge-green" : "badge-gold");
+
+            // Profile
+            document.getElementById("prof-email").textContent = profile.email || "—";
+            document.getElementById("prof-phone").textContent = profile.phone || "—";
+            document.getElementById("prof-specialties").textContent = profile.specialties || profile.specialty || "—";
+            document.getElementById("prof-style").textContent = profile.coaching_style ? (profile.coaching_style.charAt(0).toUpperCase() + profile.coaching_style.slice(1)) : "—";
+            document.getElementById("prof-zoom").textContent = profile.zoom_link || "—";
+            document.getElementById("prof-emergency").textContent = profile.emergency_contact || "—";
+            document.getElementById("prof-timezone").textContent = profile.timezone || "America/New_York";
+
+            // Practice
+            document.getElementById("prac-fee").textContent = profile.coaching_fee ? ("$" + Number(profile.coaching_fee).toFixed(0) + "/hr") : "—";
+            document.getElementById("prac-mode").textContent = profile.payment_mode === "platform_handles" ? "Platform Handles" : "Coach Handles";
+
+            // Tax
+            var w9El = document.getElementById("tax-w9");
+            w9El.textContent = profile.w9_submitted ? "Filed" : "Missing";
+            w9El.className = "status-badge " + (profile.w9_submitted ? "status-green" : "status-red");
+            var t1099El = document.getElementById("tax-1099");
+            t1099El.textContent = profile.requires_1099 ? "Required" : "Below threshold";
+            t1099El.className = "status-badge " + (profile.requires_1099 ? "status-gold" : "status-muted");
+            document.getElementById("tax-address").textContent = profile.address_verified ? "Verified" : "Not verified";
+            document.getElementById("tax-tin").textContent = profile.tin_doc_uploaded ? "Uploaded" : "Not uploaded";
+
+            // Subscription
+            document.getElementById("sub-tier").textContent = (profile.tier || profile.subscription_plan || "COACH").replace(/_/g, " ");
+            var subCert = document.getElementById("sub-cert");
+            subCert.textContent = cert;
+            subCert.className = "status-badge " + (cert === "APPROVED" ? "status-green" : "status-gold");
+
+            // Legal
+            document.getElementById("legal-consent").textContent = profile.consent_version || "—";
+        }
+
+        // Profile editing
+        var profileEditing = false;
+        window.toggleProfileEdit = function() {
+            profileEditing = !profileEditing;
+            var card = document.getElementById("profile-card");
+            if (profileEditing) {
+                card.innerHTML = '<div class="field-row"><div class="field-label">Email</div><input class="field-input" id="edit-email" value="' + (profile.email || '') + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Phone</div><input class="field-input" id="edit-phone" value="' + (profile.phone || '') + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Specialties</div><input class="field-input" id="edit-specialties" value="' + (profile.specialties || profile.specialty || '') + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Coaching Style</div><select class="field-select" id="edit-style"><option value="directive"' + (profile.coaching_style === 'directive' ? ' selected' : '') + '>Directive</option><option value="reflective"' + (profile.coaching_style === 'reflective' ? ' selected' : '') + '>Reflective</option><option value="integrative"' + ((!profile.coaching_style || profile.coaching_style === 'integrative') ? ' selected' : '') + '>Integrative</option></select></div>'
+                    + '<div class="field-row"><div class="field-label">Zoom Link</div><input class="field-input" id="edit-zoom" value="' + (profile.zoom_link || '') + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Emergency Contact</div><input class="field-input" id="edit-emergency" value="' + (profile.emergency_contact || '') + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Timezone</div><input class="field-input" id="edit-timezone" value="' + (profile.timezone || 'America/New_York') + '"></div>'
+                    + '<div class="btn-row"><button class="btn-cancel" onclick="cancelProfileEdit()">Cancel</button><button class="btn-save" onclick="saveProfile()">Save</button></div>';
+            } else {
+                populateSettings();
+                // Rebuild the card
+                card.innerHTML = '<div class="field-row"><div class="field-label">Email</div><div class="field-value" id="prof-email">' + (profile.email || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Phone</div><div class="field-value" id="prof-phone">' + (profile.phone || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Specialties</div><div class="field-value" id="prof-specialties">' + (profile.specialties || profile.specialty || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Coaching Style</div><div class="field-value" id="prof-style">' + (profile.coaching_style || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Zoom Link</div><div class="field-value" id="prof-zoom">' + (profile.zoom_link || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Emergency Contact</div><div class="field-value" id="prof-emergency">' + (profile.emergency_contact || '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Timezone</div><div class="field-value" id="prof-timezone">' + (profile.timezone || 'America/New_York') + '</div></div>'
+                    + '<div class="btn-row"><button class="btn-edit" onclick="toggleProfileEdit()">&#x270F;&#xFE0F; Edit</button></div>';
+            }
+        };
+        window.cancelProfileEdit = function() { profileEditing = true; toggleProfileEdit(); };
+        window.saveProfile = function() {
+            if (!ws || !authenticated) return;
+            ws.send(JSON.stringify({
+                type: "update_profile",
+                email: document.getElementById("edit-email").value.trim(),
+                phone: document.getElementById("edit-phone").value.trim(),
+                timezone: document.getElementById("edit-timezone").value.trim(),
+                emergency_contact: document.getElementById("edit-emergency").value.trim()
+            }));
+            ws.send(JSON.stringify({
+                type: "update_coach_profile",
+                specialties: document.getElementById("edit-specialties").value.trim(),
+                coaching_style: document.getElementById("edit-style").value,
+                zoom_link: document.getElementById("edit-zoom").value.trim()
+            }));
+            profileEditing = true; toggleProfileEdit();
+        };
+
+        // Practice editing
+        var practiceEditing = false;
+        window.togglePracticeEdit = function() {
+            practiceEditing = !practiceEditing;
+            var card = document.getElementById("practice-card");
+            if (practiceEditing) {
+                card.innerHTML = '<div class="field-row"><div class="field-label">Coaching Fee ($/hr)</div><input class="field-input" type="number" id="edit-fee" value="' + (profile.coaching_fee || 0) + '"></div>'
+                    + '<div class="field-row"><div class="field-label">Payment Mode</div><select class="field-select" id="edit-paymode"><option value="coach_handles"' + (profile.payment_mode !== 'platform_handles' ? ' selected' : '') + '>Coach Handles</option><option value="platform_handles"' + (profile.payment_mode === 'platform_handles' ? ' selected' : '') + '>Platform Handles</option></select></div>'
+                    + '<div class="field-row"><div class="field-label">Platform Fee</div><div class="field-value">30% (min $30)</div></div>'
+                    + '<div class="btn-row"><button class="btn-cancel" onclick="cancelPracticeEdit()">Cancel</button><button class="btn-save" onclick="savePractice()">Save</button></div>';
+            } else {
+                card.innerHTML = '<div class="field-row"><div class="field-label">Coaching Fee ($/hr)</div><div class="field-value" id="prac-fee">' + (profile.coaching_fee ? '$' + Number(profile.coaching_fee).toFixed(0) + '/hr' : '—') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Payment Mode</div><div class="field-value" id="prac-mode">' + (profile.payment_mode === 'platform_handles' ? 'Platform Handles' : 'Coach Handles') + '</div></div>'
+                    + '<div class="field-row"><div class="field-label">Platform Fee</div><div class="field-value" id="prac-platform-fee">30% (min $30)</div></div>'
+                    + '<div class="btn-row"><button class="btn-edit" onclick="togglePracticeEdit()">&#x270F;&#xFE0F; Edit</button></div>';
+            }
+        };
+        window.cancelPracticeEdit = function() { practiceEditing = true; togglePracticeEdit(); };
+        window.savePractice = function() {
+            if (!ws || !authenticated) return;
+            ws.send(JSON.stringify({ type: "coach_set_fee", coaching_fee: parseFloat(document.getElementById("edit-fee").value) || 0 }));
+            ws.send(JSON.stringify({ type: "coach_set_payment_mode", payment_mode: document.getElementById("edit-paymode").value }));
+            practiceEditing = true; togglePracticeEdit();
+        };
+
+        // Notifications
+        window.saveNotifPrefs = function() {
+            if (!ws || !authenticated) return;
+            ws.send(JSON.stringify({
+                type: "update_notification_prefs",
+                new_client_alerts: document.getElementById("pref-new-client").checked,
+                session_reminders: document.getElementById("pref-session").checked,
+                crisis_alerts: document.getElementById("pref-crisis").checked,
+                night_school_updates: document.getElementById("pref-nightschool").checked
+            }));
+        };
+
+        // Legal modal
+        window.showLegalModal = function() { document.getElementById("legalModal").style.display = "block"; };
+        window.closeLegalModal = function() { document.getElementById("legalModal").style.display = "none"; };
+
+        // Delete account
+        window.showDeleteModal = function() { document.getElementById("deleteModal").style.display = "flex"; };
+        window.closeDeleteModal = function() { document.getElementById("deleteModal").style.display = "none"; document.getElementById("deleteConfirmInput").value = ""; };
+        window.confirmDelete = function() {
+            if (document.getElementById("deleteConfirmInput").value.trim().toUpperCase() !== "DELETE") { alert("Please type DELETE to confirm."); return; }
+            if (ws && authenticated) { ws.send(JSON.stringify({ type: "request_account_deletion" })); }
+            closeDeleteModal();
+            logout();
+        };
+
+        window.logout = function() {
+            sessionStorage.clear();
+            window.location.href = "index.html";
+        };
+
+        connect();
+    })();
+    </script>
+</body>
+</html>

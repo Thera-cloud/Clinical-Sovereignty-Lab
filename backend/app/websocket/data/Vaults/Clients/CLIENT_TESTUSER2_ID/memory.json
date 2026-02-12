@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-01-23 09:46:55.700054",
+    "session_id": "SES_20260123_B87FDB393678",
+    "user": "Hello",
+    "ai": "Hello there! I'm Little Nate, your Quantum Observer. How are you feeling today?",
+    "word_count_user": 1,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-23 11:43:56.057958",
+    "session_id": "SES_20260123_DD2ECE5A098C",
+    "user": "Hello",
+    "ai": "Hello, Test User 2! It's lovely to connect with you. How are you feeling today?",
+    "word_count_user": 1,
+    "word_count_ai": 15
+  }
+]

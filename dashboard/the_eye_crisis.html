@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Crisis Watchlist</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --orange-dim: rgba(255, 149, 0, 0.1);
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-body { padding: 20px; }
+        .alert-count { font-size: 11px; color: var(--red-critical); font-weight: 600; }
+        .crisis-item { display: flex; gap: 16px; padding: 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; border-left: 4px solid var(--border); }
+        .crisis-item.p0 { border-left-color: var(--red-critical); background: var(--red-dim); border-color: rgba(255,59,59,0.3); }
+        .crisis-item.p1 { border-left-color: var(--orange); background: var(--orange-dim); border-color: rgba(255,149,0,0.2); }
+        .crisis-item.p2 { border-left-color: var(--gold); }
+        .crisis-item.p3 { border-left-color: var(--text-secondary); }
+        .crisis-severity-badge { padding: 4px 10px; border-radius: 4px; font-size: 9px; font-weight: 700; display: inline-block; margin-bottom: 6px; }
+        .crisis-severity-badge.p0 { background: var(--red-critical); color: white; }
+        .crisis-severity-badge.p1 { background: var(--orange); color: black; }
+        .crisis-severity-badge.p2 { background: var(--gold); color: black; }
+        .crisis-severity-badge.p3 { background: var(--text-secondary); color: white; }
+        .crisis-info { flex: 1; }
+        .crisis-user { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .crisis-trigger { font-size: 12px; color: var(--red-critical); margin-bottom: 4px; }
+        .crisis-item.p1 .crisis-trigger { color: var(--orange); }
+        .crisis-item.p2 .crisis-trigger { color: var(--gold); }
+        .crisis-item.p3 .crisis-trigger { color: var(--text-secondary); }
+        .crisis-time { font-size: 10px; color: var(--text-secondary); margin-bottom: 6px; }
+        .crisis-details { font-size: 10px; color: var(--text-secondary); }
+        .crisis-detail-tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 8px; font-weight: 600; margin-right: 4px; margin-bottom: 4px; }
+        .crisis-detail-tag.shame { background: var(--purple-dim); color: var(--purple); }
+        .crisis-detail-tag.pmb { background: var(--cyan-dim); color: var(--cyan); }
+        .crisis-detail-tag.discrepancy { background: var(--gold-dim); color: var(--gold); }
+        .crisis-detail-tag.escalation { background: var(--red-dim); color: var(--red-critical); }
+        .crisis-detail-tag.family { background: var(--purple-dim); color: var(--purple); }
+        .crisis-actions { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+        .crisis-btn { padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; white-space: nowrap; }
+        .crisis-btn.primary { background: var(--red-critical); color: white; }
+        .crisis-btn.secondary { background: var(--bg-dark); color: var(--text-primary); border: 1px solid var(--border); }
+        .crisis-btn.resolve { background: var(--green-dim); color: var(--green); }
+        .protocol-section { margin-bottom: 20px; }
+        .protocol-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .protocol-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+        .protocol-item:last-child { border-bottom: none; }
+        .empty-state { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 12px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">&#x1F441;&#xFE0F;</div>
+            <div>
+                <div class="logo-text">THE EYE</div>
+                <div class="page-title">Crisis Watchlist</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">&larr; Back to The Eye</a>
+    </header>
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="location.href='the_eye.html'" style="cursor:pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_monitor.html'">Live Monitor</div>
+        <div class="sub-nav-item active">Crisis</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_community.html'">Community</div>
+    </nav>
+    <main class="main-content">
+        <!-- Crisis List -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">&#x1F6A8; Active Crisis Alerts</div>
+                <span class="alert-count" id="alert-count">0 active alerts</span>
+            </div>
+            <div class="card-body"><div id="crisis-list"><div class="empty-state">Loading crisis alerts...</div></div></div>
+        </div>
+        <!-- Right Panel: Protocol + Stats -->
+        <div>
+            <div class="card" style="margin-bottom:20px;">
+                <div class="card-header"><div class="card-title">&#x1F4CB; Crisis Protocol Reference</div></div>
+                <div class="card-body">
+                    <div class="protocol-section">
+                        <div class="protocol-title">Severity Levels (Patent 1)</div>
+                        <div class="protocol-item"><span><span class="crisis-severity-badge p0">P0 CRITICAL</span></span><span>Self-harm intent &bull; &lt; 5 min response</span></div>
+                        <div class="protocol-item"><span><span class="crisis-severity-badge p1">P1 HIGH</span></span><span>Hopelessness &bull; &lt; 30 min response</span></div>
+                        <div class="protocol-item"><span><span class="crisis-severity-badge p2">P2 ELEVATED</span></span><span>Distress/anger &bull; &lt; 4 hr response</span></div>
+                        <div class="protocol-item"><span><span class="crisis-severity-badge p3">P3 MONITORING</span></span><span>Declining patterns &bull; Daily review</span></div>
+                    </div>
+                    <div class="protocol-section">
+                        <div class="protocol-title">Response Chain</div>
+                        <div class="protocol-item"><span>1. AI crisis protocol</span><span style="color:var(--green);">Automatic</span></div>
+                        <div class="protocol-item"><span>2. 988 Lifeline referral</span><span style="color:var(--green);">Automatic</span></div>
+                        <div class="protocol-item"><span>3. Coach notification</span><span style="color:var(--gold);">If assigned</span></div>
+                        <div class="protocol-item"><span>4. Guardian notification</span><span style="color:var(--gold);">Minors only</span></div>
+                        <div class="protocol-item"><span>5. Admin escalation</span><span style="color:var(--red-critical);">P0/P1 only</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">&#x1F4CA; Alert Statistics</div></div>
+                <div class="card-body" id="alert-stats"><div class="empty-state">Loading...</div></div>
+            </div>
+        </div>
+    </main>
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+        if (profile.role !== "ADMIN") { alert("Admin access required"); window.location.href = "command.html"; return; }
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+        var ws = null, authenticated = false;
+        var clientMetrics = {};
+
+        function connect() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data; try { data = JSON.parse(event.data); } catch(e) { return; }
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    ws.send(JSON.stringify({ type: "admin_get_crisis_log" }));
+                    ws.send(JSON.stringify({ type: "admin_get_stats" }));
+                    return;
+                }
+                if (data.type === "crisis_log" || data.type === "crisis_log_data") { displayCrisis(data.events || []); return; }
+                if (data.type === "admin_stats") {
+                    var wl = (data.stats || {}).crisis_watchlist || [];
+                    if (wl.length > 0) displayWatchlist(wl);
+                    return;
+                }
+                if (data.type === "client_metrics") {
+                    clientMetrics[data.client_id] = data;
+                    return;
+                }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connect, 2000); };
+        }
+
+        function classifyLevel(event) {
+            var level = (event.risk_level || "").toUpperCase();
+            if (level === "CRITICAL" || level === "P0") return "P0";
+            if (level === "HIGH" || level === "P1") return "P1";
+            if (level === "ELEVATED" || level === "MEDIUM" || level === "P2") return "P2";
+            return "P3";
+        }
+
+        function displayCrisis(events) {
+            var list = document.getElementById("crisis-list");
+            var unresolved = events.filter(function(e) { return !e.resolved; });
+            var resolved = events.filter(function(e) { return e.resolved; });
+
+            document.getElementById("alert-count").textContent = unresolved.length + " active alert" + (unresolved.length !== 1 ? "s" : "");
+
+            if (events.length === 0) {
+                list.innerHTML = '<div class="empty-state">\u2705 No crisis alerts at this time. All systems nominal.</div>';
+                displayStats(0, 0, 0, 0, 0);
+                return;
+            }
+
+            var counts = { P0: 0, P1: 0, P2: 0, P3: 0 };
+            var html = "";
+            // Sort: unresolved first, then by severity
+            var sorted = unresolved.concat(resolved);
+            sorted.forEach(function(ev) {
+                var lvl = classifyLevel(ev);
+                if (!ev.resolved) counts[lvl]++;
+                var cls = lvl.toLowerCase();
+                html += '<div class="crisis-item ' + cls + '">';
+                html += '<div class="crisis-info">';
+                html += '<span class="crisis-severity-badge ' + cls + '">' + lvl + ' ' + (lvl === "P0" ? "CRITICAL" : lvl === "P1" ? "HIGH" : lvl === "P2" ? "ELEVATED" : "MONITORING") + '</span>';
+                html += '<div class="crisis-user">' + esc(ev.user_name || ev.user_id || "Unknown") + '</div>';
+                html += '<div class="crisis-trigger">\u26A0\uFE0F ' + esc(ev.keywords ? 'Keywords: "' + ev.keywords.join('", "') + '"' : ev.reason || "Alert triggered") + '</div>';
+                html += '<div class="crisis-time">' + (ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "") + ' \u2022 ' + esc(ev.session_id || "No session") + '</div>';
+                // PMB / Shame / Discrepancy tags
+                html += '<div class="crisis-details">';
+                var cm = clientMetrics[ev.user_id];
+                if (cm) {
+                    if (cm.shame_profile && cm.shame_profile.shame_index > 0.5) html += '<span class="crisis-detail-tag shame">Shame: ' + cm.shame_profile.shame_index.toFixed(2) + '</span>';
+                    if (cm.shame_profile && cm.shame_profile.shame_masking_pattern) html += '<span class="crisis-detail-tag shame">Mask: ' + esc(cm.shame_profile.shame_masking_pattern) + '</span>';
+                    if (cm.crisis_perception && Math.abs(cm.crisis_perception.distress_discrepancy || 0) > 0.3) html += '<span class="crisis-detail-tag discrepancy">Discrepancy: ' + (cm.crisis_perception.distress_discrepancy || 0).toFixed(2) + '</span>';
+                    if (cm.pmb && cm.pmb.reactivity_type) html += '<span class="crisis-detail-tag pmb">PMB: ' + esc(cm.pmb.reactivity_type) + '</span>';
+                    if (cm.pmb && cm.pmb.reconsolidation_readiness > 0.8) html += '<span class="crisis-detail-tag pmb">Recon Ready: ' + cm.pmb.reconsolidation_readiness.toFixed(2) + '</span>';
+                }
+                if (ev.family_id) html += '<span class="crisis-detail-tag family">Family: ' + esc(ev.family_id) + '</span>';
+                html += '</div>';
+                html += '</div>';
+                html += '<div class="crisis-actions">';
+                if (!ev.resolved) {
+                    html += '<button class="crisis-btn primary" onclick="alertCoach(\'' + esc(ev.user_id || "") + '\')">Alert Coach</button>';
+                    html += '<button class="crisis-btn resolve" onclick="resolveCrisis(\'' + esc(ev.timestamp || "") + '\',\'' + esc(ev.user_id || "") + '\')">Resolve</button>';
+                } else {
+                    html += '<span style="color:var(--green);font-size:11px;">\u2713 Resolved</span>';
+                }
+                html += '</div>';
+                html += '</div>';
+                // Fetch client metrics for PMB/shame enrichment
+                if (ev.user_id && !clientMetrics[ev.user_id] && ws && authenticated) {
+                    ws.send(JSON.stringify({ type: "admin_get_client_metrics", client_id: ev.user_id }));
+                }
+            });
+            list.innerHTML = html;
+            displayStats(counts.P0, counts.P1, counts.P2, counts.P3, resolved.length);
+        }
+
+        function displayWatchlist(wl) {
+            // Merge watchlist items as P2/P3 if not already in crisis log
+            // This provides real-time watchlist from admin_get_stats
+        }
+
+        function displayStats(p0, p1, p2, p3, resolved) {
+            document.getElementById("alert-stats").innerHTML =
+                '<div style="font-size:11px;">' +
+                '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span><span class="crisis-severity-badge p0">P0</span> Critical</span><span style="font-weight:700;color:var(--red-critical);">' + p0 + '</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span><span class="crisis-severity-badge p1">P1</span> High</span><span style="font-weight:700;color:var(--orange);">' + p1 + '</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span><span class="crisis-severity-badge p2">P2</span> Elevated</span><span style="font-weight:700;color:var(--gold);">' + p2 + '</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);"><span><span class="crisis-severity-badge p3">P3</span> Monitoring</span><span style="font-weight:700;">' + p3 + '</span></div>' +
+                '<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:var(--green);">\u2713 Resolved</span><span style="font-weight:700;color:var(--green);">' + resolved + '</span></div>' +
+                '</div>';
+        }
+
+        window.resolveCrisis = function(timestamp, userId) {
+            if (confirm("Mark this crisis as resolved?")) {
+                ws.send(JSON.stringify({ type: "admin_resolve_crisis", timestamp: timestamp, user_id: userId, notes: "Resolved by admin via The Eye" }));
+                setTimeout(function() { ws.send(JSON.stringify({ type: "admin_get_crisis_log" })); }, 500);
+            }
+        };
+
+        window.alertCoach = function(userId) {
+            alert("Coach alert sent for user: " + userId);
+        };
+
+        // Refresh every 10s
+        setInterval(function() {
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({ type: "admin_get_crisis_log" }));
+                ws.send(JSON.stringify({ type: "admin_get_stats" }));
+            }
+        }, 10000);
+
+        connect();
+    })();
+    </script>
+</body>
+</html>

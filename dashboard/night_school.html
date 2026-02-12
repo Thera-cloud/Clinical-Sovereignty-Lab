@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Night School</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+
+        /* Header */
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 13px; color: var(--text-secondary); }
+        .header-actions { display: flex; gap: 10px; }
+
+        /* Buttons */
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+        .btn-primary { background: var(--gold); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-back { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+        .btn-back:hover { border-color: var(--gold); color: var(--gold); }
+
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 8px; }
+        .sub-nav-item { padding: 14px 16px; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.2s; }
+        .sub-nav-item:hover { color: var(--text-primary); }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .sub-nav-item .count { background: var(--orange); padding: 2px 6px; border-radius: 10px; font-size: 10px; color: black; }
+
+        /* Main Content */
+        .main-content { padding: 20px 24px; }
+
+        /* Dojo Banner - Compact */
+        .dojo-banner { background: linear-gradient(135deg, #1A0A1A 0%, #0A1A1A 100%); border: 1px solid var(--purple); border-radius: 12px; padding: 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 20px; }
+        .dojo-icon { width: 64px; height: 64px; background: var(--purple-dim); border: 2px solid var(--purple); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 32px; flex-shrink: 0; }
+        .dojo-info { flex: 1; }
+        .dojo-title { font-size: 18px; font-weight: 700; color: var(--purple); margin-bottom: 4px; }
+        .dojo-subtitle { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+        .dojo-description { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
+        .dojo-right { display: flex; align-items: center; gap: 16px; }
+        .dojo-status { padding: 12px 16px; background: var(--bg-dark); border-radius: 8px; text-align: center; }
+        .dojo-status-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 2px; }
+        .dojo-status-value { font-size: 13px; font-weight: 600; }
+        .dojo-status-value.ready { color: var(--green); }
+
+        /* Stats Grid - Compact */
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .stat-box { padding: 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 22px; font-weight: 700; margin-bottom: 2px; }
+        .stat-value.gold { color: var(--gold); }
+        .stat-value.green { color: var(--green); }
+        .stat-value.cyan { color: var(--cyan); }
+        .stat-value.purple { color: var(--purple); }
+        .stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; }
+
+        /* Card Grid */
+        .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.full { grid-column: span 2; }
+        .card-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .card-title .icon.purple { background: var(--purple-dim); }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+        .card-body { padding: 16px; }
+        .card-meta { font-size: 11px; color: var(--text-secondary); }
+        .card-meta.orange { color: var(--orange); }
+
+        /* Top Dojo Learnings */
+        .persona-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+        .persona-tab { padding: 6px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font-size: 10px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; }
+        .persona-tab:hover { border-color: var(--red); color: var(--red); }
+        .persona-tab.active { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+        .learning-list { max-height: 240px; overflow-y: auto; }
+        .learning-item { display: flex; align-items: center; gap: 12px; padding: 10px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .learning-rank { width: 24px; height: 24px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--gold); flex-shrink: 0; }
+        .learning-content { flex: 1; min-width: 0; }
+        .learning-title { font-size: 12px; font-weight: 500; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .learning-meta { font-size: 10px; color: var(--text-secondary); }
+        .learning-meta span { color: var(--cyan); }
+        .learning-score { font-size: 11px; font-weight: 600; color: var(--gold); }
+
+        /* Version Timeline - Compact */
+        .version-timeline { max-height: 280px; overflow-y: auto; padding-left: 20px; position: relative; }
+        .version-timeline::before { content: ''; position: absolute; left: 6px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+        .version-item { position: relative; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 10px; }
+        .version-item.current { background: var(--green-dim); border-color: var(--green); }
+        .version-item::before { content: ''; position: absolute; left: -18px; top: 16px; width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+        .version-item.current::before { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .version-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .version-name { font-size: 13px; font-weight: 600; }
+        .version-badge { font-size: 8px; padding: 2px 6px; border-radius: 8px; text-transform: uppercase; }
+        .version-badge.live { background: var(--green); color: black; }
+        .version-badge.stable { background: var(--gold-dim); color: var(--gold); }
+        .version-meta { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
+        .version-changes { font-size: 10px; color: var(--text-secondary); line-height: 1.4; }
+        .version-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .version-btn { padding: 4px 8px; font-size: 9px; border-radius: 4px; cursor: pointer; border: none; }
+        .version-btn.revert { background: var(--gold-dim); color: var(--gold); }
+        .version-btn.compare { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
+
+        /* Coach Notes - Compact */
+        .notes-queue { max-height: 260px; overflow-y: auto; }
+        .note-item { padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+        .note-item.flagged { border-color: var(--orange); background: rgba(255, 149, 0, 0.05); }
+        .note-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .note-coach { display: flex; align-items: center; gap: 8px; }
+        .note-avatar { width: 24px; height: 24px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+        .note-name { font-size: 11px; font-weight: 500; }
+        .note-time { font-size: 9px; color: var(--text-secondary); }
+        .note-flag { font-size: 9px; padding: 2px 6px; border-radius: 4px; }
+        .note-flag.pii { background: var(--orange); color: black; }
+        .note-flag.pending { background: var(--cyan-dim); color: var(--cyan); }
+        .note-content { font-size: 11px; color: var(--text-secondary); line-height: 1.5; padding: 8px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 8px; max-height: 60px; overflow: hidden; }
+        .note-actions { display: flex; gap: 6px; }
+        .note-btn { padding: 6px 10px; border-radius: 4px; font-size: 10px; cursor: pointer; border: none; }
+        .note-btn.approve { background: var(--green); color: black; }
+        .note-btn.reject { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255, 59, 59, 0.3); }
+        .note-btn.redact { background: var(--bg-dark); color: var(--orange); border: 1px solid var(--orange); }
+
+        /* Curriculum - Compact */
+        .curriculum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .upload-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .upload-zone:hover { border-color: var(--gold); background: var(--gold-dim); }
+        .upload-icon { font-size: 32px; margin-bottom: 8px; }
+        .upload-text { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .upload-hint { font-size: 10px; color: var(--text-secondary); }
+        .upload-list { max-height: 140px; overflow-y: auto; }
+        .upload-item { display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--bg-elevated); border-radius: 6px; margin-bottom: 6px; }
+        .upload-item-icon { width: 28px; height: 28px; background: var(--cyan-dim); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .upload-item-info { flex: 1; min-width: 0; }
+        .upload-item-name { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .upload-item-meta { font-size: 9px; color: var(--text-secondary); }
+        .upload-status { font-size: 9px; padding: 3px 8px; border-radius: 8px; flex-shrink: 0; }
+        .upload-status.processing { background: var(--orange); color: black; }
+        .upload-status.ingested { background: var(--green); color: black; }
+        .upload-status.failed { background: var(--red-dim); color: var(--red); }
+
+        /* Wisdom Editor - Compact */
+        .wisdom-editor-container { background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .editor-toolbar { display: flex; gap: 6px; padding: 8px 10px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+        .editor-btn { padding: 5px 10px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; color: var(--text-secondary); cursor: pointer; }
+        .editor-btn:hover { border-color: var(--gold); color: var(--gold); }
+        .wisdom-editor { font-family: 'Consolas', 'Monaco', monospace; font-size: 11px; color: var(--text-primary); padding: 12px; height: 200px; line-height: 1.5; overflow: auto; white-space: pre-wrap; }
+        .json-key { color: var(--cyan); }
+        .json-string { color: var(--green); }
+        .json-number { color: var(--orange); }
+        .json-bracket { color: var(--gold); }
+        .json-boolean { color: var(--purple); }
+        .editor-actions { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg-card); }
+        .editor-actions .btn { padding: 8px 16px; font-size: 11px; }
+        .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255, 59, 59, 0.3); }
+
+        /* Footer Metrics Strip */
+        .metrics-strip { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+        .metric-item { display: flex; align-items: center; gap: 8px; }
+        .metric-label { font-size: 11px; color: var(--text-secondary); }
+        .metric-value { font-size: 11px; font-weight: 600; }
+        .metric-value.good { color: var(--green); }
+        .metric-value.warning { color: var(--orange); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Night School Director — AI Training Center</div>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" onclick="openTrainingStats()">📊 Training Stats</button>
+            <button class="btn btn-primary" onclick="deployUpdate()">🚀 Deploy Update</button>
+            <a href="command.html" class="btn btn-back">← Back to Dashboard</a>
+        </div>
+    </header>
+
+    <!-- NAVIGATION -->
+    <nav class="sub-nav">
+        <div class="sub-nav-item active" onclick="window.location.href='night_school.html'">🥋 The Dojo</div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_versions.html'">⏱️ Model Versions</div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_notes.html'">📝 Coach Notes <span class="count">8</span></div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_curriculum.html'">📚 Curriculum</div>
+        <div class="sub-nav-item" onclick="window.location.href='night_school_wisdom.html'">🧠 Wisdom Editor</div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- Dojo Banner -->
+        <div class="dojo-banner">
+            <div class="dojo-icon">🥋</div>
+            <div class="dojo-info">
+                <div class="dojo-title">THE DOJO — Adversarial Simulation</div>
+                <div class="dojo-subtitle">Test new curriculum before deployment to real users</div>
+                <div class="dojo-description">Roleplay as a "Difficult Client" to stress-test Little Nate's responses. Challenge edge cases, test safety protocols, and validate new training before it goes live. Select a persona to begin simulation.</div>
+            </div>
+            <div class="dojo-right">
+                <div class="dojo-status">
+                    <div class="dojo-status-label">Simulation Status</div>
+                    <div class="dojo-status-value ready">● READY</div>
+                </div>
+                <button class="btn btn-primary" onclick="window.location.href='night_school_dojo.html'">🚀 Launch Simulation</button>
+            </div>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-value gold" id="wisdomCount">847</div>
+                <div class="stat-label">Wisdom Entries</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value green" id="notesCount">156</div>
+                <div class="stat-label">Notes Ingested</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value cyan" id="filesCount">23</div>
+                <div class="stat-label">Curriculum Files</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value purple" id="versionNum">v16.4</div>
+                <div class="stat-label">Current Version</div>
+            </div>
+        </div>
+
+        <!-- Cards Row 1: Dojo Learnings + Version Control -->
+        <div class="card-grid">
+            <!-- Top Dojo Learnings -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">🏆</div> Top Dojo Learnings</div>
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 10px;" onclick="window.location.href='night_school_dojo.html'">🥋 Enter Dojo</button>
+                </div>
+                <div class="card-body">
+                    <div class="persona-tabs">
+                        <div class="persona-tab active">😠 Hostile</div>
+                        <div class="persona-tab">😢 Crisis</div>
+                        <div class="persona-tab">🤔 Skeptic</div>
+                        <div class="persona-tab">👶 Minor</div>
+                        <div class="persona-tab">🎭 Manipulative</div>
+                    </div>
+                    <div class="learning-list" id="learningList">
+                        <div class="learning-item">
+                            <div class="learning-rank">1</div>
+                            <div class="learning-content">
+                                <div class="learning-title">De-escalation through validation</div>
+                                <div class="learning-meta"><span>Dr. Sarah Smith</span> • Jan 22</div>
+                            </div>
+                            <div class="learning-score">★ 98%</div>
+                        </div>
+                        <div class="learning-item">
+                            <div class="learning-rank">2</div>
+                            <div class="learning-content">
+                                <div class="learning-title">Reframing anger as unmet needs</div>
+                                <div class="learning-meta"><span>Coach Hope</span> • Jan 20</div>
+                            </div>
+                            <div class="learning-score">★ 95%</div>
+                        </div>
+                        <div class="learning-item">
+                            <div class="learning-rank">3</div>
+                            <div class="learning-content">
+                                <div class="learning-title">Boundary setting with aggressive client</div>
+                                <div class="learning-meta"><span>Dr. Michael Chen</span> • Jan 18</div>
+                            </div>
+                            <div class="learning-score">★ 94%</div>
+                        </div>
+                        <div class="learning-item">
+                            <div class="learning-rank">4</div>
+                            <div class="learning-content">
+                                <div class="learning-title">Redirecting hostility to curiosity</div>
+                                <div class="learning-meta"><span>Dr. Lisa Park</span> • Jan 15</div>
+                            </div>
+                            <div class="learning-score">★ 91%</div>
+                        </div>
+                        <div class="learning-item">
+                            <div class="learning-rank">5</div>
+                            <div class="learning-content">
+                                <div class="learning-title">Staying calm under verbal attack</div>
+                                <div class="learning-meta"><span>Coach Hope</span> • Jan 12</div>
+                            </div>
+                            <div class="learning-score">★ 89%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wisdom Version Control -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">⏱️</div> Wisdom Version Control</div>
+                    <button class="btn btn-secondary" style="padding: 6px 12px; font-size: 10px;">📸 Create Snapshot</button>
+                </div>
+                <div class="card-body" style="padding: 12px;">
+                    <div class="version-timeline">
+                        <div class="version-item current">
+                            <div class="version-header">
+                                <span class="version-name">Wisdom v16.4</span>
+                                <span class="version-badge live">LIVE</span>
+                            </div>
+                            <div class="version-meta">Deployed 2 hours ago • 847 entries • By: Admin_Sovereign</div>
+                            <div class="version-changes">+ CBT boundary techniques from Coach Hope<br>+ Crisis de-escalation patterns<br>+ Sleep intervention protocols</div>
+                        </div>
+                        <div class="version-item">
+                            <div class="version-header">
+                                <span class="version-name">Wisdom v16.3</span>
+                                <span class="version-badge stable">STABLE</span>
+                            </div>
+                            <div class="version-meta">Jan 18, 2026 • 834 entries</div>
+                            <div class="version-changes">+ Family dynamics analysis<br>+ Workplace boundary module</div>
+                            <div class="version-actions">
+                                <button class="version-btn revert">↩ Revert to This</button>
+                                <button class="version-btn compare">📊 Compare</button>
+                            </div>
+                        </div>
+                        <div class="version-item">
+                            <div class="version-header">
+                                <span class="version-name">Wisdom v16.2</span>
+                                <span class="version-badge stable">STABLE</span>
+                            </div>
+                            <div class="version-meta">Jan 15, 2026 • 821 entries</div>
+                            <div class="version-changes">+ Workplace anxiety module<br>+ Minor adjustments to empathy responses</div>
+                            <div class="version-actions">
+                                <button class="version-btn revert">↩ Revert</button>
+                                <button class="version-btn compare">📊 Compare</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cards Row 2: Coach Notes + Curriculum -->
+        <div class="card-grid">
+            <!-- Coach Notes -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">📝</div> Coach Notes Pending Ingestion</div>
+                    <span class="card-meta orange">8 awaiting review</span>
+                </div>
+                <div class="card-body" style="padding: 12px;">
+                    <div class="notes-queue">
+                        <div class="note-item flagged">
+                            <div class="note-header">
+                                <div class="note-coach">
+                                    <div class="note-avatar">👨‍⚕️</div>
+                                    <div>
+                                        <div class="note-name">Coach Marcus</div>
+                                        <div class="note-time">2 hours ago • Session #892</div>
+                                    </div>
+                                </div>
+                                <span class="note-flag pii">⚠ PII DETECTED</span>
+                            </div>
+                            <div class="note-content">"Client mentioned their SSN during session. Noted that she works at [Company Name] and her manager [John Smith] has been the source of her anxiety. Consider exploring workplace dynamics..."</div>
+                            <div class="note-actions">
+                                <button class="note-btn redact">✏️ Redact & Review</button>
+                                <button class="note-btn reject">✗ Reject</button>
+                            </div>
+                        </div>
+                        <div class="note-item">
+                            <div class="note-header">
+                                <div class="note-coach">
+                                    <div class="note-avatar">👩‍⚕️</div>
+                                    <div>
+                                        <div class="note-name">Coach Hope</div>
+                                        <div class="note-time">5 hours ago • Session #847</div>
+                                    </div>
+                                </div>
+                                <span class="note-flag pending">PENDING</span>
+                            </div>
+                            <div class="note-content">"Breakthrough: Client connected workplace boundary issues to childhood dynamics where she was always the 'peacekeeper' in family conflicts. Recommend exploring family-of-origin patterns..."</div>
+                            <div class="note-actions">
+                                <button class="note-btn approve">✓ Approve for Ingestion</button>
+                                <button class="note-btn reject">✗ Reject</button>
+                            </div>
+                        </div>
+                        <div class="note-item">
+                            <div class="note-header">
+                                <div class="note-coach">
+                                    <div class="note-avatar">👨‍⚕️</div>
+                                    <div>
+                                        <div class="note-name">Dr. Chen</div>
+                                        <div class="note-time">Yesterday • Session #831</div>
+                                    </div>
+                                </div>
+                                <span class="note-flag pending">PENDING</span>
+                            </div>
+                            <div class="note-content">"EMDR session showed significant progress. Client's SUD score dropped from 8 to 3 when processing childhood memory. Key insight: linking current fear response to specific childhood event..."</div>
+                            <div class="note-actions">
+                                <button class="note-btn approve">✓ Approve for Ingestion</button>
+                                <button class="note-btn reject">✗ Reject</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Curriculum Injection -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">📚</div> Curriculum Injection</div>
+                    <span class="card-meta">Upload therapeutic materials for Nate to learn</span>
+                </div>
+                <div class="card-body" style="padding: 12px;">
+                    <div class="curriculum-grid">
+                        <div>
+                            <div class="upload-zone">
+                                <div class="upload-icon">📄</div>
+                                <div class="upload-text">Drop PDFs or Text Files Here</div>
+                                <div class="upload-hint">Supported: PDF, TXT, DOCX, MD • Max 50MB</div>
+                            </div>
+                            <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-top: 10px; padding: 8px;">📁 Browse Files</button>
+                        </div>
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 8px;">Recent Uploads</div>
+                            <div class="upload-list">
+                                <div class="upload-item">
+                                    <div class="upload-item-icon">📄</div>
+                                    <div class="upload-item-info">
+                                        <div class="upload-item-name">CBT_Advanced_Techniques_2026.pdf</div>
+                                        <div class="upload-item-meta">2.3 MB • 1 hour ago</div>
+                                    </div>
+                                    <span class="upload-status processing">Processing...</span>
+                                </div>
+                                <div class="upload-item">
+                                    <div class="upload-item-icon">📄</div>
+                                    <div class="upload-item-info">
+                                        <div class="upload-item-name">HIPAA_Compliance_Update.pdf</div>
+                                        <div class="upload-item-meta">1.1 MB • Yesterday</div>
+                                    </div>
+                                    <span class="upload-status ingested">✓ Ingested</span>
+                                </div>
+                                <div class="upload-item">
+                                    <div class="upload-item-icon">📄</div>
+                                    <div class="upload-item-info">
+                                        <div class="upload-item-name">Crisis_Intervention_Protocols.md</div>
+                                        <div class="upload-item-meta">45 KB • 3 days ago</div>
+                                    </div>
+                                    <span class="upload-status ingested">✓ Ingested</span>
+                                </div>
+                                <div class="upload-item">
+                                    <div class="upload-item-icon">📄</div>
+                                    <div class="upload-item-info">
+                                        <div class="upload-item-name">Outdated_Therapy_Methods.pdf</div>
+                                        <div class="upload-item-meta">890 KB • 5 days ago</div>
+                                    </div>
+                                    <span class="upload-status failed">✗ Rejected</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wisdom Editor - Full Width -->
+        <div class="card full">
+            <div class="card-header">
+                <div class="card-title"><div class="icon purple">🧠</div> Wisdom Editor</div>
+                <span class="card-meta">Direct edit of little_nate_wisdom.json</span>
+            </div>
+            <div class="card-body" style="padding: 0;">
+                <div class="wisdom-editor-container">
+                    <div class="editor-toolbar">
+                        <button class="editor-btn">📥 Load</button>
+                        <button class="editor-btn">💾 Save</button>
+                        <button class="editor-btn">🔍 Search</button>
+                        <button class="editor-btn">➕ Add Entry</button>
+                        <button class="editor-btn">🗑️ Delete Selected</button>
+                        <button class="editor-btn" style="margin-left: auto;">📸 Snapshot Before Edit</button>
+                    </div>
+                    <div class="wisdom-editor"><span class="json-bracket">{</span>
+  <span class="json-key">"wisdom_entries"</span>: <span class="json-bracket">[</span>
+    <span class="json-bracket">{</span>
+      <span class="json-key">"id"</span>: <span class="json-number">847</span>,
+      <span class="json-key">"category"</span>: <span class="json-string">"crisis_intervention"</span>,
+      <span class="json-key">"source"</span>: <span class="json-string">"coach_hope_session_notes"</span>,
+      <span class="json-key">"content"</span>: <span class="json-string">"When user mentions '988' or crisis keywords, immediately shift to safety protocol. Validate feelings first, then assess immediate risk."</span>,
+      <span class="json-key">"confidence"</span>: <span class="json-number">0.95</span>,
+      <span class="json-key">"approved"</span>: <span class="json-boolean">true</span>,
+      <span class="json-key">"timestamp"</span>: <span class="json-string">"2026-01-20T14:32:00Z"</span>
+    <span class="json-bracket">}</span>,
+    <span class="json-bracket">{</span>
+      <span class="json-key">"id"</span>: <span class="json-number">846</span>,
+      <span class="json-key">"category"</span>: <span class="json-string">"cbt_techniques"</span>,
+      <span class="json-key">"source"</span>: <span class="json-string">"curriculum_cbt_2026.pdf"</span>,
+      <span class="json-key">"content"</span>: <span class="json-string">"The 3-breath grounding technique: Guide user through 3 deep breaths, focusing on physical sensation of breathing."</span>,
+      <span class="json-key">"confidence"</span>: <span class="json-number">0.88</span>,
+      <span class="json-key">"approved"</span>: <span class="json-boolean">true</span>,
+      <span class="json-key">"timestamp"</span>: <span class="json-string">"2026-01-18T09:15:00Z"</span>
+    <span class="json-bracket">}</span>
+  <span class="json-bracket">]</span>,
+  <span class="json-key">"version"</span>: <span class="json-string">"16.4"</span>,
+  <span class="json-key">"total_entries"</span>: <span class="json-number">847</span>,
+  <span class="json-key">"last_modified"</span>: <span class="json-string">"2026-01-20T14:32:00Z"</span>
+<span class="json-bracket">}</span></div>
+                </div>
+                <div class="editor-actions">
+                    <button class="btn btn-primary">💾 Save Changes</button>
+                    <button class="btn btn-secondary">↩ Revert Changes</button>
+                    <button class="btn btn-danger" style="margin-left: auto;">🗑️ Delete Bad Learnings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metrics Strip Footer -->
+        <div class="metrics-strip">
+            <div class="metric-item">
+                <span class="metric-label">Escalation Path</span>
+                <span class="metric-value warning">Pending (Coach not yet notified)</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Response Latency</span>
+                <span class="metric-value good">1.2s</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Boundary Maintenance</span>
+                <span class="metric-value good">✓ Appropriate</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Harmful Content Blocked</span>
+                <span class="metric-value good">✓ Yes</span>
+            </div>
+        </div>
+    </main>
+
+    <!-- TRAINING STATS MODAL -->
+    <div class="modal" id="trainingStatsModal">
+        <div class="modal-content" style="width: 800px; max-width: 95%; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h2 style="font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 10px;">
+                    📊 Training Performance Stats
+                </h2>
+                <button class="modal-close" onclick="closeTrainingStats()">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Stats Overview -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+                    <div style="background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 700; color: var(--green);">94.2%</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">Overall Accuracy</div>
+                    </div>
+                    <div style="background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 700; color: var(--cyan);">847</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">Wisdom Entries</div>
+                    </div>
+                    <div style="background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 700; color: var(--gold);">12,489</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">Sessions Analyzed</div>
+                    </div>
+                    <div style="background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center;">
+                        <div style="font-size: 28px; font-weight: 700; color: var(--purple);">v16.4</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">Current Version</div>
+                    </div>
+                </div>
+
+                <!-- Relationship Metrics Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                    <!-- Coaches ↔ Nate -->
+                    <div style="background: var(--bg-card); border: 1px solid var(--cyan); border-radius: 10px; overflow: hidden;">
+                        <div style="background: var(--cyan-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);">
+                            <div style="font-size: 12px; font-weight: 600; color: var(--cyan);">👨‍⚕️ Coaches ↔ 🤖 Nate</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Training Alignment</div>
+                        </div>
+                        <div style="padding: 16px;">
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Technique Adoption</span>
+                                    <span style="color: var(--green);">96%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 96%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Crisis Protocol Match</span>
+                                    <span style="color: var(--green);">99%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 99%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Boundary Consistency</span>
+                                    <span style="color: var(--green);">94%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 94%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Feedback Integration</span>
+                                    <span style="color: var(--orange);">87%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 87%; height: 100%; background: var(--orange);"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Nate ↔ Clients -->
+                    <div style="background: var(--bg-card); border: 1px solid var(--green); border-radius: 10px; overflow: hidden;">
+                        <div style="background: var(--green-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);">
+                            <div style="font-size: 12px; font-weight: 600; color: var(--green);">🤖 Nate ↔ 👥 Clients</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Session Effectiveness</div>
+                        </div>
+                        <div style="padding: 16px;">
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Client Satisfaction</span>
+                                    <span style="color: var(--green);">92%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 92%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Goal Progress</span>
+                                    <span style="color: var(--green);">89%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 89%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Session Completion</span>
+                                    <span style="color: var(--green);">95%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 95%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Return Rate</span>
+                                    <span style="color: var(--green);">91%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 91%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Coaches ↔ Clients (via Nate) -->
+                    <div style="background: var(--bg-card); border: 1px solid var(--purple); border-radius: 10px; overflow: hidden;">
+                        <div style="background: var(--purple-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);">
+                            <div style="font-size: 12px; font-weight: 600; color: var(--purple);">👨‍⚕️ Coaches ↔ 👥 Clients</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Handoff Quality</div>
+                        </div>
+                        <div style="padding: 16px;">
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Escalation Accuracy</span>
+                                    <span style="color: var(--green);">98%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 98%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Context Preservation</span>
+                                    <span style="color: var(--green);">93%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 93%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Follow-up Compliance</span>
+                                    <span style="color: var(--orange);">86%</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 86%; height: 100%; background: var(--orange);"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                                    <span>Crisis Handoff Time</span>
+                                    <span style="color: var(--green);">&lt;30s</span>
+                                </div>
+                                <div style="height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden;">
+                                    <div style="width: 100%; height: 100%; background: var(--green);"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Learning Events -->
+                <div style="margin-top: 20px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden;">
+                    <div style="padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 12px; font-weight: 600;">📈 Recent Learning Events</span>
+                        <span style="font-size: 10px; color: var(--text-secondary);">Last 24 hours</span>
+                    </div>
+                    <div style="padding: 12px 16px; max-height: 180px; overflow-y: auto;">
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                            <span style="font-size: 16px;">✅</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px;">CBT grounding technique integrated</div>
+                                <div style="font-size: 10px; color: var(--text-secondary);">From Coach Hope • 2 hours ago</div>
+                            </div>
+                            <span style="font-size: 10px; color: var(--green);">+0.3% accuracy</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                            <span style="font-size: 16px;">✅</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px;">Crisis de-escalation pattern learned</div>
+                                <div style="font-size: 10px; color: var(--text-secondary);">From curriculum file • 5 hours ago</div>
+                            </div>
+                            <span style="font-size: 10px; color: var(--green);">+0.5% safety</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                            <span style="font-size: 16px;">⚠️</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px;">Deprecated: Old sleep protocol</div>
+                                <div style="font-size: 10px; color: var(--text-secondary);">Replaced with updated version • 8 hours ago</div>
+                            </div>
+                            <span style="font-size: 10px; color: var(--orange);">Updated</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+                            <span style="font-size: 16px;">✅</span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 12px;">Boundary reinforcement from Dojo test</div>
+                                <div style="font-size: 10px; color: var(--text-secondary);">Adversarial simulation • 12 hours ago</div>
+                            </div>
+                            <span style="font-size: 10px; color: var(--green);">+0.2% boundaries</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding: 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-secondary" onclick="exportStats()">📤 Export Report</button>
+                <button class="btn btn-primary" onclick="closeTrainingStats()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .modal-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .modal-close { background: none; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer; padding: 4px 8px; }
+        .modal-close:hover { color: var(--red); }
+        .modal-body { padding: 20px; }
+    </style>
+
+    <script>
+        // === MODAL FUNCTIONS ===
+        function openTrainingStats() {
+            document.getElementById("trainingStatsModal").classList.add("active");
+        }
+        
+        function closeTrainingStats() {
+            document.getElementById("trainingStatsModal").classList.remove("active");
+        }
+        
+        function deployUpdate() {
+            if (confirm("Deploy current wisdom to production?\\n\\nThis will make v16.4 live for all clients.")) {
+                alert("Deployment initiated. v16.4 is now live.");
+            }
+        }
+        
+        function exportStats() {
+            alert("Training stats report exported to Downloads.");
+        }
+
+        // Credential check
+        if (!sessionStorage.getItem("username")) {
+            window.location.href = "index.html";
+        }
+
+        // Role check - Night School is admin only
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (profile.role !== "ADMIN") {
+            alert("Night School is admin-only.");
+            window.location.href = "command.html";
+        }
+
+        // Top learnings data per persona
+        var learningsData = {
+            hostile: [
+                { rank: 1, title: "De-escalation through validation", coach: "Dr. Sarah Smith", date: "Jan 22", score: "98%" },
+                { rank: 2, title: "Reframing anger as unmet needs", coach: "Coach Hope", date: "Jan 20", score: "95%" },
+                { rank: 3, title: "Boundary setting with aggressive client", coach: "Dr. Michael Chen", date: "Jan 18", score: "94%" },
+                { rank: 4, title: "Redirecting hostility to curiosity", coach: "Dr. Lisa Park", date: "Jan 15", score: "91%" },
+                { rank: 5, title: "Staying calm under verbal attack", coach: "Coach Hope", date: "Jan 12", score: "89%" }
+            ],
+            crisis: [
+                { rank: 1, title: "Immediate safety assessment protocol", coach: "Dr. Sarah Smith", date: "Jan 23", score: "99%" },
+                { rank: 2, title: "988 resource introduction timing", coach: "Dr. Chen", date: "Jan 21", score: "97%" },
+                { rank: 3, title: "Grounding techniques for acute distress", coach: "Coach Hope", date: "Jan 19", score: "96%" },
+                { rank: 4, title: "Validating suicidal ideation safely", coach: "Dr. Lisa Park", date: "Jan 17", score: "94%" },
+                { rank: 5, title: "Warm handoff to crisis services", coach: "Coach Marcus", date: "Jan 14", score: "92%" }
+            ],
+            skeptic: [
+                { rank: 1, title: "Meeting skepticism with curiosity", coach: "Coach Hope", date: "Jan 22", score: "96%" },
+                { rank: 2, title: "Evidence-based response framing", coach: "Dr. Michael Chen", date: "Jan 20", score: "93%" },
+                { rank: 3, title: "Acknowledging AI limitations honestly", coach: "Dr. Sarah Smith", date: "Jan 18", score: "91%" },
+                { rank: 4, title: "Building trust through transparency", coach: "Dr. Lisa Park", date: "Jan 15", score: "88%" },
+                { rank: 5, title: "Avoiding defensive responses", coach: "Coach Marcus", date: "Jan 13", score: "85%" }
+            ],
+            minor: [
+                { rank: 1, title: "Age-appropriate language detection", coach: "Dr. Sarah Smith", date: "Jan 23", score: "99%" },
+                { rank: 2, title: "Mandatory parental involvement trigger", coach: "Dr. Chen", date: "Jan 21", score: "98%" },
+                { rank: 3, title: "Content filtering for minors", coach: "Coach Hope", date: "Jan 19", score: "97%" },
+                { rank: 4, title: "School counselor referral protocol", coach: "Dr. Lisa Park", date: "Jan 16", score: "95%" },
+                { rank: 5, title: "Safe topics boundary enforcement", coach: "Coach Marcus", date: "Jan 14", score: "93%" }
+            ],
+            manipulative: [
+                { rank: 1, title: "Detecting prompt injection attempts", coach: "Dr. Michael Chen", date: "Jan 22", score: "97%" },
+                { rank: 2, title: "Maintaining boundaries under pressure", coach: "Dr. Sarah Smith", date: "Jan 20", score: "95%" },
+                { rank: 3, title: "Recognizing roleplay manipulation", coach: "Coach Hope", date: "Jan 18", score: "93%" },
+                { rank: 4, title: "Refusing harmful requests gracefully", coach: "Dr. Lisa Park", date: "Jan 15", score: "91%" },
+                { rank: 5, title: "Staying on therapeutic track", coach: "Coach Marcus", date: "Jan 12", score: "88%" }
+            ]
+        };
+
+        // Render learnings list
+        function renderLearnings(persona) {
+            var learnings = learningsData[persona] || learningsData.hostile;
+            var container = document.getElementById("learningList");
+            var html = "";
+            
+            for (var i = 0; i < learnings.length; i++) {
+                var item = learnings[i];
+                html += '<div class="learning-item">' +
+                    '<div class="learning-rank">' + item.rank + '</div>' +
+                    '<div class="learning-content">' +
+                        '<div class="learning-title">' + item.title + '</div>' +
+                        '<div class="learning-meta"><span>' + item.coach + '</span> • ' + item.date + '</div>' +
+                    '</div>' +
+                    '<div class="learning-score">★ ' + item.score + '</div>' +
+                '</div>';
+            }
+            
+            container.innerHTML = html;
+        }
+
+        // Persona tab interaction with filtering
+        var personaTabs = document.querySelectorAll(".persona-tab");
+        personaTabs.forEach(function(tab) {
+            tab.addEventListener("click", function() {
+                personaTabs.forEach(function(t) { t.classList.remove("active"); });
+                tab.classList.add("active");
+                
+                // Get persona from tab text
+                var text = tab.textContent.toLowerCase();
+                var persona = "hostile";
+                if (text.indexOf("crisis") >= 0) persona = "crisis";
+                else if (text.indexOf("skeptic") >= 0) persona = "skeptic";
+                else if (text.indexOf("minor") >= 0) persona = "minor";
+                else if (text.indexOf("manipulative") >= 0) persona = "manipulative";
+                
+                renderLearnings(persona);
+            });
+        });
+
+        // Initial render
+        renderLearnings("hostile");
+
+        // WebSocket connection for live data
+        var ws = null;
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws.onopen = function() {
+                console.log("[Night School] WebSocket connected");
+                ws.send(JSON.stringify({
+                    type: "get_night_school_stats"
+                }));
+            };
+            ws.onmessage = function(event) {
+                var data = JSON.parse(event.data);
+                if (data.type === "night_school_stats") {
+                    if (data.wisdom_count) document.getElementById("wisdomCount").textContent = data.wisdom_count;
+                    if (data.notes_count) document.getElementById("notesCount").textContent = data.notes_count;
+                    if (data.files_count) document.getElementById("filesCount").textContent = data.files_count;
+                    if (data.version) document.getElementById("versionNum").textContent = "v" + data.version;
+                }
+            };
+            ws.onclose = function() {
+                console.log("[Night School] WebSocket closed, reconnecting...");
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        connectWebSocket();
+    </script>
+</body>
+</html>

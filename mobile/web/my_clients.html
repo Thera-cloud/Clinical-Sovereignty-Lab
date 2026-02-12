@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Clients | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --purple: #9D4EDD;
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .main-layout { display: grid; grid-template-columns: 1fr 400px; height: calc(100vh - 73px); }
+        .main-layout.no-selection { grid-template-columns: 1fr; }
+        .content { padding: 24px; overflow-y: auto; }
+        .content-header { margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .content-title { font-size: 20px; font-weight: 700; }
+        .search-input { padding: 10px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 13px; width: 250px; }
+        .client-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+        .client-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; cursor: pointer; transition: all 0.2s; }
+        .client-card:hover { border-color: var(--gold-dim); transform: translateY(-2px); }
+        .client-card.selected { border-color: var(--gold); background: var(--gold-dim); }
+        .client-card.top-tier { border-color: var(--gold-dim); background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), var(--bg-card)); }
+        .client-header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+        .client-avatar { width: 50px; height: 50px; background: var(--cyan-dim); border: 2px solid var(--cyan); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600; }
+        .client-avatar.gold { background: var(--gold-dim); border-color: var(--gold); }
+        .client-name { font-size: 16px; font-weight: 600; }
+        .client-tier { font-size: 10px; padding: 3px 8px; background: var(--gold); color: black; border-radius: 10px; font-weight: 600; margin-left: 8px; }
+        .client-meta { font-size: 12px; color: var(--text-secondary); }
+        .client-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+        .stat { text-align: center; }
+        .stat-value { font-size: 18px; font-weight: 700; }
+        .stat-value.cyan { color: var(--cyan); }
+        .stat-value.green { color: var(--green); }
+        .stat-value.orange { color: var(--orange); }
+        .stat-label { font-size: 10px; color: var(--text-secondary); }
+        .risk-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 10px; font-weight: 600; }
+        .risk-badge.low { background: var(--green-dim); color: var(--green); }
+        .risk-badge.medium { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .risk-badge.high { background: var(--red-dim); color: var(--red); }
+        .sidebar { background: var(--bg-card); border-left: 1px solid var(--border); padding: 24px; overflow-y: auto; }
+        .sidebar-header { margin-bottom: 20px; }
+        .sidebar-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+        .sidebar-subtitle { font-size: 12px; color: var(--text-secondary); }
+        .action-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+        .action-btn { padding: 12px 16px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 10px; }
+        .action-btn.primary { background: var(--gold); color: black; }
+        .action-btn.secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .action-btn.danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255, 59, 59, 0.3); }
+        .info-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
+        .info-section h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+        .info-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { font-weight: 500; }
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: var(--text-secondary); }
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">My Clients</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+    </header>
+    <div class="main-layout no-selection" id="mainLayout">
+        <div class="content">
+            <div class="content-header">
+                <div class="content-title">My Clients</div>
+                <input type="text" class="search-input" id="searchInput" placeholder="Search clients..." oninput="filterClients()">
+            </div>
+            <div class="client-grid" id="clientGrid">
+                <div class="empty-state">
+                    <div class="icon">⏳</div>
+                    <div>Loading clients...</div>
+                </div>
+            </div>
+        </div>
+        <div class="sidebar" id="sidebar" style="display: none;">
+            <div class="sidebar-header">
+                <div class="sidebar-title" id="sidebarName">Client Name</div>
+                <div class="sidebar-subtitle" id="sidebarMeta">Client details</div>
+            </div>
+            <div class="action-buttons">
+                <button class="action-btn primary" onclick="startSession()">🎥 Start Session</button>
+                <button class="action-btn secondary" onclick="openBrief()">📋 Pre-Session Brief</button>
+                <button class="action-btn secondary" onclick="viewHistory()">📊 View History</button>
+                <button class="action-btn secondary" onclick="sendMessage()">💬 Send Message</button>
+            </div>
+            <div class="info-section">
+                <h4>CLIENT INFORMATION</h4>
+                <div class="info-row"><span class="info-label">Subscription</span><span class="info-value" id="infoTier">-</span></div>
+                <div class="info-row"><span class="info-label">Sessions Total</span><span class="info-value" id="infoSessions">-</span></div>
+                <div class="info-row"><span class="info-label">Last Session</span><span class="info-value" id="infoLastSession">-</span></div>
+                <div class="info-row"><span class="info-label">Next Session</span><span class="info-value" id="infoNextSession">-</span></div>
+            </div>
+            <div class="info-section">
+                <h4>NEVEDAL STATE</h4>
+                <div class="info-row"><span class="info-label">Coherence</span><span class="info-value cyan" id="infoCoherence">-</span></div>
+                <div class="info-row"><span class="info-label">Growth Index</span><span class="info-value green" id="infoGrowth">-</span></div>
+                <div class="info-row"><span class="info-label">Risk Level</span><span class="info-value" id="infoRisk">-</span></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        function getWsUrl() {
+            var proto = (location.protocol === "https:") ? "wss" : "ws";
+            var host = location.hostname || "10.0.0.81";
+            return proto + "://" + host + ":8765";
+        }
+
+        var socket = null;
+        var allClients = [];
+        var selectedClient = null;
+
+        function init() {
+            var uname = sessionStorage.getItem("username");
+            var pwd = sessionStorage.getItem("password");
+            if (!uname || !pwd) {
+                window.location.href = "index.html";
+                return;
+            }
+            connect();
+        }
+
+        function connect() {
+            socket = new WebSocket(getWsUrl());
+            socket.onopen = function() {
+                var profileStr = sessionStorage.getItem("profile");
+                var profile = profileStr ? JSON.parse(profileStr) : {};
+                socket.send(JSON.stringify({
+                    type: "login_request",
+                    username: sessionStorage.getItem("username"),
+                    password: sessionStorage.getItem("password"),
+                    expected_role: profile.role || "COACH"
+                }));
+            };
+            socket.onmessage = handleMessage;
+            socket.onclose = function() { setTimeout(connect, 3000); };
+        }
+
+        function handleMessage(event) {
+            var data = JSON.parse(event.data);
+            console.log("Received:", data.type);
+            if (data.type === "login_success") {
+                socket.send(JSON.stringify({ type: "coach_get_clients" }));
+            } else if (data.type === "coach_clients") {
+                allClients = data.clients || [];
+                console.log("Got clients:", allClients.length);
+                renderClients();
+            }
+        }
+
+        function renderClients() {
+            var grid = document.getElementById("clientGrid");
+            var search = document.getElementById("searchInput").value.toLowerCase();
+            
+            var filtered = allClients.filter(function(c) {
+                var name = (c.name || "").toLowerCase();
+                return name.indexOf(search) >= 0;
+            });
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>No clients assigned to you</div></div>';
+                return;
+            }
+
+            var html = "";
+            for (var i = 0; i < filtered.length; i++) {
+                var c = filtered[i];
+                var isTopTier = c.tier === "TOP_TIER" || c.tier === "PREMIUM";
+                var isSelected = selectedClient && selectedClient.id === c.id;
+                var initials = getInitials(c.name);
+                var coherence = c.metrics && c.metrics.coherence ? c.metrics.coherence : "--";
+                var growth = c.metrics && (c.metrics.growth || c.metrics.growth_potential) ? (c.metrics.growth || c.metrics.growth_potential) : "--";
+                var risk = c.metrics && c.metrics.risk_level ? c.metrics.risk_level : "LOW";
+                
+                html += '<div class="client-card ' + (isTopTier ? 'top-tier ' : '') + (isSelected ? 'selected' : '') + '" onclick="selectClient(\'' + c.id + '\')">';
+                html += '<div class="client-header">';
+                html += '<div class="client-avatar ' + (isTopTier ? 'gold' : '') + '">' + initials + '</div>';
+                html += '<div>';
+                html += '<div class="client-name">' + (c.name || "Unknown");
+                if (isTopTier) html += '<span class="client-tier">⭐ TOP TIER</span>';
+                html += '</div>';
+                html += '<div class="client-meta">' + (c.total_sessions || 0) + ' sessions • Last: ' + (c.last_login ? String(c.last_login).slice(0, 10) : 'Never') + '</div>';
+                html += '</div>';
+                html += '</div>';
+                html += '<div class="client-stats">';
+                html += '<div class="stat"><div class="stat-value cyan">' + coherence + '</div><div class="stat-label">Coherence</div></div>';
+                html += '<div class="stat"><div class="stat-value green">' + growth + '</div><div class="stat-label">Growth</div></div>';
+                html += '<div class="stat"><div class="stat-value"><span class="risk-badge ' + risk.toLowerCase() + '">' + risk + '</span></div><div class="stat-label">Risk</div></div>';
+                html += '</div>';
+                html += '</div>';
+            }
+            grid.innerHTML = html;
+        }
+
+        function getInitials(name) {
+            if (!name) return "?";
+            var parts = name.split(" ");
+            var result = "";
+            for (var i = 0; i < parts.length && i < 2; i++) {
+                if (parts[i].length > 0) result += parts[i][0];
+            }
+            return result.toUpperCase();
+        }
+
+        function selectClient(clientId) {
+            selectedClient = null;
+            for (var i = 0; i < allClients.length; i++) {
+                if (allClients[i].id === clientId) {
+                    selectedClient = allClients[i];
+                    break;
+                }
+            }
+            renderClients();
+            if (selectedClient) {
+                showSidebar(selectedClient);
+            }
+        }
+
+        function showSidebar(client) {
+            document.getElementById("mainLayout").classList.remove("no-selection");
+            document.getElementById("sidebar").style.display = "block";
+            
+            document.getElementById("sidebarName").textContent = client.name || "Unknown";
+            document.getElementById("sidebarMeta").textContent = "ID: " + client.id;
+            
+            var tier = client.tier || client.subscription_tier || "STANDARD";
+            document.getElementById("infoTier").textContent = tier;
+            document.getElementById("infoSessions").textContent = client.total_sessions || "0";
+            document.getElementById("infoLastSession").textContent = client.last_session || "Never";
+            document.getElementById("infoNextSession").textContent = client.next_session || "Not scheduled";
+            
+            var coherence = client.metrics && client.metrics.coherence ? client.metrics.coherence : "--";
+            var growth = client.metrics && (client.metrics.growth || client.metrics.growth_potential) ? (client.metrics.growth || client.metrics.growth_potential) : "--";
+            var risk = client.metrics && client.metrics.risk_level ? client.metrics.risk_level : "LOW";
+            
+            document.getElementById("infoCoherence").textContent = coherence;
+            document.getElementById("infoGrowth").textContent = growth;
+            document.getElementById("infoRisk").textContent = risk;
+        }
+
+        function filterClients() {
+            renderClients();
+        }
+
+        function startSession() {
+            if (selectedClient) {
+                alert("Starting session with " + selectedClient.name);
+            }
+        }
+
+        function openBrief() {
+            if (selectedClient) {
+                window.location.href = "presession_brief.html?client=" + selectedClient.id;
+            }
+        }
+
+        function viewHistory() {
+            if (selectedClient) {
+                alert("View history for " + selectedClient.name);
+            }
+        }
+
+        function sendMessage() {
+            if (selectedClient) {
+                alert("Send message to " + selectedClient.name);
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

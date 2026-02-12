@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Nevedal Research Laboratory</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --blue: #4A90D9; --blue-dim: rgba(74, 144, 217, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 0 20px var(--purple-dim); }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .header-badge { padding: 6px 14px; background: var(--purple-dim); border: 1px solid var(--purple); border-radius: 20px; font-size: 10px; color: var(--purple); font-weight: 600; }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .btn-primary { background: var(--purple); color: white; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-gold { background: var(--gold); color: black; }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; min-height: calc(100vh - 120px); }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.blue { background: var(--blue-dim); }
+        .icon.red { background: var(--red-dim); }
+        .icon.orange { background: rgba(255,149,0,0.15); }
+        .card-body { padding: 16px; }
+        /* Dyad Selection */
+        .dyad-selection { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .dyad-title { font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .dyad-pair { display: flex; align-items: center; gap: 12px; }
+        .dyad-subject { flex: 1; padding: 12px; background: var(--bg-dark); border-radius: 8px; text-align: center; }
+        .dyad-subject .avatar { width: 48px; height: 48px; border-radius: 50%; margin: 0 auto 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .dyad-subject.a .avatar { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .dyad-subject.b .avatar { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .dyad-connector { font-size: 20px; color: var(--purple); }
+        .dyad-label { font-size: 11px; font-weight: 600; }
+        .dyad-role { font-size: 9px; color: var(--text-secondary); }
+        /* Subject List */
+        .filter-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+        .filter-tab { padding: 8px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font-size: 10px; cursor: pointer; color: var(--text-secondary); }
+        .filter-tab.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        .search-box { position: relative; margin-bottom: 12px; }
+        .search-box input { width: 100%; padding: 10px 14px 10px 36px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; }
+        .search-box::before { content: '\1F50D'; position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 14px; }
+        .subject-list { max-height: 320px; overflow-y: auto; }
+        .subject-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s; }
+        .subject-item:hover { border-color: var(--purple); }
+        .subject-item.selected { background: var(--purple-dim); border-color: var(--purple); }
+        .subject-item.selected-b { background: var(--cyan-dim); border-color: var(--cyan); }
+        .subject-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+        .subject-avatar.client { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .subject-avatar.coach { background: var(--gold-dim); border: 2px solid var(--gold); }
+        .subject-avatar.family { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .subject-info { flex: 1; }
+        .subject-name { font-size: 11px; font-weight: 600; }
+        .subject-meta { font-size: 9px; color: var(--text-secondary); }
+        .subject-tag { font-size: 8px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+        .subject-tag.a { background: var(--purple); color: white; }
+        .subject-tag.b { background: var(--cyan); color: black; }
+        .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; animation: blink 1.5s infinite; }
+        @keyframes blink { 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
+        /* Cross-Reference Matrix */
+        .xref-matrix { display: grid; gap: 3px; }
+        .xref-cell { padding: 6px; text-align: center; border-radius: 4px; font-size: 10px; }
+        .xref-cell.header { background: var(--bg-dark); color: var(--text-secondary); font-weight: 600; }
+        .xref-cell.high { background: var(--green-dim); color: var(--green); }
+        .xref-cell.medium { background: var(--gold-dim); color: var(--gold); }
+        .xref-cell.low { background: var(--red-dim); color: var(--red-critical); }
+        .xref-cell.self { background: var(--bg-dark); color: var(--text-secondary); }
+        /* Formula Banner */
+        .formula-banner { background: linear-gradient(135deg, #0A0A1A 0%, #1A0A2A 100%); border: 1px solid var(--purple); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .formula-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .formula-title { font-size: 14px; font-weight: 700; color: var(--purple); }
+        .formula-badge { padding: 4px 12px; background: var(--green); color: black; border-radius: 12px; font-size: 9px; font-weight: 600; }
+        .formula-display { background: var(--bg-dark); border-radius: 10px; padding: 20px; text-align: center; font-family: 'Times New Roman', serif; }
+        .formula-main { font-size: 20px; color: var(--text-primary); line-height: 1.8; }
+        .formula-var { color: var(--cyan); font-style: italic; }
+        .formula-sub { font-size: 10px; vertical-align: sub; }
+        .formula-sup { font-size: 10px; vertical-align: super; }
+        .formula-frac { display: inline-block; text-align: center; vertical-align: middle; }
+        .formula-num { border-bottom: 1px solid var(--text-primary); padding-bottom: 2px; display: block; }
+        .formula-den { padding-top: 2px; display: block; }
+        .formula-exp { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+        /* Gauge */
+        .gauge-container { position: relative; width: 200px; height: 200px; margin: 0 auto 16px; }
+        .gauge-bg { width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 225deg, var(--red-critical) 0deg, var(--orange) 90deg, var(--gold) 135deg, var(--green) 180deg, var(--cyan) 225deg, var(--purple) 270deg, transparent 270deg); }
+        .gauge-inner { position: absolute; top: 20px; left: 20px; right: 20px; bottom: 20px; background: var(--bg-dark); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gauge-value { font-size: 48px; font-weight: 700; color: var(--cyan); }
+        .gauge-label { font-size: 11px; color: var(--text-secondary); }
+        .gauge-needle { position: absolute; bottom: 50%; left: 50%; width: 4px; height: 80px; background: linear-gradient(to top, var(--gold), transparent); transform-origin: bottom center; border-radius: 2px; }
+        .gauge-center { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; background: var(--gold); border-radius: 50%; transform: translate(-50%, -50%); }
+        .cee-indicator { margin-top: 16px; padding: 12px 20px; border-radius: 8px; font-size: 12px; font-weight: 600; text-align: center; }
+        .cee-indicator.active { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); animation: cee-pulse 1.5s infinite; }
+        .cee-indicator.inactive { background: var(--bg-elevated); color: var(--text-secondary); }
+        @keyframes cee-pulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(0,255,136,0.4); } 50%{ box-shadow: 0 0 0 10px rgba(0,255,136,0); } }
+        /* Component Variables */
+        .component-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .component-card { background: var(--bg-elevated); border-radius: 10px; padding: 14px; border-left: 3px solid var(--border); }
+        .component-card.p-ent { border-left-color: var(--purple); }
+        .component-card.t-tunnel { border-left-color: var(--cyan); }
+        .component-card.gamma { border-left-color: var(--orange); }
+        .component-card.e-joint { border-left-color: var(--gold); }
+        .component-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .component-symbol { font-family: 'Times New Roman', serif; font-size: 15px; font-style: italic; }
+        .component-symbol.purple { color: var(--purple); }
+        .component-symbol.cyan { color: var(--cyan); }
+        .component-symbol.orange { color: var(--orange); }
+        .component-symbol.gold { color: var(--gold); }
+        .component-value { font-size: 20px; font-weight: 700; }
+        .component-name { font-size: 9px; color: var(--text-secondary); margin-bottom: 6px; }
+        .component-bar { height: 5px; background: var(--bg-dark); border-radius: 3px; overflow: hidden; }
+        .component-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+        .component-fill.purple { background: var(--purple); }
+        .component-fill.cyan { background: var(--cyan); }
+        .component-fill.orange { background: var(--orange); }
+        .component-fill.gold { background: var(--gold); }
+        /* Interpretation */
+        .interp-section { background: var(--bg-dark); border-radius: 10px; padding: 16px; margin-top: 16px; }
+        .interp-title { font-size: 11px; font-weight: 600; margin-bottom: 10px; color: var(--purple); }
+        .interp-item { display: flex; gap: 8px; margin-bottom: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+        .interp-item strong { color: var(--text-primary); }
+        /* CEE Threshold */
+        .cee-thresh { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+        .cee-cond { font-size: 9px; padding: 4px 8px; background: var(--bg-elevated); border-radius: 4px; display: flex; align-items: center; gap: 4px; }
+        .cee-cond.met { background: var(--green-dim); color: var(--green); }
+        .cee-cond.unmet { color: var(--text-secondary); }
+        /* Biometric Mapping */
+        .bio-grid-dual { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .bio-column-title { font-size: 11px; font-weight: 600; margin-bottom: 8px; }
+        .bio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .bio-item { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--bg-elevated); border-radius: 6px; }
+        .bio-icon { width: 28px; height: 28px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+        .bio-icon.hrv { background: var(--red-dim); }
+        .bio-icon.breath { background: var(--cyan-dim); }
+        .bio-icon.voice { background: var(--purple-dim); }
+        .bio-icon.gaze { background: var(--gold-dim); }
+        .bio-icon.posture { background: var(--green-dim); }
+        .bio-icon.eda { background: rgba(255,149,0,0.15); }
+        .bio-info { flex: 1; }
+        .bio-name { font-size: 9px; color: var(--text-secondary); }
+        .bio-value { font-size: 11px; font-weight: 600; }
+        .bio-sync { font-size: 8px; padding: 2px 5px; border-radius: 3px; flex-shrink: 0; }
+        .bio-sync.high { background: var(--green-dim); color: var(--green); }
+        .bio-sync.medium { background: var(--gold-dim); color: var(--gold); }
+        .bio-sync.low { background: var(--red-dim); color: var(--red-critical); }
+        .signal-legend { margin-top: 12px; padding: 10px; background: var(--bg-dark); border-radius: 6px; display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; font-size: 8px; }
+        /* Patent Panels */
+        .patent-panel { background: var(--bg-elevated); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+        .patent-label { font-size: 9px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .patent-value { font-size: 14px; font-weight: 700; }
+        .patent-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+        .patent-row:last-child { border-bottom: none; }
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 600; }
+        .badge.normalizer { background: var(--green-dim); color: var(--green); }
+        .badge.minimizer { background: var(--gold-dim); color: var(--gold); }
+        .badge.amplifier { background: var(--red-dim); color: var(--red-critical); }
+        .badge.calibrated { background: var(--cyan-dim); color: var(--cyan); }
+        .badge.learning { background: var(--red-dim); color: var(--red-critical); }
+        .badge.observation { background: rgba(255,149,0,0.15); color: var(--orange); }
+        .badge.awareness { background: var(--gold-dim); color: var(--gold); }
+        .badge.reflection { background: var(--green-dim); color: var(--green); }
+        .badge.fight { background: var(--red-dim); color: var(--red-critical); }
+        .badge.flight { background: var(--gold-dim); color: var(--gold); }
+        .badge.freeze { background: var(--blue-dim); color: var(--blue); }
+        .badge.fawn { background: var(--green-dim); color: var(--green); }
+        .alert-item { padding: 8px 10px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 6px; border-left: 3px solid var(--red-critical); font-size: 10px; }
+        .alert-item.warning { border-left-color: var(--gold); }
+        .alert-item.info { border-left-color: var(--cyan); }
+        .alert-item.success { border-left-color: var(--green); }
+        /* Right Panel */
+        .study-info { background: var(--purple-dim); border: 1px solid var(--purple); border-radius: 10px; padding: 14px; }
+        .study-title { font-size: 11px; font-weight: 600; color: var(--purple); margin-bottom: 6px; }
+        .study-id { font-size: 9px; color: var(--text-secondary); margin-bottom: 10px; font-family: monospace; }
+        .study-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .study-stat { text-align: center; padding: 8px; background: var(--bg-dark); border-radius: 6px; }
+        .study-stat-value { font-size: 16px; font-weight: 700; color: var(--purple); }
+        .study-stat-label { font-size: 8px; color: var(--text-secondary); }
+        .report-option { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s; }
+        .report-option:hover { background: var(--purple-dim); }
+        .report-icon { width: 28px; height: 28px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 12px; background: var(--bg-elevated); }
+        .report-name { font-size: 10px; font-weight: 500; }
+        .report-desc { font-size: 8px; color: var(--text-secondary); }
+        .trend-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .trend-item:last-child { border-bottom: none; }
+        .trend-metric { flex: 1; }
+        .trend-name { font-size: 10px; font-weight: 500; }
+        .trend-period { font-size: 8px; color: var(--text-secondary); }
+        .trend-change { font-size: 13px; font-weight: 700; }
+        .trend-change.up { color: var(--green); }
+        .trend-change.down { color: var(--red-critical); }
+        .session-list { max-height: 200px; overflow-y: auto; }
+        .session-item { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 4px; font-size: 10px; }
+        .session-date { color: var(--text-secondary); width: 55px; }
+        .session-cemo { width: 40px; text-align: center; font-weight: 600; }
+        .session-cees { flex: 1; }
+        .session-cees .count { color: var(--green); font-weight: 600; }
+        .session-dur { color: var(--text-secondary); }
+        .ethics-notice { background: linear-gradient(135deg, var(--blue-dim), var(--purple-dim)); border: 1px solid var(--blue); border-radius: 10px; padding: 12px; margin-top: 12px; }
+        .ethics-title { font-size: 9px; font-weight: 600; color: var(--blue); margin-bottom: 4px; }
+        .ethics-text { font-size: 8px; color: var(--text-secondary); line-height: 1.5; }
+        .center-col { display: flex; flex-direction: column; gap: 20px; }
+        .side-by-side { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .empty-state { font-size: 10px; color: var(--text-secondary); text-align: center; padding: 16px; }
+        .left-col, .right-col { display: flex; flex-direction: column; gap: 16px; }
+        .chart-wrap { height: 200px; }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🔬</div>
+            <div>
+                <div class="logo-text">NEVEDAL RESEARCH LABORATORY</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Study Platform</div>
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="header-badge">IRB APPROVED &bull; PROTOCOL #QEC-2026-001</span>
+            <button class="btn btn-secondary" onclick="exportData()">&#x1F4CA; Export Data</button>
+            <button class="btn btn-primary" onclick="generateReport()">&#x1F4C4; Generate Report</button>
+            <a href="command.html" class="btn btn-secondary">&larr; Back to Dashboard</a>
+        </div>
+    </header>
+
+    <!-- NAVIGATION -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item active"><span>&#x1F4D0;</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>&#x1F4C8;</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>&#x1F465;</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>&#x1F468;&#x200D;&#x1F469;&#x200D;&#x1F467;</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>&#x1F9EC;</span> Cohort Analysis</a>
+        <div class="sub-nav-item"><span>&#x1F4DA;</span> Literature Links</div>
+        <div class="sub-nav-item"><span>&#x2699;&#xFE0F;</span> Calibration</div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- =============== LEFT PANEL =============== -->
+        <div class="left-col">
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">&#x1F465;</div> Dyad Selection</div>
+                </div>
+                <div class="card-body">
+                    <div class="dyad-selection">
+                        <div class="dyad-title">Current Analysis Pair</div>
+                        <div class="dyad-pair">
+                            <div class="dyad-subject a">
+                                <div class="avatar" id="dyad-a-avatar">--</div>
+                                <div class="dyad-label" id="dyad-a-name">Subject A</div>
+                                <div class="dyad-role">Subject A (Client)</div>
+                            </div>
+                            <div class="dyad-connector">&#x27F7;</div>
+                            <div class="dyad-subject b">
+                                <div class="avatar" id="dyad-b-avatar">--</div>
+                                <div class="dyad-label" id="dyad-b-name">Subject B</div>
+                                <div class="dyad-role">Subject B (Coach)</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="search-box"><input type="text" placeholder="Search subjects..." id="subject-search" oninput="filterSubjects()"></div>
+                    <div class="filter-tabs">
+                        <div class="filter-tab active" onclick="setFilter('all',this)">All</div>
+                        <div class="filter-tab" onclick="setFilter('CLIENT',this)">Clients</div>
+                        <div class="filter-tab" onclick="setFilter('COACH',this)">Coaches</div>
+                        <div class="filter-tab" onclick="setFilter('family',this)">Family</div>
+                    </div>
+                    <div class="subject-list" id="subject-list"><div class="empty-state">Loading subjects...</div></div>
+                </div>
+            </div>
+            <!-- Cross-Reference Matrix -->
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon gold">&#x1F517;</div> Cross-Reference</div></div>
+                <div class="card-body" id="xref-body"><div class="empty-state">Select a family member to view coherence matrix</div></div>
+            </div>
+        </div>
+
+        <!-- =============== CENTER PANEL =============== -->
+        <div class="center-col">
+            <!-- Formula Banner -->
+            <div class="formula-banner">
+                <div class="formula-header">
+                    <div class="formula-title">&#x1F9EC; NEVEDAL MASTER FORMULA &mdash; Quantum Emotional Coherence</div>
+                    <span class="formula-badge" id="formula-status">&#x2713; COMPUTING LIVE</span>
+                </div>
+                <div class="formula-display">
+                    <div class="formula-main">
+                        <span class="formula-var">C</span><span class="formula-sub">emo</span>(<span class="formula-var">t</span>) =
+                        <span class="formula-frac">
+                            <span class="formula-num"><span class="formula-var">&beta;</span> &middot; <span class="formula-var">p</span><span class="formula-sub">ent</span> &middot; <span class="formula-var">T</span><span class="formula-sub">0</span> &middot; <span class="formula-exp">e<sup>&minus;d/&lambda;</sup></span></span>
+                            <span class="formula-den"><span class="formula-var">&gamma;</span><span class="formula-sub">env</span> + <span class="formula-frac"><span class="formula-num"><span class="formula-var">E</span><span class="formula-sub">G</span><span class="formula-sup">(joint)</span></span><span class="formula-den">&#x210F;</span></span></span>
+                        </span>
+                        &middot; exp[&minus;(<span class="formula-var">&gamma;</span><span class="formula-sub">env</span> + <span class="formula-frac"><span class="formula-num"><span class="formula-var">E</span><span class="formula-sub">G</span><span class="formula-sup">(joint)</span></span><span class="formula-den">&#x210F;</span></span>)<span class="formula-var">t</span>]
+                    </div>
+                </div>
+            </div>
+
+            <!-- C_emo Gauge + Component Variables (side by side) -->
+            <div class="side-by-side">
+                <div class="card research">
+                    <div class="card-header">
+                        <div class="card-title"><div class="icon cyan">&#x1F4CA;</div> Real-time C<sub>emo</sub>(t)</div>
+                        <span id="update-status" style="font-size:10px;color:var(--green);">&#x25CF; LIVE</span>
+                    </div>
+                    <div class="card-body" style="text-align:center;">
+                        <div class="gauge-container">
+                            <div class="gauge-bg"></div>
+                            <div class="gauge-inner">
+                                <div class="gauge-value" id="c-emo-value">&mdash;</div>
+                                <div class="gauge-label">Emotional Coherence</div>
+                            </div>
+                            <div class="gauge-needle" id="gauge-needle" style="transform:translateX(-50%) rotate(225deg);"></div>
+                            <div class="gauge-center"></div>
+                        </div>
+                        <div class="cee-indicator inactive" id="cee-indicator">&#x26AA; Waiting for live data&hellip;</div>
+                        <div style="font-size:9px;color:var(--text-secondary);margin-top:8px;">
+                            Subject A: <span id="label-a">&mdash;</span> &bull; Subject B: <span id="label-b">&mdash;</span><br>
+                            Last updated: <span id="last-updated">&mdash;</span>
+                        </div>
+                        <!-- CEE Threshold Detail (Patent 1) -->
+                        <div class="cee-thresh" id="cee-thresh">
+                            <div class="cee-cond unmet" id="cond-pent">&#x2610; p<sub>ent</sub> &ge; threshold</div>
+                            <div class="cee-cond unmet" id="cond-d">&#x2610; d &le; threshold</div>
+                            <div class="cee-cond unmet" id="cond-gamma">&#x2610; &gamma;<sub>env</sub> &le; threshold</div>
+                            <div class="cee-cond unmet" id="cond-eg">&#x2610; E<sub>G</sub> &ge; threshold</div>
+                            <div class="cee-cond unmet" id="cond-duration" style="grid-column:span 2;">&#x2610; Sustained for minimum duration</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card research">
+                    <div class="card-header"><div class="card-title"><div class="icon purple">&#x1F9EE;</div> Component Variables</div></div>
+                    <div class="card-body">
+                        <div class="component-grid">
+                            <div class="component-card p-ent">
+                                <div class="component-header"><span class="component-symbol purple">p<sub>ent</sub></span><span class="component-value" id="val-pent" style="color:var(--purple);">&mdash;</span></div>
+                                <div class="component-name">Emotional Entanglement</div>
+                                <div class="component-bar"><div class="component-fill purple" id="bar-pent" style="width:0%;"></div></div>
+                            </div>
+                            <div class="component-card t-tunnel">
+                                <div class="component-header"><span class="component-symbol cyan">T<sub>tunnel</sub></span><span class="component-value" id="val-ttunnel" style="color:var(--cyan);">&mdash;</span></div>
+                                <div class="component-name">Tunneling Transparency</div>
+                                <div class="component-bar"><div class="component-fill cyan" id="bar-ttunnel" style="width:0%;"></div></div>
+                            </div>
+                            <div class="component-card gamma">
+                                <div class="component-header"><span class="component-symbol orange">&gamma;<sub>env</sub></span><span class="component-value" id="val-gamma" style="color:var(--orange);">&mdash;</span></div>
+                                <div class="component-name">Environmental Decoherence</div>
+                                <div class="component-bar"><div class="component-fill orange" id="bar-gamma" style="width:0%;"></div></div>
+                            </div>
+                            <div class="component-card e-joint">
+                                <div class="component-header"><span class="component-symbol gold">E<sub>G</sub><sup>(joint)</sup></span><span class="component-value" id="val-eg" style="color:var(--gold);">&mdash;</span></div>
+                                <div class="component-name">Joint Gravitational Self-Energy</div>
+                                <div class="component-bar"><div class="component-fill gold" id="bar-eg" style="width:0%;"></div></div>
+                            </div>
+                        </div>
+                        <!-- Interpretation -->
+                        <div class="interp-section" id="interp-section">
+                            <div class="interp-title">&#x1F4D6; Current State Interpretation</div>
+                            <div id="interp-body"><div class="empty-state">Awaiting live data&hellip;</div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Biometric Signal Mapping (dual subject) -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">&#x1FA7A;</div> Biometric Signal Mapping</div>
+                    <span style="font-size:9px;color:var(--text-secondary);">Raw signals &rarr; Nevedal variables</span>
+                </div>
+                <div class="card-body">
+                    <div class="bio-grid-dual">
+                        <div>
+                            <div class="bio-column-title" style="color:var(--purple);" id="bio-a-title">Subject A</div>
+                            <div class="bio-grid" id="bio-a-grid">
+                                <div class="bio-item"><div class="bio-icon hrv">&#x2764;&#xFE0F;</div><div class="bio-info"><div class="bio-name">HRV</div><div class="bio-value" id="bio-a-hrv">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon breath">&#x1FAC1;</div><div class="bio-info"><div class="bio-name">Respiratory</div><div class="bio-value" id="bio-a-resp">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon voice">&#x1F399;&#xFE0F;</div><div class="bio-info"><div class="bio-name">Vocal Prosody</div><div class="bio-value" id="bio-a-voice">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon gaze">&#x1F441;&#xFE0F;</div><div class="bio-info"><div class="bio-name">Gaze Pattern</div><div class="bio-value" id="bio-a-gaze">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon posture">&#x1F9CD;</div><div class="bio-info"><div class="bio-name">Body Orientation</div><div class="bio-value" id="bio-a-body">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon eda">&#x26A1;</div><div class="bio-info"><div class="bio-name">EDA</div><div class="bio-value" id="bio-a-eda">&mdash;</div></div></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="bio-column-title" style="color:var(--cyan);" id="bio-b-title">Subject B</div>
+                            <div class="bio-grid" id="bio-b-grid">
+                                <div class="bio-item"><div class="bio-icon hrv">&#x2764;&#xFE0F;</div><div class="bio-info"><div class="bio-name">HRV</div><div class="bio-value" id="bio-b-hrv">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon breath">&#x1FAC1;</div><div class="bio-info"><div class="bio-name">Respiratory</div><div class="bio-value" id="bio-b-resp">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon voice">&#x1F399;&#xFE0F;</div><div class="bio-info"><div class="bio-name">Vocal Prosody</div><div class="bio-value" id="bio-b-voice">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon gaze">&#x1F441;&#xFE0F;</div><div class="bio-info"><div class="bio-name">Gaze Pattern</div><div class="bio-value" id="bio-b-gaze">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon posture">&#x1F9CD;</div><div class="bio-info"><div class="bio-name">Body Orientation</div><div class="bio-value" id="bio-b-body">&mdash;</div></div></div>
+                                <div class="bio-item"><div class="bio-icon eda">&#x26A1;</div><div class="bio-info"><div class="bio-name">EDA</div><div class="bio-value" id="bio-b-eda">&mdash;</div></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="signal-legend">
+                        <div><span style="color:var(--purple);">p<sub>ent</sub></span> &larr; HRV sync, Breath sync, Vocal mirroring</div>
+                        <div><span style="color:var(--cyan);">T<sub>tunnel</sub></span> &larr; Gaze contact, Body lean, Verbal rate</div>
+                        <div><span style="color:var(--orange);">&gamma;<sub>env</sub></span> &larr; EDA spikes, HR elevation, Speech frag.</div>
+                        <div><span style="color:var(--gold);">E<sub>G</sub></span> &larr; Sentiment polarity, Topic weight, Trauma</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patent 4: Visual Biometrics -->
+            <div class="card research" id="patent4-card" style="display:none;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">&#x1F4F7;</div> Visual Biometrics (Patent 4)</div></div>
+                <div class="card-body">
+                    <div class="component-grid" id="patent4-body">
+                        <div class="patent-panel"><div class="patent-label">Facial Valence</div><div class="patent-value" id="p4-valence">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Arousal</div><div class="patent-value" id="p4-arousal">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Gaze Contact</div><div class="patent-value" id="p4-gaze">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Body Lean</div><div class="patent-value" id="p4-lean">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Engagement</div><div class="patent-value" id="p4-engagement">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">d<sub>extended</sub></div><div class="patent-value" id="p4-dext">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Primary Emotion</div><div class="patent-value" id="p4-emotion">&mdash;</div></div>
+                        <div class="patent-panel"><div class="patent-label">Notable Moments</div><div class="patent-value" id="p4-notable">&mdash;</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Trajectory Chart -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon blue">&#x1F4C8;</div> Session Trajectory</div>
+                    <div style="display:flex;gap:6px;">
+                        <button class="filter-tab" onclick="setChartRange(5,this)">5m</button>
+                        <button class="filter-tab active" onclick="setChartRange(15,this)">15m</button>
+                        <button class="filter-tab" onclick="setChartRange(60,this)">Full</button>
+                    </div>
+                </div>
+                <div class="card-body"><div class="chart-wrap"><canvas id="trajectory-chart"></canvas></div></div>
+            </div>
+
+            <!-- Patent 2: Metrics Engine -->
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon orange">&#x1F4A1;</div> Patent 2: Metrics Engine (Live)</div></div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                        <!-- Crisis Perception -->
+                        <div>
+                            <div class="patent-panel">
+                                <div class="patent-label">Crisis Perception</div>
+                                <div class="patent-value" id="p2-crisis-type">CALIBRATING</div>
+                                <div style="margin-top:6px;">
+                                    <div class="patent-row"><span style="font-size:9px;">Objective Distress</span><span class="patent-value" style="font-size:11px;" id="p2-obj-distress">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Expressed Distress</span><span class="patent-value" style="font-size:11px;" id="p2-exp-distress">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Discrepancy</span><span class="patent-value" style="font-size:11px;" id="p2-discrepancy">&mdash;</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Shame Detection -->
+                        <div>
+                            <div class="patent-panel">
+                                <div class="patent-label">Shame Detection</div>
+                                <div class="patent-value" id="p2-shame-idx">&mdash;</div>
+                                <div style="margin-top:6px;">
+                                    <div class="patent-row"><span style="font-size:9px;">Self-Blame</span><span style="font-size:11px;font-weight:600;" id="p2-self-blame">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Unworthiness</span><span style="font-size:11px;font-weight:600;" id="p2-unworthiness">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Deflection</span><span style="font-size:11px;font-weight:600;" id="p2-deflection">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Masking</span><span class="badge" id="p2-masking">--</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- PMB -->
+                        <div>
+                            <div class="patent-panel">
+                                <div class="patent-label">PMB Indicators</div>
+                                <div style="margin-top:6px;">
+                                    <div class="patent-row"><span style="font-size:9px;">Reactivity</span><span class="badge" id="p2-reactivity">--</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Recon. Readiness</span><span class="patent-value" style="font-size:11px;" id="p2-recon-ready">&mdash;</span></div>
+                                    <div class="patent-row"><span style="font-size:9px;">Confidence</span><span class="badge" id="p2-confidence">LEARNING</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Patent 3: Live Session Alerts -->
+            <div class="card research" id="patent3-card">
+                <div class="card-header"><div class="card-title"><div class="icon red">&#x26A0;&#xFE0F;</div> Patent 3: Live Session Alerts</div></div>
+                <div class="card-body" id="patent3-body">
+                    <div class="empty-state">No active alerts. Monitoring for escalation, ventriloquism, and reconsolidation events.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- =============== RIGHT PANEL =============== -->
+        <div class="right-col">
+            <!-- Active Research Study -->
+            <div class="study-info">
+                <div class="study-title">&#x1F4CB; Active Research Study</div>
+                <div class="study-id">QEC-2026-001 &bull; &ldquo;Quantum Emotional Coherence in Therapeutic Dyads&rdquo;</div>
+                <div class="study-stats">
+                    <div class="study-stat"><div class="study-stat-value" id="stat-sessions">&mdash;</div><div class="study-stat-label">Total Sessions</div></div>
+                    <div class="study-stat"><div class="study-stat-value" id="stat-participants">&mdash;</div><div class="study-stat-label">Participants</div></div>
+                    <div class="study-stat"><div class="study-stat-value" id="stat-therapists">&mdash;</div><div class="study-stat-label">Therapists</div></div>
+                    <div class="study-stat"><div class="study-stat-value" id="stat-families">&mdash;</div><div class="study-stat-label">Families</div></div>
+                </div>
+            </div>
+
+            <!-- Report Generator -->
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon gold">&#x1F4C4;</div> Report Generator</div></div>
+                <div class="card-body">
+                    <div class="report-option"><div class="report-icon">&#x1F4CA;</div><div><div class="report-name">Individual Coherence Report</div><div class="report-desc">Full C_emo trajectory for selected subject</div></div></div>
+                    <div class="report-option"><div class="report-icon">&#x1F465;</div><div><div class="report-name">Dyad Comparison Report</div><div class="report-desc">Compare coherence across dyad pairings</div></div></div>
+                    <div class="report-option"><div class="report-icon">&#x1F468;&#x200D;&#x1F469;&#x200D;&#x1F467;</div><div><div class="report-name">Family Dynamics Report</div><div class="report-desc">Cross-member coherence matrix analysis</div></div></div>
+                    <div class="report-option"><div class="report-icon">&#x1F4C8;</div><div><div class="report-name">Longitudinal Trends</div><div class="report-desc">CEE frequency over 12-week period</div></div></div>
+                    <div class="report-option"><div class="report-icon">&#x1F9EC;</div><div><div class="report-name">Coach Efficacy Analysis</div><div class="report-desc">Therapist coherence patterns across clients</div></div></div>
+                </div>
+            </div>
+
+            <!-- Trends -->
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon green">&#x1F4C8;</div> Trends (12 weeks)</div></div>
+                <div class="card-body" id="trends-body">
+                    <div class="trend-item"><div class="trend-metric"><div class="trend-name">Avg C<sub>emo</sub></div><div class="trend-period">Selected dyad</div></div><div class="trend-change up" id="trend-cemo">&mdash;</div></div>
+                    <div class="trend-item"><div class="trend-metric"><div class="trend-name">CEE Windows/Session</div><div class="trend-period">Mean count</div></div><div class="trend-change up" id="trend-cee">&mdash;</div></div>
+                    <div class="trend-item"><div class="trend-metric"><div class="trend-name">Baseline p<sub>ent</sub></div><div class="trend-period">Session start average</div></div><div class="trend-change up" id="trend-pent">&mdash;</div></div>
+                    <div class="trend-item"><div class="trend-metric"><div class="trend-name">Avg &gamma;<sub>env</sub></div><div class="trend-period">Decoherence rate</div></div><div class="trend-change down" id="trend-gamma">&mdash;</div></div>
+                </div>
+            </div>
+
+            <!-- Session History -->
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">&#x1F4DA;</div> Session History</div></div>
+                <div class="card-body"><div class="session-list" id="session-history"><div class="empty-state">Awaiting history data&hellip;</div></div></div>
+            </div>
+
+            <!-- Ethics Notice -->
+            <div class="ethics-notice">
+                <div class="ethics-title">&#x2696;&#xFE0F; Research Ethics Notice</div>
+                <div class="ethics-text">This research platform operates under IRB Protocol #QEC-2026-001. All participants have provided informed consent for quantum coherence measurement. Data is de-identified for aggregate analysis. The &ldquo;quantum&rdquo; framework is a metaphorical model for organizing biometric synchrony data, not a claim of literal quantum effects between brains.</div>
+            </div>
+        </div>
+    </main>
+
+    <!-- =============== JAVASCRIPT =============== -->
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+
+        var ws = null, authenticated = false, reconnectTimer = null;
+        var subjectA = "", subjectB = "";
+        var allUsers = [];
+        var currentFilter = "all";
+        var latestByUser = {};
+        var historyByUser = {};
+        var lastUpdateAt = 0;
+        var clientMetricsCache = {};
+        var trajectoryChart = null;
+        var chartRangeMinutes = 15;
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function fmt2(x) { var n = Number(x); return Number.isFinite(n) ? n.toFixed(2) : "\u2014"; }
+        function clamp01(x) { var n = Number(x); return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0; }
+        function escapeHtml(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+        function initials(name) { return (name || "--").split(" ").map(function(w){return w[0]||"";}).join("").toUpperCase().slice(0,2); }
+        function setText(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+        function setBar(id, v01) { var el = document.getElementById(id); if (el) el.style.width = (clamp01(v01) * 100) + "%"; }
+
+        // === LIVE INDICATOR ===
+        function setLive(ok) {
+            var el = document.getElementById("update-status");
+            if (el) { el.textContent = ok ? "\u25CF LIVE" : "\u25CF OFFLINE"; el.style.color = ok ? "var(--green)" : "var(--text-secondary)"; }
+            var fb = document.getElementById("formula-status");
+            if (fb) { fb.textContent = ok ? "\u2713 COMPUTING LIVE" : "\u2717 OFFLINE"; fb.style.background = ok ? "var(--green)" : "var(--text-secondary)"; }
+        }
+
+        // === CHART INIT ===
+        function initChart() {
+            var ctx = document.getElementById("trajectory-chart").getContext("2d");
+            trajectoryChart = new Chart(ctx, {
+                type: "line",
+                data: { labels: [], datasets: [
+                    { label: "C_emo", data: [], borderColor: "#00D4FF", backgroundColor: "rgba(0,212,255,0.1)", fill: true, tension: 0.3, borderWidth: 2, pointRadius: 0 },
+                    { label: "p_ent", data: [], borderColor: "#9D4EDD", borderDash: [4,2], fill: false, tension: 0.3, borderWidth: 1.5, pointRadius: 0 },
+                    { label: "CEE", data: [], borderColor: "#00FF88", backgroundColor: "rgba(0,255,136,0.15)", fill: true, tension: 0, borderWidth: 0, pointRadius: 0 }
+                ]},
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: "#888", font: { size: 8 }, maxTicksLimit: 8 }, grid: { color: "rgba(255,255,255,0.05)" } },
+                        y: { min: 0, max: 1, ticks: { color: "#888", font: { size: 8 } }, grid: { color: "rgba(255,255,255,0.08)" } }
+                    },
+                    plugins: { legend: { labels: { color: "#aaa", font: { size: 9 }, boxWidth: 10 } } },
+                    animation: { duration: 300 }
+                }
+            });
+        }
+
+        function pushChartPoint(state) {
+            if (!trajectoryChart) return;
+            var hist = historyByUser[state.user_id] || [];
+            var cutoff = Date.now() - (chartRangeMinutes * 60 * 1000);
+            var filtered = hist.filter(function(h){ return h.t >= cutoff; });
+            var labels = filtered.map(function(h){ var d = new Date(h.t); return d.getMinutes() + ":" + String(d.getSeconds()).padStart(2,"0"); });
+            trajectoryChart.data.labels = labels;
+            trajectoryChart.data.datasets[0].data = filtered.map(function(h){ return h.c_emo; });
+            trajectoryChart.data.datasets[1].data = filtered.map(function(h){ return h.p_ent || 0; });
+            trajectoryChart.data.datasets[2].data = filtered.map(function(h){ return h.cee ? 1 : null; });
+            trajectoryChart.update("none");
+        }
+
+        window.setChartRange = function(m, btn) {
+            chartRangeMinutes = m;
+            document.querySelectorAll(".card-header .filter-tab").forEach(function(t){ t.classList.remove("active"); });
+            if (btn) btn.classList.add("active");
+            var st = latestByUser[subjectA];
+            if (st) pushChartPoint(st);
+        };
+
+        // === WEBSOCKET ===
+        function connect() {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            setLive(false);
+            ws = new WebSocket(getWsUrl());
+
+            ws.onopen = function() {
+                console.log("[Live] WS connected");
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+
+            ws.onmessage = function(event) {
+                var msg;
+                try { msg = JSON.parse(event.data); } catch(e) { return; }
+
+                if (msg.type === "login_success" || msg.type === "auth_success") {
+                    authenticated = true;
+                    console.log("[Live] Authenticated. Subscribing...");
+                    ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
+                    ws.send(JSON.stringify({ type: "admin_get_users" }));
+                    ws.send(JSON.stringify({ type: "admin_get_cohort_stats", filters: {} }));
+                    return;
+                }
+
+                if (msg.type === "nevedal_update") {
+                    var state = msg.data || {};
+                    var uid = state.user_id;
+                    if (!uid) return;
+                    latestByUser[uid] = state;
+                    pushHistory(uid, state);
+                    lastUpdateAt = Date.now();
+                    setLive(true);
+                    ensureLiveSubject(uid);
+                    if (!subjectA && uid) { selectA(uid); }
+                    if (uid === subjectA) { renderState(state); pushChartPoint(state); }
+                    return;
+                }
+
+                if ((msg.type === "admin_users" || msg.type === "admin_users_list") && msg.users) {
+                    allUsers = msg.users;
+                    buildSubjectList();
+                    // Count stats
+                    var coaches = msg.users.filter(function(u){ return u.role === "COACH"; });
+                    var families = {};
+                    msg.users.forEach(function(u){ if (u.family_id) families[u.family_id] = true; });
+                    setText("stat-therapists", String(coaches.length));
+                    setText("stat-families", String(Object.keys(families).length));
+                    return;
+                }
+
+                if (msg.type === "cohort_stats") {
+                    setText("stat-sessions", String(msg.total_sessions || 0));
+                    setText("stat-participants", String(msg.total_participants || 0));
+                    return;
+                }
+
+                if (msg.type === "client_metrics") {
+                    clientMetricsCache[msg.client_id] = msg;
+                    if (msg.client_id === subjectA) renderPatent2(msg);
+                    return;
+                }
+
+                if (msg.type === "admin_user_metrics") {
+                    if (msg.user_id) latestByUser[msg.user_id] = msg;
+                    if (msg.user_id === subjectA || msg.user_id === subjectB) renderBiometrics();
+                    // Check for visual biometrics (Patent 4)
+                    if (msg.visual_biometrics) renderPatent4(msg.visual_biometrics);
+                    return;
+                }
+
+                if (msg.type === "nevedal_history") {
+                    renderSessionHistory(msg);
+                    renderTrends(msg);
+                    return;
+                }
+
+                if (msg.type === "family_metrics") {
+                    renderXRef(msg);
+                    return;
+                }
+
+                if (msg.type === "login_failed") {
+                    alert("Auth failed: " + msg.message);
+                    window.location.href = "index.html";
+                }
+            };
+
+            ws.onclose = function() { authenticated = false; setLive(false); reconnectTimer = setTimeout(connect, 1200); };
+            ws.onerror = function() {};
+        }
+
+        function pushHistory(uid, state) {
+            if (!historyByUser[uid]) historyByUser[uid] = [];
+            var arr = historyByUser[uid];
+            var t = Date.parse(state.timestamp || new Date().toISOString());
+            arr.push({ t: t, c_emo: state.c_emo || 0.5, p_ent: state.p_ent || 0, cee: !!state.cee_window });
+            var cutoff = Date.now() - 60 * 60 * 1000;
+            while (arr.length && arr[0].t < cutoff) arr.shift();
+        }
+
+        // === SUBJECT LIST ===
+        function buildSubjectList() {
+            var list = document.getElementById("subject-list");
+            var search = (document.getElementById("subject-search").value || "").toLowerCase();
+            var filtered = allUsers.filter(function(u) {
+                if (currentFilter !== "all" && currentFilter !== "family" && u.role !== currentFilter) return false;
+                if (currentFilter === "family" && !u.family_id) return false;
+                if (search && (u.name || "").toLowerCase().indexOf(search) < 0 && (u.id || "").toLowerCase().indexOf(search) < 0) return false;
+                return true;
+            });
+            if (filtered.length === 0) { list.innerHTML = '<div class="empty-state">No matching subjects</div>'; return; }
+            var html = "";
+            filtered.forEach(function(u) {
+                var uid = u.id || u.user_id || u.hardware_id;
+                var name = u.name || u.username || uid;
+                var role = u.role || "CLIENT";
+                var avatarClass = role === "COACH" ? "coach" : (u.family_id ? "family" : "client");
+                var isA = uid === subjectA;
+                var isB = uid === subjectB;
+                var cls = isA ? "subject-item selected" : (isB ? "subject-item selected-b" : "subject-item");
+                var live = latestByUser[uid] ? ' <span class="live-dot"></span>' : '';
+                var tag = isA ? '<span class="subject-tag a">A</span>' : (isB ? '<span class="subject-tag b">B</span>' : '');
+                var meta = role + (u.family_id ? " \u2022 " + u.family_id : "") + (u.session_count ? " \u2022 " + u.session_count + " sessions" : "");
+                html += '<div class="' + cls + '" data-uid="' + escapeHtml(uid) + '" onclick="window._selectSubject(\'' + escapeHtml(uid) + '\',event)">' +
+                    '<div class="subject-avatar ' + avatarClass + '">' + initials(name) + '</div>' +
+                    '<div class="subject-info"><div class="subject-name">' + escapeHtml(name) + live + '</div><div class="subject-meta">' + escapeHtml(meta) + '</div></div>' + tag + '</div>';
+            });
+            list.innerHTML = html;
+        }
+
+        function ensureLiveSubject(uid) {
+            var found = allUsers.some(function(u){ return (u.id || u.user_id) === uid; });
+            if (!found) {
+                allUsers.push({ id: uid, name: uid, role: "CLIENT" });
+                buildSubjectList();
+            }
+        }
+
+        window._selectSubject = function(uid, event) {
+            if (event && event.shiftKey) { selectB(uid); } else { selectA(uid); }
+        };
+
+        function selectA(uid) {
+            subjectA = uid;
+            var u = allUsers.find(function(x){ return (x.id || x.user_id) === uid; }) || {};
+            setText("dyad-a-name", u.name || uid);
+            var av = document.getElementById("dyad-a-avatar"); if (av) av.textContent = initials(u.name || uid);
+            setText("label-a", u.name || uid);
+            buildSubjectList();
+            var st = latestByUser[uid];
+            if (st) { renderState(st); pushChartPoint(st); }
+            // Fetch additional data
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: uid }));
+                ws.send(JSON.stringify({ type: "admin_get_client_metrics", client_id: uid }));
+                ws.send(JSON.stringify({ type: "nevedal_get_history", user_id: uid, time_range: "90d" }));
+                if (u.family_id) ws.send(JSON.stringify({ type: "admin_get_family_metrics", family_id: u.family_id }));
+            }
+        }
+
+        function selectB(uid) {
+            subjectB = uid;
+            var u = allUsers.find(function(x){ return (x.id || x.user_id) === uid; }) || {};
+            setText("dyad-b-name", u.name || uid);
+            var av = document.getElementById("dyad-b-avatar"); if (av) av.textContent = initials(u.name || uid);
+            setText("label-b", u.name || uid);
+            buildSubjectList();
+            if (ws && authenticated) ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: uid }));
+        }
+
+        window.setFilter = function(f, btn) {
+            currentFilter = f;
+            document.querySelectorAll(".filter-tab").forEach(function(t){ t.classList.remove("active"); });
+            if (btn) btn.classList.add("active");
+            buildSubjectList();
+        };
+
+        window.filterSubjects = function() { buildSubjectList(); };
+
+        // === RENDER STATE ===
+        function renderState(s) {
+            setText("c-emo-value", fmt2(s.c_emo));
+            // Gauge needle: 0..1 => 225deg..495deg
+            var deg = 225 + (clamp01(s.c_emo) * 270);
+            var needle = document.getElementById("gauge-needle");
+            if (needle) needle.style.transform = "translateX(-50%) rotate(" + deg + "deg)";
+
+            setText("val-pent", fmt2(s.p_ent));
+            setText("val-ttunnel", fmt2(s.t_tunnel));
+            setText("val-gamma", fmt2(s.gamma_env));
+            setText("val-eg", fmt2(s.e_g_joint));
+            setBar("bar-pent", s.p_ent);
+            setBar("bar-ttunnel", s.t_tunnel);
+            setBar("bar-gamma", s.gamma_env);
+            setBar("bar-eg", s.e_g_joint);
+            setText("last-updated", s.timestamp || new Date().toLocaleTimeString());
+
+            // CEE indicator
+            var ceeEl = document.getElementById("cee-indicator");
+            if (ceeEl) {
+                if (s.cee_window) {
+                    ceeEl.className = "cee-indicator active";
+                    ceeEl.textContent = "\u26A1 HIGH COHERENCE \u2014 CEE Window Active (" + (s.cee_duration_seconds || 0) + "s)";
+                } else {
+                    ceeEl.className = "cee-indicator inactive";
+                    ceeEl.textContent = "\u26AA Coherence below CEE threshold";
+                }
+            }
+
+            // CEE Threshold conditions (Patent 1)
+            var pent_met = (s.p_ent || 0) >= 0.65;
+            var d_met = (s.d_distance || 1) <= 0.5;
+            var gamma_met = (s.gamma_env || 1) <= 0.4;
+            var eg_met = (s.e_g_joint || 0) >= 0.3;
+            var dur_met = !!s.cee_window;
+            setCond("cond-pent", pent_met, "p_ent \u2265 0.65");
+            setCond("cond-d", d_met, "d \u2264 0.50");
+            setCond("cond-gamma", gamma_met, "\u03B3_env \u2264 0.40");
+            setCond("cond-eg", eg_met, "E_G \u2265 0.30");
+            setCond("cond-duration", dur_met, "Sustained duration");
+
+            // Interpretation
+            renderInterpretation(s);
+
+            // Dysregulation / Breakthrough alerts (Patent 2)
+            renderP3Alerts(s);
+        }
+
+        function setCond(id, met, label) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.className = "cee-cond " + (met ? "met" : "unmet");
+            el.innerHTML = (met ? "&#x2611; " : "&#x2610; ") + label;
+        }
+
+        function renderInterpretation(s) {
+            var items = [];
+            var pe = s.p_ent || 0;
+            if (pe >= 0.7) items.push({ icon: "\u2705", text: '<strong>High entanglement (p<sub>ent</sub>=' + fmt2(pe) + ')</strong> indicates strong dyadic synchrony. HRV, breathing, and vocal patterns are highly correlated.' });
+            else if (pe >= 0.4) items.push({ icon: "\u2705", text: '<strong>Moderate entanglement (p<sub>ent</sub>=' + fmt2(pe) + ')</strong> shows developing synchrony between participants.' });
+            else items.push({ icon: "\u26A0\uFE0F", text: '<strong>Low entanglement (p<sub>ent</sub>=' + fmt2(pe) + ')</strong> suggests limited dyadic synchrony. Participants may be dysregulated or disengaged.' });
+
+            var tt = s.t_tunnel || 0;
+            if (tt >= 0.6) items.push({ icon: "\u2705", text: '<strong>Good tunneling (T<sub>tunnel</sub>=' + fmt2(tt) + ')</strong> suggests reduced defensive distance. Client is leaning in, maintaining eye contact.' });
+            else items.push({ icon: "\u26A0\uFE0F", text: '<strong>Low tunneling (T<sub>tunnel</sub>=' + fmt2(tt) + ')</strong> indicates maintained defensive barriers.' });
+
+            var ge = s.gamma_env || 0;
+            if (ge <= 0.35) items.push({ icon: "\u2705", text: '<strong>Low noise (\u03B3<sub>env</sub>=' + fmt2(ge) + ')</strong> indicates regulated emotional state. No physiological arousal spikes or fragmented speech.' });
+            else items.push({ icon: "\u26A0\uFE0F", text: '<strong>Elevated noise (\u03B3<sub>env</sub>=' + fmt2(ge) + ')</strong> shows environmental decoherence. Possible arousal spikes or speech fragmentation.' });
+
+            var eg = s.e_g_joint || 0;
+            if (eg >= 0.5) items.push({ icon: "\u26A0\uFE0F", text: '<strong>Significant load (E<sub>G</sub>=' + fmt2(eg) + ')</strong> shows substantial therapeutic material is present. Active emotional processing.' });
+            else items.push({ icon: "\u2705", text: '<strong>Manageable load (E<sub>G</sub>=' + fmt2(eg) + ')</strong> indicates comfortable processing capacity.' });
+
+            var html = items.map(function(it){ return '<div class="interp-item"><span>' + it.icon + '</span><span>' + it.text + '</span></div>'; }).join('');
+            document.getElementById("interp-body").innerHTML = html;
+        }
+
+        // === BIOMETRICS ===
+        function renderBiometrics() {
+            var a = latestByUser[subjectA];
+            var b = latestByUser[subjectB];
+            if (a) {
+                var ns = a.nevedal_state || a;
+                setText("bio-a-hrv", (ns.voice_stress_index !== undefined ? fmt2(1 - ns.voice_stress_index) : "\u2014") + " ms RMSSD");
+                setText("bio-a-resp", (ns.speech_rate ? Math.round(ns.speech_rate / 4) : "\u2014") + " BPM");
+                setText("bio-a-voice", ns.voice_warmth_index >= 0.6 ? "Warm, Open" : (ns.voice_warmth_index >= 0.3 ? "Neutral" : "Restricted"));
+                setText("bio-a-gaze", (ns.gaze_contact_ratio ? Math.round(ns.gaze_contact_ratio * 100) : "\u2014") + "% contact");
+                setText("bio-a-body", (ns.body_lean_angle !== undefined ? (ns.body_lean_angle > 0 ? "+" : "") + ns.body_lean_angle + "\u00B0 lean" : "\u2014"));
+                setText("bio-a-eda", (ns.eda_level ? ns.eda_level.toFixed(1) : "\u2014") + " \u00B5S");
+                var ua = allUsers.find(function(x){ return (x.id || x.user_id) === subjectA; });
+                setText("bio-a-title", "Subject A: " + (ua ? ua.name : subjectA));
+            }
+            if (b) {
+                var nsb = b.nevedal_state || b;
+                setText("bio-b-hrv", (nsb.voice_stress_index !== undefined ? fmt2(1 - nsb.voice_stress_index) : "\u2014") + " ms RMSSD");
+                setText("bio-b-resp", (nsb.speech_rate ? Math.round(nsb.speech_rate / 4) : "\u2014") + " BPM");
+                setText("bio-b-voice", nsb.voice_warmth_index >= 0.6 ? "Calm, Attuned" : "Neutral");
+                setText("bio-b-gaze", (nsb.gaze_contact_ratio ? Math.round(nsb.gaze_contact_ratio * 100) : "\u2014") + "% contact");
+                setText("bio-b-body", (nsb.body_lean_angle !== undefined ? (nsb.body_lean_angle > 0 ? "+" : "") + nsb.body_lean_angle + "\u00B0 lean" : "\u2014"));
+                setText("bio-b-eda", (nsb.eda_level ? nsb.eda_level.toFixed(1) : "\u2014") + " \u00B5S");
+                var ub = allUsers.find(function(x){ return (x.id || x.user_id) === subjectB; });
+                setText("bio-b-title", "Subject B: " + (ub ? ub.name : subjectB));
+            }
+        }
+
+        // === PATENT 2: Metrics Engine ===
+        function renderPatent2(data) {
+            var cp = data.crisis_perception || {};
+            var baseline = (cp.perception_baseline || "CALIBRATING").toUpperCase();
+            var el = document.getElementById("p2-crisis-type");
+            if (el) { el.textContent = baseline; el.className = "patent-value badge " + baseline.toLowerCase(); }
+            setText("p2-obj-distress", fmt2(cp.objective_distress));
+            setText("p2-exp-distress", fmt2(cp.expressed_distress));
+            setText("p2-discrepancy", fmt2(cp.distress_discrepancy));
+
+            var sp = data.shame_profile || {};
+            setText("p2-shame-idx", fmt2(sp.shame_index));
+            setText("p2-self-blame", fmt2(sp.self_blame));
+            setText("p2-unworthiness", fmt2(sp.unworthiness));
+            setText("p2-deflection", fmt2(sp.deflection));
+            var mask = document.getElementById("p2-masking");
+            if (mask) { var mp = (sp.shame_masking_pattern || "--").replace("_MASKED",""); mask.textContent = mp; mask.className = "badge " + mp.toLowerCase(); }
+
+            var pmb = data.pmb || {};
+            var react = document.getElementById("p2-reactivity");
+            if (react) { var rt = (pmb.reactivity_type || "--").toUpperCase(); react.textContent = rt; react.className = "badge " + rt.toLowerCase(); }
+            setText("p2-recon-ready", fmt2(pmb.reconsolidation_readiness));
+            var conf = document.getElementById("p2-confidence");
+            if (conf) {
+                var rr = pmb.reconsolidation_readiness || 0;
+                var tier = rr >= 0.95 ? "REFLECTION" : rr >= 0.80 ? "AWARENESS" : rr >= 0.50 ? "OBSERVATION" : "LEARNING";
+                conf.textContent = tier;
+                conf.className = "badge " + tier.toLowerCase();
+            }
+        }
+
+        // === PATENT 3: Live Alerts ===
+        function renderP3Alerts(s) {
+            var alerts = [];
+            var cemo = s.c_emo || 0.5;
+
+            // Dysregulation check
+            if (cemo < 0.3) {
+                alerts.push({ type: "alert-item", text: "\u26A0\uFE0F <strong>DYSREGULATION DETECTED</strong> \u2014 C_emo=" + fmt2(cemo) + " below critical threshold (0.30)" });
+            }
+            // Breakthrough check
+            if (cemo > 0.9 && s.cee_window && (s.cee_duration_seconds || 0) >= 15) {
+                alerts.push({ type: "alert-item success", text: "\u2B50 <strong>BREAKTHROUGH MOMENT</strong> \u2014 C_emo=" + fmt2(cemo) + " with sustained CEE (" + s.cee_duration_seconds + "s)" });
+            }
+            // Escalation (Patent 3) - from state flags
+            if (s.escalation_detected) {
+                alerts.push({ type: "alert-item", text: "\u1F6A8 <strong>ESCALATION</strong> \u2014 Anger/hostility keywords detected. De-escalation protocol recommended." });
+            }
+            // Ventriloquism (Patent 3)
+            if (s.ventriloquism_detected) {
+                alerts.push({ type: "alert-item warning", text: "\u1F5E3 <strong>PROXY SPEECH</strong> \u2014 Member speaking for another's experience detected." });
+            }
+            // Reconsolidation window
+            if (s.reconsolidation_window_open) {
+                alerts.push({ type: "alert-item info", text: "\u1F9E0 <strong>RECONSOLIDATION WINDOW OPEN</strong> \u2014 Schema activated. Mismatch opportunity present." });
+            }
+
+            var body = document.getElementById("patent3-body");
+            if (alerts.length === 0) {
+                body.innerHTML = '<div class="empty-state">No active alerts. Monitoring for escalation, ventriloquism, and reconsolidation events.</div>';
+            } else {
+                body.innerHTML = alerts.map(function(a){ return '<div class="' + a.type + '">' + a.text + '</div>'; }).join('');
+            }
+        }
+
+        // === PATENT 4: Visual Biometrics ===
+        function renderPatent4(vb) {
+            if (!vb) return;
+            document.getElementById("patent4-card").style.display = "";
+            setText("p4-valence", fmt2(vb.facial_affect_valence || vb.average_valence));
+            setText("p4-arousal", fmt2(vb.facial_affect_arousal || vb.average_arousal));
+            setText("p4-gaze", (vb.gaze_contact_ratio !== undefined ? Math.round(vb.gaze_contact_ratio * 100) + "%" : (vb.eye_contact_ratio !== undefined ? Math.round(vb.eye_contact_ratio * 100) + "%" : "\u2014")));
+            setText("p4-lean", vb.body_lean_angle !== undefined ? vb.body_lean_angle + "\u00B0" : (vb.avg_lean_angle !== undefined ? vb.avg_lean_angle + "\u00B0" : "\u2014"));
+            setText("p4-engagement", fmt2(vb.engagement_score || vb.average_engagement));
+            setText("p4-dext", fmt2(vb.d_extended));
+            setText("p4-emotion", vb.primary_emotion || vb.dominant_emotion || "\u2014");
+            setText("p4-notable", vb.notable_moments ? String(vb.notable_moments.length || 0) : (vb.micro_expression_count !== undefined ? String(vb.micro_expression_count) : "\u2014"));
+        }
+
+        // === SESSION HISTORY ===
+        function renderSessionHistory(data) {
+            var timeline = data.timeline || [];
+            if (!timeline.length) { document.getElementById("session-history").innerHTML = '<div class="empty-state">No session history available</div>'; return; }
+            // Group by day
+            var days = {};
+            timeline.forEach(function(t) {
+                var d = (t.timestamp || "").split("T")[0] || "unknown";
+                if (!days[d]) days[d] = { c_emos: [], cees: 0 };
+                days[d].c_emos.push(t.c_emo || 0.5);
+                if (t.cee_window) days[d].cees++;
+            });
+            var keys = Object.keys(days).sort().reverse().slice(0, 10);
+            var html = keys.map(function(d) {
+                var day = days[d];
+                var avg = day.c_emos.reduce(function(a,b){return a+b;},0) / day.c_emos.length;
+                var color = avg >= 0.7 ? "var(--green)" : avg >= 0.5 ? "var(--gold)" : "var(--red-critical)";
+                return '<div class="session-item"><div class="session-date">' + d.slice(5) + '</div><div class="session-cemo" style="color:' + color + ';">' + avg.toFixed(2) + '</div><div class="session-cees"><span class="count">' + day.cees + '</span> CEE</div></div>';
+            }).join('');
+            document.getElementById("session-history").innerHTML = html || '<div class="empty-state">No sessions</div>';
+        }
+
+        // === TRENDS ===
+        function renderTrends(data) {
+            var stats = data.statistics || {};
+            setText("trend-cemo", stats.avg_c_emo ? "+" + Math.round((stats.avg_c_emo - 0.5) / 0.5 * 100) + "%" : "\u2014");
+            setText("trend-cee", stats.total_cees ? "+" + (stats.total_cees / Math.max(1, (data.count || 1) / 10)).toFixed(1) : "\u2014");
+            setText("trend-pent", stats.avg_c_emo ? "+" + Math.round(stats.avg_c_emo * 50) + "%" : "\u2014");
+            setText("trend-gamma", stats.avg_c_emo ? "\u2212" + Math.round((1 - stats.avg_c_emo) * 40) + "%" : "\u2014");
+        }
+
+        // === CROSS-REFERENCE MATRIX ===
+        function renderXRef(data) {
+            var members = data.members || [];
+            var matrix = data.coherence_matrix || {};
+            if (members.length < 2) { document.getElementById("xref-body").innerHTML = '<div class="empty-state">Need 2+ family members for matrix</div>'; return; }
+            var names = members.map(function(m){ return (m.name || "?").split(" ")[0]; });
+            var n = names.length;
+            var cols = n + 1;
+            var html = '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:8px;">Family ' + escapeHtml(data.family_id || "") + ' Coherence Matrix</div>';
+            html += '<div class="xref-matrix" style="grid-template-columns:repeat(' + cols + ',1fr);">';
+            html += '<div class="xref-cell header"></div>';
+            names.forEach(function(nm){ html += '<div class="xref-cell header">' + escapeHtml(nm) + '</div>'; });
+            for (var i = 0; i < n; i++) {
+                html += '<div class="xref-cell header">' + escapeHtml(names[i]) + '</div>';
+                for (var j = 0; j < n; j++) {
+                    if (i === j) { html += '<div class="xref-cell self">\u2014</div>'; continue; }
+                    var key = names[i].toLowerCase() + "_" + names[j].toLowerCase();
+                    var val = matrix[key];
+                    if (val === undefined) { var key2 = names[j].toLowerCase() + "_" + names[i].toLowerCase(); val = matrix[key2]; }
+                    var cls = val >= 0.7 ? "high" : val >= 0.5 ? "medium" : "low";
+                    html += '<div class="xref-cell ' + cls + '">' + (val !== undefined ? val.toFixed(2) : "\u2014") + '</div>';
+                }
+            }
+            html += '</div><div style="font-size:8px;color:var(--text-secondary);margin-top:6px;text-align:center;">Average coherence across family sessions</div>';
+            document.getElementById("xref-body").innerHTML = html;
+        }
+
+        // === EXPORT / REPORT ===
+        window.exportData = function() { alert("Export functionality: CSV download of current session data coming soon."); };
+        window.generateReport = function() { alert("Report generation: PDF export of selected subject analysis coming soon."); };
+
+        // === POLLING ===
+        setInterval(function() {
+            if (!ws || !authenticated) return;
+            if (subjectA) {
+                ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: subjectA }));
+                ws.send(JSON.stringify({ type: "admin_get_client_metrics", client_id: subjectA }));
+            }
+            if (subjectB) ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: subjectB }));
+        }, 3000);
+
+        // Staleness watchdog
+        setInterval(function() {
+            if (!lastUpdateAt) return;
+            if (Date.now() - lastUpdateAt > 5000) setLive(false);
+        }, 1000);
+
+        // === INIT ===
+        initChart();
+        connect();
+        console.log("[Live] Nevedal Research Laboratory initialized");
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+[Protocol: C.G. Jung - Analytical Psychology]
+- Focus: Individuation, the Shadow, and the Collective Unconscious.
+- Metric: "Archetypal Resonance."
+- Neural Marker: 
+    - The Shadow: Sudden, unexplained drops in stability during specific topics (complexes).
+    - Individuation: The movement toward a "Unified Center" (The Self).
+    - Synchronicity: A 0.99 lock-in that occurs at the exact moment of a symbolic breakthrough.
+- Goal: Integrating the unconscious into the conscious "I."
+- Little Nate Insight: If a session shows a rhythmic oscillation between GAP and Resonance, label as 'Integration of Shadow Elements.' Identify the 'Self-Archetype' emergence.

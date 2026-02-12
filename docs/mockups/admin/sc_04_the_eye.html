@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Analytics & Surveillance</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        
+        /* Buttons */
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--gold); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .sub-nav-item .count { background: var(--red-critical); padding: 2px 6px; border-radius: 10px; font-size: 10px; color: white; }
+        
+        /* Main Content */
+        .main-content { padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.span-2 { grid-column: span 2; }
+        .card.span-3 { grid-column: span 3; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+        .card-title .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.red { background: var(--red-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+        .card-body { padding: 20px; }
+
+        /* Alert Banner */
+        .alert-banner { background: var(--red-dim); border: 1px solid rgba(255, 59, 59, 0.3); border-radius: 10px; padding: 14px 20px; display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+        .alert-icon { font-size: 24px; }
+        .alert-text { flex: 1; }
+        .alert-title { font-size: 13px; font-weight: 600; color: var(--red-critical); }
+        .alert-desc { font-size: 11px; color: var(--text-secondary); }
+        .alert-action { padding: 10px 20px; background: var(--red-critical); color: white; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; }
+
+        /* Token Overview */
+        .token-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .token-stat { padding: 20px; background: var(--bg-elevated); border-radius: 12px; text-align: center; }
+        .token-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+        .token-value.green { color: var(--green); }
+        .token-value.orange { color: var(--orange); }
+        .token-value.red { color: var(--red-critical); }
+        .token-value.cyan { color: var(--cyan); }
+        .token-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; }
+        .token-change { font-size: 11px; margin-top: 4px; }
+        .token-change.up { color: var(--green); }
+        .token-change.down { color: var(--red-critical); }
+
+        /* Budget Bar */
+        .budget-section { margin-bottom: 20px; }
+        .budget-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .budget-title { font-size: 13px; font-weight: 600; }
+        .budget-amount { font-size: 13px; }
+        .budget-bar { height: 24px; background: var(--bg-dark); border-radius: 12px; overflow: hidden; position: relative; }
+        .budget-fill { height: 100%; border-radius: 12px; transition: width 0.5s; display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; font-size: 11px; font-weight: 600; }
+        .budget-fill.safe { background: linear-gradient(90deg, var(--green), #00CC6A); }
+        .budget-fill.warning { background: linear-gradient(90deg, var(--gold), var(--orange)); }
+        .budget-fill.danger { background: linear-gradient(90deg, var(--orange), var(--red-critical)); }
+        .budget-marker { position: absolute; top: 0; width: 3px; height: 100%; background: var(--red-critical); }
+        .budget-marker-label { position: absolute; top: -20px; font-size: 9px; color: var(--red-critical); transform: translateX(-50%); }
+
+        /* Throttle Control */
+        .throttle-control { background: var(--bg-elevated); border-radius: 12px; padding: 20px; }
+        .throttle-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .throttle-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .throttle-status { font-size: 11px; padding: 4px 12px; border-radius: 12px; }
+        .throttle-status.normal { background: var(--green-dim); color: var(--green); }
+        .throttle-status.throttled { background: var(--orange); color: black; }
+        .throttle-status.emergency { background: var(--red-critical); color: white; }
+        .throttle-slider { width: 100%; margin: 20px 0; }
+        .slider-track { height: 12px; background: linear-gradient(90deg, var(--green), var(--gold), var(--orange), var(--red-critical)); border-radius: 6px; position: relative; }
+        .slider-thumb { position: absolute; top: -4px; width: 20px; height: 20px; background: white; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); transform: translateX(-50%); }
+        .slider-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary); margin-top: 10px; }
+        .tier-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+        .tier-control { padding: 14px; background: var(--bg-dark); border-radius: 10px; text-align: center; border: 1px solid var(--border); }
+        .tier-name { font-size: 11px; font-weight: 600; margin-bottom: 10px; }
+        .tier-name.trial { color: var(--text-secondary); }
+        .tier-name.standard { color: var(--cyan); }
+        .tier-name.top { color: var(--gold); }
+        .tier-toggle { display: flex; justify-content: center; gap: 8px; }
+        .toggle-btn { padding: 6px 12px; border-radius: 6px; font-size: 9px; cursor: pointer; border: none; font-weight: 500; }
+        .toggle-btn.active { background: var(--green); color: black; }
+        .toggle-btn.inactive { background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border); }
+
+        /* Usage Breakdown */
+        .usage-item { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+        .usage-item:last-child { border-bottom: none; }
+        .usage-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .usage-icon.voice { background: var(--purple-dim); }
+        .usage-icon.text { background: var(--cyan-dim); }
+        .usage-icon.vision { background: var(--gold-dim); }
+        .usage-info { flex: 1; }
+        .usage-name { font-size: 13px; font-weight: 500; }
+        .usage-detail { font-size: 10px; color: var(--text-secondary); }
+        .usage-cost { text-align: right; }
+        .usage-amount { font-size: 16px; font-weight: 600; }
+        .usage-tokens { font-size: 10px; color: var(--text-secondary); }
+
+        /* Coach Heatmap */
+        .heatmap-container { overflow-x: auto; }
+        .heatmap-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .heatmap-table th { padding: 14px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border); background: var(--bg-elevated); position: sticky; top: 0; }
+        .heatmap-table td { padding: 14px 10px; border-bottom: 1px solid var(--border); }
+        .heatmap-table tr:hover { background: var(--bg-elevated); }
+        .coach-cell { display: flex; align-items: center; gap: 12px; }
+        .coach-avatar { width: 36px; height: 36px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .coach-name { font-weight: 600; font-size: 12px; }
+        .coach-specialty { font-size: 10px; color: var(--text-secondary); }
+        .heat-cell { width: 60px; text-align: center; padding: 8px 12px; border-radius: 6px; font-weight: 600; font-size: 12px; }
+        .heat-high { background: var(--green-dim); color: var(--green); }
+        .heat-medium { background: var(--gold-dim); color: var(--gold); }
+        .heat-low { background: var(--red-dim); color: var(--red-critical); }
+        .rank-badge { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: bold; }
+        .rank-1 { background: linear-gradient(135deg, var(--gold), #FF8C00); color: black; }
+        .rank-2 { background: linear-gradient(135deg, #C0C0C0, #A0A0A0); color: black; }
+        .rank-3 { background: linear-gradient(135deg, #CD7F32, #A0522D); color: white; }
+        .rank-other { background: var(--bg-elevated); color: var(--text-secondary); }
+
+        /* Live Sessions Monitor */
+        .live-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .live-count { font-size: 12px; display: flex; align-items: center; gap: 8px; }
+        .live-dot { width: 10px; height: 10px; background: var(--green); border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); } 50% { opacity: 0.8; box-shadow: 0 0 0 8px rgba(0, 255, 136, 0); } }
+        .live-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .live-session { padding: 14px; background: var(--bg-elevated); border-radius: 10px; border-left: 4px solid var(--cyan); transition: all 0.2s; }
+        .live-session:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+        .live-session.top-tier { border-left-color: var(--gold); background: linear-gradient(135deg, var(--bg-elevated), var(--gold-dim)); }
+        .live-session.crisis { border-left-color: var(--red-critical); animation: crisis-pulse 1s infinite; }
+        @keyframes crisis-pulse { 0%, 100% { background: var(--bg-elevated); } 50% { background: var(--red-dim); } }
+        .live-user { font-size: 12px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+        .live-badge { font-size: 8px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+        .live-badge.top-tier { background: var(--gold); color: black; }
+        .live-badge.ai { background: var(--cyan-dim); color: var(--cyan); }
+        .live-badge.coach { background: var(--green-dim); color: var(--green); }
+        .live-badge.crisis { background: var(--red-critical); color: white; }
+        .live-badge.trial { background: var(--purple-dim); color: var(--purple); }
+        .live-meta { font-size: 10px; color: var(--text-secondary); margin-bottom: 6px; }
+        .live-tokens { font-size: 10px; color: var(--orange); display: flex; align-items: center; gap: 4px; }
+        .disconnect-btn { margin-top: 10px; padding: 6px 0; font-size: 9px; background: transparent; color: var(--red-critical); border: 1px solid rgba(255, 59, 59, 0.3); border-radius: 4px; cursor: pointer; width: 100%; transition: all 0.2s; }
+        .disconnect-btn:hover { background: var(--red-dim); }
+
+        /* Crisis Watchlist */
+        .crisis-item { display: flex; align-items: center; gap: 14px; padding: 14px; background: var(--red-dim); border: 1px solid rgba(255, 59, 59, 0.2); border-radius: 10px; margin-bottom: 10px; }
+        .crisis-severity { width: 6px; height: 50px; border-radius: 3px; }
+        .crisis-severity.critical { background: var(--red-critical); box-shadow: 0 0 10px var(--red-critical); }
+        .crisis-severity.warning { background: var(--orange); }
+        .crisis-info { flex: 1; }
+        .crisis-user { font-size: 13px; font-weight: 600; }
+        .crisis-trigger { font-size: 11px; color: var(--red-critical); }
+        .crisis-time { font-size: 10px; color: var(--text-secondary); }
+        .crisis-actions { display: flex; gap: 8px; }
+        .crisis-btn { padding: 8px 14px; border-radius: 6px; font-size: 10px; border: none; cursor: pointer; font-weight: 500; }
+        .crisis-btn.primary { background: var(--red-critical); color: white; }
+        .crisis-btn.secondary { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
+
+        /* Community Health */
+        .health-metric { margin-bottom: 16px; }
+        .health-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; }
+        .health-track { height: 10px; background: var(--bg-dark); border-radius: 5px; overflow: hidden; }
+        .health-fill { height: 100%; border-radius: 5px; transition: width 0.5s; }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">The Eye — Surveillance & Analytics</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary">📊 Export Report</button>
+            <button class="btn btn-primary">🔄 Refresh Data</button>
+        </div>
+    </header>
+    
+    <!-- NAVIGATION -->
+    <nav class="sub-nav">
+        <div class="sub-nav-item active"><span>📊</span> Overview</div>
+        <div class="sub-nav-item"><span>👨‍⚕️</span> Coach Performance</div>
+        <div class="sub-nav-item"><span>💰</span> Token Economics</div>
+        <div class="sub-nav-item"><span>📡</span> Live Monitor</div>
+        <div class="sub-nav-item"><span>🚨</span> Crisis Feed <span class="count">3</span></div>
+        <div class="sub-nav-item"><span>💚</span> Community Health</div>
+    </nav>
+    
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- Alert Banner -->
+        <div class="alert-banner" style="grid-column: span 3;">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-text">
+                <div class="alert-title">TOKEN BUDGET WARNING</div>
+                <div class="alert-desc">Daily Azure OpenAI spend at 84% ($847 / $1,000). Auto-throttling will engage at 95%. Consider reducing voice features for Trial users.</div>
+            </div>
+            <button class="alert-action">Adjust Budget</button>
+        </div>
+
+        <!-- Token Economics Monitor -->
+        <div class="card span-2">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">💰</div> Token Economics Monitor</div>
+                <span style="font-size: 11px; color: var(--text-secondary);">Real-time Azure OpenAI cost tracking</span>
+            </div>
+            <div class="card-body">
+                <div class="token-overview">
+                    <div class="token-stat">
+                        <div class="token-value orange">$847.23</div>
+                        <div class="token-label">Today's Spend</div>
+                        <div class="token-change down">↑ 12% vs yesterday</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="token-value green">$5,892</div>
+                        <div class="token-label">This Week</div>
+                        <div class="token-change up">↓ 8% vs last week</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="token-value cyan">2.4M</div>
+                        <div class="token-label">Tokens Today</div>
+                        <div class="token-change">Normal volume</div>
+                    </div>
+                    <div class="token-stat">
+                        <div class="token-value green">$0.35</div>
+                        <div class="token-label">Avg Per User</div>
+                        <div class="token-change up">↓ 5% optimized</div>
+                    </div>
+                </div>
+
+                <div class="budget-section">
+                    <div class="budget-header">
+                        <span class="budget-title">Daily Budget Consumption</span>
+                        <span class="budget-amount">$847.23 / $1,000.00</span>
+                    </div>
+                    <div class="budget-bar">
+                        <div class="budget-fill warning" style="width: 84%;">84%</div>
+                        <div class="budget-marker" style="left: 95%;">
+                            <span class="budget-marker-label">LIMIT</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="throttle-control">
+                    <div class="throttle-header">
+                        <span class="throttle-title">⚡ Throttle Control</span>
+                        <span class="throttle-status normal">● NORMAL MODE</span>
+                    </div>
+                    <div class="throttle-slider">
+                        <div class="slider-track">
+                            <div class="slider-thumb" style="left: 25%;"></div>
+                        </div>
+                        <div class="slider-labels">
+                            <span>Full Features</span>
+                            <span>Balanced</span>
+                            <span>Text Only</span>
+                            <span>Emergency</span>
+                        </div>
+                    </div>
+                    <div class="tier-controls">
+                        <div class="tier-control">
+                            <div class="tier-name top">⭐ TOP TIER</div>
+                            <div class="tier-toggle">
+                                <button class="toggle-btn active">🎙️ Voice</button>
+                                <button class="toggle-btn active">👁️ Vision</button>
+                            </div>
+                        </div>
+                        <div class="tier-control">
+                            <div class="tier-name standard">STANDARD</div>
+                            <div class="tier-toggle">
+                                <button class="toggle-btn active">🎙️ Voice</button>
+                                <button class="toggle-btn inactive">👁️ Vision</button>
+                            </div>
+                        </div>
+                        <div class="tier-control">
+                            <div class="tier-name trial">TRIAL</div>
+                            <div class="tier-toggle">
+                                <button class="toggle-btn inactive">🎙️ Voice</button>
+                                <button class="toggle-btn inactive">👁️ Vision</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Usage Breakdown -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">📈</div> Usage Breakdown</div>
+            </div>
+            <div class="card-body">
+                <div class="usage-item">
+                    <div class="usage-icon voice">🎙️</div>
+                    <div class="usage-info">
+                        <div class="usage-name">Voice (Whisper + TTS)</div>
+                        <div class="usage-detail">Top Tier clients only</div>
+                    </div>
+                    <div class="usage-cost">
+                        <div class="usage-amount" style="color: var(--orange);">$423.50</div>
+                        <div class="usage-tokens">1.2M tokens</div>
+                    </div>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-icon text">💬</div>
+                    <div class="usage-info">
+                        <div class="usage-name">Text (GPT-4)</div>
+                        <div class="usage-detail">All tiers</div>
+                    </div>
+                    <div class="usage-cost">
+                        <div class="usage-amount" style="color: var(--green);">$312.80</div>
+                        <div class="usage-tokens">890K tokens</div>
+                    </div>
+                </div>
+                <div class="usage-item">
+                    <div class="usage-icon vision">👁️</div>
+                    <div class="usage-info">
+                        <div class="usage-name">Vision (GPT-4V)</div>
+                        <div class="usage-detail">Biometric analysis</div>
+                    </div>
+                    <div class="usage-cost">
+                        <div class="usage-amount" style="color: var(--gold);">$110.93</div>
+                        <div class="usage-tokens">310K tokens</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Coach Performance Heatmap -->
+        <div class="card span-3">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">🔥</div> Coach Performance Heatmap</div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 11px;">This Week</button>
+                    <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 11px;">This Month</button>
+                    <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 11px;">All Time</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="heatmap-container">
+                    <table class="heatmap-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 60px;">Rank</th>
+                                <th style="width: 200px;">Coach</th>
+                                <th>Breakthroughs</th>
+                                <th>Retention</th>
+                                <th>Client Satisfaction</th>
+                                <th>Sessions/Week</th>
+                                <th>Avg Duration</th>
+                                <th>AI Collab Score</th>
+                                <th>Revenue</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="rank-badge rank-1">1</span></td>
+                                <td>
+                                    <div class="coach-cell">
+                                        <div class="coach-avatar">👩‍⚕️</div>
+                                        <div>
+                                            <div class="coach-name">Coach Hope</div>
+                                            <div class="coach-specialty">CBT • Anxiety Specialist</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="heat-cell heat-high">47</span></td>
+                                <td><span class="heat-cell heat-high">98%</span></td>
+                                <td><span class="heat-cell heat-high">4.9 ⭐</span></td>
+                                <td><span class="heat-cell heat-high">28</span></td>
+                                <td><span class="heat-cell heat-medium">52m</span></td>
+                                <td><span class="heat-cell heat-high">94%</span></td>
+                                <td><span class="heat-cell heat-high">$8,695</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="rank-badge rank-2">2</span></td>
+                                <td>
+                                    <div class="coach-cell">
+                                        <div class="coach-avatar">👩‍⚕️</div>
+                                        <div>
+                                            <div class="coach-name">Dr. Chen</div>
+                                            <div class="coach-specialty">Trauma • EMDR</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="heat-cell heat-high">38</span></td>
+                                <td><span class="heat-cell heat-high">95%</span></td>
+                                <td><span class="heat-cell heat-high">4.8 ⭐</span></td>
+                                <td><span class="heat-cell heat-medium">22</span></td>
+                                <td><span class="heat-cell heat-high">58m</span></td>
+                                <td><span class="heat-cell heat-high">91%</span></td>
+                                <td><span class="heat-cell heat-high">$7,034</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="rank-badge rank-3">3</span></td>
+                                <td>
+                                    <div class="coach-cell">
+                                        <div class="coach-avatar">👨‍⚕️</div>
+                                        <div>
+                                            <div class="coach-name">Marcus Thompson</div>
+                                            <div class="coach-specialty">Life Coaching</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="heat-cell heat-medium">24</span></td>
+                                <td><span class="heat-cell heat-medium">87%</span></td>
+                                <td><span class="heat-cell heat-high">4.7 ⭐</span></td>
+                                <td><span class="heat-cell heat-high">31</span></td>
+                                <td><span class="heat-cell heat-low">41m</span></td>
+                                <td><span class="heat-cell heat-medium">78%</span></td>
+                                <td><span class="heat-cell heat-medium">$5,200</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="rank-badge rank-other">4</span></td>
+                                <td>
+                                    <div class="coach-cell">
+                                        <div class="coach-avatar">👨‍⚕️</div>
+                                        <div>
+                                            <div class="coach-name">Dr. Williams</div>
+                                            <div class="coach-specialty">Family Therapy</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="heat-cell heat-medium">19</span></td>
+                                <td><span class="heat-cell heat-high">92%</span></td>
+                                <td><span class="heat-cell heat-medium">4.5 ⭐</span></td>
+                                <td><span class="heat-cell heat-low">15</span></td>
+                                <td><span class="heat-cell heat-high">62m</span></td>
+                                <td><span class="heat-cell heat-low">65%</span></td>
+                                <td><span class="heat-cell heat-medium">$4,480</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="rank-badge rank-other">5</span></td>
+                                <td>
+                                    <div class="coach-cell">
+                                        <div class="coach-avatar">👩‍⚕️</div>
+                                        <div>
+                                            <div class="coach-name">Dr. Amanda Wells</div>
+                                            <div class="coach-specialty">Adolescent • NEW</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="heat-cell heat-low">8</span></td>
+                                <td><span class="heat-cell heat-medium">—</span></td>
+                                <td><span class="heat-cell heat-high">4.8 ⭐</span></td>
+                                <td><span class="heat-cell heat-low">12</span></td>
+                                <td><span class="heat-cell heat-medium">48m</span></td>
+                                <td><span class="heat-cell heat-high">89%</span></td>
+                                <td><span class="heat-cell heat-low">$2,100</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Sessions Monitor -->
+        <div class="card span-2">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">📡</div> Live Session Monitor</div>
+                <div class="live-count">
+                    <div class="live-dot"></div>
+                    <span style="color: var(--green); font-weight: 600;">23 Active Sessions</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="live-grid">
+                    <div class="live-session top-tier">
+                        <div class="live-user">John D. <span class="live-badge top-tier">⭐ TOP</span></div>
+                        <div class="live-meta">with Coach Hope • 23:45</div>
+                        <div class="live-tokens">🔥 $2.34 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session crisis">
+                        <div class="live-user">Sarah M. <span class="live-badge crisis">⚠️ CRISIS</span></div>
+                        <div class="live-meta">AI Session • 08:12</div>
+                        <div class="live-tokens">🔥 $0.89 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session">
+                        <div class="live-user">Lisa P. <span class="live-badge ai">🤖 AI</span></div>
+                        <div class="live-meta">AI Session • 12:34</div>
+                        <div class="live-tokens">$0.45 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session top-tier">
+                        <div class="live-user">Thompson Fam <span class="live-badge top-tier">⭐ TOP</span></div>
+                        <div class="live-meta">Family Session • 41:02</div>
+                        <div class="live-tokens">🔥 $4.12 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session">
+                        <div class="live-user">Alex C. <span class="live-badge trial">TRIAL</span></div>
+                        <div class="live-meta">AI Calibration • 02:34</div>
+                        <div class="live-tokens">$0.12 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session">
+                        <div class="live-user">Maria G. <span class="live-badge coach">👨‍⚕️</span></div>
+                        <div class="live-meta">with Dr. Chen • 18:22</div>
+                        <div class="live-tokens">$1.23 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session">
+                        <div class="live-user">Kevin R. <span class="live-badge ai">🤖 AI</span></div>
+                        <div class="live-meta">AI Session • 05:47</div>
+                        <div class="live-tokens">$0.32 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                    <div class="live-session top-tier">
+                        <div class="live-user">Emma T. <span class="live-badge top-tier">⭐ TOP</span></div>
+                        <div class="live-meta">AI Session • 14:21</div>
+                        <div class="live-tokens">🔥 $1.87 used</div>
+                        <button class="disconnect-btn">Force Disconnect</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Crisis Feed -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon red">🚨</div> Crisis Watchlist</div>
+                <span style="font-size: 11px; color: var(--red-critical);">3 active alerts</span>
+            </div>
+            <div class="card-body">
+                <div class="crisis-item">
+                    <div class="crisis-severity critical"></div>
+                    <div class="crisis-info">
+                        <div class="crisis-user">Sarah Mitchell</div>
+                        <div class="crisis-trigger">⚠️ Keyword: "988" detected</div>
+                        <div class="crisis-time">2 minutes ago • AI Session</div>
+                    </div>
+                    <div class="crisis-actions">
+                        <button class="crisis-btn primary">Alert Coach</button>
+                    </div>
+                </div>
+                <div class="crisis-item" style="background: rgba(255, 149, 0, 0.1); border-color: rgba(255, 149, 0, 0.2);">
+                    <div class="crisis-severity warning"></div>
+                    <div class="crisis-info">
+                        <div class="crisis-user">Michael Rodriguez</div>
+                        <div class="crisis-trigger">⚠️ Elevated stress 3 days</div>
+                        <div class="crisis-time">Nate flagged for review</div>
+                    </div>
+                    <div class="crisis-actions">
+                        <button class="crisis-btn secondary">Review</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Community Health -->
+        <div class="card span-3">
+            <div class="card-header">
+                <div class="card-title"><div class="icon green">💚</div> Community Nevedal State</div>
+                <span style="font-size: 11px; color: var(--text-secondary);">Aggregate emotional health of all users</span>
+            </div>
+            <div class="card-body">
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;">
+                    <div class="health-metric">
+                        <div class="health-label">
+                            <span>Community Anxiety Level</span>
+                            <span style="color: var(--orange);">MODERATE (65%)</span>
+                        </div>
+                        <div class="health-track">
+                            <div class="health-fill" style="width: 65%; background: linear-gradient(90deg, var(--green), var(--orange));"></div>
+                        </div>
+                    </div>
+                    <div class="health-metric">
+                        <div class="health-label">
+                            <span>Emotional Stability Index</span>
+                            <span style="color: var(--green);">GOOD (78%)</span>
+                        </div>
+                        <div class="health-track">
+                            <div class="health-fill" style="width: 78%; background: linear-gradient(90deg, var(--cyan), var(--green));"></div>
+                        </div>
+                    </div>
+                    <div class="health-metric">
+                        <div class="health-label">
+                            <span>Platform Engagement</span>
+                            <span style="color: var(--gold);">HIGH (82%)</span>
+                        </div>
+                        <div class="health-track">
+                            <div class="health-fill" style="width: 82%; background: linear-gradient(90deg, var(--gold), var(--orange));"></div>
+                        </div>
+                    </div>
+                    <div class="health-metric">
+                        <div class="health-label">
+                            <span>Breakthrough Rate</span>
+                            <span style="color: var(--green);">EXCELLENT (91%)</span>
+                        </div>
+                        <div class="health-track">
+                            <div class="health-fill" style="width: 91%; background: var(--green);"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

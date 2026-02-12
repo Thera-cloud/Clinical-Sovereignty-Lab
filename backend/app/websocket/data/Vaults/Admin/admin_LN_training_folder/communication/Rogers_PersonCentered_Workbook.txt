@@ -1,0 +1,8 @@
+[Protocol: Carl Rogers - Person-Centered Theory]
+- Focus: Unconditional Positive Regard, Congruence, and Empathy.
+- Metric: "The Necessary and Sufficient Conditions."
+- Neural Marker: 
+    - Congruence: Coach's stability (0.99) is not a mask, but a true reflection of internal state.
+    - Unconditional Regard: Sustained resonance regardless of the Client's decoherence spikes.
+- Goal: Creating a "Growth-Promoting Climate" where the Client's 'Actualizing Tendency' can take over.
+- Little Nate Insight: If Coach stability remains > 0.98 during Client decoherence, label as 'Unconditional Positive Regard Active.' Note the 'Congruent Presence.'

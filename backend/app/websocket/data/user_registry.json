@@ -1,0 +1,370 @@
+{
+  "client_client1b": {
+    "credentials": {
+      "username": "client1b",
+      "password": "test123"
+    },
+    "profile": {
+      "role": "CLIENT",
+      "name": "Jane D.",
+      "email": "client1b@example.com",
+      "hardware_id": "CLIENT_001B",
+      "subscription_plan": "TOP_TIER",
+      "subscription_status": "ACTIVE",
+      "token_balance": 50000,
+      "joined_date": "2026-01-20T10:00:00.000000",
+      "assigned_coach": "coach1",
+      "family_id": "FAM_1834DACF",
+      "family_role": "MEMBER",
+      "consent_version": "v12.6_2026_FINAL",
+      "last_login": "2026-02-01 00:27:12.186939",
+      "login_count": 283,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach1": {
+    "credentials": {
+      "username": "coach1",
+      "password": "test123"
+    },
+    "username": "coach1",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "role": "COACH",
+      "name": "Coach Hope",
+      "email": "coach1@littlenate.ai",
+      "hardware_id": "COACH_001",
+      "subscription_plan": "TOP_TIER",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-10-20T23:14:04.403879",
+      "consent_version": "v12.6_2026_FINAL",
+      "specialty": "CBT - Anxiety Specialist",
+      "client_count": 12,
+      "total_sessions": 106,
+      "breakthroughs": 13,
+      "retention_rate": 85,
+      "satisfaction": 4.7,
+      "sessions_per_week": 24,
+      "last_login": "2026-02-01 22:26:56.869402",
+      "login_count": 38,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach2": {
+    "username": "coach2",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "name": "Dr. Chen",
+      "email": "coach2@littlenate.ai",
+      "hardware_id": "COACH_002",
+      "subscription_plan": "TOP_TIER",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-04-15T23:14:04.403933",
+      "specialty": "Trauma - EMDR",
+      "client_count": 8,
+      "total_sessions": 125,
+      "breakthroughs": 12,
+      "retention_rate": 92,
+      "satisfaction": 4.7,
+      "sessions_per_week": 35,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach3": {
+    "username": "coach3",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "name": "Marcus Thompson",
+      "email": "coach3@littlenate.ai",
+      "hardware_id": "COACH_003",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-05-23T23:14:04.403948",
+      "specialty": "Life Coaching",
+      "client_count": 15,
+      "total_sessions": 65,
+      "breakthroughs": 18,
+      "retention_rate": 95,
+      "satisfaction": 4.6,
+      "sessions_per_week": 32,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach4": {
+    "username": "coach4",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "name": "Dr. Williams",
+      "email": "coach4@littlenate.ai",
+      "hardware_id": "COACH_004",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-07-08T23:14:04.403958",
+      "specialty": "Family Therapy",
+      "client_count": 6,
+      "total_sessions": 192,
+      "breakthroughs": 29,
+      "retention_rate": 93,
+      "satisfaction": 4.6,
+      "sessions_per_week": 16,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach5": {
+    "username": "coach5",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "name": "Dr. Amanda Wells",
+      "email": "coach5@littlenate.ai",
+      "hardware_id": "COACH_005",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-10-13T23:14:04.403967",
+      "specialty": "Adolescent - NEW",
+      "client_count": 4,
+      "total_sessions": 54,
+      "breakthroughs": 49,
+      "retention_rate": 89,
+      "satisfaction": 4.7,
+      "sessions_per_week": 31,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client_client1": {
+    "credentials": {
+      "username": "client1",
+      "password": "test123"
+    },
+    "profile": {
+      "role": "CLIENT",
+      "name": "John D.",
+      "email": "client1@example.com",
+      "hardware_id": "CLIENT_001",
+      "subscription_plan": "TOP_TIER",
+      "subscription_status": "ACTIVE",
+      "token_balance": 50000,
+      "joined_date": "2026-01-17T23:14:04.403978",
+      "assigned_coach": "coach1",
+      "family_id": "FAM_1834DACF",
+      "family_role": "HEAD",
+      "consent_version": "v12.6_2026_FINAL",
+      "last_login": "2026-02-01 20:07:47.688204",
+      "login_count": 529,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client2": {
+    "username": "client2",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Sarah M.",
+      "email": "client2@example.com",
+      "hardware_id": "CLIENT_002",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-11-03T23:14:04.403985",
+      "assigned_coach": "coach2",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client3": {
+    "username": "client3",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Lisa P.",
+      "email": "client3@example.com",
+      "hardware_id": "CLIENT_003",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-12-24T23:14:04.403992",
+      "assigned_coach": "coach5",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client4": {
+    "username": "client4",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Alex C.",
+      "email": "client4@example.com",
+      "hardware_id": "CLIENT_004",
+      "subscription_plan": "TRIAL",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2026-01-03T23:14:04.403997",
+      "assigned_coach": "coach1",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client5": {
+    "username": "client5",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Maria G.",
+      "email": "client5@example.com",
+      "hardware_id": "CLIENT_005",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-12-29T23:14:04.404002",
+      "assigned_coach": "coach3",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client6": {
+    "username": "client6",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Kevin R.",
+      "email": "client6@example.com",
+      "hardware_id": "CLIENT_006",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-12-12T23:14:04.404008",
+      "assigned_coach": "coach3",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client7": {
+    "username": "client7",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Emma T.",
+      "email": "client7@example.com",
+      "hardware_id": "CLIENT_007",
+      "subscription_plan": "TRIAL",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-11-12T23:14:04.404013",
+      "assigned_coach": "coach4",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client8": {
+    "username": "client8",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Michael R.",
+      "email": "client8@example.com",
+      "hardware_id": "CLIENT_008",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2025-11-30T23:14:04.404017",
+      "assigned_coach": "coach4",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "client9": {
+    "username": "client9",
+    "password_hash": "hashed_password",
+    "role": "CLIENT",
+    "profile": {
+      "name": "Thompson Fam",
+      "email": "client9@example.com",
+      "hardware_id": "CLIENT_009",
+      "subscription_plan": "STANDARD",
+      "subscription_status": "active",
+      "token_balance": 50000,
+      "joined_date": "2026-01-11T23:14:04.404022",
+      "assigned_coach": "coach4",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "coach_freeindeed": {
+    "credentials": {
+      "username": "coach_freeindeed",
+      "password": "3333"
+    },
+    "username": "coach_freeindeed",
+    "password_hash": "hashed_password",
+    "role": "COACH",
+    "profile": {
+      "role": "COACH",
+      "name": "KRISTY moore",
+      "email": "",
+      "hardware_id": "COACH_FREEINDEED_ID",
+      "subscription_plan": "COACH",
+      "subscription_status": "ACTIVE",
+      "certification_status": "APPROVED",
+      "coach_verified": true,
+      "token_balance": 50000,
+      "joined_date": "2026-02-10T00:00:00.000000",
+      "family_id": "FAM_E6965D9A",
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  },
+  "admin_admin1": {
+    "credentials": {
+      "username": "admin1",
+      "password": "07cfa13b5b6f7fdc150101bcacc7fe2a:92207ffda1b89795d4451facb5f745aa65d49e59561e6b07fc9a88bab28e7921"
+    },
+    "profile": {
+      "role": "ADMIN",
+      "name": "Admin User",
+      "email": "admin@littlenate.ai",
+      "phone": "",
+      "hardware_id": "ADMIN_ADMIN1_ID",
+      "family_id": "FAM_1834DACF",
+      "family_role": "HEAD",
+      "joined_date": "2026-01-26",
+      "tier": "STANDARD",
+      "dob": "",
+      "consent_version": "v12.6_2026_FINAL",
+      "timezone": "America/New_York",
+      "profile_photo_url": "",
+      "emergency_contact": "",
+      "subscription_status": "ACTIVE",
+      "subscription_plan": "TOP_TIER",
+      "stripe_customer_id": "",
+      "subscription_start_date": "2026-01-26",
+      "trial_end_date": "2026-02-09",
+      "total_sessions_count": 0,
+      "token_balance": 50000,
+      "token_usage_today": 0,
+      "token_usage_month": 0,
+      "last_token_reset": "2026-01-26",
+      "assigned_coach_id": "",
+      "last_login": "2026-02-01 21:48:55.370334",
+      "login_count": 277,
+      "created_at": "2026-01-26 00:22:00.174009",
+      "updated_at": "2026-01-26 00:22:00.174013"
+    }
+  }
+}

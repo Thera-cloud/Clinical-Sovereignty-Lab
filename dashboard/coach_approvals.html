@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coach Approvals | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .content { padding: 24px; max-width: 900px; margin: 0 auto; }
+        .content-header { margin-bottom: 24px; }
+        .content-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+        .content-subtitle { font-size: 14px; color: var(--text-secondary); }
+        .tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+        .tab { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; cursor: pointer; color: var(--text-secondary); }
+        .tab.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+        .approval-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+        .approval-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+        .approval-avatar { width: 56px; height: 56px; background: var(--gold-dim); border: 2px solid var(--gold); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .approval-info { flex: 1; }
+        .approval-name { font-size: 18px; font-weight: 600; }
+        .approval-meta { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+        .approval-status { padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; }
+        .approval-status.pending { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .approval-status.approved { background: var(--green-dim); color: var(--green); }
+        .approval-status.rejected { background: var(--red-dim); color: var(--red); }
+        .approval-details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+        .detail-item { }
+        .detail-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 4px; }
+        .detail-value { font-size: 14px; font-weight: 500; }
+        .approval-actions { display: flex; gap: 12px; }
+        .action-btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .action-btn.approve { background: var(--green); color: black; }
+        .action-btn.reject { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255, 59, 59, 0.3); }
+        .action-btn.view { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .empty-state { text-align: center; padding: 60px; color: var(--text-secondary); }
+        .empty-state .icon { font-size: 64px; margin-bottom: 20px; opacity: 0.5; }
+        .empty-state h3 { font-size: 18px; margin-bottom: 8px; color: var(--text-primary); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Coach Approvals</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+    </header>
+    <div class="content">
+        <div class="content-header">
+            <div class="content-title">Coach Applications</div>
+            <div class="content-subtitle">Review and approve new coach applications</div>
+        </div>
+        <div class="tabs">
+            <div class="tab active" onclick="filterApprovals('pending')">Pending</div>
+            <div class="tab" onclick="filterApprovals('approved')">Approved</div>
+            <div class="tab" onclick="filterApprovals('rejected')">Rejected</div>
+        </div>
+        <div id="approvalsList">
+            <div class="empty-state">
+                <div class="icon">⏳</div>
+                <div>Loading...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
+        var socket = null;
+        var allApprovals = [];
+        var currentFilter = "pending";
+
+        function init() {
+            var uname = sessionStorage.getItem("username");
+            if (!uname) { window.location.href = "index.html"; return; }
+            connect();
+        }
+
+        function connect() {
+            socket = new WebSocket(SERVER_URL);
+            socket.onopen = function() {
+                var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+                socket.send(JSON.stringify({
+                    type: "login_request",
+                    username: sessionStorage.getItem("username"),
+                    password: sessionStorage.getItem("password"),
+                    expected_role: profile.role
+                }));
+            };
+            socket.onmessage = handleMessage;
+            socket.onclose = function() { setTimeout(connect, 3000); };
+        }
+
+        function handleMessage(event) {
+            var data = JSON.parse(event.data);
+            console.log("Received:", data.type);
+            if (data.type === "login_success") {
+                socket.send(JSON.stringify({ type: "admin_get_pending_coaches" }));
+            } else if (data.type === "pending_coaches") {
+                allApprovals = data.coaches || [];
+                renderApprovals();
+            } else if (data.type === "coach_approved") {
+                console.log("Coach approved:", data.coach_id);
+                // Refresh the list from server
+                socket.send(JSON.stringify({ type: "admin_get_pending_coaches" }));
+            } else if (data.type === "coach_rejected") {
+                console.log("Coach rejected:", data.coach_id);
+                // Refresh the list from server
+                socket.send(JSON.stringify({ type: "admin_get_pending_coaches" }));
+            } else if (data.type === "error") {
+                console.error("Server error:", data.message);
+                alert("⚠️ Error: " + (data.message || "Unknown server error. The action may not have saved."));
+                // Refresh to show true state
+                socket.send(JSON.stringify({ type: "admin_get_pending_coaches" }));
+            }
+        }
+
+        function renderApprovals() {
+            var list = document.getElementById("approvalsList");
+            var filtered = allApprovals.filter(function(a) {
+                var status = (a.certification_status || "pending").toLowerCase();
+                return status === currentFilter;
+            });
+            
+            if (filtered.length === 0) {
+                var msg = currentFilter === "pending" ? "No pending applications" : "No " + currentFilter + " applications";
+                list.innerHTML = '<div class="empty-state"><div class="icon">✅</div><h3>' + msg + '</h3><div>All caught up!</div></div>';
+                return;
+            }
+            
+            var html = "";
+            for (var i = 0; i < filtered.length; i++) {
+                var a = filtered[i];
+                var initials = getInitials(a.name);
+                var status = (a.certification_status || "pending").toLowerCase();
+                var specialties = a.specializations;
+                if (Array.isArray(specialties)) specialties = specialties.join(", ");
+                html += '<div class="approval-card">';
+                html += '<div class="approval-header">';
+                html += '<div class="approval-avatar">' + initials + '</div>';
+                html += '<div class="approval-info">';
+                html += '<div class="approval-name">' + (a.name || "Unknown") + '</div>';
+                html += '<div class="approval-meta">Applied: ' + (a.registration_date || a.joined_date || "Recently") + '</div>';
+                html += '</div>';
+                html += '<span class="approval-status ' + status + '">' + status.toUpperCase() + '</span>';
+                html += '</div>';
+                html += '<div class="approval-details">';
+                html += '<div class="detail-item"><div class="detail-label">Email</div><div class="detail-value">' + (a.email || "N/A") + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">Specialties</div><div class="detail-value">' + (specialties || "General") + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">W-9 Status</div><div class="detail-value">' + (a.w9_submitted ? "Submitted" : "Missing") + '</div></div>';
+                html += '</div>';
+                html += '<div class="approval-actions">';
+                if (currentFilter === "pending") {
+                    html += '<button class="action-btn approve" onclick="approveCoach(\'' + a.hardware_id + '\')">✓ Approve</button>';
+                    html += '<button class="action-btn reject" onclick="rejectCoach(\'' + a.hardware_id + '\')">✗ Reject</button>';
+                }
+                html += '<button class="action-btn view" onclick="viewDetails(\'' + a.hardware_id + '\')">View Full Profile</button>';
+                html += '</div></div>';
+            }
+            list.innerHTML = html;
+        }
+
+        function getInitials(name) {
+            if (!name) return "?";
+            var parts = name.split(" ");
+            var r = "";
+            for (var i = 0; i < parts.length && i < 2; i++) {
+                if (parts[i].length > 0) r += parts[i][0];
+            }
+            return r.toUpperCase();
+        }
+
+        function filterApprovals(filter) {
+            currentFilter = filter;
+            var tabs = document.querySelectorAll(".tab");
+            for (var i = 0; i < tabs.length; i++) tabs[i].classList.remove("active");
+            event.target.classList.add("active");
+            renderApprovals();
+        }
+
+        function approveCoach(hwId) {
+            if (!confirm("Approve this coach application?")) return;
+            socket.send(JSON.stringify({ type: "admin_approve_coach", coach_id: hwId }));
+        }
+
+        function rejectCoach(hwId) {
+            var reason = prompt("Rejection reason (optional):");
+            if (reason === null) return; // cancelled
+            socket.send(JSON.stringify({ type: "admin_reject_coach", coach_id: hwId, reason: reason }));
+        }
+
+        function viewDetails(hwId) {
+            var coach = null;
+            for (var i = 0; i < allApprovals.length; i++) {
+                if (allApprovals[i].hardware_id === hwId) { coach = allApprovals[i]; break; }
+            }
+            if (!coach) { alert("Coach not found"); return; }
+            var details = "Name: " + (coach.name || "?") + "\n";
+            details += "Email: " + (coach.email || "N/A") + "\n";
+            details += "Phone: " + (coach.phone || "N/A") + "\n";
+            details += "DOB: " + (coach.dob || "N/A") + "\n";
+            var specs = coach.specializations;
+            if (Array.isArray(specs)) specs = specs.join(", ");
+            details += "Specializations: " + (specs || "General") + "\n";
+            var dojos = coach.selected_dojos;
+            if (Array.isArray(dojos)) dojos = dojos.join(", ");
+            details += "Selected Dojos: " + (dojos || "None") + "\n";
+            details += "Coaching Fee: $" + (coach.coaching_fee || 0) + "/hr\n";
+            details += "W-9 Submitted: " + (coach.w9_submitted ? "Yes" : "No") + "\n";
+            if (coach.w9_data) {
+                details += "W-9 Legal Name: " + (coach.w9_data.legal_name || "N/A") + "\n";
+                details += "W-9 TIN (masked): " + (coach.w9_data.tin_masked || "N/A") + "\n";
+                details += "W-9 Address: " + [coach.w9_data.street, coach.w9_data.city, coach.w9_data.state, coach.w9_data.zip].filter(Boolean).join(", ") + "\n";
+            }
+            details += "Hardware ID: " + (coach.hardware_id || "N/A");
+            alert(details);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

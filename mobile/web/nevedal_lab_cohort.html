@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Cohort Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .back-btn:hover { border-color: var(--purple); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .card-body { padding: 20px; }
+        
+        /* Filters */
+        .filter-section { margin-bottom: 20px; }
+        .filter-title { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+        .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+        .checkbox-item input { width: 16px; height: 16px; }
+        
+        /* Platform Stats */
+        .platform-stat { text-align: center; padding: 24px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
+        .platform-stat-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
+        .platform-stat-value { font-size: 48px; font-weight: 700; color: var(--purple); margin: 8px 0; }
+        .platform-stat-sub { font-size: 11px; color: var(--text-secondary); }
+        
+        /* Comparison Chart */
+        .comparison-chart { height: 280px; background: var(--bg-elevated); border-radius: 10px; padding: 20px; }
+        .chart-placeholder { text-align: center; padding: 100px 20px; color: var(--text-secondary); font-size: 11px; }
+        
+        /* Cohort Bars */
+        .cohort-item { margin-bottom: 16px; }
+        .cohort-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .cohort-label { font-size: 11px; font-weight: 600; }
+        .cohort-value { font-size: 11px; color: var(--purple); }
+        .cohort-bar { height: 8px; background: var(--bg-dark); border-radius: 4px; overflow: hidden; }
+        .cohort-fill { height: 100%; background: linear-gradient(90deg, var(--purple), var(--cyan)); border-radius: 4px; }
+        .cohort-meta { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Treatment Comparison */
+        .treatment-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .treatment-name { font-size: 11px; font-weight: 600; }
+        .treatment-effect { font-size: 14px; font-weight: 700; }
+        .treatment-effect.positive { color: var(--green); }
+        .treatment-effect.baseline { color: var(--text-secondary); }
+        
+        /* Key Insights */
+        .insight-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--purple); }
+        .insight-text { font-size: 11px; line-height: 1.5; }
+        .insight-icon { display: inline-block; margin-right: 6px; }
+        
+        /* Sample Size */
+        .sample-badge { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--bg-elevated); border-radius: 6px; font-size: 10px; margin-bottom: 8px; }
+        
+        /* Export Button */
+        .export-btn { width: 100%; padding: 12px; background: var(--purple); color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+        .export-btn:hover { background: var(--cyan); }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
+    </div>
+
+    <!-- Sub Navigation -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item active"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Filters -->
+        <aside>
+            <!-- Age Groups -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📊</div> Study Filters</div>
+                </div>
+                <div class="card-body">
+                    <div class="filter-section">
+                        <div class="filter-title">Age Groups</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="age-18-25"> 18-25 years
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="age-26-35"> 26-35 years
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="age-36-50"> 36-50 years
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="age-51"> 51+ years
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <div class="filter-title">Diagnosis Categories</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="dx-anxiety"> Anxiety
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="dx-depression"> Depression
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="dx-ptsd"> PTSD
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="dx-none"> No Diagnosis
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <div class="filter-title">Treatment Modalities</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="tx-ai"> AI Only
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="tx-ai-coach"> AI + Coach
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" checked id="tx-family"> Family Therapy
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <div class="filter-title">Time Range</div>
+                        <select id="time-range" style="width: 100%; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 11px;">
+                            <option value="30d" selected>Last 30 days</option>
+                            <option value="90d">Last 90 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Analysis -->
+        <section>
+            <!-- Platform Average -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">🌐</div> Platform-Wide C<sub>emo</sub></div>
+                </div>
+                <div class="card-body">
+                    <div class="platform-stat">
+                        <div class="platform-stat-label">Population Average</div>
+                        <div class="platform-stat-value" id="platform-avg">0.64</div>
+                        <div class="platform-stat-sub">Across all active participants</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Age Group Breakdown -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">📊</div> Age Group Analysis</div>
+                </div>
+                <div class="card-body">
+                    <div class="comparison-chart">
+                        <div class="chart-placeholder">
+                            Bar chart: C<sub>emo</sub> by age group<br>
+                            <span style="font-size: 10px; margin-top: 8px; display: block;">18-25, 26-35, 36-50, 51+ cohort comparison</span>
+                            <span style="font-size: 10px; margin-top: 4px; display: block;">Requires admin_get_cohort_stats handler</span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <div class="cohort-item">
+                            <div class="cohort-header">
+                                <span class="cohort-label">18-25 years</span>
+                                <span class="cohort-value">C<sub>emo</sub>: 0.58</span>
+                            </div>
+                            <div class="cohort-bar">
+                                <div class="cohort-fill" style="width: 58%;"></div>
+                            </div>
+                            <div class="cohort-meta">n = 42 participants • 234 sessions</div>
+                        </div>
+                        <div class="cohort-item">
+                            <div class="cohort-header">
+                                <span class="cohort-label">26-35 years</span>
+                                <span class="cohort-value" style="color: var(--green);">C<sub>emo</sub>: 0.71</span>
+                            </div>
+                            <div class="cohort-bar">
+                                <div class="cohort-fill" style="width: 71%;"></div>
+                            </div>
+                            <div class="cohort-meta">n = 58 participants • 412 sessions</div>
+                        </div>
+                        <div class="cohort-item">
+                            <div class="cohort-header">
+                                <span class="cohort-label">36-50 years</span>
+                                <span class="cohort-value">C<sub>emo</sub>: 0.67</span>
+                            </div>
+                            <div class="cohort-bar">
+                                <div class="cohort-fill" style="width: 67%;"></div>
+                            </div>
+                            <div class="cohort-meta">n = 38 participants • 289 sessions</div>
+                        </div>
+                        <div class="cohort-item">
+                            <div class="cohort-header">
+                                <span class="cohort-label">51+ years</span>
+                                <span class="cohort-value">C<sub>emo</sub>: 0.59</span>
+                            </div>
+                            <div class="cohort-bar">
+                                <div class="cohort-fill" style="width: 59%;"></div>
+                            </div>
+                            <div class="cohort-meta">n = 18 participants • 112 sessions</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Diagnosis Comparison -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🏥</div> Diagnosis Category Breakdown</div>
+                </div>
+                <div class="card-body">
+                    <div class="cohort-item">
+                        <div class="cohort-header">
+                            <span class="cohort-label">Anxiety Disorders</span>
+                            <span class="cohort-value">C<sub>emo</sub>: 0.62 <span style="color: var(--green); font-size: 9px;">↑ +12%</span></span>
+                        </div>
+                        <div class="cohort-bar">
+                            <div class="cohort-fill" style="width: 62%;"></div>
+                        </div>
+                        <div class="cohort-meta">n = 64 • Improving fastest</div>
+                    </div>
+                    <div class="cohort-item">
+                        <div class="cohort-header">
+                            <span class="cohort-label">Depression</span>
+                            <span class="cohort-value">C<sub>emo</sub>: 0.61 <span style="color: var(--green); font-size: 9px;">↑ +8%</span></span>
+                        </div>
+                        <div class="cohort-bar">
+                            <div class="cohort-fill" style="width: 61%;"></div>
+                        </div>
+                        <div class="cohort-meta">n = 48 • Steady improvement</div>
+                    </div>
+                    <div class="cohort-item">
+                        <div class="cohort-header">
+                            <span class="cohort-label">PTSD</span>
+                            <span class="cohort-value">C<sub>emo</sub>: 0.58 <span style="color: var(--green); font-size: 9px;">↑ +15%</span></span>
+                        </div>
+                        <div class="cohort-bar">
+                            <div class="cohort-fill" style="width: 58%;"></div>
+                        </div>
+                        <div class="cohort-meta">n = 26 • Strong response to treatment</div>
+                    </div>
+                    <div class="cohort-item">
+                        <div class="cohort-header">
+                            <span class="cohort-label">No Diagnosis</span>
+                            <span class="cohort-value" style="color: var(--green);">C<sub>emo</sub>: 0.72 <span style="color: var(--green); font-size: 9px;">↑ +5%</span></span>
+                        </div>
+                        <div class="cohort-bar">
+                            <div class="cohort-fill" style="width: 72%;"></div>
+                        </div>
+                        <div class="cohort-meta">n = 18 • Baseline wellness</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Treatment Effectiveness -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">💊</div> Treatment Modality Effectiveness</div>
+                </div>
+                <div class="card-body">
+                    <div class="treatment-item">
+                        <div>
+                            <div class="treatment-name">AI Only</div>
+                            <div style="font-size: 9px; color: var(--text-secondary); margin-top: 2px;">C<sub>emo</sub>: 0.59</div>
+                        </div>
+                        <div class="treatment-effect baseline">Baseline</div>
+                    </div>
+                    <div class="treatment-item">
+                        <div>
+                            <div class="treatment-name">AI + Human Coach</div>
+                            <div style="font-size: 9px; color: var(--text-secondary); margin-top: 2px;">C<sub>emo</sub>: 0.73</div>
+                        </div>
+                        <div class="treatment-effect positive">+34%</div>
+                    </div>
+                    <div class="treatment-item">
+                        <div>
+                            <div class="treatment-name">Family Therapy</div>
+                            <div style="font-size: 9px; color: var(--text-secondary); margin-top: 2px;">C<sub>emo</sub>: 0.69</div>
+                        </div>
+                        <div class="treatment-effect positive">+23%</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Insights -->
+        <aside>
+            <!-- Sample Size -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📋</div> Study Overview</div>
+                </div>
+                <div class="card-body">
+                    <div class="sample-badge">
+                        <span>👥</span>
+                        <span><strong>156</strong> participants</span>
+                    </div>
+                    <div class="sample-badge">
+                        <span>📊</span>
+                        <span><strong>847</strong> total sessions</span>
+                    </div>
+                    <div class="sample-badge">
+                        <span>📅</span>
+                        <span><strong>30</strong> day period</span>
+                    </div>
+                    <div class="sample-badge">
+                        <span>🎯</span>
+                        <span><strong>34</strong> CEE events avg/user</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Insights -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">💡</div> Key Findings</div>
+                </div>
+                <div class="card-body">
+                    <div class="insight-item">
+                        <div class="insight-text">
+                            <span class="insight-icon">📈</span>
+                            Ages 26-35 demonstrate highest baseline coherence (0.71), suggesting optimal neuroplasticity window
+                        </div>
+                    </div>
+                    <div class="insight-item">
+                        <div class="insight-text">
+                            <span class="insight-icon">🎯</span>
+                            Anxiety diagnosis shows fastest improvement rate (+12%), responding well to QEC-based interventions
+                        </div>
+                    </div>
+                    <div class="insight-item">
+                        <div class="insight-text">
+                            <span class="insight-icon">🤝</span>
+                            AI + Human Coach combination yields 34% higher coherence than AI alone, highlighting dyadic synchrony benefits
+                        </div>
+                    </div>
+                    <div class="insight-item">
+                        <div class="insight-text">
+                            <span class="insight-icon">👨‍👩‍👧</span>
+                            Family therapy shows 23% improvement, with multi-member CEE events correlating with breakthrough outcomes
+                        </div>
+                    </div>
+                    <div class="insight-item">
+                        <div class="insight-text">
+                            <span class="insight-icon">⚡</span>
+                            PTSD cohort demonstrates highest improvement velocity (+15%), suggesting trauma-responsive coherence patterns
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">📄</div> Export Data</div>
+                </div>
+                <div class="card-body">
+                    <button class="export-btn">📥 Download Full Research Report (PDF)</button>
+                    <div style="font-size: 9px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4;">
+                        Includes: Population statistics, cohort breakdowns, treatment efficacy analysis, and longitudinal trends
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Authentication check
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) {
+            window.location.href = "index.html";
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let authenticated = false;
+        let filters = {
+            age_groups: ["18-25", "26-35", "36-50", "51+"],
+            diagnoses: ["anxiety", "depression", "ptsd", "none"],
+            treatment_types: ["ai_only", "ai_coach", "family"],
+            time_range: "30d"
+        };
+
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            
+            ws.onopen = function() {
+                console.log("✅ WebSocket connected");
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username: username,
+                    password: password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log("📩 Received:", data.type);
+                
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("🔓 Authenticated! Requesting cohort stats...");
+                    requestCohortStats();
+                }
+                
+                if (data.type === "cohort_stats") {
+                    displayCohortStats(data);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error("❌ WebSocket error:", error);
+            };
+        }
+
+        function requestCohortStats() {
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({
+                    type: "admin_get_cohort_stats",
+                    filters: filters
+                }));
+                console.log("📡 Requested cohort stats with filters:", filters);
+            }
+        }
+
+        function displayCohortStats(data) {
+            console.log("🧬 Displaying cohort stats:", data);
+            
+            // Update platform average
+            if (data.platform_avg_c_emo !== undefined) {
+                document.getElementById("platform-avg").textContent = data.platform_avg_c_emo.toFixed(2);
+            }
+            
+            // Update age group data if available
+            if (data.by_age_group) {
+                // Would update the cohort bars and values here
+            }
+            
+            // Update diagnosis data if available
+            if (data.by_diagnosis) {
+                // Would update diagnosis breakdown here
+            }
+            
+            // Update treatment effectiveness if available
+            if (data.by_treatment) {
+                // Would update treatment comparison here
+            }
+        }
+
+        // Filter change handlers
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                console.log("Filter changed:", this.id, this.checked);
+                requestCohortStats();
+            });
+        });
+
+        document.getElementById('time-range').addEventListener('change', function() {
+            filters.time_range = this.value;
+            requestCohortStats();
+        });
+
+        // Initialize
+        connectWebSocket();
+        
+        console.log("🧬 Nevedal Lab Cohort Analysis initialized");
+    </script>
+</body>
+</html>

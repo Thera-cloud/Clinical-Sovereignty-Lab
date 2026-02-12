@@ -1,0 +1,140 @@
+--- backend/app/websocket/bridge_server.py
++++ backend/app/websocket/bridge_server_fixed-2.py
+@@ -5105,6 +5105,54 @@
+                         "messages": existing.get("messages", [])[-50:]
+                     }))
+ 
++            elif t == "sanctuary_sync_state":
++                """
++                Sync sanctuary state when app resumes from background
++                Returns current coaching status and recent messages
++                """
++                sanctuary_id = d.get('sanctuary_id')
++                member_id = current_profile['hardware_id']
++                
++                sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
++                if not sanctuary_data:
++                    await websocket.send(json.dumps({
++                        "type": "error",
++                        "message": "Sanctuary not found"
++                    }))
++                    continue
++                
++                # Check if anyone is in active coaching
++                coaching_sessions = sanctuary_data.get('coaching_sessions', {})
++                active_coaching = []
++                for cs in coaching_sessions.values():
++                    if cs.get('status') == 'ACTIVE':
++                        active_coaching.append({
++                            "member_id": cs.get('member_id'),
++                            "member_name": cs.get('member_name', 'A family member')
++                        })
++                
++                # Check if THIS member is in coaching
++                my_coaching = None
++                for cs in coaching_sessions.values():
++                    if cs.get('member_id') == member_id and cs.get('status') == 'ACTIVE':
++                        my_coaching = cs
++                        break
++                
++                is_paused = len(active_coaching) > 0 and not my_coaching
++                
++                await websocket.send(json.dumps({
++                    "type": "sanctuary_state_sync",
++                    "sanctuary_id": sanctuary_id,
++                    "status": sanctuary_data.get('status', 'ACTIVE'),
++                    "is_paused": is_paused,
++                    "active_coaching": active_coaching,
++                    "my_coaching_active": my_coaching is not None,
++                    "members": sanctuary_engine.get_member_list(sanctuary_id),
++                    "recent_messages": sanctuary_data.get("messages", [])[-20:]
++                }))
++                
++                print(f">>> [SANCTUARY] State sync for {current_profile.get('name')}: paused={is_paused}, coaching={len(active_coaching)}")
++
+             elif t == "sanctuary_exit":
+                         """
+                         Member wants to exit sanctuary
+@@ -5179,7 +5227,7 @@
+ 
+             elif t == "sanctuary_coaching_decline":
+                 """
+-                Member declines coaching offer - show them the pause screen instead
++                Member declines coaching offer - show them the pause screen IF someone else is in coaching
+                 """
+                 sanctuary_id = d.get('sanctuary_id')
+                 member_id = current_profile['hardware_id']
+@@ -5192,16 +5240,63 @@
+                     if cs.get('status') == 'ACTIVE':
+                         in_coaching.append(cs.get('member_name', 'A family member'))
+                 
+-                coaching_member = in_coaching[0] if in_coaching else 'A family member'
+-                
+-                # Send the pause notification
+-                await websocket.send(json.dumps({
+-                    "type": "sanctuary_member_coaching",
+-                    "member_name": coaching_member,
+-                    "message": f"{coaching_member} is receiving private support from Little Nate. The sanctuary is paused."
+-                }))
+-                
+-                print(f">>> [SANCTUARY] {current_profile.get('name')} declined coaching, showing pause screen")
++                if in_coaching:
++                    # Someone is actually in coaching - show pause screen
++                    coaching_member = in_coaching[0]
++                    await websocket.send(json.dumps({
++                        "type": "sanctuary_member_coaching",
++                        "member_name": coaching_member,
++                        "message": f"{coaching_member} is receiving private support from Little Nate. The sanctuary is paused."
++                    }))
++                    print(f">>> [SANCTUARY] {current_profile.get('name')} declined coaching, showing pause screen")
++                else:
++                    # No one is in coaching - send resume so they stay in chat
++                    await websocket.send(json.dumps({
++                        "type": "sanctuary_resumed",
++                        "message": "The sanctuary conversation can continue. 💙"
++                    }))
++                    print(f">>> [SANCTUARY] {current_profile.get('name')} declined coaching, no one in coaching so resuming")
++
++            elif t == "sanctuary_post_assisted_response":
++                """
++                Member wants to post their assisted response to the group chat
++                """
++                sanctuary_id = d.get('sanctuary_id')
++                assisted_text = d.get('assisted_response', '')
++                member_id = current_profile['hardware_id']
++                member_name = current_profile.get('name', 'Friend')
++                
++                if not assisted_text:
++                    await websocket.send(json.dumps({
++                        "type": "error",
++                        "message": "No assisted response to post"
++                    }))
++                    continue
++                
++                # Store the assisted message in sanctuary messages
++                message_id = sanctuary_engine.add_message(
++                    sanctuary_id=sanctuary_id,
++                    sender_id=member_id,
++                    sender_name=member_name,
++                    content=assisted_text,
++                    message_type="ASSISTED"
++                )
++                
++                # Broadcast to all members
++                await sanctuary_engine.broadcast_to_sanctuary(
++                    sanctuary_id=sanctuary_id,
++                    message_data={
++                        "type": "sanctuary_message",
++                        "message_id": message_id,
++                        "sender_id": member_id,
++                        "sender_name": member_name,
++                        "content": assisted_text,
++                        "message_type": "ASSISTED",
++                        "timestamp": str(datetime.datetime.now())
++                    }
++                )
++                
++                print(f">>> [SANCTUARY] {member_name} posted assisted response to group chat")
+ 
+             elif t == "sanctuary_request_coach":
+                         """

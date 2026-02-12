@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sanctuary Membership — Little Nate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #161616;
+            --border-subtle: #1A1A1A;
+            --border-active: #2A2A2A;
+            
+            --gold-primary: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            
+            --cyan-primary: #4ECDC4;
+            --cyan-dim: #2D7A75;
+            
+            --text-primary: #F5F5F5;
+            --text-secondary: #9A9A9A;
+            --text-muted: #5A5A5A;
+            
+            --success: #4ADE80;
+            --warning: #FBBF24;
+            
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        /* Ambient Background */
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        .ambient-bg::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(201, 169, 98, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(78, 205, 196, 0.02) 0%, transparent 50%);
+            animation: ambientDrift 30s ease-in-out infinite;
+        }
+        
+        @keyframes ambientDrift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            50% { transform: translate(-5%, -5%) rotate(5deg); }
+        }
+        
+        /* Container */
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 24px;
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+        
+        .header-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 32px;
+            position: relative;
+        }
+        
+        .header-icon svg {
+            width: 100%;
+            height: 100%;
+            fill: none;
+            stroke: var(--gold-primary);
+            stroke-width: 1;
+        }
+        
+        .header-icon::after {
+            content: '';
+            position: absolute;
+            inset: -20px;
+            background: radial-gradient(circle, rgba(201, 169, 98, 0.1) 0%, transparent 70%);
+            animation: iconGlow 4s ease-in-out infinite;
+        }
+        
+        @keyframes iconGlow {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        
+        .header h1 {
+            font-family: var(--font-display);
+            font-size: 48px;
+            font-weight: 300;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+        
+        .header p {
+            font-size: 15px;
+            color: var(--text-secondary);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        
+        /* Tier Grid */
+        .tier-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-bottom: 60px;
+        }
+        
+        @media (max-width: 900px) {
+            .tier-grid {
+                grid-template-columns: 1fr;
+                max-width: 400px;
+                margin-left: auto;
+                margin-right: auto;
+            }
+        }
+        
+        /* Tier Card */
+        .tier-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            padding: 40px 32px;
+            position: relative;
+            transition: all 0.4s ease;
+            cursor: pointer;
+        }
+        
+        .tier-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+        }
+        
+        .tier-card:hover {
+            border-color: var(--border-active);
+            transform: translateY(-4px);
+        }
+        
+        .tier-card:hover::before {
+            opacity: 1;
+        }
+        
+        .tier-card.featured {
+            border-color: var(--gold-dim);
+            background: linear-gradient(180deg, rgba(201, 169, 98, 0.05) 0%, var(--bg-card) 100%);
+        }
+        
+        .tier-card.featured::before {
+            opacity: 1;
+            background: linear-gradient(90deg, transparent, var(--gold-primary), transparent);
+        }
+        
+        .tier-badge {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--gold-primary);
+            color: var(--bg-void);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            padding: 6px 16px;
+            border-radius: 1px;
+        }
+        
+        .tier-name {
+            font-family: var(--font-display);
+            font-size: 14px;
+            letter-spacing: 4px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        
+        .tier-title {
+            font-family: var(--font-display);
+            font-size: 28px;
+            font-weight: 400;
+            color: var(--text-primary);
+            margin-bottom: 24px;
+        }
+        
+        .tier-card.featured .tier-title {
+            color: var(--gold-bright);
+        }
+        
+        .tier-price {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        
+        .tier-price .currency {
+            font-size: 20px;
+            color: var(--text-secondary);
+        }
+        
+        .tier-price .amount {
+            font-family: var(--font-display);
+            font-size: 56px;
+            font-weight: 300;
+            color: var(--text-primary);
+            line-height: 1;
+        }
+        
+        .tier-price .period {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        
+        .tier-trial {
+            font-size: 13px;
+            color: var(--cyan-primary);
+            margin-bottom: 32px;
+        }
+        
+        .tier-features {
+            list-style: none;
+            margin-bottom: 40px;
+        }
+        
+        .tier-features li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        
+        .tier-features li:last-child {
+            border-bottom: none;
+        }
+        
+        .tier-features .check {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        
+        .tier-features .check svg {
+            width: 100%;
+            height: 100%;
+            stroke: var(--success);
+            stroke-width: 2;
+            fill: none;
+        }
+        
+        .tier-features .locked {
+            color: var(--text-muted);
+        }
+        
+        .tier-features .locked .check svg {
+            stroke: var(--text-muted);
+            opacity: 0.3;
+        }
+        
+        .tier-cta {
+            width: 100%;
+            padding: 16px 24px;
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            border: 1px solid var(--border-active);
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .tier-cta:hover {
+            background: var(--text-primary);
+            color: var(--bg-void);
+        }
+        
+        .tier-card.featured .tier-cta {
+            background: var(--gold-primary);
+            border-color: var(--gold-primary);
+            color: var(--bg-void);
+        }
+        
+        .tier-card.featured .tier-cta:hover {
+            background: var(--gold-bright);
+            border-color: var(--gold-bright);
+        }
+        
+        /* Family Section */
+        .family-section {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            padding: 48px;
+            margin-bottom: 60px;
+        }
+        
+        .family-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 40px;
+        }
+        
+        .family-header h2 {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        .family-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .family-badge {
+            background: rgba(201, 169, 98, 0.1);
+            border: 1px solid var(--gold-dim);
+            color: var(--gold-primary);
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 8px 16px;
+            border-radius: 1px;
+        }
+        
+        .family-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+        
+        @media (max-width: 800px) {
+            .family-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        .family-slot {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 24px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .family-slot:hover {
+            border-color: var(--border-active);
+        }
+        
+        .family-slot.included {
+            border-color: var(--gold-dim);
+        }
+        
+        .family-slot .role {
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        
+        .family-slot .label {
+            font-family: var(--font-display);
+            font-size: 18px;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+        
+        .family-slot .price {
+            font-size: 14px;
+            color: var(--success);
+        }
+        
+        .family-slot .price.paid {
+            color: var(--text-secondary);
+        }
+        
+        /* Coaching Section */
+        .coaching-section {
+            margin-bottom: 60px;
+        }
+        
+        .coaching-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .coaching-header h2 {
+            font-family: var(--font-display);
+            font-size: 32px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        .coaching-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .coaching-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+        
+        @media (max-width: 800px) {
+            .coaching-grid {
+                grid-template-columns: 1fr;
+                max-width: 400px;
+                margin: 0 auto;
+            }
+        }
+        
+        .coaching-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 32px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .coaching-card:hover {
+            border-color: var(--cyan-dim);
+        }
+        
+        .coaching-card.best-value {
+            border-color: var(--cyan-primary);
+            position: relative;
+        }
+        
+        .coaching-card.best-value::after {
+            content: 'BEST VALUE';
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--cyan-primary);
+            color: var(--bg-void);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            padding: 4px 12px;
+        }
+        
+        .coaching-card .sessions {
+            font-family: var(--font-display);
+            font-size: 48px;
+            font-weight: 300;
+            color: var(--text-primary);
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+        
+        .coaching-card .sessions-label {
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        
+        .coaching-card .total-price {
+            font-size: 32px;
+            font-weight: 300;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        
+        .coaching-card .per-session {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        
+        .coaching-card .savings {
+            font-size: 12px;
+            color: var(--success);
+            margin-bottom: 24px;
+        }
+        
+        .coaching-card .validity {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+        
+        .coaching-card button {
+            width: 100%;
+            padding: 14px;
+            font-family: var(--font-body);
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            border: 1px solid var(--border-active);
+            background: transparent;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .coaching-card button:hover {
+            background: var(--cyan-primary);
+            border-color: var(--cyan-primary);
+            color: var(--bg-void);
+        }
+        
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding-top: 40px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        
+        .footer p {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.8;
+        }
+        
+        .footer a {
+            color: var(--text-secondary);
+            text-decoration: underline;
+            text-underline-offset: 3px;
+        }
+        
+        .footer a:hover {
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="ambient-bg"></div>
+    
+    <div class="container">
+        <header class="header">
+            <div class="header-icon">
+                <svg viewBox="0 0 64 64">
+                    <circle cx="32" cy="32" r="28" />
+                    <path d="M32 12 L32 52" />
+                    <path d="M20 24 L32 12 L44 24" />
+                    <circle cx="32" cy="32" r="8" />
+                </svg>
+            </div>
+            <h1>Choose Your Path</h1>
+            <p>Enter the Sanctuary</p>
+        </header>
+        
+        <!-- Tier Selection -->
+        <div class="tier-grid">
+            <!-- Trial -->
+            <div class="tier-card">
+                <div class="tier-name">Trial</div>
+                <div class="tier-title">The Threshold</div>
+                <div class="tier-price">
+                    <span class="amount">Free</span>
+                </div>
+                <div class="tier-trial">7 days to explore</div>
+                <ul class="tier-features">
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Nate AI (text only)
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        3 sessions per day
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Basic progress insights
+                    </li>
+                    <li class="locked">
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+                        Voice conversations
+                    </li>
+                    <li class="locked">
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+                        Nevedal biometrics
+                    </li>
+                </ul>
+                <button class="tier-cta">Begin Trial</button>
+            </div>
+            
+            <!-- Standard -->
+            <div class="tier-card">
+                <div class="tier-name">Standard</div>
+                <div class="tier-title">Inner Chamber</div>
+                <div class="tier-price">
+                    <span class="currency">$</span>
+                    <span class="amount">49</span>
+                    <span class="period">/month</span>
+                </div>
+                <div class="tier-trial">Your personal AI companion</div>
+                <ul class="tier-features">
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Unlimited Nate AI
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Voice conversations
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Full progress tracking
+                    </li>
+                    <li class="locked">
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+                        Family linking
+                    </li>
+                    <li class="locked">
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></span>
+                        Live coach sessions
+                    </li>
+                </ul>
+                <button class="tier-cta">Enter Chamber</button>
+            </div>
+            
+            <!-- Top Tier -->
+            <div class="tier-card featured">
+                <div class="tier-badge">Recommended</div>
+                <div class="tier-name">Premium</div>
+                <div class="tier-title">Sovereign Circle</div>
+                <div class="tier-price">
+                    <span class="currency">$</span>
+                    <span class="amount">149</span>
+                    <span class="period">/month</span>
+                </div>
+                <div class="tier-trial">Complete platform access</div>
+                <ul class="tier-features">
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Everything in Standard
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Nevedal biometric insights
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Family linking (spouse + 1 free)
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Live coaching available
+                    </li>
+                    <li>
+                        <span class="check"><svg viewBox="0 0 16 16"><path d="M3 8l4 4 6-7"/></svg></span>
+                        Crisis priority support
+                    </li>
+                </ul>
+                <button class="tier-cta">Join the Circle</button>
+            </div>
+        </div>
+        
+        <!-- Family Section -->
+        <section class="family-section">
+            <div class="family-header">
+                <div>
+                    <h2>Family Circle</h2>
+                    <p>Sovereign Circle members can link their family</p>
+                </div>
+                <div class="family-badge">Sovereign Circle Only</div>
+            </div>
+            <div class="family-grid">
+                <div class="family-slot included">
+                    <div class="role">Primary</div>
+                    <div class="label">You</div>
+                    <div class="price">$149/mo</div>
+                </div>
+                <div class="family-slot included">
+                    <div class="role">Spouse</div>
+                    <div class="label">Partner</div>
+                    <div class="price">Included</div>
+                </div>
+                <div class="family-slot included">
+                    <div class="role">First Dependent</div>
+                    <div class="label">Child</div>
+                    <div class="price">Included</div>
+                </div>
+                <div class="family-slot">
+                    <div class="role">Additional</div>
+                    <div class="label">+ Member</div>
+                    <div class="price paid">+$75/mo each</div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Coaching Section -->
+        <section class="coaching-section">
+            <div class="coaching-header">
+                <h2>Live Coaching Sessions</h2>
+                <p>Book 1-on-1 sessions with certified coaches • Sovereign Circle members only</p>
+            </div>
+            <div class="coaching-grid">
+                <div class="coaching-card">
+                    <div class="sessions">1</div>
+                    <div class="sessions-label">Session</div>
+                    <div class="total-price">$175</div>
+                    <div class="per-session">per session</div>
+                    <div class="savings">&nbsp;</div>
+                    <div class="validity">Book when you need it</div>
+                    <button>Book Session</button>
+                </div>
+                <div class="coaching-card">
+                    <div class="sessions">4</div>
+                    <div class="sessions-label">Sessions</div>
+                    <div class="total-price">$600</div>
+                    <div class="per-session">$150 per session</div>
+                    <div class="savings">Save $100 (15%)</div>
+                    <div class="validity">Valid for 3 months</div>
+                    <button>Purchase Pack</button>
+                </div>
+                <div class="coaching-card best-value">
+                    <div class="sessions">8</div>
+                    <div class="sessions-label">Sessions</div>
+                    <div class="total-price">$1,120</div>
+                    <div class="per-session">$140 per session</div>
+                    <div class="savings">Save $280 (20%)</div>
+                    <div class="validity">Valid for 6 months</div>
+                    <button>Purchase Pack</button>
+                </div>
+            </div>
+        </section>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <p>
+                All subscriptions can be cancelled anytime. Your data remains yours.<br>
+                <a href="#">Terms of Service</a> · <a href="#">Privacy Policy</a> · <a href="#">Sanctuary Covenant</a>
+            </p>
+        </footer>
+    </div>
+</body>
+</html>

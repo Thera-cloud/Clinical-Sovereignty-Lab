@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Audit Log</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--gold); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        
+        .main-layout { display: grid; grid-template-columns: 280px 1fr; height: calc(100vh - 110px); }
+        
+        /* Filters Sidebar */
+        .filters-sidebar { background: var(--bg-card); border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; }
+        .filter-section { margin-bottom: 24px; }
+        .filter-title { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+        .filter-option { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-bottom: 4px; }
+        .filter-option:hover { background: var(--bg-elevated); }
+        .filter-option.active { background: var(--gold-dim); color: var(--gold); }
+        .filter-checkbox { width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+        .filter-checkbox.checked { background: var(--gold); border-color: var(--gold); }
+        .filter-count { margin-left: auto; font-size: 10px; color: var(--text-secondary); }
+        .date-input { width: 100%; padding: 10px 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; margin-bottom: 8px; }
+        
+        /* Main Content */
+        .audit-content { padding: 24px; overflow-y: auto; }
+        .audit-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .audit-title { font-size: 18px; font-weight: 600; }
+        .audit-subtitle { font-size: 12px; color: var(--text-secondary); }
+        .audit-stats { display: flex; gap: 16px; }
+        .audit-stat { padding: 8px 16px; background: var(--bg-card); border-radius: 8px; text-align: center; }
+        .audit-stat-value { font-size: 18px; font-weight: 700; }
+        .audit-stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; }
+        
+        /* Audit Timeline */
+        .audit-timeline { position: relative; }
+        .audit-date-group { margin-bottom: 24px; }
+        .audit-date { font-size: 12px; font-weight: 600; color: var(--gold); padding: 8px 16px; background: var(--bg-card); border-radius: 6px; display: inline-block; margin-bottom: 12px; }
+        .audit-entries { position: relative; padding-left: 24px; }
+        .audit-entries::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+        
+        .audit-entry { position: relative; padding: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+        .audit-entry::before { content: ''; position: absolute; left: -20px; top: 20px; width: 12px; height: 12px; border-radius: 50%; background: var(--border); }
+        .audit-entry.access::before { background: var(--cyan); }
+        .audit-entry.modify::before { background: var(--orange); }
+        .audit-entry.create::before { background: var(--green); }
+        .audit-entry.delete::before { background: var(--red-critical); }
+        .audit-entry.security::before { background: var(--purple); }
+        
+        .audit-entry-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+        .audit-admin { display: flex; align-items: center; gap: 10px; }
+        .audit-admin-avatar { width: 32px; height: 32px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .audit-admin-name { font-size: 12px; font-weight: 600; }
+        .audit-admin-role { font-size: 10px; color: var(--gold); }
+        .audit-time { font-size: 10px; color: var(--text-secondary); text-align: right; }
+        .audit-ip { font-size: 9px; color: var(--text-secondary); font-family: monospace; }
+        
+        .audit-action { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .audit-action-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .audit-action-icon.access { background: var(--cyan-dim); }
+        .audit-action-icon.modify { background: rgba(255, 149, 0, 0.2); }
+        .audit-action-icon.create { background: var(--green-dim); }
+        .audit-action-icon.delete { background: var(--red-dim); }
+        .audit-action-icon.security { background: rgba(157, 78, 221, 0.2); }
+        .audit-action-text { font-size: 13px; font-weight: 500; }
+        .audit-action-badge { font-size: 9px; padding: 3px 8px; border-radius: 4px; margin-left: auto; }
+        .audit-action-badge.access { background: var(--cyan-dim); color: var(--cyan); }
+        .audit-action-badge.modify { background: rgba(255, 149, 0, 0.2); color: var(--orange); }
+        .audit-action-badge.create { background: var(--green-dim); color: var(--green); }
+        .audit-action-badge.delete { background: var(--red-dim); color: var(--red-critical); }
+        .audit-action-badge.security { background: rgba(157, 78, 221, 0.2); color: var(--purple); }
+        
+        .audit-details { background: var(--bg-dark); border-radius: 6px; padding: 12px; font-size: 11px; }
+        .audit-detail-row { display: flex; justify-content: space-between; padding: 4px 0; }
+        .audit-detail-label { color: var(--text-secondary); }
+        .audit-detail-value { font-family: monospace; }
+        .audit-detail-value.highlight { color: var(--cyan); }
+        
+        /* Immutability Notice */
+        .immutable-notice { background: var(--green-dim); border: 1px solid rgba(0, 255, 136, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+        .immutable-icon { font-size: 20px; }
+        .immutable-text { font-size: 11px; color: var(--green); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Sovereignty Audit Log</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary">📥 Export Log</button>
+            <button class="btn btn-primary">🔄 Refresh</button>
+        </div>
+    </header>
+    
+    <nav class="sub-nav">
+        <div class="sub-nav-item"><span>💰</span> Revenue Overview</div>
+        <div class="sub-nav-item"><span>🏥</span> F-Code Queue</div>
+        <div class="sub-nav-item"><span>💵</span> Coach Payouts</div>
+        <div class="sub-nav-item"><span>📜</span> Consent Manager</div>
+        <div class="sub-nav-item active"><span>🔒</span> Audit Log</div>
+    </nav>
+    
+    <div class="main-layout">
+        <!-- Filters Sidebar -->
+        <aside class="filters-sidebar">
+            <div class="filter-section">
+                <div class="filter-title">Date Range</div>
+                <input type="date" class="date-input" value="2026-01-01">
+                <input type="date" class="date-input" value="2026-01-20">
+            </div>
+            
+            <div class="filter-section">
+                <div class="filter-title">Action Types</div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>👁️ Profile Access</span>
+                    <span class="filter-count">124</span>
+                </div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>✏️ Modifications</span>
+                    <span class="filter-count">47</span>
+                </div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>🔑 Password Resets</span>
+                    <span class="filter-count">12</span>
+                </div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>✅ Approvals</span>
+                    <span class="filter-count">34</span>
+                </div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>🚫 Bans/Freezes</span>
+                    <span class="filter-count">3</span>
+                </div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>🔐 Security Events</span>
+                    <span class="filter-count">8</span>
+                </div>
+            </div>
+            
+            <div class="filter-section">
+                <div class="filter-title">Administrators</div>
+                <div class="filter-option active">
+                    <div class="filter-checkbox checked">✓</div>
+                    <span>Admin_Sovereign</span>
+                    <span class="filter-count">156</span>
+                </div>
+                <div class="filter-option">
+                    <div class="filter-checkbox"></div>
+                    <span>Admin_Support</span>
+                    <span class="filter-count">52</span>
+                </div>
+                <div class="filter-option">
+                    <div class="filter-checkbox"></div>
+                    <span>System_Auto</span>
+                    <span class="filter-count">20</span>
+                </div>
+            </div>
+            
+            <div class="filter-section">
+                <div class="filter-title">Target Users</div>
+                <input type="text" class="date-input" placeholder="🔍 Search by username or ID...">
+            </div>
+        </aside>
+        
+        <!-- Main Audit Content -->
+        <main class="audit-content">
+            <div class="audit-header">
+                <div>
+                    <div class="audit-title">Sovereignty Audit Log</div>
+                    <div class="audit-subtitle">Immutable ledger of all administrative actions</div>
+                </div>
+                <div class="audit-stats">
+                    <div class="audit-stat">
+                        <div class="audit-stat-value" style="color: var(--cyan);">228</div>
+                        <div class="audit-stat-label">Total Actions</div>
+                    </div>
+                    <div class="audit-stat">
+                        <div class="audit-stat-value" style="color: var(--orange);">47</div>
+                        <div class="audit-stat-label">Modifications</div>
+                    </div>
+                    <div class="audit-stat">
+                        <div class="audit-stat-value" style="color: var(--red-critical);">3</div>
+                        <div class="audit-stat-label">Critical</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="immutable-notice">
+                <div class="immutable-icon">🔒</div>
+                <div class="immutable-text">
+                    <strong>IMMUTABLE LEDGER</strong> — This audit log cannot be modified or deleted. All administrative actions are permanently recorded for sovereign trust compliance.
+                </div>
+            </div>
+            
+            <div class="audit-timeline">
+                <!-- Today -->
+                <div class="audit-date-group">
+                    <div class="audit-date">📅 Today — January 20, 2026</div>
+                    <div class="audit-entries">
+                        <div class="audit-entry access">
+                            <div class="audit-entry-header">
+                                <div class="audit-admin">
+                                    <div class="audit-admin-avatar">👑</div>
+                                    <div>
+                                        <div class="audit-admin-name">Admin_Sovereign</div>
+                                        <div class="audit-admin-role">SUPER ADMIN</div>
+                                    </div>
+                                </div>
+                                <div class="audit-time">
+                                    <div>14:32:18</div>
+                                    <div class="audit-ip">IP: 192.168.1.42</div>
+                                </div>
+                            </div>
+                            <div class="audit-action">
+                                <div class="audit-action-icon access">👁️</div>
+                                <div class="audit-action-text">Viewed user profile</div>
+                                <span class="audit-action-badge access">ACCESS</span>
+                            </div>
+                            <div class="audit-details">
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Target User</span>
+                                    <span class="audit-detail-value highlight">emma_t_2024 (FAM_0023)</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Hardware ID</span>
+                                    <span class="audit-detail-value">HW_8f3a9b2c4d1e</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Sections Accessed</span>
+                                    <span class="audit-detail-value">Profile, Nevedal State, Family Tree</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="audit-entry modify">
+                            <div class="audit-entry-header">
+                                <div class="audit-admin">
+                                    <div class="audit-admin-avatar">👑</div>
+                                    <div>
+                                        <div class="audit-admin-name">Admin_Sovereign</div>
+                                        <div class="audit-admin-role">SUPER ADMIN</div>
+                                    </div>
+                                </div>
+                                <div class="audit-time">
+                                    <div>13:15:42</div>
+                                    <div class="audit-ip">IP: 192.168.1.42</div>
+                                </div>
+                            </div>
+                            <div class="audit-action">
+                                <div class="audit-action-icon modify">🔑</div>
+                                <div class="audit-action-text">Password reset initiated</div>
+                                <span class="audit-action-badge modify">MODIFY</span>
+                            </div>
+                            <div class="audit-details">
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Target User</span>
+                                    <span class="audit-detail-value highlight">john_doe_123</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Reason</span>
+                                    <span class="audit-detail-value">User requested via support ticket #4521</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Old Hash</span>
+                                    <span class="audit-detail-value">$2b$12$xK...redacted</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="audit-entry create">
+                            <div class="audit-entry-header">
+                                <div class="audit-admin">
+                                    <div class="audit-admin-avatar">👑</div>
+                                    <div>
+                                        <div class="audit-admin-name">Admin_Sovereign</div>
+                                        <div class="audit-admin-role">SUPER ADMIN</div>
+                                    </div>
+                                </div>
+                                <div class="audit-time">
+                                    <div>11:08:33</div>
+                                    <div class="audit-ip">IP: 192.168.1.42</div>
+                                </div>
+                            </div>
+                            <div class="audit-action">
+                                <div class="audit-action-icon create">✅</div>
+                                <div class="audit-action-text">Coach account approved</div>
+                                <span class="audit-action-badge create">APPROVE</span>
+                            </div>
+                            <div class="audit-details">
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Target User</span>
+                                    <span class="audit-detail-value highlight">dr_amanda_wells</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Previous Status</span>
+                                    <span class="audit-detail-value">PENDING_VERIFICATION</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">New Status</span>
+                                    <span class="audit-detail-value" style="color: var(--green);">ACTIVE</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Yesterday -->
+                <div class="audit-date-group">
+                    <div class="audit-date">📅 Yesterday — January 19, 2026</div>
+                    <div class="audit-entries">
+                        <div class="audit-entry delete">
+                            <div class="audit-entry-header">
+                                <div class="audit-admin">
+                                    <div class="audit-admin-avatar">👑</div>
+                                    <div>
+                                        <div class="audit-admin-name">Admin_Sovereign</div>
+                                        <div class="audit-admin-role">SUPER ADMIN</div>
+                                    </div>
+                                </div>
+                                <div class="audit-time">
+                                    <div>16:45:12</div>
+                                    <div class="audit-ip">IP: 192.168.1.42</div>
+                                </div>
+                            </div>
+                            <div class="audit-action">
+                                <div class="audit-action-icon delete">🧹</div>
+                                <div class="audit-action-text">Memory wipe executed (RTBF Compliance)</div>
+                                <span class="audit-action-badge delete">DELETE</span>
+                            </div>
+                            <div class="audit-details">
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Target User</span>
+                                    <span class="audit-detail-value highlight">departed_user_847</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Files Deleted</span>
+                                    <span class="audit-detail-value">memory.json, nevedal_state.json, session_logs/*</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Legal Reference</span>
+                                    <span class="audit-detail-value">RTBF Request #2026-0119</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="audit-entry security">
+                            <div class="audit-entry-header">
+                                <div class="audit-admin">
+                                    <div class="audit-admin-avatar">🤖</div>
+                                    <div>
+                                        <div class="audit-admin-name">System_Auto</div>
+                                        <div class="audit-admin-role">AUTOMATED</div>
+                                    </div>
+                                </div>
+                                <div class="audit-time">
+                                    <div>09:23:01</div>
+                                    <div class="audit-ip">IP: Internal</div>
+                                </div>
+                            </div>
+                            <div class="audit-action">
+                                <div class="audit-action-icon security">🚨</div>
+                                <div class="audit-action-text">Crisis watchlist update</div>
+                                <span class="audit-action-badge security">SECURITY</span>
+                            </div>
+                            <div class="audit-details">
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Target User</span>
+                                    <span class="audit-detail-value highlight">sarah_m_crisis (FAM_0042)</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Trigger</span>
+                                    <span class="audit-detail-value" style="color: var(--red-critical);">Keyword: "988" detected in AI session</span>
+                                </div>
+                                <div class="audit-detail-row">
+                                    <span class="audit-detail-label">Action Taken</span>
+                                    <span class="audit-detail-value">Coach notified, Guardian alerted</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

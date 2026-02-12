@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Dojo Training - Sovereign Sanctuary</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+      --bg-void: #050505;
+      --bg-chamber: #0A0A0A;
+      --bg-elevated: #111111;
+      --gold: #C9A962;
+      --gold-bright: #E8D5A3;
+      --gold-dim: #8B7355;
+      --cyan: #4ECDC4;
+      --purple: #9D4EDD;
+      --red: #EF4444;
+      --green: #22C55E;
+      --border: #222222;
+    }
+    
+    body {
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-void);
+      color: #fff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+    
+    .header {
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      padding: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    
+    .header h1 {
+      color: var(--gold);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      margin-bottom: 4px;
+    }
+    
+    .header .subtitle {
+      color: rgba(255,255,255,0.6);
+      font-size: 12px;
+    }
+    
+    .personas {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0;
+    }
+    
+    .persona-chip {
+      padding: 8px 16px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .persona-chip:hover {
+      border-color: var(--cyan);
+    }
+    
+    .persona-chip.selected {
+      background: var(--cyan);
+      border-color: var(--cyan);
+      color: #000;
+    }
+    
+    .persona-chip.HOSTILE.selected { background: var(--red); border-color: var(--red); color: #fff; }
+    .persona-chip.CRISIS.selected { background: #FF6B35; border-color: #FF6B35; color: #fff; }
+    .persona-chip.SKEPTICAL.selected { background: var(--gold); border-color: var(--gold); color: #000; }
+    .persona-chip.MINOR.selected { background: var(--purple); border-color: var(--purple); color: #fff; }
+    .persona-chip.MANIPULATION.selected { background: #EC4899; border-color: #EC4899; color: #fff; }
+    
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    
+    .btn {
+      padding: 12px 20px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .btn-primary {
+      background: var(--cyan);
+      color: #000;
+    }
+    
+    .btn-danger {
+      background: var(--red);
+      color: #fff;
+    }
+    
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.7);
+    }
+    
+    .btn-purple {
+      background: var(--purple);
+      color: #fff;
+    }
+    
+    .error-banner {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--red);
+      font-size: 12px;
+    }
+    
+    .error-banner.hidden { display: none; }
+    
+    .log-container {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 200px;
+    }
+    
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 300px;
+      color: rgba(255,255,255,0.24);
+    }
+    
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+    }
+    
+    .log-item {
+      background: var(--bg-elevated);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border-left: 3px solid var(--border);
+    }
+    
+    .log-item.prompt { border-left-color: var(--gold); }
+    .log-item.response { border-left-color: var(--cyan); }
+    .log-item.analysis { border-left-color: var(--purple); }
+    
+    .log-item .label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .log-item.prompt .label { color: var(--gold); }
+    .log-item.response .label { color: var(--cyan); }
+    .log-item.analysis .label { color: var(--purple); }
+    
+    .log-item .content {
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    
+    .analysis-section {
+      background: rgba(157, 78, 221, 0.1);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 12px;
+    }
+    
+    .analysis-section h4 {
+      color: var(--purple);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    
+    .analysis-section ul {
+      margin-left: 16px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.8);
+    }
+    
+    .analysis-section li {
+      margin-bottom: 4px;
+    }
+    
+    .input-area {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--bg-chamber);
+      border-top: 1px solid var(--border);
+      padding: 16px;
+    }
+    
+    .input-area.hidden { display: none; }
+    
+    .input-row {
+      display: flex;
+      gap: 12px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    
+    .input-row textarea {
+      flex: 1;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      color: #fff;
+      font-size: 14px;
+      resize: none;
+      min-height: 50px;
+      max-height: 120px;
+    }
+    
+    .input-row textarea:focus {
+      outline: none;
+      border-color: var(--cyan);
+    }
+    
+    .input-row textarea::placeholder {
+      color: rgba(255,255,255,0.4);
+    }
+    
+    .send-btn {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--cyan);
+      border: none;
+      color: #000;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .share-btn {
+      margin-top: 12px;
+      width: 100%;
+      background: transparent;
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+    }
+    
+    .status-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: var(--red);
+      color: #fff;
+      text-align: center;
+      padding: 8px;
+      font-size: 12px;
+      z-index: 1000;
+    }
+    
+    .status-bar.connected {
+      background: var(--green);
+    }
+    
+    .status-bar.hidden { display: none; }
+    
+    @media (max-width: 600px) {
+      .controls { flex-direction: column; }
+      .btn { width: 100%; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+  <div id="status-bar" class="status-bar hidden">Connecting...</div>
+  
+  <div class="header">
+    <h1>DOJO TRAINING</h1>
+    <p class="subtitle" id="subtitle">Select persona types to train with</p>
+    
+    <div class="personas" id="personas">
+      <button class="persona-chip HOSTILE selected" data-persona="HOSTILE">HOSTILE</button>
+      <button class="persona-chip CRISIS" data-persona="CRISIS">CRISIS</button>
+      <button class="persona-chip SKEPTICAL" data-persona="SKEPTICAL">SKEPTICAL</button>
+      <button class="persona-chip MINOR" data-persona="MINOR">MINOR</button>
+      <button class="persona-chip MANIPULATION" data-persona="MANIPULATION">MANIPULATION</button>
+    </div>
+    
+    <div class="controls" id="controls">
+      <button class="btn btn-primary" id="startBtn" onclick="startSession()">
+        <span>▶</span> Start Session
+      </button>
+    </div>
+    
+    <div class="error-banner hidden" id="error">
+      <span>⚠</span>
+      <span id="errorText"></span>
+      <button onclick="hideError()" style="margin-left:auto;background:none;border:none;color:var(--red);cursor:pointer;">✕</button>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="log-container" id="log">
+      <div class="empty-state" id="emptyState">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+        <p>No active session</p>
+        <p style="font-size:12px;margin-top:8px;">Select personas and click Start Session</p>
+      </div>
+    </div>
+  </div>
+  
+  <div class="input-area hidden" id="inputArea">
+    <div class="input-row">
+      <textarea id="messageInput" placeholder="Type your coaching response..." rows="2"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let socket = null;
+    let token = null;
+    let profile = null;
+    let sessionId = null;
+    let activePersona = null;
+    let selectedPersonas = new Set(['HOSTILE']);
+    let busy = false;
+    let logItems = [];
+    
+    // Get auth from URL params (passed from Flutter WebView)
+    const params = new URLSearchParams(window.location.search);
+    token = params.get('token');
+    const wsUrl = params.get('ws') || 'wss://api.sovereignsanctuary.net/ws';
+    
+    // DOM elements
+    const statusBar = document.getElementById('status-bar');
+    const subtitle = document.getElementById('subtitle');
+    const controls = document.getElementById('controls');
+    const errorBanner = document.getElementById('error');
+    const errorText = document.getElementById('errorText');
+    const logContainer = document.getElementById('log');
+    const emptyState = document.getElementById('emptyState');
+    const inputArea = document.getElementById('inputArea');
+    const messageInput = document.getElementById('messageInput');
+    const startBtn = document.getElementById('startBtn');
+    
+    // Initialize
+    document.querySelectorAll('.persona-chip').forEach(chip => {
+      chip.addEventListener('click', () => togglePersona(chip.dataset.persona));
+    });
+    
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    
+    connect();
+    
+    function connect() {
+      showStatus('Connecting...', false);
+      
+      socket = new WebSocket(wsUrl);
+      
+      socket.onopen = () => {
+        hideStatus();
+        if (token) {
+          // Auth with existing token
+          socket.send(JSON.stringify({ type: 'auth', token: token, hardware_id: params.get('hw') || '' }));
+        }
+      };
+      
+      socket.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        handleMessage(data);
+      };
+      
+      socket.onclose = () => {
+        showStatus('Disconnected. Reconnecting...', false);
+        setTimeout(connect, 3000);
+      };
+      
+      socket.onerror = () => {
+        showStatus('Connection error', false);
+      };
+    }
+    
+    function handleMessage(data) {
+      console.log('Received:', data);
+      
+      switch(data.type) {
+        case 'connected':
+          hideStatus();
+          break;
+          
+        case 'auth_success':
+        case 'login_success':
+          profile = data.profile;
+          hideStatus();
+          break;
+          
+        case 'dojo_started':
+          sessionId = data.session_id;
+          activePersona = data.persona || selectedPersonas.values().next().value;
+          busy = false;
+          subtitle.textContent = `Training with ${activePersona}`;
+          updateControls();
+          inputArea.classList.remove('hidden');
+          break;
+          
+        case 'dojo_prompt':
+          addLogItem('prompt', data.prompt, data.persona);
+          busy = false;
+          break;
+          
+        case 'dojo_response':
+          addLogItem('response', data.text);
+          busy = false;
+          break;
+          
+        case 'dojo_analysis':
+          addLogItem('analysis', data.analysis);
+          busy = false;
+          break;
+          
+        case 'dojo_ended':
+          sessionId = null;
+          activePersona = null;
+          subtitle.textContent = 'Select persona types to train with';
+          updateControls();
+          inputArea.classList.add('hidden');
+          break;
+          
+        case 'error':
+          showError(data.message);
+          busy = false;
+          break;
+          
+        case 'coach_learning_enqueued':
+          alert('Shared with Nate for approval!');
+          break;
+      }
+    }
+    
+    function togglePersona(persona) {
+      if (sessionId) return; // Can't change during session
+      
+      if (selectedPersonas.has(persona)) {
+        if (selectedPersonas.size > 1) {
+          selectedPersonas.delete(persona);
+        }
+      } else {
+        selectedPersonas.add(persona);
+      }
+      
+      document.querySelectorAll('.persona-chip').forEach(chip => {
+        chip.classList.toggle('selected', selectedPersonas.has(chip.dataset.persona));
+      });
+    }
+    
+    function startSession() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showError('Not connected');
+        return;
+      }
+      
+      busy = true;
+      const persona = selectedPersonas.values().next().value;
+      
+      socket.send(JSON.stringify({
+        type: 'dojo_start',
+        persona: persona
+      }));
+      
+      emptyState.style.display = 'none';
+      updateControls();
+    }
+    
+    function endSession() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      
+      socket.send(JSON.stringify({ type: 'dojo_end' }));
+      sessionId = null;
+      updateControls();
+    }
+    
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || !sessionId || busy) return;
+      
+      busy = true;
+      
+      socket.send(JSON.stringify({
+        type: 'dojo_test_message',
+        text: text
+      }));
+      
+      addLogItem('response', text);
+      messageInput.value = '';
+    }
+    
+    function shareLearning(analysisData) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      
+      // Find the last prompt and response
+      let prompt = '';
+      let response = '';
+      for (let i = logItems.length - 1; i >= 0; i--) {
+        if (logItems[i].type === 'prompt' && !prompt) prompt = logItems[i].content;
+        if (logItems[i].type === 'response' && !response) response = logItems[i].content;
+        if (prompt && response) break;
+      }
+      
+      socket.send(JSON.stringify({
+        type: 'dojo_share_learning',
+        session_id: sessionId || '',
+        persona: activePersona || 'HOSTILE',
+        prompt: prompt,
+        coach_response: response,
+        analysis: analysisData
+      }));
+    }
+    
+    function addLogItem(type, content, persona) {
+      const item = { type, content, persona, time: new Date() };
+      logItems.push(item);
+      
+      const div = document.createElement('div');
+      div.className = `log-item ${type}`;
+      
+      let label = type.toUpperCase();
+      if (type === 'prompt' && persona) label = `${persona} CLIENT`;
+      if (type === 'response') label = 'YOUR RESPONSE';
+      if (type === 'analysis') label = 'NATE\'S ANALYSIS';
+      
+      let html = `<div class="label">${label}</div>`;
+      
+      if (type === 'analysis' && typeof content === 'object') {
+        html += `<div class="content">${content.summary || ''}</div>`;
+        
+        if (content.strengths?.length) {
+          html += `<div class="analysis-section"><h4>Strengths</h4><ul>${content.strengths.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+        }
+        if (content.improvements?.length) {
+          html += `<div class="analysis-section"><h4>Areas for Growth</h4><ul>${content.improvements.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+        }
+        if (content.techniques?.length) {
+          html += `<div class="analysis-section"><h4>Techniques Used</h4><ul>${content.techniques.map(s => `<li>${s}</li>`).join('')}</ul></div>`;
+        }
+        
+        html += `<button class="btn share-btn" onclick='shareLearning(${JSON.stringify(content)})'>📚 Send to Nate (for approval)</button>`;
+      } else {
+        html += `<div class="content">${typeof content === 'object' ? JSON.stringify(content, null, 2) : content}</div>`;
+      }
+      
+      div.innerHTML = html;
+      logContainer.appendChild(div);
+      div.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function updateControls() {
+      if (sessionId) {
+        controls.innerHTML = `
+          <button class="btn btn-danger" onclick="endSession()"><span>⏹</span> End Session</button>
+          <button class="btn btn-secondary" onclick="clearLog()"><span>🗑</span> Clear Log</button>
+        `;
+      } else {
+        controls.innerHTML = `
+          <button class="btn btn-primary" onclick="startSession()" ${busy ? 'disabled' : ''}>
+            <span>▶</span> ${busy ? 'Starting...' : 'Start Session'}
+          </button>
+        `;
+      }
+    }
+    
+    function clearLog() {
+      logItems = [];
+      logContainer.innerHTML = '';
+      emptyState.style.display = 'flex';
+      logContainer.appendChild(emptyState);
+    }
+    
+    function showStatus(msg, isConnected) {
+      statusBar.textContent = msg;
+      statusBar.className = isConnected ? 'status-bar connected' : 'status-bar';
+      statusBar.classList.remove('hidden');
+    }
+    
+    function hideStatus() {
+      statusBar.classList.add('hidden');
+    }
+    
+    function showError(msg) {
+      errorText.textContent = msg;
+      errorBanner.classList.remove('hidden');
+    }
+    
+    function hideError() {
+      errorBanner.classList.add('hidden');
+    }
+    
+    // Flutter WebView JS bridge
+    window.flutterBridge = {
+      setAuth: (t, hw) => {
+        token = t;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'auth', token: t, hardware_id: hw }));
+        }
+      }
+    };
+  </script>
+</body>
+</html>

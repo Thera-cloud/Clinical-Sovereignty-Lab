@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Analytics & Surveillance</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --blue: #4A90D9; --blue-dim: rgba(74,144,217,0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .btn-primary { background: var(--gold); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .sub-nav-item .count { background: var(--red-critical); padding: 2px 6px; border-radius: 10px; font-size: 10px; color: white; }
+        .main-content { padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.span-2 { grid-column: span 2; }
+        .card.span-3 { grid-column: span 3; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+        .card-title .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.red { background: var(--red-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+        .card-title .icon.purple { background: var(--purple-dim); }
+        .card-title .icon.orange { background: rgba(255,149,0,0.15); }
+        .card-title .icon.blue { background: var(--blue-dim); }
+        .card-body { padding: 20px; }
+        .alert-banner { background: var(--red-dim); border: 1px solid rgba(255, 59, 59, 0.3); border-radius: 10px; padding: 14px 20px; display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+        .alert-icon { font-size: 24px; }
+        .alert-text { flex: 1; }
+        .alert-title { font-size: 13px; font-weight: 600; color: var(--red-critical); }
+        .alert-desc { font-size: 11px; color: var(--text-secondary); }
+        .alert-action { padding: 10px 20px; background: var(--red-critical); color: white; border: none; border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; }
+        .token-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .token-stat { padding: 20px; background: var(--bg-elevated); border-radius: 12px; text-align: center; }
+        .token-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+        .token-value.green { color: var(--green); }
+        .token-value.orange { color: var(--orange); }
+        .token-value.red { color: var(--red-critical); }
+        .token-value.cyan { color: var(--cyan); }
+        .token-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; }
+        .token-change { font-size: 11px; margin-top: 4px; }
+        .token-change.up { color: var(--green); }
+        .token-change.down { color: var(--red-critical); }
+        .budget-section { margin-bottom: 20px; }
+        .budget-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .budget-title { font-size: 13px; font-weight: 600; }
+        .budget-amount { font-size: 13px; }
+        .budget-bar { height: 24px; background: var(--bg-dark); border-radius: 12px; overflow: hidden; position: relative; }
+        .budget-fill { height: 100%; border-radius: 12px; transition: width 0.5s; display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; font-size: 11px; font-weight: 600; }
+        .budget-fill.safe { background: linear-gradient(90deg, var(--green), #00CC6A); }
+        .budget-fill.warning { background: linear-gradient(90deg, var(--gold), var(--orange)); }
+        .budget-fill.danger { background: linear-gradient(90deg, var(--orange), var(--red-critical)); }
+        .budget-marker { position: absolute; top: 0; width: 3px; height: 100%; background: var(--red-critical); }
+        .budget-marker-label { position: absolute; top: -20px; font-size: 9px; color: var(--red-critical); transform: translateX(-50%); }
+        .throttle-control { background: var(--bg-elevated); border-radius: 12px; padding: 20px; }
+        .throttle-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .throttle-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .throttle-status { font-size: 11px; padding: 4px 12px; border-radius: 12px; }
+        .throttle-status.normal { background: var(--green-dim); color: var(--green); }
+        .throttle-status.warning { background: var(--gold-dim); color: var(--gold); }
+        .throttle-status.danger { background: rgba(255,149,0,0.15); color: var(--orange); }
+        .throttle-status.emergency { background: var(--red-dim); color: var(--red-critical); animation: crisis-pulse 1s infinite; }
+        .throttle-slider { width: 100%; margin: 20px 0; }
+        .slider-track { height: 12px; background: linear-gradient(90deg, var(--green), var(--gold), var(--orange), var(--red-critical)); border-radius: 6px; position: relative; }
+        .slider-thumb { position: absolute; top: -4px; width: 20px; height: 20px; background: white; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); transform: translateX(-50%); }
+        .slider-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-secondary); margin-top: 10px; }
+        .tier-controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+        .tier-control { padding: 14px; background: var(--bg-dark); border-radius: 10px; text-align: center; border: 1px solid var(--border); }
+        .tier-name { font-size: 11px; font-weight: 600; margin-bottom: 10px; }
+        .tier-name.trial { color: var(--text-secondary); }
+        .tier-name.standard { color: var(--cyan); }
+        .tier-name.top { color: var(--gold); }
+        .tier-toggle { display: flex; justify-content: center; gap: 8px; }
+        .toggle-btn { padding: 6px 12px; border-radius: 6px; font-size: 9px; cursor: pointer; border: none; font-weight: 500; }
+        .toggle-btn.active { background: var(--green); color: black; }
+        .toggle-btn.inactive { background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border); }
+        .usage-item { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+        .usage-item:last-child { border-bottom: none; }
+        .usage-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .usage-icon.voice { background: var(--purple-dim); }
+        .usage-icon.text { background: var(--cyan-dim); }
+        .usage-icon.vision { background: var(--gold-dim); }
+        .usage-info { flex: 1; }
+        .usage-name { font-size: 13px; font-weight: 500; }
+        .usage-detail { font-size: 10px; color: var(--text-secondary); }
+        .usage-cost { text-align: right; }
+        .usage-amount { font-size: 16px; font-weight: 600; }
+        .usage-tokens { font-size: 10px; color: var(--text-secondary); }
+        .heatmap-container { overflow-x: auto; }
+        .heatmap-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .heatmap-table th { padding: 14px 10px; text-align: left; color: var(--text-secondary); font-weight: 500; border-bottom: 1px solid var(--border); background: var(--bg-elevated); position: sticky; top: 0; }
+        .heatmap-table td { padding: 14px 10px; border-bottom: 1px solid var(--border); }
+        .heatmap-table tr:hover { background: var(--bg-elevated); }
+        .coach-cell { display: flex; align-items: center; gap: 12px; }
+        .coach-avatar { width: 36px; height: 36px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .coach-name { font-weight: 600; font-size: 12px; }
+        .coach-specialty { font-size: 10px; color: var(--text-secondary); }
+        .heat-cell { display: inline-block; min-width: 50px; text-align: center; padding: 8px 12px; border-radius: 6px; font-weight: 600; font-size: 12px; }
+        .heat-high { background: var(--green-dim); color: var(--green); }
+        .heat-medium { background: var(--gold-dim); color: var(--gold); }
+        .heat-low { background: var(--red-dim); color: var(--red-critical); }
+        .rank-badge { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-size: 12px; font-weight: bold; }
+        .rank-1 { background: linear-gradient(135deg, var(--gold), #FF8C00); color: black; }
+        .rank-2 { background: linear-gradient(135deg, #C0C0C0, #A0A0A0); color: black; }
+        .rank-3 { background: linear-gradient(135deg, #CD7F32, #A0522D); color: white; }
+        .rank-other { background: var(--bg-elevated); color: var(--text-secondary); }
+        .live-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .live-count { font-size: 12px; display: flex; align-items: center; gap: 8px; }
+        .live-dot { width: 10px; height: 10px; background: var(--green); border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); } 50% { opacity: 0.8; box-shadow: 0 0 0 8px rgba(0, 255, 136, 0); } }
+        .live-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .live-session { padding: 14px; background: var(--bg-elevated); border-radius: 10px; border-left: 4px solid var(--cyan); transition: all 0.2s; }
+        .live-session:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+        .live-session.top-tier { border-left-color: var(--gold); background: linear-gradient(135deg, var(--bg-elevated), var(--gold-dim)); }
+        .live-session.crisis { border-left-color: var(--red-critical); animation: crisis-pulse 1s infinite; }
+        @keyframes crisis-pulse { 0%, 100% { background: var(--bg-elevated); } 50% { background: var(--red-dim); } }
+        .live-session.family { border-left-color: var(--purple); }
+        .live-user { font-size: 12px; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+        .live-badge { font-size: 8px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+        .live-badge.top-tier { background: var(--gold); color: black; }
+        .live-badge.ai { background: var(--cyan-dim); color: var(--cyan); }
+        .live-badge.coach { background: var(--green-dim); color: var(--green); }
+        .live-badge.crisis { background: var(--red-critical); color: white; }
+        .live-badge.trial { background: var(--purple-dim); color: var(--purple); }
+        .live-badge.family { background: var(--purple-dim); color: var(--purple); }
+        .live-meta { font-size: 10px; color: var(--text-secondary); margin-bottom: 6px; }
+        .live-tokens { font-size: 10px; color: var(--orange); display: flex; align-items: center; gap: 4px; }
+        .live-cemo { font-size: 10px; color: var(--cyan); margin-top: 4px; }
+        .disconnect-btn { margin-top: 10px; padding: 6px 0; font-size: 9px; background: transparent; color: var(--red-critical); border: 1px solid rgba(255, 59, 59, 0.3); border-radius: 4px; cursor: pointer; width: 100%; transition: all 0.2s; }
+        .disconnect-btn:hover { background: var(--red-dim); }
+        .crisis-item { display: flex; align-items: center; gap: 14px; padding: 14px; background: var(--red-dim); border: 1px solid rgba(255, 59, 59, 0.2); border-radius: 10px; margin-bottom: 10px; }
+        .crisis-item.warning { background: rgba(255,149,0,0.1); border-color: rgba(255,149,0,0.2); }
+        .crisis-severity { width: 6px; height: 50px; border-radius: 3px; }
+        .crisis-severity.critical { background: var(--red-critical); box-shadow: 0 0 10px var(--red-critical); }
+        .crisis-severity.high { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+        .crisis-severity.elevated { background: var(--gold); }
+        .crisis-severity.monitoring { background: var(--text-secondary); }
+        .crisis-info { flex: 1; }
+        .crisis-user { font-size: 13px; font-weight: 600; }
+        .crisis-trigger { font-size: 11px; color: var(--red-critical); }
+        .crisis-time { font-size: 10px; color: var(--text-secondary); }
+        .crisis-actions { display: flex; gap: 8px; }
+        .crisis-btn { padding: 8px 14px; border-radius: 6px; font-size: 10px; border: none; cursor: pointer; font-weight: 500; }
+        .crisis-btn.primary { background: var(--red-critical); color: white; }
+        .crisis-btn.secondary { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
+        .health-metric { margin-bottom: 16px; }
+        .health-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; }
+        .health-track { height: 10px; background: var(--bg-dark); border-radius: 5px; overflow: hidden; }
+        .health-fill { height: 100%; border-radius: 5px; transition: width 0.5s; }
+        .patent-panel { background: var(--bg-elevated); border-radius: 10px; padding: 14px; }
+        .patent-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .patent-val { font-size: 18px; font-weight: 700; }
+        .badge-sm { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 600; }
+        .badge-sm.green { background: var(--green-dim); color: var(--green); }
+        .badge-sm.gold { background: var(--gold-dim); color: var(--gold); }
+        .badge-sm.red { background: var(--red-dim); color: var(--red-critical); }
+        .badge-sm.cyan { background: var(--cyan-dim); color: var(--cyan); }
+        .badge-sm.orange { background: rgba(255,149,0,0.15); color: var(--orange); }
+        .badge-sm.purple { background: var(--purple-dim); color: var(--purple); }
+        .p2-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .p3-alert { padding: 10px 14px; background: var(--bg-dark); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--border); font-size: 11px; }
+        .p3-alert.escalation { border-left-color: var(--red-critical); }
+        .p3-alert.ventriloquism { border-left-color: var(--gold); }
+        .p3-alert.billing { border-left-color: var(--orange); }
+        .empty-state { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 11px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">&#x1F451;</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">The Eye &mdash; Surveillance &amp; Analytics</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary">&#x1F4CA; Export Report</button>
+            <button class="btn btn-primary" onclick="refreshAll()">&#x1F504; Refresh Data</button>
+            <a href="command.html" class="btn btn-secondary">&larr; Back to Dashboard</a>
+        </div>
+    </header>
+    <nav class="sub-nav">
+        <div class="sub-nav-item active">&#x1F4CA; Overview</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_coaches.html'">&#x1F468;&#x200D;&#x2695;&#xFE0F; Coach Performance</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_tokens.html'">&#x1F4B0; Token Economics</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_monitor.html'">&#x1F534; Live Monitor</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_crisis.html'">&#x1F6A8; Crisis Feed <span class="count" id="nav-crisis-count">0</span></div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_community.html'">&#x1F49A; Community Health</div>
+    </nav>
+    <main class="main-content">
+        <!-- Alert Banner -->
+        <div class="alert-banner" style="grid-column:span 3;" id="alert-banner">
+            <div class="alert-icon">&#x26A0;&#xFE0F;</div>
+            <div class="alert-text">
+                <div class="alert-title" id="alert-title">LOADING...</div>
+                <div class="alert-desc" id="alert-desc">Connecting to server...</div>
+            </div>
+            <button class="alert-action">Adjust Budget</button>
+        </div>
+
+        <!-- Token Economics -->
+        <div class="card span-2">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">&#x1F4B0;</div> Token Economics Monitor</div>
+                <span style="font-size:11px;color:var(--text-secondary);">Real-time Azure OpenAI cost tracking</span>
+            </div>
+            <div class="card-body">
+                <div class="token-overview">
+                    <div class="token-stat"><div class="token-value orange" id="tk-today">$0</div><div class="token-label">Today's Spend</div><div class="token-change" id="tk-today-chg">&mdash;</div></div>
+                    <div class="token-stat"><div class="token-value green" id="tk-week">$0</div><div class="token-label">This Week</div><div class="token-change" id="tk-week-chg">&mdash;</div></div>
+                    <div class="token-stat"><div class="token-value cyan" id="tk-tokens">0</div><div class="token-label">Tokens Today</div><div class="token-change">Normal volume</div></div>
+                    <div class="token-stat"><div class="token-value green" id="tk-avg">$0</div><div class="token-label">Avg Per User</div><div class="token-change up" id="tk-avg-chg">&mdash;</div></div>
+                </div>
+                <div class="budget-section">
+                    <div class="budget-header"><span class="budget-title">Daily Budget Consumption</span><span class="budget-amount" id="budget-label">$0 / $1,000</span></div>
+                    <div class="budget-bar">
+                        <div class="budget-fill safe" id="budget-fill" style="width:0%;">0%</div>
+                        <div class="budget-marker" style="left:95%;"><span class="budget-marker-label">LIMIT</span></div>
+                    </div>
+                </div>
+                <div class="throttle-control">
+                    <div class="throttle-header"><span class="throttle-title">&#x26A1; Throttle Control</span><span class="throttle-status normal" id="throttle-badge">&#x25CF; NORMAL MODE</span></div>
+                    <div class="throttle-slider"><div class="slider-track"><div class="slider-thumb" id="throttle-thumb" style="left:8%;"></div></div><div class="slider-labels"><span>Full Features</span><span>Balanced</span><span>Text Only</span><span>Emergency</span></div></div>
+                    <div class="tier-controls">
+                        <div class="tier-control"><div class="tier-name top">&#x2B50; TOP TIER</div><div class="tier-toggle" id="tier-top-toggle"><button class="toggle-btn active">&#x1F399;&#xFE0F; Voice</button><button class="toggle-btn active">&#x1F441;&#xFE0F; Vision</button></div></div>
+                        <div class="tier-control"><div class="tier-name standard">STANDARD</div><div class="tier-toggle" id="tier-standard-toggle"><button class="toggle-btn active">&#x1F399;&#xFE0F; Voice</button><button class="toggle-btn inactive">&#x1F441;&#xFE0F; Vision</button></div></div>
+                        <div class="tier-control"><div class="tier-name trial">TRIAL</div><div class="tier-toggle" id="tier-trial-toggle"><button class="toggle-btn inactive">&#x1F399;&#xFE0F; Voice</button><button class="toggle-btn inactive">&#x1F441;&#xFE0F; Vision</button></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Usage Breakdown -->
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon cyan">&#x1F4C8;</div> Usage Breakdown</div></div>
+            <div class="card-body">
+                <div class="usage-item"><div class="usage-icon voice">&#x1F399;&#xFE0F;</div><div class="usage-info"><div class="usage-name">Voice (Whisper + TTS)</div><div class="usage-detail">Top Tier clients only</div></div><div class="usage-cost"><div class="usage-amount" id="usage-voice-cost" style="color:var(--orange);">$0.00</div><div class="usage-tokens" id="usage-voice-tokens">0 tokens</div></div></div>
+                <div class="usage-item"><div class="usage-icon text">&#x1F4AC;</div><div class="usage-info"><div class="usage-name">Text (GPT-4o)</div><div class="usage-detail">All tiers</div></div><div class="usage-cost"><div class="usage-amount" id="usage-text-cost" style="color:var(--green);">$0.00</div><div class="usage-tokens" id="usage-text-tokens">0 tokens</div></div></div>
+                <div class="usage-item"><div class="usage-icon vision">&#x1F441;&#xFE0F;</div><div class="usage-info"><div class="usage-name">Vision (GPT-4V)</div><div class="usage-detail">Biometric analysis</div></div><div class="usage-cost"><div class="usage-amount" id="usage-vision-cost" style="color:var(--gold);">$0.00</div><div class="usage-tokens" id="usage-vision-tokens">0 tokens</div></div></div>
+            </div>
+        </div>
+
+        <!-- Coach Performance Heatmap -->
+        <div class="card span-3">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">&#x1F525;</div> Coach Performance Heatmap</div>
+                <div style="display:flex;gap:8px;"><button class="btn btn-secondary" style="padding:6px 14px;font-size:11px;">This Week</button><button class="btn btn-secondary" style="padding:6px 14px;font-size:11px;">This Month</button><button class="btn btn-secondary" style="padding:6px 14px;font-size:11px;">All Time</button></div>
+            </div>
+            <div class="card-body">
+                <div class="heatmap-container">
+                    <table class="heatmap-table">
+                        <thead><tr><th style="width:60px;">Rank</th><th style="width:200px;">Coach</th><th>Clients</th><th>Sessions</th><th>Retention</th><th>Avg C<sub>emo</sub></th><th>CEE Rate</th><th>AI Collab</th><th>Revenue</th></tr></thead>
+                        <tbody id="heatmap-body"><tr><td colspan="9" class="empty-state">Loading coaches...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Sessions Monitor -->
+        <div class="card span-2">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">&#x1F4E1;</div> Live Session Monitor</div>
+                <div class="live-count"><div class="live-dot"></div><span style="color:var(--green);font-weight:600;" id="live-count">0 Active Sessions</span></div>
+            </div>
+            <div class="card-body"><div class="live-grid" id="live-sessions-grid"><div class="empty-state">Awaiting live session data...</div></div></div>
+        </div>
+
+        <!-- Crisis Watchlist -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon red">&#x1F6A8;</div> Crisis Watchlist</div>
+                <span style="font-size:11px;color:var(--red-critical);"><span id="crisis-count">0</span> active alerts</span>
+            </div>
+            <div class="card-body" id="crisis-body"><div class="empty-state">No crisis alerts</div></div>
+        </div>
+
+        <!-- Community Health -->
+        <div class="card span-3">
+            <div class="card-header">
+                <div class="card-title"><div class="icon green">&#x1F49A;</div> Community Nevedal State</div>
+                <span style="font-size:11px;color:var(--text-secondary);">Aggregate emotional health of all users</span>
+            </div>
+            <div class="card-body"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px;" id="community-bars"><div class="empty-state" style="grid-column:span 4;">Loading community metrics...</div></div></div>
+        </div>
+
+        <!-- Patent 2: Aggregate Metrics -->
+        <div class="card span-2">
+            <div class="card-header"><div class="card-title"><div class="icon orange">&#x1F4A1;</div> Patent 2: Platform Behavioral Intelligence</div></div>
+            <div class="card-body">
+                <div class="p2-grid">
+                    <div class="patent-panel"><div class="patent-label">Crisis Perception Distribution</div><div id="p2-perception">&mdash;</div></div>
+                    <div class="patent-panel"><div class="patent-label">Reactivity Signatures</div><div id="p2-reactivity">&mdash;</div></div>
+                    <div class="patent-panel"><div class="patent-label">Confidence Tiers</div><div id="p2-confidence">&mdash;</div></div>
+                    <div class="patent-panel"><div class="patent-label">Aggregate Shame Index</div><div class="patent-val" id="p2-shame">&mdash;</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Patent 3: Family Alerts -->
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon purple">&#x1F468;&#x200D;&#x1F469;&#x200D;&#x1F467;</div> Patent 3: Family Alerts</div></div>
+            <div class="card-body" id="p3-body"><div class="empty-state">No active family alerts</div></div>
+        </div>
+
+        <!-- Platform Revenue -->
+        <div class="card span-3">
+            <div class="card-header">
+                <div class="card-title"><div class="icon" style="background:rgba(201,169,98,0.2);color:var(--gold);">&#x1F4B0;</div> Platform Revenue</div>
+                <span style="font-size:11px;color:var(--text-secondary);">Coach financial overview &amp; platform fees</span>
+            </div>
+            <div class="card-body">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+                    <div class="token-stat"><div class="token-value" id="rev-platform-fees-ytd" style="color:var(--gold);">$0.00</div><div class="token-label">Platform Fees (YTD)</div></div>
+                    <div class="token-stat"><div class="token-value" id="rev-gross-earnings-ytd" style="color:var(--green);">$0.00</div><div class="token-label">Gross Earnings (YTD)</div></div>
+                    <div class="token-stat"><div class="token-value" id="rev-month" style="color:var(--cyan);">&mdash;</div><div class="token-label">Current Period</div></div>
+                    <div class="token-stat"><div class="token-value" id="rev-1099-count" style="color:var(--orange);">0</div><div class="token-label">Coaches Near 1099 Threshold</div></div>
+                </div>
+                <div style="margin-top:8px;">
+                    <div style="font-size:12px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Revenue by Coach</div>
+                    <div style="overflow-x:auto;">
+                        <table id="rev-coach-table" style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1);"><th style="text-align:left;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Coach</th><th style="text-align:center;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Rate</th><th style="text-align:center;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Sessions</th><th style="text-align:right;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Gross Fees</th><th style="text-align:right;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Platform Fees</th><th style="text-align:center;padding:8px 12px;color:var(--text-secondary);font-weight:500;">Payment Mode</th><th style="text-align:center;padding:8px 12px;color:var(--text-secondary);font-weight:500;">W-9</th><th style="text-align:center;padding:8px 12px;color:var(--text-secondary);font-weight:500;">1099</th></tr></thead>
+                            <tbody id="rev-coach-tbody"><tr><td colspan="8" class="empty-state">Loading financial data...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+
+        var ws = null, authenticated = false;
+        var allUsers = [], allCoaches = [];
+        var nevedalByUser = {};
+        var cohortData = null;
+        var crisisWatchlist = [];
+        var familyAlerts = [];
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+        function setText(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+
+        function connect() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data; try { data = JSON.parse(event.data); } catch(e) { return; }
+
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    ws.send(JSON.stringify({ type: "admin_get_stats" }));
+                    ws.send(JSON.stringify({ type: "admin_get_financial_summary" }));
+                    ws.send(JSON.stringify({ type: "admin_get_users" }));
+                    ws.send(JSON.stringify({ type: "admin_get_cohort_stats", filters: {} }));
+                    ws.send(JSON.stringify({ type: "admin_get_families" }));
+                    ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
+                    return;
+                }
+
+                if (data.type === "admin_stats") { displayStats(data.stats || {}); return; }
+                if (data.type === "admin_financial_summary") { displayFinancials(data); return; }
+                if ((data.type === "admin_users" || data.type === "admin_users_list") && data.users) { allUsers = data.users; allCoaches = data.users.filter(function(u){return u.role==="COACH";}); buildHeatmap(); return; }
+                if (data.type === "cohort_stats") { cohortData = data; displayCommunity(data); displayPatent2Aggregate(data); return; }
+                if (data.type === "families_list" || data.type === "admin_families_list") { displayPatent3(data.families || []); return; }
+                if (data.type === "nevedal_update") {
+                    var st = data.data || {};
+                    if (st.user_id) nevedalByUser[st.user_id] = st;
+                    return;
+                }
+                if (data.type === "login_failed") { alert("Auth failed: " + data.message); window.location.href = "index.html"; }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connect, 2000); };
+            ws.onerror = function() {};
+        }
+
+        window.refreshAll = function() {
+            if (!ws || !authenticated) return;
+            ws.send(JSON.stringify({ type: "admin_get_stats" }));
+            ws.send(JSON.stringify({ type: "admin_get_financial_summary" }));
+            ws.send(JSON.stringify({ type: "admin_get_users" }));
+            ws.send(JSON.stringify({ type: "admin_get_cohort_stats", filters: {} }));
+            ws.send(JSON.stringify({ type: "admin_get_families" }));
+        };
+
+        // === STATS ===
+        function displayStats(stats) {
+            var tokensToday = stats.today_tokens || stats.tokens_used_today || 0;
+            var totalTokens = (stats.platform_totals && stats.platform_totals.total_tokens_used) || stats.total_tokens_used || 0;
+            var liveSessions = stats.live_sessions || 0;
+            var activeUsers = stats.active_users || 0;
+
+            // Token stats
+            var dailySpend = tokensToday * 0.00001;
+            setText("tk-today", "$" + dailySpend.toFixed(2));
+            setText("tk-tokens", (tokensToday / 1000).toFixed(0) + "K");
+            var avgPerUser = activeUsers > 0 ? dailySpend / activeUsers : 0;
+            setText("tk-avg", "$" + avgPerUser.toFixed(2));
+
+            // Budget bar
+            var budgetLimit = 1000;
+            var pct = Math.min((dailySpend / budgetLimit) * 100, 100);
+            var fill = document.getElementById("budget-fill");
+            if (fill) {
+                fill.style.width = pct + "%";
+                fill.textContent = pct.toFixed(0) + "%";
+                fill.className = "budget-fill " + (pct < 70 ? "safe" : pct < 90 ? "warning" : "danger");
+            }
+            setText("budget-label", "$" + dailySpend.toFixed(2) + " / $" + budgetLimit.toFixed(2));
+
+            // Usage breakdown (estimated modality split from total tokens)
+            var voicePct = 0.50, textPct = 0.37, visionPct = 0.13;
+            var voiceTokens = Math.round(tokensToday * voicePct);
+            var textTokens  = Math.round(tokensToday * textPct);
+            var visionTokens = tokensToday - voiceTokens - textTokens;
+            var voiceCost  = voiceTokens * 0.000015;   // Whisper + TTS higher rate
+            var textCost   = textTokens  * 0.00001;    // GPT-4o standard
+            var visionCost = visionTokens * 0.00001;   // GPT-4V
+            function fmtTokens(n) { return n >= 1e6 ? (n/1e6).toFixed(1) + "M" : n >= 1000 ? (n/1000).toFixed(0) + "K" : String(n); }
+            setText("usage-voice-cost",   "$" + voiceCost.toFixed(2));
+            setText("usage-voice-tokens", fmtTokens(voiceTokens) + " tokens");
+            setText("usage-text-cost",    "$" + textCost.toFixed(2));
+            setText("usage-text-tokens",  fmtTokens(textTokens) + " tokens");
+            setText("usage-vision-cost",  "$" + visionCost.toFixed(2));
+            setText("usage-vision-tokens",fmtTokens(visionTokens) + " tokens");
+
+            // Throttle control (react to live budget percentage)
+            var badge = document.getElementById("throttle-badge");
+            var thumb = document.getElementById("throttle-thumb");
+            var tierTop      = document.getElementById("tier-top-toggle");
+            var tierStandard = document.getElementById("tier-standard-toggle");
+            var tierTrial    = document.getElementById("tier-trial-toggle");
+            if (pct < 70) {
+                // NORMAL — Full Features
+                if (badge) { badge.textContent = "\u25CF NORMAL MODE"; badge.className = "throttle-status normal"; }
+                if (thumb) thumb.style.left = "8%";
+                if (tierTop)      tierTop.innerHTML      = '<button class="toggle-btn active">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn active">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierStandard) tierStandard.innerHTML  = '<button class="toggle-btn active">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierTrial)    tierTrial.innerHTML     = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+            } else if (pct < 85) {
+                // BALANCED
+                if (badge) { badge.textContent = "\u25CF BALANCED MODE"; badge.className = "throttle-status warning"; }
+                if (thumb) thumb.style.left = "35%";
+                if (tierTop)      tierTop.innerHTML      = '<button class="toggle-btn active">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn active">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierStandard) tierStandard.innerHTML  = '<button class="toggle-btn active">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierTrial)    tierTrial.innerHTML     = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+            } else if (pct < 95) {
+                // THROTTLED — Text Only
+                if (badge) { badge.textContent = "\u25CF THROTTLED"; badge.className = "throttle-status danger"; }
+                if (thumb) thumb.style.left = "62%";
+                if (tierTop)      tierTop.innerHTML      = '<button class="toggle-btn active">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierStandard) tierStandard.innerHTML  = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierTrial)    tierTrial.innerHTML     = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+            } else {
+                // EMERGENCY
+                if (badge) { badge.textContent = "\u25CF EMERGENCY"; badge.className = "throttle-status emergency"; }
+                if (thumb) thumb.style.left = "92%";
+                if (tierTop)      tierTop.innerHTML      = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierStandard) tierStandard.innerHTML  = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+                if (tierTrial)    tierTrial.innerHTML     = '<button class="toggle-btn inactive">\uD83C\uDF99\uFE0F Voice</button><button class="toggle-btn inactive">\uD83D\uDC41\uFE0F Vision</button>';
+            }
+
+            // Alert banner
+            if (pct >= 80) {
+                setText("alert-title", "TOKEN BUDGET WARNING");
+                setText("alert-desc", "Daily Azure OpenAI spend at " + pct.toFixed(0) + "% ($" + dailySpend.toFixed(0) + " / $" + budgetLimit + "). Auto-throttling will engage at 95%.");
+            } else {
+                setText("alert-title", "SYSTEM NOMINAL");
+                setText("alert-desc", "Daily spend at " + pct.toFixed(0) + "%. All systems operating within budget.");
+                var banner = document.getElementById("alert-banner");
+                if (banner) { banner.style.background = "var(--green-dim)"; banner.style.borderColor = "rgba(0,255,136,0.3)"; }
+            }
+
+            // Live sessions
+            setText("live-count", liveSessions + " Active Sessions");
+            buildLiveSessions(stats);
+
+            // Crisis watchlist
+            crisisWatchlist = stats.crisis_watchlist || [];
+            buildCrisisWatchlist(crisisWatchlist);
+            setText("crisis-count", String(crisisWatchlist.length));
+            setText("nav-crisis-count", String(crisisWatchlist.length));
+        }
+
+        // === LIVE SESSIONS ===
+        function buildLiveSessions(stats) {
+            var grid = document.getElementById("live-sessions-grid");
+            var onlineClients = stats.online_client_ids || [];
+            var onlineCoaches = stats.online_coach_ids || [];
+            var all = onlineClients.concat(onlineCoaches);
+            if (all.length === 0) { grid.innerHTML = '<div class="empty-state">No active sessions right now</div>'; return; }
+
+            var html = "";
+            all.forEach(function(uid) {
+                var user = allUsers.find(function(u){ return (u.id || u.user_id || u.hardware_id) === uid; });
+                var name = user ? (user.name || user.username || uid) : uid;
+                var role = user ? user.role : "CLIENT";
+                var tier = user ? (user.subscription_plan || "standard") : "standard";
+                var ns = nevedalByUser[uid];
+                var isCrisis = crisisWatchlist.some(function(c){ return c.user_id === uid; });
+                var isFamily = user && user.family_id;
+                var cardClass = isCrisis ? "crisis" : tier.toLowerCase().indexOf("top") >= 0 ? "top-tier" : isFamily ? "family" : "";
+                var badgeClass = isCrisis ? "crisis" : role === "COACH" ? "coach" : tier.toLowerCase().indexOf("top") >= 0 ? "top-tier" : tier.toLowerCase().indexOf("trial") >= 0 ? "trial" : "ai";
+                var badgeText = isCrisis ? "\u26A0 CRISIS" : role === "COACH" ? "\uD83D\uDC68\u200D\u2695\uFE0F Coach" : tier.toUpperCase();
+
+                html += '<div class="live-session ' + cardClass + '">';
+                html += '<div class="live-user">' + esc(name) + ' <span class="live-badge ' + badgeClass + '">' + badgeText + '</span></div>';
+                html += '<div class="live-meta">' + esc(role) + (isFamily ? " \u2022 " + esc(user.family_id) : "") + '</div>';
+                if (ns) {
+                    var cemo = (ns.c_emo || 0).toFixed(2);
+                    var ceeLabel = ns.cee_window ? "\u26A1 CEE Active" : "";
+                    html += '<div class="live-cemo">C<sub>emo</sub>: ' + cemo + ' ' + ceeLabel + '</div>';
+                }
+                html += '<button class="disconnect-btn">Force Disconnect</button>';
+                html += '</div>';
+            });
+            grid.innerHTML = html;
+        }
+
+        // === CRISIS WATCHLIST ===
+        function buildCrisisWatchlist(list) {
+            var body = document.getElementById("crisis-body");
+            if (!list || list.length === 0) { body.innerHTML = '<div class="empty-state">\u2705 No crisis alerts at this time</div>'; return; }
+            var html = "";
+            list.forEach(function(c) {
+                var level = (c.risk_level || "MONITORING").toUpperCase();
+                var severityClass = level === "CRITICAL" ? "critical" : level === "HIGH" ? "high" : level === "ELEVATED" ? "elevated" : "monitoring";
+                var itemClass = level === "CRITICAL" ? "" : "warning";
+                html += '<div class="crisis-item ' + itemClass + '">';
+                html += '<div class="crisis-severity ' + severityClass + '"></div>';
+                html += '<div class="crisis-info">';
+                html += '<div class="crisis-user">' + esc(c.user_name || c.user_id || "Unknown") + ' <span class="badge-sm ' + (level === "CRITICAL" ? "red" : level === "HIGH" ? "orange" : "gold") + '">' + level + '</span></div>';
+                html += '<div class="crisis-trigger">\u26A0\uFE0F ' + esc(c.reason || (c.keywords ? "Keywords: " + c.keywords.join(", ") : "Alert triggered")) + '</div>';
+                html += '<div class="crisis-time">' + esc(c.last_assessment || c.timestamp || "") + ' \u2022 ' + esc(c.assigned_coach || "No coach") + '</div>';
+                html += '</div>';
+                html += '<div class="crisis-actions"><button class="crisis-btn primary">Alert Coach</button><button class="crisis-btn secondary">Review</button></div>';
+                html += '</div>';
+            });
+            body.innerHTML = html;
+        }
+
+        // === COACH HEATMAP ===
+        function buildHeatmap() {
+            var tbody = document.getElementById("heatmap-body");
+            if (allCoaches.length === 0) { tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No coaches found</td></tr>'; return; }
+            var html = "";
+            allCoaches.sort(function(a, b) { return (b.client_count || 0) - (a.client_count || 0); });
+            allCoaches.forEach(function(c, i) {
+                var rank = i + 1;
+                var rankClass = rank === 1 ? "rank-1" : rank === 2 ? "rank-2" : rank === 3 ? "rank-3" : "rank-other";
+                var name = c.name || c.username || c.hardware_id || "Coach";
+                var clients = c.client_count || 0;
+                var sessions = c.total_sessions || 0;
+                var retention = c.retention_rate || 0;
+                var avgCemo = c.avg_c_emo || 0;
+                var ceeRate = c.cee_rate || 0;
+                var aiCollab = c.ai_collab_score || 0;
+                var revenue = c.ytd_earnings || 0;
+                html += '<tr>';
+                html += '<td><span class="rank-badge ' + rankClass + '">' + rank + '</span></td>';
+                html += '<td><div class="coach-cell"><div class="coach-avatar">\uD83D\uDC68\u200D\u2695\uFE0F</div><div><div class="coach-name">' + esc(name) + '</div><div class="coach-specialty">' + esc(c.specialty || c.subscription_status || "Coach") + '</div></div></div></td>';
+                html += '<td><span class="heat-cell ' + heatClass(clients, 5, 15) + '">' + clients + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(sessions, 10, 30) + '">' + sessions + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(retention, 80, 95) + '">' + (retention ? retention + "%" : "\u2014") + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(avgCemo * 100, 50, 75) + '">' + (avgCemo ? avgCemo.toFixed(2) : "\u2014") + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(ceeRate * 100, 20, 60) + '">' + (ceeRate ? (ceeRate * 100).toFixed(0) + "%" : "\u2014") + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(aiCollab, 60, 85) + '">' + (aiCollab ? aiCollab + "%" : "\u2014") + '</span></td>';
+                html += '<td><span class="heat-cell ' + heatClass(revenue, 2000, 5000) + '">$' + revenue.toLocaleString() + '</span></td>';
+                html += '</tr>';
+            });
+            tbody.innerHTML = html;
+        }
+
+        function heatClass(val, low, high) {
+            if (!val) return "heat-low";
+            return val >= high ? "heat-high" : val >= low ? "heat-medium" : "heat-low";
+        }
+
+        // === COMMUNITY HEALTH ===
+        function displayCommunity(data) {
+            var avgCemo = data.avg_c_emo || 0;
+            var ceeRate = data.avg_cee_rate || 0;
+            var totalP = data.total_participants || 0;
+            var totalS = data.total_sessions || 0;
+
+            var anxietyPct = Math.max(0, Math.min(100, 100 - (avgCemo * 100)));
+            var stabilityPct = Math.max(0, Math.min(100, avgCemo * 100));
+            var engagementPct = totalP > 0 ? Math.min(100, (totalS / totalP) * 10) : 0;
+            var breakthroughPct = Math.min(100, ceeRate * 100);
+
+            var metrics = [
+                { label: "Community Anxiety Level", value: anxietyPct, status: anxietyPct > 70 ? "HIGH" : anxietyPct > 40 ? "MODERATE" : "LOW", color: anxietyPct > 70 ? "var(--red-critical)" : "var(--orange)", gradient: "linear-gradient(90deg, var(--green), var(--orange))" },
+                { label: "Emotional Stability Index", value: stabilityPct, status: stabilityPct > 70 ? "GOOD" : stabilityPct > 40 ? "MODERATE" : "LOW", color: stabilityPct > 70 ? "var(--green)" : "var(--orange)", gradient: "linear-gradient(90deg, var(--cyan), var(--green))" },
+                { label: "Platform Engagement", value: engagementPct, status: engagementPct > 70 ? "HIGH" : engagementPct > 40 ? "MODERATE" : "LOW", color: engagementPct > 70 ? "var(--gold)" : "var(--text-secondary)", gradient: "linear-gradient(90deg, var(--gold), var(--orange))" },
+                { label: "Breakthrough Rate", value: breakthroughPct, status: breakthroughPct > 70 ? "EXCELLENT" : breakthroughPct > 40 ? "GOOD" : "DEVELOPING", color: breakthroughPct > 70 ? "var(--green)" : "var(--gold)", gradient: "var(--green)" }
+            ];
+
+            document.getElementById("community-bars").innerHTML = metrics.map(function(m) {
+                return '<div class="health-metric"><div class="health-label"><span>' + m.label + '</span><span style="color:' + m.color + ';">' + m.status + ' (' + m.value.toFixed(0) + '%)</span></div><div class="health-track"><div class="health-fill" style="width:' + m.value + '%;background:' + m.gradient + ';"></div></div></div>';
+            }).join('');
+        }
+
+        // === PATENT 2 AGGREGATE ===
+        function displayPatent2Aggregate(data) {
+            // Perception distribution
+            var perceptions = data.perception_distribution || { CALIBRATED: 0, NORMALIZER: 0, MINIMIZER: 0, AMPLIFIER: 0 };
+            var percHtml = '<div style="font-size:10px;margin-top:6px;">';
+            ["CALIBRATED", "NORMALIZER", "MINIMIZER", "AMPLIFIER"].forEach(function(k) {
+                var cls = k === "CALIBRATED" ? "cyan" : k === "NORMALIZER" ? "green" : k === "MINIMIZER" ? "gold" : "red";
+                percHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span>' + k + '</span><span class="badge-sm ' + cls + '">' + (perceptions[k] || 0) + '</span></div>';
+            });
+            percHtml += '</div>';
+            document.getElementById("p2-perception").innerHTML = percHtml;
+
+            // Reactivity signatures
+            var reactivity = data.reactivity_distribution || { FIGHT: 0, FLIGHT: 0, FREEZE: 0, FAWN: 0 };
+            var reactHtml = '<div style="font-size:10px;margin-top:6px;">';
+            ["FIGHT", "FLIGHT", "FREEZE", "FAWN"].forEach(function(k) {
+                var cls = k === "FIGHT" ? "red" : k === "FLIGHT" ? "gold" : k === "FREEZE" ? "cyan" : "green";
+                reactHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span>' + k + '</span><span class="badge-sm ' + cls + '">' + (reactivity[k] || 0) + '</span></div>';
+            });
+            reactHtml += '</div>';
+            document.getElementById("p2-reactivity").innerHTML = reactHtml;
+
+            // Confidence tiers
+            var tiers = data.confidence_tiers || { LEARNING: 0, OBSERVATION: 0, AWARENESS: 0, REFLECTION: 0 };
+            var tierHtml = '<div style="font-size:10px;margin-top:6px;">';
+            ["REFLECTION", "AWARENESS", "OBSERVATION", "LEARNING"].forEach(function(k) {
+                var cls = k === "REFLECTION" ? "green" : k === "AWARENESS" ? "gold" : k === "OBSERVATION" ? "orange" : "red";
+                tierHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;"><span>' + k + '</span><span class="badge-sm ' + cls + '">' + (tiers[k] || 0) + '</span></div>';
+            });
+            tierHtml += '</div>';
+            document.getElementById("p2-confidence").innerHTML = tierHtml;
+
+            setText("p2-shame", data.avg_shame_index ? data.avg_shame_index.toFixed(3) : "0.000");
+        }
+
+        // === PATENT 3: FAMILY ALERTS ===
+        function displayPatent3(families) {
+            var alerts = [];
+            families.forEach(function(f) {
+                if (f.escalation_count > 0) alerts.push({ type: "escalation", text: "Family " + esc(f.family_id || f.id || "?") + ": " + f.escalation_count + " escalation event(s) detected" });
+                if (f.ventriloquism_count > 0) alerts.push({ type: "ventriloquism", text: "Family " + esc(f.family_id || f.id || "?") + ": " + f.ventriloquism_count + " ventriloquism detection(s)" });
+                if (f.billing_alert) alerts.push({ type: "billing", text: "Family " + esc(f.family_id || f.id || "?") + ": Billing threshold reached ($" + (f.billing_total || 0).toFixed(2) + ")" });
+            });
+            var body = document.getElementById("p3-body");
+            if (alerts.length === 0) { body.innerHTML = '<div class="empty-state">No active family alerts</div>'; return; }
+            body.innerHTML = alerts.map(function(a) {
+                return '<div class="p3-alert ' + a.type + '">' + a.text + '</div>';
+            }).join('');
+        }
+
+        // === FINANCIALS ===
+        function displayFinancials(data) {
+            var feesEl = document.getElementById("rev-platform-fees-ytd");
+            var grossEl = document.getElementById("rev-gross-earnings-ytd");
+            var monthEl = document.getElementById("rev-month");
+            var nearEl = document.getElementById("rev-1099-count");
+            if (feesEl) feesEl.textContent = "$" + (data.total_platform_fees_ytd || 0).toFixed(2);
+            if (grossEl) grossEl.textContent = "$" + (data.total_gross_earnings_ytd || 0).toFixed(2);
+            if (monthEl) monthEl.textContent = data.month || "\u2014";
+            if (nearEl) nearEl.textContent = (data.coaches_near_1099_threshold || []).length.toString();
+
+            var tbody = document.getElementById("rev-coach-tbody");
+            if (!tbody) return;
+            var coaches = data.coaches || [];
+            if (coaches.length === 0) { tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No coach financial data yet</td></tr>'; return; }
+            tbody.innerHTML = coaches.map(function(c) {
+                var w9Badge = c.w9_submitted ? '<span style="color:var(--green);font-size:11px;">\u2713 Filed</span>' : '<span style="color:var(--orange);font-size:11px;">Missing</span>';
+                var t1099Badge = c.requires_1099 ? '<span style="color:var(--gold);font-size:11px;">Required</span>' : '<span style="color:var(--text-secondary);font-size:11px;">Below</span>';
+                var modeLabel = c.payment_mode === 'platform_handles' ? '<span style="color:var(--cyan);font-size:11px;">Platform</span>' : '<span style="color:var(--text-secondary);font-size:11px;">Coach</span>';
+                return '<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px 12px;">' + esc(c.name || c.hardware_id || "Unknown") + '</td><td style="text-align:center;padding:10px 12px;color:var(--gold);">$' + (c.coaching_fee || 0).toFixed(0) + '</td><td style="text-align:center;padding:10px 12px;">' + (c.total_sessions || 0) + '</td><td style="text-align:right;padding:10px 12px;color:var(--green);">$' + (c.ytd_earnings || 0).toFixed(2) + '</td><td style="text-align:right;padding:10px 12px;color:var(--gold);">$' + (c.ytd_platform_fees || 0).toFixed(2) + '</td><td style="text-align:center;padding:10px 12px;">' + modeLabel + '</td><td style="text-align:center;padding:10px 12px;">' + w9Badge + '</td><td style="text-align:center;padding:10px 12px;">' + t1099Badge + '</td></tr>';
+            }).join('');
+        }
+
+        // Refresh stats every 10s
+        setInterval(function() {
+            if (ws && authenticated) ws.send(JSON.stringify({ type: "admin_get_stats" }));
+        }, 10000);
+
+        connect();
+    })();
+    </script>
+</body>
+</html>

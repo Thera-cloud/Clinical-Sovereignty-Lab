@@ -1,0 +1,125 @@
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: nate_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-little_nate}
+      POSTGRES_USER: ${POSTGRES_USER:-nate_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nate_admin} -d ${POSTGRES_DB:-little_nate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: nate_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Backend API Server (FastAPI) — bind to localhost; Nginx terminates TLS
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nate_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - REDIS_URL=redis://redis:6379
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./data/backend:/app/data
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # WebSocket Bridge Server — bind to localhost; Nginx upgrades to WSS
+  # ---------------------------------------------------------------------------
+  bridge:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.bridge
+    container_name: nate_bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - REDIS_URL=redis://redis:6379
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "127.0.0.1:${WEBSOCKET_PORT:-8765}:8765"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./data/bridge:/app/data
+      # Read backend scheduling + Zoom join_url without duplicating stores
+      - ./data/backend:/app/backend_data:ro
+      - bridge_logs:/app/logs
+    networks:
+      - nate_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+  bridge_logs:
+    driver: local
+
+networks:
+  nate_network:
+    driver: bridge

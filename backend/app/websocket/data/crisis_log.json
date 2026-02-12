@@ -1,0 +1,44 @@
+[
+  {
+    "timestamp": "2026-01-25T23:12:04.404699",
+    "user_id": "client2",
+    "user_name": "Sarah Mitchell",
+    "risk_level": "CRITICAL",
+    "keywords": [
+      "988"
+    ],
+    "session_id": "session_12345",
+    "resold": false
+  },
+  {
+    "timestamp": "2026-01-25T22:14:04.404711",
+    "user_id": "client8",
+    "user_name": "Michael Rodriguez",
+    "risk_level": "WARNING",
+    "reason": "Elevated stress 3 days",
+    "session_id": "session_12340",
+    "resolved": false
+  },
+  {
+    "timestamp": "2026-01-30 13:02:44.543901",
+    "user_id": "CLIENT_001B",
+    "user_name": "Jane D.",
+    "trigger_keyword": "crisis_keywords",
+    "context": "I have a traumatic history of abuse both kinds. I was abused by men in the church when I was young. John was supposed to be my safety and help me out of that abusive culture. He knows my father allowe",
+    "status": "ACTIVE",
+    "resolved": false,
+    "resolved_by": "",
+    "resolution_notes": ""
+  },
+  {
+    "timestamp": "2026-01-31 18:01:22.726146",
+    "user_id": "CLIENT_001",
+    "user_name": "John D.",
+    "trigger_keyword": "crisis_keywords",
+    "context": "Very interesting. Another thought was what is the difference between Adam and Jesus?",
+    "status": "ACTIVE",
+    "resolved": false,
+    "resolved_by": "",
+    "resolution_notes": ""
+  }
+]

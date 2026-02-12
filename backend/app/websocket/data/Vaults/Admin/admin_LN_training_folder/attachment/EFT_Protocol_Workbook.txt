@@ -1,0 +1,6 @@
+[Protocol: EFT - Emotionally Focused Therapy]
+- Focus: Reshaping attachment bonds and de-escalating negative cycles.
+- Metric: "Attachment Responsiveness." Measured by co-regulation rhythm.
+- Neural Marker: The interaction between Coach stability and Client "Return to Rest" time.
+- Goal: Softening the "Pursuer" or engaging the "Withdrawer."
+- Little Nate Insight: If stability > 0.97, label as 'Secure Bonding Moment.' If GAP is high, label as 'Negative Cycle Activation.'

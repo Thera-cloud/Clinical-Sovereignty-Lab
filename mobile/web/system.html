@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .content { padding: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+        .card.full { grid-column: span 2; }
+        .card-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+        .status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .status-item { background: var(--bg-elevated); border-radius: 8px; padding: 16px; }
+        .status-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+        .status-value { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .metric-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-label { color: var(--text-secondary); font-size: 13px; }
+        .metric-value { font-weight: 600; font-size: 13px; }
+        .metric-value.green { color: var(--green); }
+        .metric-value.gold { color: var(--gold); }
+        .action-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .action-btn { padding: 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s; }
+        .action-btn:hover { border-color: var(--gold); transform: translateY(-2px); }
+        .action-btn .icon { font-size: 24px; margin-bottom: 8px; }
+        .action-btn .label { font-size: 11px; color: var(--text-secondary); }
+        .log-list { max-height: 300px; overflow-y: auto; }
+        .log-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 12px; display: flex; gap: 12px; }
+        .log-time { color: var(--text-secondary); white-space: nowrap; }
+        .log-type { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+        .log-type.info { background: var(--cyan-dim); color: var(--cyan); }
+        .log-type.success { background: var(--green-dim); color: var(--green); }
+        .log-msg { flex: 1; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">⚙️</div>
+            <div>
+                <div class="logo-text">SYSTEM STATUS</div>
+                <div class="page-title">Infrastructure monitoring</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+    </header>
+    <div class="content">
+        <div class="card">
+            <div class="card-title">🔌 Service Status</div>
+            <div class="status-grid">
+                <div class="status-item"><div class="status-label">Sovereign Bridge</div><div class="status-value"><span class="status-dot green"></span> Online</div></div>
+                <div class="status-item"><div class="status-label">Nate AI</div><div class="status-value"><span class="status-dot green"></span> Ready</div></div>
+                <div class="status-item"><div class="status-label">Azure Cortex</div><div class="status-value"><span class="status-dot green"></span> Connected</div></div>
+                <div class="status-item"><div class="status-label">Night School</div><div class="status-value"><span class="status-dot green"></span> Active</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">📊 Performance Metrics</div>
+            <div class="metric-row"><span class="metric-label">Uptime</span><span class="metric-value green">99.9%</span></div>
+            <div class="metric-row"><span class="metric-label">Avg Response Time</span><span class="metric-value">142ms</span></div>
+            <div class="metric-row"><span class="metric-label">Active Connections</span><span class="metric-value gold">1</span></div>
+            <div class="metric-row"><span class="metric-label">Memory Usage</span><span class="metric-value">324 MB</span></div>
+        </div>
+        <div class="card">
+            <div class="card-title">⚡ Quick Actions</div>
+            <div class="action-grid">
+                <div class="action-btn" onclick="alert('Cache refreshed')"><div class="icon">🔄</div><div class="label">Refresh Cache</div></div>
+                <div class="action-btn" onclick="alert('Diagnostics running')"><div class="icon">🔍</div><div class="label">Run Diagnostics</div></div>
+                <div class="action-btn" onclick="alert('Exporting logs')"><div class="icon">📥</div><div class="label">Export Logs</div></div>
+                <div class="action-btn" onclick="alert('Sessions cleared')"><div class="icon">🧹</div><div class="label">Clear Sessions</div></div>
+                <div class="action-btn" onclick="alert('Night School training')"><div class="icon">🧠</div><div class="label">Retrain Nate</div></div>
+                <div class="action-btn" onclick="alert('Backup started')"><div class="icon">💾</div><div class="label">Backup Data</div></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">📜 Recent Logs</div>
+            <div class="log-list">
+                <div class="log-item"><span class="log-time">Just now</span><span class="log-type success">SUCCESS</span><span class="log-msg">System page loaded</span></div>
+                <div class="log-item"><span class="log-time">1m ago</span><span class="log-type info">INFO</span><span class="log-msg">User authenticated successfully</span></div>
+                <div class="log-item"><span class="log-time">5m ago</span><span class="log-type info">INFO</span><span class="log-msg">Bridge server started on port 8765</span></div>
+                <div class="log-item"><span class="log-time">5m ago</span><span class="log-type success">SUCCESS</span><span class="log-msg">Night School session completed</span></div>
+            </div>
+        </div>
+        <div class="card full" id="adminTools" style="display:none;">
+            <div class="card-title">🔧 Admin Tools</div>
+            <div class="action-grid">
+                <div class="action-btn" onclick="window.location.href='night_school.html'"><div class="icon">🥋</div><div class="label">Night School</div></div>
+                <div class="action-btn" onclick="window.location.href='the_eye.html'"><div class="icon">👁️</div><div class="label">The Eye</div></div>
+                <div class="action-btn" onclick="window.location.href='nevedal_lab_old.html'"><div class="icon">🔬</div><div class="label">Nevedal Lab</div></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        if (!sessionStorage.getItem("username")) {
+            window.location.href = "index.html";
+        }
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (profile.role === "ADMIN") {
+            document.getElementById("adminTools").style.display = "block";
+        }
+    </script>
+</body>
+</html>

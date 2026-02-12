@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Live Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; cursor: pointer; }
+        .back-btn:hover { border-color: var(--purple); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 280px 1fr 300px; gap: 20px; min-height: calc(100vh - 140px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .card-body { padding: 20px; }
+        
+        /* Subject Selector */
+        .search-box { position: relative; margin-bottom: 16px; }
+        .search-box input { width: 100%; padding: 12px 16px 12px 40px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; }
+        .search-box::before { content: '🔍'; position: absolute; left: 14px; top: 50%; transform: translateY(-50%); }
+        .subject-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+        .subject-item:hover { border-color: var(--purple); }
+        .subject-item.selected { background: var(--purple-dim); border-color: var(--purple); }
+        .subject-avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--cyan-dim); border: 2px solid var(--cyan); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
+        .subject-info { flex: 1; }
+        .subject-name { font-size: 12px; font-weight: 600; }
+        .subject-meta { font-size: 10px; color: var(--text-secondary); }
+        
+        /* Real-time Gauge */
+        .gauge-container { position: relative; width: 220px; height: 220px; margin: 0 auto 24px; }
+        .gauge-bg { width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 225deg, var(--red-critical) 0deg, var(--orange) 60deg, var(--gold) 120deg, var(--green) 180deg, var(--cyan) 240deg, var(--purple) 300deg, transparent 300deg); }
+        .gauge-inner { position: absolute; top: 20px; left: 20px; right: 20px; bottom: 20px; background: var(--bg-dark); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gauge-value { font-size: 56px; font-weight: 700; color: var(--cyan); font-family: 'Times New Roman', serif; }
+        .gauge-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+        .gauge-sublabel { font-size: 9px; color: var(--text-secondary); font-style: italic; }
+        
+        /* CEE Indicator */
+        .cee-indicator { text-align: center; padding: 16px; background: var(--bg-elevated); border-radius: 10px; margin-bottom: 20px; }
+        .cee-status { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+        .cee-status.active { color: var(--green); animation: pulse 1.5s infinite; }
+        .cee-status.inactive { color: var(--text-secondary); }
+        .cee-duration { font-size: 10px; color: var(--text-secondary); }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        
+        /* Component Variables */
+        .component-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .component-card { background: var(--bg-elevated); border-radius: 8px; padding: 14px; border-left: 3px solid var(--purple); }
+        .component-card.t-tunnel { border-left-color: var(--cyan); }
+        .component-card.gamma { border-left-color: var(--orange); }
+        .component-card.e-joint { border-left-color: var(--gold); }
+        .component-name { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; font-style: italic; font-family: 'Times New Roman', serif; }
+        .component-value { font-size: 24px; font-weight: 700; }
+        .component-bar { height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+        .component-fill { height: 100%; border-radius: 3px; }
+        .component-fill.purple { background: var(--purple); }
+        .component-fill.cyan { background: var(--cyan); }
+        .component-fill.orange { background: var(--orange); }
+        .component-fill.gold { background: var(--gold); }
+        
+        /* Biometric Panel */
+        .bio-grid { display: grid; gap: 10px; }
+        .bio-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; }
+        .bio-icon { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .bio-icon.hrv { background: rgba(255, 59, 59, 0.15); }
+        .bio-icon.gsr { background: rgba(255, 149, 0, 0.15); }
+        .bio-icon.stress { background: rgba(255, 215, 0, 0.15); }
+        .bio-icon.breath { background: rgba(0, 212, 255, 0.15); }
+        .bio-info { flex: 1; }
+        .bio-label { font-size: 10px; color: var(--text-secondary); }
+        .bio-value { font-size: 16px; font-weight: 700; }
+        
+        /* Session Info */
+        .session-stat { display: flex; justify-content: space-between; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .stat-label { font-size: 11px; color: var(--text-secondary); }
+        .stat-value { font-size: 14px; font-weight: 700; color: var(--purple); }
+        
+        /* Timeline Chart */
+        .timeline-chart { height: 200px; background: var(--bg-elevated); border-radius: 10px; padding: 16px; position: relative; overflow: hidden; }
+        .chart-line { position: absolute; bottom: 20px; left: 16px; right: 16px; height: 120px; }
+        .chart-placeholder { text-align: center; padding: 60px 20px; color: var(--text-secondary); font-size: 11px; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
+    </div>
+
+    <!-- Sub Navigation -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item active"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Subject Selector -->
+        <aside>
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">👤</div> Subject Selection</div>
+                </div>
+                <div class="card-body">
+                    <div class="search-box">
+                        <input type="text" placeholder="Search subjects..." id="subject-search">
+                    </div>
+                    <div id="subject-list">
+                        <div class="subject-item selected" data-id="CLIENT_EMMA_ID">
+                            <div class="subject-avatar">ET</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Emma T.</div>
+                                <div class="subject-meta">14 sessions • TOP TIER</div>
+                            </div>
+                        </div>
+                        <div class="subject-item" data-id="CLIENT_JOHN_ID">
+                            <div class="subject-avatar">JD</div>
+                            <div class="subject-info">
+                                <div class="subject-name">John D.</div>
+                                <div class="subject-meta">8 sessions • STANDARD</div>
+                            </div>
+                        </div>
+                        <div class="subject-item" data-id="CLIENT_SARAH_ID">
+                            <div class="subject-avatar">SM</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Sarah M.</div>
+                                <div class="subject-meta">23 sessions • TOP TIER</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Live Analysis -->
+        <section>
+            <!-- Real-time Gauge -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📐</div> Real-time C<sub>emo</sub> Coherence</div>
+                    <span id="update-status" style="font-size: 10px; color: var(--green);">● LIVE</span>
+                </div>
+                <div class="card-body">
+                    <div class="gauge-container">
+                        <div class="gauge-bg"></div>
+                        <div class="gauge-inner">
+                            <div class="gauge-value" id="c-emo-value">0.78</div>
+                            <div class="gauge-label">C<sub>emo</sub></div>
+                            <div class="gauge-sublabel">Quantum Emotional Coherence</div>
+                        </div>
+                    </div>
+                    
+                    <!-- CEE Indicator -->
+                    <div class="cee-indicator">
+                        <div class="cee-status active" id="cee-status">🟢 CEE ACTIVE</div>
+                        <div class="cee-duration" id="cee-duration">Duration: 00:02:15</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Component Variables -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">🔬</div> Component Variables</div>
+                </div>
+                <div class="card-body">
+                    <div class="component-grid">
+                        <div class="component-card">
+                            <div class="component-name">P<sub>ent</sub> (Entanglement)</div>
+                            <div class="component-value" id="p-ent">0.82</div>
+                            <div class="component-bar"><div class="component-fill purple" id="p-ent-bar" style="width: 82%;"></div></div>
+                        </div>
+                        <div class="component-card t-tunnel">
+                            <div class="component-name">T<sub>tunnel</sub> (Temporal)</div>
+                            <div class="component-value" id="t-tunnel">0.45</div>
+                            <div class="component-bar"><div class="component-fill cyan" id="t-tunnel-bar" style="width: 72.5%;"></div></div>
+                        </div>
+                        <div class="component-card gamma">
+                            <div class="component-name">Γ<sub>amp</sub> (Gamma)</div>
+                            <div class="component-value" id="gamma-amp">67.3</div>
+                            <div class="component-bar"><div class="component-fill orange" id="gamma-bar" style="width: 67%;"></div></div>
+                        </div>
+                        <div class="component-card e-joint">
+                            <div class="component-name">E<sub>joint</sub> (Emotional)</div>
+                            <div class="component-value" id="e-joint">0.71</div>
+                            <div class="component-bar"><div class="component-fill gold" id="e-joint-bar" style="width: 71%;"></div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timeline Chart -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📊</div> 10-Minute Timeline</div>
+                </div>
+                <div class="card-body">
+                    <div class="timeline-chart">
+                        <div class="chart-placeholder">Real-time coherence graph will display here<br>Requires active session with biometric data stream</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Biometrics & Info -->
+        <aside>
+            <!-- Biometric Mapping -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">💓</div> Biometric Mapping</div>
+                </div>
+                <div class="card-body">
+                    <div class="bio-grid">
+                        <div class="bio-item">
+                            <div class="bio-icon hrv">❤️</div>
+                            <div class="bio-info">
+                                <div class="bio-label">D<sub>distance</sub> (Interpersonal Distance)</div>
+                                <div class="bio-value" id="hrv-value">0.50</div>
+                            </div>
+                        </div>
+                        <div class="bio-item">
+                            <div class="bio-icon gsr">⚡</div>
+                            <div class="bio-info">
+                                <div class="bio-label">Γ<sub>env</sub> (Decoherence Rate)</div>
+                                <div class="bio-value" id="gsr-value">0.30</div>
+                            </div>
+                        </div>
+                        <div class="bio-item">
+                            <div class="bio-icon stress">🎤</div>
+                            <div class="bio-info">
+                                <div class="bio-label">τ<sub>emo</sub> (Coherence Lifetime)</div>
+                                <div class="bio-value" id="stress-value">1.00</div>
+                            </div>
+                        </div>
+                        <div class="bio-item">
+                            <div class="bio-icon breath">🫁</div>
+                            <div class="bio-info">
+                                <div class="bio-label">CEE Intensity (Peak C<sub>emo</sub>)</div>
+                                <div class="bio-value" id="breath-value">0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Information -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📋</div> Session Info</div>
+                </div>
+                <div class="card-body">
+                    <div class="session-stat">
+                        <span class="stat-label">Duration</span>
+                        <span class="stat-value" id="session-duration">00:23:12</span>
+                    </div>
+                    <div class="session-stat">
+                        <span class="stat-label">CEE Events</span>
+                        <span class="stat-value" id="cee-count">3</span>
+                    </div>
+                    <div class="session-stat">
+                        <span class="stat-label">Avg C<sub>emo</sub></span>
+                        <span class="stat-value" id="avg-c-emo">0.68</span>
+                    </div>
+                    <div class="session-stat">
+                        <span class="stat-label">Peak C<sub>emo</sub></span>
+                        <span class="stat-value" id="peak-c-emo">0.89</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Authentication check (optional for nevedal_subscribe, but used for admin pages)
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) {
+            window.location.href = "index.html";
+        }
+
+        const UPDATE_STATUS = document.getElementById("update-status");
+
+        // WebSocket connection
+        let ws = null;
+        let authenticated = false;
+        let currentSubject = "CLIENT_001"; // default fallback; UI selection can override
+        const latestByUser = new Map(); // user_id -> state
+        const historyByUser = new Map(); // user_id -> [{t, c_emo, cee}]
+        let lastAnyUpdateAt = 0;
+        let reconnectTimer = null;
+
+        function getWsUrl() {
+            const proto = (location.protocol === "https:") ? "wss" : "ws";
+            const host = location.hostname || "10.0.0.81";
+            return `${proto}://${host}:8765`;
+        }
+
+        function setLiveIndicator(ok) {
+            if (!UPDATE_STATUS) return;
+            UPDATE_STATUS.textContent = ok ? "● LIVE" : "● OFFLINE";
+            UPDATE_STATUS.style.color = ok ? "var(--green)" : "var(--text-secondary)";
+        }
+
+        function connectWebSocket() {
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            setLiveIndicator(false);
+
+            ws = new WebSocket(getWsUrl());
+
+            ws.onopen = function() {
+                console.log("✅ WebSocket connected to Nevedal Lab");
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username: username,
+                    password: password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+
+            ws.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "login_success" || msg.type === "auth_success") {
+                    authenticated = true;
+                    console.log("🔓 Authenticated! Subscribing to Nevedal admin stream...");
+                    subscribeToNevedalAdmin();
+                    return;
+                }
+
+                if (msg.type === "nevedal_update") {
+                    // Message shape: {type, session_id, data: NevedalState}
+                    const state = msg.data || {};
+                    const userId = state.user_id;
+                    if (!userId) return;
+
+                    latestByUser.set(userId, state);
+                    pushHistory(userId, state);
+                    lastAnyUpdateAt = Date.now();
+                    setLiveIndicator(true);
+
+                    // Auto-populate subject list if unknown
+                    ensureSubjectExists(userId);
+
+                    // If no active selection has live data yet, auto-select first live user
+                    if (!latestByUser.get(currentSubject) && latestByUser.size === 1) {
+                        selectSubject(userId);
+                        return;
+                    }
+
+                    if (userId === currentSubject) renderState(state);
+                    return;
+                }
+
+                if (msg.type === "login_failed") {
+                    console.error("❌ Login failed:", msg.message);
+                    alert("Authentication failed: " + msg.message);
+                    window.location.href = "index.html";
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error("❌ WebSocket error:", error);
+            };
+
+            ws.onclose = function() {
+                console.log("⚠️ WebSocket closed; reconnecting soon...");
+                authenticated = false;
+                setLiveIndicator(false);
+                reconnectTimer = setTimeout(connectWebSocket, 1200);
+            };
+        }
+
+        function subscribeToNevedalAdmin() {
+            if (!ws || !authenticated) return;
+            // IMPORTANT: Nevedal handler expects `session_id`, not user_id.
+            // 'admin' subscribes to all Nevedal session updates.
+            ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
+        }
+
+        function pushHistory(userId, state) {
+            const arr = historyByUser.get(userId) || [];
+            const t = Date.parse(state.timestamp || new Date().toISOString());
+            arr.push({ t, c_emo: state.c_emo ?? 0.5, cee: !!state.cee_window });
+            // Keep last 10 minutes
+            const cutoff = Date.now() - (10 * 60 * 1000);
+            while (arr.length && arr[0].t < cutoff) arr.shift();
+            historyByUser.set(userId, arr);
+        }
+
+        function ensureSubjectExists(userId) {
+            const list = document.getElementById("subject-list");
+            if (!list) return;
+            if (list.querySelector(`.subject-item[data-id="${userId}"]`)) return;
+
+            const initials = userId.split("_").slice(-1)[0].slice(0, 2).toUpperCase();
+            const div = document.createElement("div");
+            div.className = "subject-item";
+            div.dataset.id = userId;
+            div.innerHTML = `
+                <div class="subject-avatar">${initials}</div>
+                <div class="subject-info">
+                    <div class="subject-name">${userId}</div>
+                    <div class="subject-meta">LIVE stream</div>
+                </div>
+            `;
+            div.addEventListener("click", () => selectSubject(userId));
+            list.appendChild(div);
+        }
+
+        function selectSubject(userId) {
+            currentSubject = userId;
+            document.querySelectorAll(".subject-item").forEach(i => i.classList.remove("selected"));
+            const el = document.querySelector(`.subject-item[data-id="${userId}"]`);
+            if (el) el.classList.add("selected");
+            const st = latestByUser.get(userId);
+            if (st) renderState(st);
+        }
+
+        function fmt2(x) {
+            const n = Number(x);
+            if (!Number.isFinite(n)) return "0.00";
+            return n.toFixed(2);
+        }
+
+        function clamp01(x) {
+            const n = Number(x);
+            if (!Number.isFinite(n)) return 0;
+            return Math.max(0, Math.min(1, n));
+        }
+
+        function renderState(s) {
+            // Core
+            document.getElementById("c-emo-value").textContent = fmt2(s.c_emo);
+            document.getElementById("p-ent").textContent = fmt2(s.p_ent);
+            document.getElementById("t-tunnel").textContent = fmt2(s.t_tunnel);
+            document.getElementById("gamma-amp").textContent = fmt2(s.gamma_env * 100); // display as %
+            document.getElementById("e-joint").textContent = fmt2(s.e_g_joint);
+
+            document.getElementById("p-ent-bar").style.width = (clamp01(s.p_ent) * 100) + "%";
+            document.getElementById("t-tunnel-bar").style.width = (clamp01(s.t_tunnel) * 100) + "%";
+            document.getElementById("gamma-bar").style.width = (clamp01(s.gamma_env) * 100) + "%";
+            document.getElementById("e-joint-bar").style.width = (clamp01(s.e_g_joint) * 100) + "%";
+
+            // Repurpose biometrics panel to show live Nevedal variables
+            document.getElementById("hrv-value").textContent = fmt2(s.d_distance);
+            document.getElementById("gsr-value").textContent = fmt2(s.gamma_env);
+            document.getElementById("stress-value").textContent = fmt2(s.tau_emo);
+            document.getElementById("breath-value").textContent = fmt2(s.cee_intensity);
+
+            // CEE indicator
+            const status = document.getElementById("cee-status");
+            const durEl = document.getElementById("cee-duration");
+            if (s.cee_window) {
+                status.textContent = "🟢 CEE ACTIVE";
+                status.className = "cee-status active";
+            } else {
+                status.textContent = "⚪ CEE INACTIVE";
+                status.className = "cee-status inactive";
+            }
+            durEl.textContent = `Duration: ${String(s.cee_duration_seconds || 0).padStart(2, "0")}s`;
+
+            // Session stats computed from recent history
+            const hist = historyByUser.get(s.user_id) || [];
+            if (hist.length) {
+                const avg = hist.reduce((a, b) => a + (b.c_emo ?? 0), 0) / hist.length;
+                const peak = Math.max(...hist.map(x => x.c_emo ?? 0));
+                const ceeCount = countCeeEvents(hist);
+                document.getElementById("avg-c-emo").textContent = fmt2(avg);
+                document.getElementById("peak-c-emo").textContent = fmt2(peak);
+                document.getElementById("cee-count").textContent = String(ceeCount);
+            }
+        }
+
+        function countCeeEvents(hist) {
+            let count = 0;
+            let prev = false;
+            for (const h of hist) {
+                if (h.cee && !prev) count += 1;
+                prev = h.cee;
+            }
+            return count;
+        }
+
+        // Hook up existing static subject cards (keep as manual shortcuts)
+        document.querySelectorAll(".subject-item").forEach(item => {
+            const id = item.dataset.id;
+            item.addEventListener("click", function() {
+                selectSubject(id);
+            });
+        });
+
+        // Live indicator watchdog
+        setInterval(() => {
+            if (!lastAnyUpdateAt) return;
+            const stale = (Date.now() - lastAnyUpdateAt) > 5000;
+            if (stale) setLiveIndicator(false);
+        }, 1000);
+
+        // Initialize
+        connectWebSocket();
+        console.log("🔬 Nevedal Lab Live Analysis initialized");
+    </script>
+</body>
+</html>

@@ -1,0 +1,3147 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+// 1. ADDED: Permission Handler (Required for Vagus v2.6.1)
+import 'package:permission_handler/permission_handler.dart';
+// 2. UPDATED: Sound Engine (Switched from SoundStream to FlutterSound)
+import 'package:audio_session/audio_session.dart'; 
+import 'package:speech_to_text/speech_to_text.dart'; // Removed 'as stt' to match your code usage
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:local_auth/error_codes.dart' as auth_error;
+import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'dart:math';
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'metrics_widgets.dart';
+import 'updated_screens.dart';
+
+import 'shared_widgets.dart';
+
+
+// =============================================================================
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MaterialApp(
+    home: LobbyScreen(), // <--- THIS IS THE KEY FIX
+    debugShowCheckedModeBanner: false,
+    // ... theme data ...
+  ));
+}
+
+class SovereignHybridApp extends StatelessWidget {
+  const SovereignHybridApp({super.key});
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Sovereign Sanctuary',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF050505),
+        primaryColor: const Color(0xFFFFD700), // Sovereign Gold
+        cardColor: const Color(0xFF111111),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFFFD700),
+          secondary: Color(0xFF003366), // Deep Navy
+          error: Colors.redAccent,
+          surface: Color(0xFF1E1E1E),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: const Color(0xFF111111),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF333333))),
+          focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF003366))),
+          hintStyle: const TextStyle(color: Colors.grey),
+        ),
+      ),
+      // MIGRATION REQUIREMENT: Boot to Lobby for Role Selection
+      home: const LobbyScreen(),
+    );
+  }
+}
+
+// =============================================================================
+// MODULE 1: HARDWARE IDENTITY ENGINE (CRASH-PROOF)
+// Status: FIXED (Catches MissingPluginException to prevent Hang)
+// =============================================================================
+class HardwareIdentity {
+  static const platform = MethodChannel('com.sovereign.lab/observer');
+  
+  // High-Security Storage (Preserved from your snippet - Excellent)
+  final _storage = const FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock)
+  );
+  
+  final _auth = LocalAuthentication();
+  String _hardwareID = "INITIALIZING...";
+
+  // 1.1: Deep Hardware Fingerprinting (Fixed Logic)
+  Future<String> getDeviceFingerprint() async {
+    try {
+      final String? result = await platform.invokeMethod('getHardwareID');
+      if (result != null && result.length > 5) {
+        _hardwareID = result;
+        print(">>> [IDENTITY] Hardware ID Verified: $_hardwareID");
+        return _hardwareID;
+      } else {
+        throw PlatformException(code: "INVALID_ID", message: "ID too short/null");
+      }
+    } on MissingPluginException {
+      // 1. CRITICAL FIX: Specifically catch the Missing Plugin error
+      print("âš ï¸ [WARN] Native Bridge Missing - Using Dev Fallback");
+      _hardwareID = "DEV_BYPASS_${Random().nextInt(99999)}";
+      return _hardwareID;
+    } catch (e) {
+      // Catch-all for any other weirdness
+      print("!!! [IDENTITY] General Error: $e");
+      _hardwareID = "ERROR_BYPASS_${Random().nextInt(99999)}";
+      return _hardwareID;
+    }
+  }
+
+  // 1.2: Persistent Session Management
+  Future<void> saveSession(String username, String token, Map<String, dynamic> profile) async {
+    try {
+      await _storage.write(key: 'session_token', value: token);
+      await _storage.write(key: 'session_user', value: username);
+      await _storage.write(key: 'user_profile', value: jsonEncode(profile)); // Fixed Key Name consistency
+      await _storage.write(key: 'last_login', value: DateTime.now().toIso8601String());
+      print(">>> [IDENTITY] Session Secured in Vault.");
+    } catch (e) {
+      print("!!! [IDENTITY] Write Error: $e");
+    }
+  }
+
+  Future<Map<String, dynamic>?> recoverSession() async {
+    try {
+      String? token = await _storage.read(key: 'session_token');
+      String? profileRaw = await _storage.read(key: 'user_profile'); // Matching key from saveSession
+      
+      if (token != null && profileRaw != null) {
+        print(">>> [IDENTITY] Found existing session token.");
+        
+        // 1.3: Biometric Gate
+        bool authenticated = await _authenticateBiometrics();
+        if (authenticated) {
+          print(">>> [IDENTITY] Biometric Auth Success. Unlocking Vault.");
+          return jsonDecode(profileRaw);
+        } else {
+          print("!!! [IDENTITY] Biometric Auth Failed or Cancelled.");
+          // Security Choice: Do we clear session on failed bio? 
+          // For now, return null but keep session (user can retry).
+          return null; 
+        }
+      }
+    } catch (e) {
+      print("!!! [IDENTITY] Recovery Error: $e");
+      await clearSession();
+    }
+    return null;
+  }
+
+  Future<void> clearSession() async {
+    await _storage.deleteAll();
+    print(">>> [IDENTITY] Secure Storage Wiped.");
+  }
+
+  // 1.4: Detailed Biometric Logic
+  Future<bool> _authenticateBiometrics() async {
+    try {
+      bool canCheck = await _auth.canCheckBiometrics;
+      bool isDeviceSupported = await _auth.isDeviceSupported();
+      
+      if (!canCheck || !isDeviceSupported) {
+        print(">>> [IDENTITY] Biometrics not available. Bypassing.");
+        return true; 
+      }
+
+      return await _auth.authenticate(
+        localizedReason: 'Sovereign Sanctuary Access Required',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+          useErrorDialogs: true
+        )
+      );
+    } catch (e) {
+      print("!!! [IDENTITY] Biometric Exception: $e");
+      return true; // Fail Open for Development, switch to 'return false' for Prod
+    }
+  }
+}
+// -----------------------------------------------------------------------------
+// END OF PART 1
+// -----------------------------------------------------------------------------
+
+class NervousSystemPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = const Color(0xFF00FFFF).withOpacity(0.05);
+    for (double i = 0; i < size.width; i += 40) { for (double j = 0; j < size.height; j += 40) { canvas.drawCircle(Offset(i, j), 1, paint); }}
+  }
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// =============================================================================
+// MODULE 4: THE NEURAL INTERFACE (SMART CONNECTED v3.0)
+// Status: UPGRADED (Handles Handshake, Debugs Silence, Shows Status)
+// =============================================================================
+class NeuralInterface extends StatefulWidget {
+  final Map<String, dynamic>? currentUserProfile;
+  final String? username;
+  final String? password;
+  
+  const NeuralInterface({super.key, this.currentUserProfile, this.username, this.password});
+  
+  @override
+  State<NeuralInterface> createState() => _NeuralInterfaceState();
+}
+
+class _NeuralInterfaceState extends State<NeuralInterface> {
+  final VagusEngine _audio = VagusEngine(); 
+  
+  // Internal Socket Management
+  WebSocketChannel? _socket;
+  final String _serverUrl = 'ws://10.0.0.99:8765'; // Ensure this matches your Mac IP!
+
+  // State
+  final List<String> _chatHistory = [];
+  final TextEditingController _chatController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  bool _isTalking = false; 
+  String _connectionStatus = "Initializing..."; 
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToCortex();
+  }
+
+  // 1. ESTABLISH FRESH CONNECTION
+  void _connectToCortex() {
+    setState(() => _connectionStatus = "Dialing Neural Core...");
+    
+    try {
+      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _socket!.stream.listen(
+        _handleSocketMessage,
+        onError: (e) {
+          if(mounted) setState(() => _connectionStatus = "ERROR: $e");
+          _addSystemMsg("Connection Died: $e");
+        },
+        onDone: () {
+          if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
+        }
+      );
+
+      // 2. IMMEDIATE LOGIN
+      print(">>> NEURAL INTERFACE: Sending Login...");
+      _socket!.sink.add(jsonEncode({
+        "type": "login_request",
+        "username": widget.username,
+        "password": widget.password,
+        "expected_role": "CLIENT"
+      }));
+
+    } catch (e) {
+      _addSystemMsg("Fatal Connection Error: $e");
+    }
+
+    // Audio Listeners
+    _audio.onTranscription.listen((text) { 
+      if (mounted) setState(() => _chatController.text = text); 
+    });
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+      print(">>> CORTEX SAYS: $data"); 
+
+      if (data['type'] == 'login_success') {
+        setState(() => _connectionStatus = "ONLINE (SECURE)");
+        _addSystemMsg("Neural Link Established.");
+      }
+      else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
+        String reply = data['text'] ?? "";
+        setState(() {
+          // Update last NATE message if it exists, otherwise add new one
+          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("[NATE]:")) {
+            _chatHistory[_chatHistory.length - 1] = "[NATE]: $reply";
+          } else {
+            _chatHistory.add("[NATE]: $reply");
+          } 
+          _scrollToBottom();
+        });
+      }
+      else if (data['type'] == 'nate_audio_delta') {
+         if (mounted) setState(() => _isTalking = true);
+         _audio.processAudioChunk(data['payload']);
+         Future.delayed(const Duration(milliseconds: 200), () => { if(mounted) setState(() => _isTalking = false) });
+      }
+    } catch (e) {
+      print("Parse Error: $e");
+    }
+  }
+
+  void _addSystemMsg(String msg) {
+    setState(() {
+      _chatHistory.add("[SYSTEM]: $msg");
+      _scrollToBottom();
+    });
+  }
+
+  void _sendMessage() {
+    String text = _chatController.text.trim();
+    if (text.isEmpty) return;
+    
+    // Check our INTERNAL socket
+    if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
+      _addSystemMsg("Link is dead. Reconnecting...");
+      _connectToCortex(); // Auto-heal
+      return;
+    }
+
+    print(">>> SENDING: $text");
+    _socket!.sink.add(jsonEncode({
+      "type": "nate_query", 
+      "nate_query": text,
+      "modality": "General" 
+    }));
+
+    setState(() {
+      _chatHistory.add("[YOU]: $text");
+      _chatController.clear();
+      _scrollToBottom();
+    });
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut
+      );
+    }
+  }
+
+  @override
+void dispose() {
+  _scrollController.dispose();
+  super.dispose();
+}
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.currentUserProfile?['name'] ?? "SUBJECT", style: const TextStyle(fontFamily: "Courier", color: Colors.cyanAccent, fontSize: 16)),
+            Text(_connectionStatus, style: TextStyle(fontFamily: "Courier", color: _connectionStatus.contains("ONLINE") ? Colors.green : Colors.red, fontSize: 10)),
+          ],
+        ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: () {
+              _socket?.sink.close();
+              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LobbyScreen()));
+            }
+          )
+        ],
+      ),
+      body: Stack(
+        children: [
+          VisualPersona(isTalking: _isTalking, isListening: _audio.isListening),
+          Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  itemCount: _chatHistory.length,
+                  itemBuilder: (ctx, i) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("[YOU]") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
+                  )
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _chatController,
+                        style: const TextStyle(color: Colors.white, fontFamily: "Courier"),
+                        decoration: InputDecoration(hintText: "Input...", filled: true, fillColor: Colors.white10, border: OutlineInputBorder(borderRadius: BorderRadius.circular(30))),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    FloatingActionButton(mini: true, backgroundColor: Colors.cyan, onPressed: _sendMessage, child: const Icon(Icons.send, color: Colors.black))
+                  ],
+                ),
+              )
+            ],
+          )
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// COACH PORTAL DASHBOARD (Verified v16.1 - Self-Sufficient Connection)
+// =============================================================================
+
+class CoachDashboardScreen extends StatefulWidget {
+  final Map<String, dynamic> currentUserProfile;
+  final String username; // <--- The Key to Stability
+  final String password; // <--- The Key to Stability
+
+  const CoachDashboardScreen({
+    super.key, 
+    required this.currentUserProfile, 
+    required this.username,
+    required this.password
+  });
+
+  @override
+  _CoachDashboardScreenState createState() => _CoachDashboardScreenState();
+}
+
+class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
+  // Internal Socket Management
+  WebSocketChannel? _socket;
+  final String _serverUrl = 'ws://10.0.0.99:8765'; // Ensure this matches your Mac IP!
+
+  // Dashboard Data
+  List<dynamic> _clients = [];
+  List<dynamic> _schedule = [];
+  bool _isLoading = true;
+  String _statusMessage = "Initializing...";
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToBridge();
+  }
+
+  // 1. ESTABLISH FRESH CONNECTION (Stability Fix)
+  void _connectToBridge() {
+    setState(() => _statusMessage = "Connecting to HQ...");
+    
+    try {
+      _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _socket!.stream.listen(
+        _handleSocketMessage,
+        onError: (e) {
+          print("Coach Socket Error: $e");
+          if (mounted) setState(() => _statusMessage = "Connection Failed");
+        },
+        onDone: () {
+          print("Coach Socket Closed");
+          if (mounted) setState(() => _statusMessage = "Disconnected");
+        }
+      );
+
+      // 2. IMMEDIATE LOGIN
+      print(">>> COACH DASHBOARD: Sending Login...");
+      _socket!.sink.add(jsonEncode({
+        "type": "login_request",
+        "username": widget.username,
+        "password": widget.password,
+        "expected_role": "COACH"
+      }));
+
+    } catch (e) {
+      print("Fatal Connection Error: $e");
+    }
+  }
+
+  void _fetchDashboard() {
+    // Sends the command to bridge_server.py to run coach_nexus.get_dashboard()
+    if (_socket != null) {
+      _socket!.sink.add(jsonEncode({ "type": "fetch_coach_dashboard" }));
+    }
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message);
+
+      // A. Login Confirmation
+      if (data['type'] == 'login_success') {
+        print(">>> COACH AUTHENTICATED. Fetching Data...");
+        _fetchDashboard(); // Load data only after login is confirmed
+      }
+
+      // B. Dashboard Data Arrived
+      else if (data['type'] == 'coach_dashboard_data') {
+        if (mounted) {
+          setState(() {
+            _clients = data['data']['clients'] ?? [];
+            _schedule = data['data']['schedule'] ?? [];
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error parsing socket message: $e");
+    }
+  }
+
+  // --- DIALOGS (Your Features) ---
+
+  void _showReportsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("INTELLIGENCE VAULT", style: TextStyle(color: Colors.amber, fontFamily: 'Courier')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.description, color: Colors.blue),
+              title: const Text("Client Observation Reports", style: TextStyle(color: Colors.white)),
+              onTap: () { 
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloading Client Reports...")));
+                // In future: _socket!.sink.add(jsonEncode({"type": "fetch_reports"}));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology, color: Colors.purple),
+              title: const Text("My Coaching Analysis", style: TextStyle(color: Colors.white)),
+              onTap: () { Navigator.pop(ctx); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_money, color: Colors.green),
+              title: const Text("Billing / Time Logs", style: TextStyle(color: Colors.white)),
+              subtitle: const Text("View billable heartbeat data", style: TextStyle(color: Colors.grey, fontSize: 10)),
+              onTap: () { Navigator.pop(ctx); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSchedulingDialog() {
+    TextEditingController _timeController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("MANAGE AVAILABILITY", style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+             TextField(
+               controller: _timeController,
+               style: const TextStyle(color: Colors.white),
+               decoration: const InputDecoration(labelText: "Add Slot (e.g. 'Mon 10:00 AM')", labelStyle: TextStyle(color: Colors.grey)),
+             ),
+             const SizedBox(height: 20),
+             ElevatedButton(
+               style: ElevatedButton.styleFrom(backgroundColor: Colors.amber),
+               child: const Text("Publish Slot"),
+               onPressed: () {
+                 _socket?.sink.add(jsonEncode({
+                   "type": "update_availability",
+                   "slots": [_timeController.text] 
+                 }));
+                 Navigator.pop(ctx);
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Slot Published")));
+               },
+             )
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNoteDialog() {
+    TextEditingController _noteController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text("NIGHT SCHOOL INGESTION", style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: _noteController,
+          maxLines: 5,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: "Speak or type session notes here for Little Nate to learn...",
+            hintStyle: TextStyle(color: Colors.grey),
+            border: OutlineInputBorder()
+          ),
+        ),
+        actions: [
+          TextButton(child: const Text("CANCEL"), onPressed: () => Navigator.pop(ctx)),
+          ElevatedButton(
+            child: const Text("UPLOAD MEMORY"),
+            onPressed: () {
+               _socket?.sink.add(jsonEncode({
+                 "type": "upload_session_note",
+                 "note_text": _noteController.text
+               }));
+               Navigator.pop(ctx);
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Notes sent to Night School.")));
+            },
+          )
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _socket?.sink.close();
+    super.dispose();
+  }
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212), // Dark Mode Background
+      appBar: AppBar(
+        title: const Text("COACH COMMAND", style: TextStyle(fontFamily: 'Courier', color: Colors.amber, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.black,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.grey),
+            onPressed: () { 
+              setState(() => _isLoading = true); 
+              _fetchDashboard(); 
+            }
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.red),
+            onPressed: () {
+               _socket?.sink.close();
+               Navigator.of(context).pushReplacement(
+                 MaterialPageRoute(builder: (_) => const LobbyScreen())
+               );
+            },
+          )
+        ],
+      ),
+      body: _isLoading 
+        ? Center(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: Colors.amber),
+              const SizedBox(height: 20),
+              Text(_statusMessage, style: const TextStyle(color: Colors.grey))
+            ],
+          ))
+        : SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildSectionHeader("Active Caseload"),
+                  if (_clients.isEmpty) _buildEmptyState("No clients assigned."),
+                  ..._clients.map((c) => _buildClientTile(c)).toList(),
+
+                  const SizedBox(height: 30),
+
+                  _buildSectionHeader("Today's Schedule"),
+                  if (_schedule.isEmpty) _buildEmptyState("No sessions today."),
+                  ..._schedule.map((s) => _buildScheduleTile(s)).toList(),
+                  
+                  const SizedBox(height: 30),
+                  
+                  _buildQuickActions()
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+  // --- UI HELPER WIDGETS ---
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        title.toUpperCase(), 
+        style: const TextStyle(color: Colors.grey, letterSpacing: 1.5, fontWeight: FontWeight.bold, fontSize: 12)
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.white10), 
+        borderRadius: BorderRadius.circular(8)
+      ),
+      child: Center(
+        child: Text(text, style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic))
+      ),
+    );
+  }
+
+  Widget _buildClientTile(dynamic client) {
+    return Card(
+      color: Colors.grey[900],
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Colors.blueGrey[900],
+          child: const Icon(Icons.person, color: Colors.blueAccent),
+        ),
+        title: Text(client['name'], style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        subtitle: Text("ID: ${client['id']}", style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        trailing: IconButton(
+          icon: const Icon(Icons.message, color: Colors.amber),
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Secure Relay Opening...")));
+          },
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildScheduleTile(dynamic slot) {
+    return Card(
+      color: Colors.grey[900],
+      child: ListTile(
+        leading: const Icon(Icons.videocam, color: Colors.green),
+        title: Text(slot['time'] ?? "Unknown Time", style: const TextStyle(color: Colors.white)),
+        subtitle: Text(slot['client'] ?? "Open Slot", style: const TextStyle(color: Colors.grey)),
+        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      ),
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.mic, color: Colors.white),
+                label: const Text("DICTATE NOTES"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey[800],
+                  padding: const EdgeInsets.symmetric(vertical: 15)
+                ),
+                onPressed: _showNoteDialog,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.calendar_today, color: Colors.white),
+                label: const Text("SCHEDULER"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueGrey[800],
+                  padding: const EdgeInsets.symmetric(vertical: 15)
+                ),
+                onPressed: _showSchedulingDialog,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 15),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.analytics, color: Colors.amber),
+            label: const Text("ACCESS INTELLIGENCE VAULT (REPORTS)"),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Colors.amber),
+              foregroundColor: Colors.amber,
+              padding: const EdgeInsets.symmetric(vertical: 15)
+            ),
+            onPressed: _showReportsDialog, 
+          ),
+        )
+      ],
+    );
+  }
+}
+
+class FamilySanctuaryScreen extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  
+  const FamilySanctuaryScreen({
+    Key? key,
+    required this.profile,
+  }) : super(key: key);
+
+  @override
+  State<FamilySanctuaryScreen> createState() => _FamilySanctuaryScreenState();
+}
+
+class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> {
+  WebSocketChannel? _channel;
+  final String _serverUrl = 'ws://10.0.0.99:8765';  // Match your server IP
+  
+  // Sanctuary state
+  String? _sanctuaryId;
+  String _sanctuaryStatus = 'LOADING';
+  List<Map<String, dynamic>> _members = [];
+  List<Map<String, dynamic>> _messages = [];
+  bool _inPrivateCoaching = false;
+  bool _coachingLimitReached = false;
+  int _coachingMaxSteps = 5;
+  List<Map<String, dynamic>> _coachingMessages = [];
+
+  int _coachingAttempt = 0;
+  final TextEditingController _coachingController = TextEditingController();
+  bool _sanctuaryPaused = false;
+  String _pausedReason = '';
+  double _totalCharges = 20.00;
+  
+  // UI state
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  bool _showCoachingModal = false;
+  Map<String, dynamic>? _coachingOffer;
+  
+  // Speech-to-Text for accessibility
+  final SpeechToText _speech = SpeechToText();
+  bool _isListening = false;
+  bool _speechAvailable = false;
+  
+  // WebSocket subscription
+  StreamSubscription? _wsSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeechToText();
+    _connectToServer();
+    
+    // Check if joining existing sanctuary
+    final sanctuaryId = widget.profile['current_sanctuary_id'];
+    if (sanctuaryId != null) {
+      _joinExistingSanctuary(sanctuaryId);
+    }
+  }
+
+  void _connectToServer() {
+  _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
+  _listenToWebSocket();
+  
+  // Wait for connection, then authenticate and check for sanctuary
+  Future.delayed(const Duration(milliseconds: 500), () {
+    final familyId = widget.profile['family_id'];
+    final hardwareId = widget.profile['hardware_id'] ?? 'GUEST';
+    
+    print('>>> SANCTUARY: Authenticating...');
+    
+    // First, authenticate using profile data
+    final username = widget.profile['username'] ?? widget.profile['email']?.split('@')[0] ?? 'client1';
+    _channel?.sink.add(json.encode({
+      "type": "login_request",
+      "username": username,  // TODO: Get from profile
+      "password": "test123",  // TODO: Get from secure storage
+      "expected_role": "CLIENT"
+    }));
+    
+    // Then get or create sanctuary
+    Future.delayed(const Duration(milliseconds: 500), () {
+      print('>>> SANCTUARY: Checking for existing sanctuary for family $familyId');
+      
+      _channel?.sink.add(json.encode({
+        "type": "sanctuary_get_or_create",
+        "family_id": familyId,
+        "member_id": hardwareId,
+        "member_name": widget.profile['name'] ?? 'Family Member',
+      }));
+    });
+  });
+}
+
+  @override
+  void dispose() {
+    _messageController.dispose();
+    _scrollController.dispose();
+    _wsSubscription?.cancel();
+    super.dispose();
+  }
+
+  // ===========================================================================
+  // SPEECH-TO-TEXT INITIALIZATION (ACCESSIBILITY FEATURE)
+  // ===========================================================================
+  
+  Future<void> _initSpeechToText() async {
+    try {
+      _speechAvailable = await _speech.initialize(
+        onError: (error) {
+          print('Speech error: ${error.errorMsg}');
+          setState(() => _isListening = false);
+        },
+        onStatus: (status) {
+          print('Speech status: $status');
+          if (status == 'done' || status == 'notListening') {
+            setState(() => _isListening = false);
+          }
+        },
+      );
+      setState(() {});
+    } catch (e) {
+      print('Speech init error: $e');
+      _speechAvailable = false;
+    }
+  }
+
+  void _toggleListening() async {
+    if (!_speechAvailable) {
+      _showError('Speech recognition not available');
+      return;
+    }
+
+    if (_isListening) {
+      // Stop listening
+      await _speech.stop();
+      setState(() => _isListening = false);
+    } else {
+      // Start listening
+      setState(() => _isListening = true);
+      
+      await _speech.listen(
+        onResult: (result) {
+          setState(() {
+            _messageController.text = result.recognizedWords;
+          });
+        },
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        partialResults: true,
+        cancelOnError: true,
+        listenMode: ListenMode.confirmation,
+      );
+    }
+  }
+
+  // ===========================================================================
+  // WEBSOCKET HANDLERS
+  // ===========================================================================
+
+  void _listenToWebSocket() {
+    _wsSubscription = _channel?.stream.listen(
+      (message) {
+        try {
+          final data = json.decode(message);
+          _handleWebSocketMessage(data);
+        } catch (e) {
+          print('Error parsing message: $e');
+        }
+      },
+      onError: (error) {
+        _showError('Connection lost');
+      },
+    );
+  }
+
+  void _handleWebSocketMessage(Map<String, dynamic> data) {
+    final type = data['type'];
+    print('>>> SANCTUARY RECEIVED: $type');
+    
+    switch (type) {
+      // LOGIN
+      case 'login_success':
+        print('>>> SANCTUARY: Authenticated successfully');
+        break;
+        
+      // SANCTUARY CREATION
+      case 'sanctuary_created':
+        setState(() {
+          _sanctuaryId = data['sanctuary_id'];
+          _sanctuaryStatus = data['status'] ?? 'WAITING_FOR_MEMBERS';
+          _totalCharges = (data['base_fee_charged'] ?? 20.0).toDouble();
+        });
+        _showSuccess('Family Sanctuary created!');
+        break;
+        
+      // JOINING (new member)
+      case 'sanctuary_joined':
+        setState(() {
+          _sanctuaryId = data['sanctuary_id'];
+          _sanctuaryStatus = data['status'] ?? 'ACTIVE';
+          _members = _parseMembersList(data['members']);
+        });
+        _showSuccess('Joined Family Sanctuary!');
+        break;
+        
+      // RECONNECTION (returning after disconnect/refresh)
+      case 'sanctuary_reconnected':
+        setState(() {
+          _sanctuaryId = data['sanctuary_id'];
+          _sanctuaryStatus = data['status'] ?? 'ACTIVE';
+          _members = _parseMembersList(data['members']);
+          // Load message history
+          if (data['messages'] != null) {
+            _messages = (data['messages'] as List).map((m) => Map<String, dynamic>.from(m)).toList();
+          }
+        });
+        _addSystemMessage(data['message'] ?? 'Reconnected to sanctuary');
+        break;
+        
+      // REJOINING (returning after exit)
+      case 'sanctuary_rejoined':
+        setState(() {
+          _sanctuaryId = data['sanctuary_id'];
+          _sanctuaryStatus = data['status'] ?? 'ACTIVE';
+          _members = _parseMembersList(data['members']);
+        });
+        // Load message history if provided
+        final rejoinMessages = data['messages'] as List<dynamic>? ?? [];
+        if (rejoinMessages.isNotEmpty) {
+          setState(() {
+            _messages = rejoinMessages.map((m) => Map<String, dynamic>.from(m)).toList();
+          });
+        }
+        _addSystemMessage(data['message'] ?? 'Welcome back!');
+        _showSuccess('Welcome back to the sanctuary!');
+        break;
+        
+      // ONBOARDING
+      case 'sanctuary_onboarding':
+        _showOnboardingDialog(data['message']);
+        break;
+        
+      // MEMBER EVENTS
+      case 'sanctuary_member_joined':
+        final member = data['member'] as Map<String, dynamic>;
+        final memberId = member['id'] ?? member['user_id'];
+        if (!_members.any((m) => (m['id'] ?? m['user_id']) == memberId)) {
+          setState(() => _members.add(member));
+        }
+        _addSystemMessage('${member['name']} joined');
+        break;
+        
+      case 'sanctuary_member_returned':
+        // Null-safe handling - member data may not always be present
+        final memberData = data['member'];
+        if (memberData != null && memberData is Map<String, dynamic>) {
+          _addSystemMessage('${memberData['name'] ?? 'A member'} has returned to the sanctuary');
+        } else {
+          _addSystemMessage(data['message'] ?? 'A member has returned to the sanctuary');
+        }
+        break;
+        
+      case 'sanctuary_member_exited':
+        _addSystemMessage(data['message'] ?? 'A member has left');
+        break;
+        
+      // SESSION START
+      case 'sanctuary_started':
+        setState(() {
+          _sanctuaryStatus = 'ACTIVE';
+          _members = _parseMembersList(data['members']);
+        });
+        _addLittleNateMessage(data['opening_message']);
+        break;
+        
+      // MESSAGES
+      case 'sanctuary_message':
+        _addMessage(data);
+        break;
+        
+      // COACHING
+
+      case 'sanctuary_coaching_offer':
+        print('>>> SANCTUARY: Coaching offer received');
+        setState(() {
+          _showCoachingModal = true;
+          _coachingOffer = data;
+        });
+        break;
+        break;
+
+      // COACHING STARTED - Enter private coaching mode
+      case 'sanctuary_coaching_started':
+        print('>>> SANCTUARY: Entering private coaching');
+        setState(() {
+          _inPrivateCoaching = true;
+          _showCoachingModal = false;  // Close any open modal
+          _sanctuaryPaused = false;     // Not paused if we're IN coaching
+          _coachingMessages = [];
+          _coachingAttempt = 1;
+        });
+        // Add Little Nate's first message
+        final startMsg = data['coaching_message'];
+        if (startMsg != null) {
+          setState(() {
+            _coachingMessages.add({
+              'role': startMsg['role'] ?? 'assistant',
+              'content': startMsg['content'] ?? '',
+              'attempt': startMsg['attempt_number'] ?? 1,
+            });
+          });
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Private coaching started'), backgroundColor: Colors.blue),
+        );
+        break;
+      
+      // COACHING RESUMED - User reconnected while in coaching session
+      case 'sanctuary_coaching_resumed':
+        print('>>> SANCTUARY: Resuming private coaching session');
+        setState(() {
+          _inPrivateCoaching = true;
+          _showCoachingModal = false;  // Close any open modal
+          _sanctuaryPaused = false;     // Not paused if we're IN coaching
+        });
+        final resumeSession = data['coaching_session'];
+        if (resumeSession != null) {
+          final resumeMessages = resumeSession['messages'] as List<dynamic>? ?? [];
+          setState(() {
+            _coachingMessages = resumeMessages.map((m) => {
+              'role': m['role'] ?? 'assistant',
+              'content': m['content'] ?? '',
+              'attempt': m['attempt_number'] ?? 1,
+            }).toList();
+            _coachingAttempt = resumeSession['attempt_number'] ?? 1;
+          });
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Resuming coaching session'), backgroundColor: Colors.blue),
+        );
+        break;
+      
+      // COACHING RESPONSE from Little Nate
+      case 'sanctuary_coaching_response':
+        final respMsg = data['coaching_message'];
+        setState(() {
+          _coachingAttempt = respMsg?['attempt_number'] ?? _coachingAttempt;
+          if (respMsg != null) {
+            _coachingMessages.add({
+              'role': 'assistant',
+              'content': respMsg['content'] ?? '',
+              'attempt': respMsg['attempt_number'],
+            });
+          }
+        });
+        break;
+      
+      // COACHING LIMIT REACHED - Offer continuation or return
+      case 'sanctuary_coaching_limit_reached':
+        print('>>> SANCTUARY: Coaching limit reached');
+        setState(() {
+          _coachingLimitReached = true;
+          _coachingMaxSteps = data['max_steps'] ?? 5;
+        });
+        _showCoachingLimitDialog(data);
+        break;
+      
+      // COACHING EXTENDED - Session extended after $5 payment
+      case 'sanctuary_coaching_extended':
+        print('>>> SANCTUARY: Coaching extended');
+        setState(() {
+          _coachingLimitReached = false;
+          _coachingMaxSteps = data['new_max_steps'] ?? 10;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Coaching extended!'), backgroundColor: Colors.green),
+        );
+        break;
+      
+      // ASSISTED RESPONSE GENERATED
+      case 'sanctuary_assisted_response_generated':
+        print('>>> SANCTUARY: Assisted response received');
+        final assistedResponse = data['assisted_response'] ?? data['response'] ?? '';
+        if (assistedResponse.isNotEmpty) {
+          setState(() {
+            _coachingMessages.add({
+              'role': 'assisted',
+              'content': '✨ SUGGESTED RESPONSE:\n\n$assistedResponse',
+              'is_assisted': true,
+            });
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Assisted response ready!'), backgroundColor: Colors.green),
+          );
+        }
+        break;
+      
+      // COACHING COMPLETED - Return to sanctuary
+      case 'sanctuary_coaching_completed':
+        setState(() {
+          _inPrivateCoaching = false;
+          _coachingMessages = [];
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'] ?? 'Welcome back'), backgroundColor: Colors.green),
+        );
+        break;
+      
+      // OTHER MEMBER IN COACHING - Sanctuary paused for us
+      case 'sanctuary_member_coaching':
+        setState(() {
+          _sanctuaryPaused = true;
+          _pausedReason = data['message'] ?? 'A family member is in private coaching.';
+        });
+        break;
+      
+      // MEMBER RETURNED from coaching
+      case 'sanctuary_member_returned':
+        _addSystemMessage(data['message'] ?? 'A family member has returned.');
+        break;
+      
+      // SANCTUARY RESUMED - Everyone back
+      case 'sanctuary_resumed':
+        setState(() {
+          _sanctuaryPaused = false;
+          _pausedReason = '';
+        });
+        _addSystemMessage(data['message'] ?? 'Sanctuary resumed. 💙');
+        break;
+
+      case 'sanctuary_coaching_fer':
+        setState(() {
+          _coachingOffer = data;
+          _showCoachingModal = true;
+        });
+        break;
+        
+      case 'sanctuary_coaching':
+        _showCoachingDialog(data);
+        break;
+        
+      case 'sanctuary_coaching_notification':
+        _showInfo(data['message']);
+        break;
+        
+      // EXIT FLOW
+      case 'sanctuary_exit_checkin':
+        _showExitDialog(data['message']);
+        break;
+        
+      case 'sanctuary_exited':
+        _showInfo('You have exited the sanctuary. You can rejoin anytime.');
+        Navigator.pop(context);
+        break;
+        
+      // BILLING
+      case 'sanctuary_threshold_notification':
+        _showThresholdDialog(data);
+        break;
+        
+      // COMPLETION
+      case 'sanctuary_completed':
+        _showCompletionDialog(data);
+        break;
+        
+      // ERRORS
+      case 'error':
+        _showError(data['message'] ?? 'An error occurred');
+        break;
+        
+      default:
+        print('>>> SANCTUARY: Unhandled message type: $type');
+    }
+  }
+
+  // Helper: Parse members list (handles different formats)
+  List<Map<String, dynamic>> _parseMembersList(dynamic members) {
+    if (members == null) return [];
+    
+    if (members is List) {
+      return members.map((m) {
+        if (m is String) {
+          return {'name': m, 'status': 'ACTIVE'};
+        } else if (m is Map) {
+          return Map<String, dynamic>.from(m);
+        }
+        return {'name': m.toString(), 'status': 'ACTIVE'};
+      }).toList().cast<Map<String, dynamic>>();
+    }
+    
+    return [];
+  }
+
+  // ===========================================================================
+  // SANCTUARY ACTIONS
+  // ===========================================================================
+
+  void _joinExistingSanctuary(String sanctuaryId) {
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_join',
+      'sanctuary_id': sanctuaryId,
+    }));
+  }
+
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _sanctuaryId == null) return;
+
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_message',
+      'sanctuary_id': _sanctuaryId,
+      'message': text,
+    }));
+
+    _messageController.clear();
+  }
+
+  void _acceptCoaching({bool assistedResponse = false}) {
+    if (_coachingOffer == null) return;
+
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_coaching_accept',
+      'sanctuary_id': _sanctuaryId,
+      'intervention_id': _coachingOffer!['intervention_id'],
+      'assisted_response': assistedResponse,
+    }));
+
+    setState(() {
+      _showCoachingModal = false;
+      _coachingOffer = null;
+    });
+  }
+
+  void _exitSanctuary() {
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_exit',
+      'sanctuary_id': _sanctuaryId,
+    }));
+  }
+
+  void _confirmExit(String reason, bool informFamily) {
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_exit_confirm',
+      'sanctuary_id': _sanctuaryId,
+      'reason': reason,
+      'inform_family': informFamily,
+    }));
+  }
+
+  void _completeSanctuary() {
+    _channel!.sink.add(json.encode({
+      'type': 'sanctuary_complete',
+      'sanctuary_id': _sanctuaryId,
+    }));
+  }
+
+  // ===========================================================================
+  // MESSAGE HANDLING
+  // ===========================================================================
+
+  void _addMessage(Map<String, dynamic> data) {
+    setState(() {
+      _messages.add({
+        'type': data['message_type'],
+        'sender_id': data['sender_id'],
+        'sender_name': data['sender_name'],
+        'content': data['content'],
+        'timestamp': data['timestamp'],
+      });
+    });
+    _scrollToBottom();
+  }
+
+  void _addLittleNateMessage(String content) {
+    setState(() {
+      _messages.add({
+        'type': 'LITTLE_NATE',
+        'sender_id': 'LITTLE_NATE',
+        'sender_name': 'Little Nate',
+        'content': content,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+    });
+    _scrollToBottom();
+  }
+
+  void _addSystemMessage(String content) {
+    setState(() {
+      _messages.add({
+        'type': 'SYSTEM',
+        'sender_id': 'SYSTEM',
+        'sender_name': 'System',
+        'content': content,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+    });
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  // ===========================================================================
+  // UI DIALOGS
+  // ===========================================================================
+
+  void _showOnboardingDialog(String message) {
+    final reasonController = TextEditingController();
+    final goalController = TextEditingController();
+    final concernsController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('Welcome to Family Sanctuary', style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message, style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: reasonController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '1. Why did you come here today?',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: goalController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: "2. What's your goal?",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: concernsController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: '3. What concerns do you have?',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              _channel!.sink.add(json.encode({
+                'type': 'sanctuary_onboarding_complete',
+                'sanctuary_id': _sanctuaryId,
+                'responses': {
+                  'reason': reasonController.text,
+                  'goal': goalController.text,
+                  'concerns': concernsController.text,
+                },
+              }));
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003366)),
+            child: const Text('Continue', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoachingDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Row(
+          children: const [
+            Text('💙 ', style: TextStyle(fontSize: 24)),
+            Text('Coaching from Little Nate', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                data['coaching_content'],
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A2A2A),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      data['is_free'] ? '🎁 FREE Coaching' : 'Charged: \$${data['charge_amount']}',
+                      style: TextStyle(
+                        color: data['is_free'] ? Colors.greenAccent : Colors.amber,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'Coaching #${data['coaching_number']}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showExitDialog(String message) {
+    final reasonController = TextEditingController();
+    bool informFamily = true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text("Exit Sanctuary?", style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message, style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 20),
+              TextField(
+                controller: reasonController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: "How are you feeling?",
+                  labelStyle: TextStyle(color: Colors.white70),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              CheckboxListTile(
+                title: const Text("Let family know I'm taking a break", style: TextStyle(color: Colors.white70)),
+                value: informFamily,
+                onChanged: (value) => setDialogState(() => informFamily = value!),
+                activeColor: const Color(0xFF003366),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Stay", style: TextStyle(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _confirmExit(reasonController.text, informFamily);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              child: const Text("Exit", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showThresholdDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Row(
+          children: const [
+            Text("💰 ", style: TextStyle(fontSize: 24)),
+            Text("Cost Milestone", style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Current charges: \$${data["total_charges"]}",
+              style: const TextStyle(color: Colors.amber, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Text(data["message"], style: const TextStyle(color: Colors.white70)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Continue", style: TextStyle(color: Colors.white70)),
+          ),
+          if (data["offer_coach"] == true)
+            ElevatedButton(
+              onPressed: () {
+                _channel?.sink.add(json.encode({
+                  "type": "sanctuary_request_coach",
+                  "sanctuary_id": _sanctuaryId,
+                }));
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003366)),
+              child: const Text("Request Coach", style: TextStyle(color: Colors.white)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showCompletionDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text("🎉 Sanctuary Complete", style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Text(data["summary"], style: const TextStyle(color: Colors.white70)),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003366)),
+            child: const Text("Done", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+void _showCoachingLimitDialog(Map<String, dynamic> data) {
+    final isDeescalated = data['is_deescalated'] ?? false;
+    final continueCost = data['options']?['continue_cost'] ?? 5.00;
+    final assistedCost = data['options']?['assisted_response_cost'] ?? 3.00;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: Row(
+          children: [
+            Icon(isDeescalated ? Icons.check_circle : Icons.info, color: Colors.blue),
+            const SizedBox(width: 8),
+            Text(
+              isDeescalated ? 'Great Progress!' : 'Coaching Checkpoint',
+              style: const TextStyle(color: Colors.white),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              data['message'] ?? "You've completed your coaching exchanges.",
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'What would you like to do?',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _completeCoaching();
+            },
+            child: const Text('Return to Family', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _requestAssistedResponse();
+              Future.delayed(const Duration(seconds: 2), () {
+                _completeCoaching();
+              });
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber[700]),
+            child: Text('Get Help + Return (\$${assistedCost.toStringAsFixed(0)})'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _extendCoaching();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+            child: Text('Continue Coaching (\$${continueCost.toStringAsFixed(0)})'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _extendCoaching() {
+    _channel?.sink.add(jsonEncode({
+      'type': 'sanctuary_coaching_extend',
+      'sanctuary_id': _sanctuaryId,
+    }));
+    setState(() {
+      _coachingLimitReached = false;
+    });
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.green),
+    );
+  }
+
+  void _showInfo(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: const Color(0xFF003366)),
+    );
+  }
+
+  // ===========================================================================
+  // BUILD UI
+  // ===========================================================================
+  // SANCTUARY PAUSED OVERLAY (while others are in private coaching)
+  // ===========================================================================
+  Widget _buildSanctuaryPausedOverlay() {
+    return Container(
+      color: const Color(0xFF0D1B2A),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.pause_circle_outline, color: Colors.blue, size: 80),
+            const SizedBox(height: 24),
+            const Text(
+              'Sanctuary Paused',
+              style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                _pausedReason.isNotEmpty ? _pausedReason : 'A family member is receiving private coaching from Little Nate.',
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 32),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Column(
+                children: const [
+                  Icon(Icons.favorite, color: Colors.blue, size: 32),
+                  SizedBox(height: 8),
+                  Text(
+                    'Take this moment to breathe',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'The sanctuary will resume when everyone returns',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // COACHING OFFER MODAL
+  // ===========================================================================
+  Widget _buildCoachingOfferModal() {
+    if (!_showCoachingModal || _coachingOffer == null) return const SizedBox();
+    
+    final isFree = _coachingOffer!['is_free'] ?? false;
+    final cost = _coachingOffer!['cost'] ?? 5.00;
+    
+    return Container(
+      color: Colors.black54,
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1a1a2e),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.blue.withOpacity(0.3)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.favorite, color: Colors.blue, size: 40),
+              const SizedBox(height: 16),
+              Text(
+                'Hi ${widget.profile['name']?.split(' ')[0] ?? 'Friend'},',
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'I notice an opportunity to provide support.',
+                style: TextStyle(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(isFree ? Icons.card_giftcard : Icons.attach_money, color: Colors.amber),
+                    const SizedBox(width: 8),
+                    Text(
+                      isFree ? 'First coaching FREE!' : 'Coaching: \$${cost.toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _showCoachingModal = false;
+                        _coachingOffer = null;
+                      });
+                      _channel?.sink.add(jsonEncode({
+                        'type': 'sanctuary_coaching_decline',
+                        'sanctuary_id': _sanctuaryId,
+                        'intervention_id': _coachingOffer?['intervention_id'],
+                      }));
+                    },
+                    child: const Text('No Thanks', style: TextStyle(color: Colors.grey)),
+                  ),
+                  const SizedBox(width: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() => _showCoachingModal = false);
+                      _channel?.sink.add(jsonEncode({
+                        'type': 'sanctuary_coaching_accept',
+                        'sanctuary_id': _sanctuaryId,
+                        'intervention_id': _coachingOffer?['intervention_id'],
+                      }));
+                    },
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    child: Text(isFree ? 'Get Coaching' : 'Get Coaching (\$${cost.toStringAsFixed(2)})'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+  // ===========================================================================
+  Widget _buildPrivateCoachingUI() {
+    return Container(
+      color: const Color(0xFF0D1B2A),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.blue.withOpacity(0.2),
+              border: Border(bottom: BorderSide(color: Colors.blue.withOpacity(0.3))),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lock, color: Colors.blue, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Private Coaching', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('This conversation is confidential', style: TextStyle(color: Colors.blue[200], fontSize: 12)),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: Colors.blue.withOpacity(0.3), borderRadius: BorderRadius.circular(12)),
+                  child: Text('Step $_coachingAttempt/5', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          // Messages
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _coachingMessages.length,
+              itemBuilder: (context, index) {
+                final msg = _coachingMessages[index];
+                final isNate = msg['role'] == 'assistant';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    mainAxisAlignment: isNate ? MainAxisAlignment.start : MainAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (isNate) ...[
+                        CircleAvatar(radius: 16, backgroundColor: Colors.blue, child: const Icon(Icons.psychology, color: Colors.white, size: 18)),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isNate ? Colors.blue.withOpacity(0.2) : Colors.grey[800],
+                            borderRadius: BorderRadius.circular(12),
+                            border: isNate ? Border.all(color: Colors.blue.withOpacity(0.3)) : null,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (isNate) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('Little Nate', style: TextStyle(color: Colors.blue[300], fontSize: 11, fontWeight: FontWeight.bold))),
+                              Text(msg['content'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          // Input
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF0D1B2A), border: Border(top: BorderSide(color: Colors.blue.withOpacity(0.2)))),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _coachingController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Share with Little Nate (confidential)...',
+                          hintStyle: TextStyle(color: Colors.grey[500]),
+                          filled: true, fillColor: Colors.grey[900],
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        ),
+                        onSubmitted: (_) => _sendCoachingMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(onPressed: _sendCoachingMessage, icon: const Icon(Icons.send, color: Colors.blue)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _completeCoaching,
+                      icon: const Icon(Icons.arrow_back, size: 18),
+                      label: const Text('Return to Sanctuary'),
+                      style: TextButton.styleFrom(foregroundColor: Colors.grey[400]),
+                    ),
+                    if (_coachingAttempt >= 3)
+                      TextButton.icon(
+                        onPressed: _requestAssistedResponse,
+                        icon: const Icon(Icons.auto_fix_high, size: 18),
+                        label: const Text('Get Help (+\$3)'),
+                        style: TextButton.styleFrom(foregroundColor: Colors.amber),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendCoachingMessage() {
+    final message = _coachingController.text.trim();
+    if (message.isEmpty) return;
+    setState(() {
+      _coachingMessages.add({'role': 'user', 'content': message, 'attempt': _coachingAttempt});
+    });
+    _channel?.sink.add(jsonEncode({
+      'type': 'sanctuary_coaching_message',
+      'sanctuary_id': _sanctuaryId,
+      'message': message,
+    }));
+    _coachingController.clear();
+  }
+
+  void _completeCoaching() {
+    _channel?.sink.add(jsonEncode({
+      'type': 'sanctuary_coaching_complete',
+      'sanctuary_id': _sanctuaryId,
+      'request_assisted_response': false,
+    }));
+  }
+
+  void _requestAssistedResponse() {
+    _channel?.sink.add(jsonEncode({
+      'type': 'sanctuary_request_assisted_response',
+      'sanctuary_id': _sanctuaryId,
+    }));
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF050505),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Row(
+          children: [
+            const Text('Family Sanctuary', style: TextStyle(color: Colors.white)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2A2A2A),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '\$${_totalCharges.toStringAsFixed(2)}',
+                style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) {
+              if (value == 'exit') _exitSanctuary();
+              if (value == 'complete') _completeSanctuary();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'exit', child: Text('Exit Sanctuary')),
+              const PopupMenuItem(value: 'complete', child: Text('Complete Session')),
+            ],
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          // Main content
+          _inPrivateCoaching 
+            ? _buildPrivateCoachingUI()
+            : _sanctuaryPaused
+              ? _buildSanctuaryPausedOverlay()
+              : Row(
+        children: [
+          // Members sidebar
+          Container(
+            width: 200,
+            color: const Color(0xFF1E1E1E),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'MEMBERS',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _members.length,
+                    itemBuilder: (context, index) {
+                      final member = _members[index];
+                      final isActive = member['status'] == 'ACTIVE';
+                      
+                      return ListTile(
+                        leading: Icon(
+                          isActive ? Icons.circle : Icons.circle_outlined,
+                          color: isActive ? Colors.greenAccent : Colors.grey,
+                          size: 12,
+                        ),
+                        title: Text(
+                          member['name'],
+                          style: TextStyle(
+                            color: isActive ? Colors.white : Colors.white54,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: member['role'] != null
+                            ? Text(
+                                member['role'],
+                                style: const TextStyle(color: Colors.white38, fontSize: 11),
+                              )
+                            : null,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Main chat area
+          Expanded(
+            child: Column(
+              children: [
+                // Status banner
+                if (_sanctuaryStatus == 'WAITING_FOR_MEMBERS')
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    color: Colors.orange.shade900,
+                    child: const Text(
+                      'Waiting for family members to join...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                
+                // Messages
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) => _buildMessage(_messages[index]),
+                  ),
+                ),
+                
+                // Input area with speech-to-text
+                _buildInputArea(),
+              ],
+            ),
+          ),
+        ],
+      ),
+          
+          // Coaching offer modal overlay
+          if (_showCoachingModal) _buildCoachingOfferModal(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessage(Map<String, dynamic> msg) {
+    final type = msg['type'];
+    final isFromSelf = msg['sender_id'] == widget.profile['hardware_id'];
+    
+    if (type == 'SYSTEM') {
+      return Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2A2A2A),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            msg['content'],
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    
+    final isLittleNate = msg['sender_id'] == 'LITTLE_NATE';
+    
+    return Align(
+      alignment: isFromSelf ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+        decoration: BoxDecoration(
+          color: isLittleNate
+              ? const Color(0xFF003366)
+              : isFromSelf
+                  ? const Color(0xFF2A2A2A)
+                  : const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(12),
+          border: isLittleNate ? Border.all(color: const Color(0xFF0055AA), width: 2) : null,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isLittleNate) const Text('💙 ', style: TextStyle(fontSize: 16)),
+                Text(
+                  msg['sender_name'],
+                  style: TextStyle(
+                    color: isLittleNate ? Colors.cyanAccent : Colors.amber,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              msg['content'],
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E1E1E),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 8,
+            offset: Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Speech-to-text button (ACCESSIBILITY)
+          IconButton(
+            icon: Icon(
+              _isListening ? Icons.mic : Icons.mic_none,
+              color: _isListening ? Colors.red : (_speechAvailable ? Colors.white : Colors.grey),
+            ),
+            onPressed: _speechAvailable ? _toggleListening : null,
+            tooltip: _speechAvailable ? 'Speak your message' : 'Speech not available',
+          ),
+          
+          // Text input
+          Expanded(
+            child: TextField(
+              controller: _messageController,
+              style: const TextStyle(color: Colors.white),
+              maxLines: null,
+              decoration: InputDecoration(
+                hintText: _isListening ? 'Listening...' : 'Type your message...',
+                hintStyle: TextStyle(
+                  color: _isListening ? Colors.redAccent : Colors.white38,
+                ),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+          ),
+          
+          const SizedBox(width: 8),
+          
+          // Send button
+          IconButton(
+            icon: const Icon(Icons.send, color: Color(0xFF003366)),
+            onPressed: _sendMessage,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// END OF PART 3
+// -----------------------------------------------------------------------------
+// =============================================================================
+// MODULE 3: THE LOBBY (SELF-HEALING v4.0)
+// Status: UPGRADED (Visual Connection Status + Retry Logic)
+// =============================================================================
+
+class LobbyScreen extends StatefulWidget {
+  const LobbyScreen({super.key});
+
+  @override
+  _LobbyScreenState createState() => _LobbyScreenState();
+}
+
+class _LobbyScreenState extends State<LobbyScreen> {
+  final HardwareIdentity _identity = HardwareIdentity();
+  WebSocketChannel? _channel;
+  
+  // Connection State
+  bool _isConnected = false;
+  String _statusMessage = "Initializing...";
+  bool _isLoading = false;
+
+  // Credentials for Handoff
+  String _tempUser = "";
+  String _tempPass = "";
+  
+  // Hardcoded IP (Make sure this matches your Mac!)
+  final String _serverUrl = 'ws://10.0.0.99:8765';
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToBridge();
+  }
+
+  void _connectToBridge() {
+    setState(() {
+      _statusMessage = "Connecting to $_serverUrl...";
+      _isConnected = false;
+    });
+
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
+      
+      _channel!.stream.listen(
+        _handlePacket, 
+        onError: (e) {
+          print("Lobby Socket Error: $e");
+          if (mounted) setState(() {
+            _isConnected = false;
+            _statusMessage = "Connection Failed. Server Offline?";
+          });
+        },
+        onDone: () {
+          print("Lobby Socket Closed");
+          if (mounted) setState(() {
+            _isConnected = false;
+            _statusMessage = "Disconnected.";
+          });
+        }
+      );
+      
+      // If we didn't crash immediately, assume we are good (Socket doesn't confirm until message)
+      // We will send a "ping" to verify connection
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) setState(() {
+          _isConnected = true;
+          _statusMessage = "SECURE LINK ESTABLISHED";
+        });
+      });
+
+    } catch (e) {
+      if (mounted) setState(() => _statusMessage = "Fatal Connection Error: $e");
+    }
+  }
+
+  void _handlePacket(dynamic message) {
+    // If we receive ANYTHING, we are definitely connected
+    if (!_isConnected) setState(() => _isConnected = true);
+
+    try {
+      final data = jsonDecode(message);
+      print("Lobby Received: $data");
+
+      if (data['type'] == 'login_success') {
+        setState(() => _isLoading = false);
+        
+        // --- THE HANDOFF (Prevent Stream Crash) ---
+        Map<String, dynamic> profile = data['profile'];
+        String role = profile['role'] ?? "CLIENT";
+        
+        // 1. Close the Lobby Line
+        _channel?.sink.close();
+        
+        // 2. Open the Session Line
+        final sessionSocket = WebSocketChannel.connect(Uri.parse(_serverUrl));
+        
+        // 3. Blind Login
+        sessionSocket.sink.add(jsonEncode({
+          "type": "login_request",
+          "username": _tempUser,
+          "password": _tempPass,
+          "expected_role": role
+        }));
+
+        // 4. Navigate
+        Widget nextScreen;
+        if (role == 'ADMIN') {
+          nextScreen = AdminDashboardScreen(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        } else if (role == 'COACH') {
+          nextScreen = CoachDashboardScreenV2(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        } else {
+          nextScreen = NeuralInterfaceV2(currentUserProfile: profile, username: _tempUser, password: _tempPass);
+        }
+
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => nextScreen));
+        
+      } else if (data['type'] == 'login_failed') {
+        Navigator.pop(context); // Close dialog if open
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("ACCESS DENIED: ${data['message']}"),
+          backgroundColor: Colors.red,
+        ));
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      print("Parse Error: $e");
+    }
+  }
+
+  void _showLoginDialog(String expectedRole) {
+    if (!_isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cannot Login: Offline")));
+      return;
+    }
+
+    TextEditingController userCtrl = TextEditingController();
+    TextEditingController passCtrl = TextEditingController();
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+            const SizedBox(height: 10),
+            TextField(controller: passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "KEY", prefixIcon: Icon(Icons.vpn_key))),
+          ],
+        ),
+        actions: [
+          TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
+            child: const Text("VERIFY"),
+            onPressed: () {
+              // 1. Save Credentials
+              _tempUser = userCtrl.text.trim();
+              _tempPass = passCtrl.text.trim();
+              
+              // 2. Send Login
+              _channel?.sink.add(jsonEncode({
+                "type": "login_request",
+                "username": _tempUser,
+                "password": _tempPass,
+                "expected_role": expectedRole
+              }));
+
+              // 3. Show Loading (Don't close dialog yet, wait for response)
+              Navigator.pop(ctx); 
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying Credentials...")));
+            },
+          )
+        ],
+      ),
+    );
+  }
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // --- CONNECTION STATUS HEADER ---
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: _isConnected ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _isConnected ? Colors.green : Colors.red)
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 10, color: _isConnected ? Colors.green : Colors.red),
+                    const SizedBox(width: 10),
+                    Text(_statusMessage, style: TextStyle(color: _isConnected ? Colors.green : Colors.red, fontSize: 10, fontFamily: "Courier")),
+                  ],
+                ),
+              ),
+              if (!_isConnected) 
+                TextButton(
+                  onPressed: _connectToBridge, 
+                  child: const Text("RETRY CONNECTION", style: TextStyle(color: Colors.white54))
+                ),
+              // --------------------------------
+
+              const SizedBox(height: 40),
+              const Icon(Icons.shield_moon, size: 80, color: Color(0xFF333333)),
+              const SizedBox(height: 20),
+              const Text("SOVEREIGN SANCTUARY", style: TextStyle(color: Colors.white, letterSpacing: 4, fontFamily: 'Courier', fontSize: 18)),
+              const SizedBox(height: 60),
+
+              _buildGateButton(
+                "CLIENT PORTAL", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                () => _showLoginDialog("CLIENT")
+              ),
+              const SizedBox(height: 20),
+
+              _buildGateButton(
+                "COACH ACCESS", "Supervision & Admin", Icons.admin_panel_settings, const Color(0xFFFFD700),
+                () => _showLoginDialog("COACH")
+              ),
+
+              const SizedBox(height: 20),
+
+              _buildGateButton(
+                "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
+                () => _showLoginDialog("ADMIN")
+              ),
+
+              const SizedBox(height: 40),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => const SignUpWizard(role: "CLIENT")
+                  ));
+                },
+                child: const Text("NEW CLIENT REGISTRATION", style: TextStyle(color: Colors.blueAccent, decoration: TextDecoration.underline, letterSpacing: 1.5, fontSize: 12)),
+           ),
+          ],
+        ),
+       ),
+      ),
+    );
+  }
+
+  Widget _buildGateButton(String title, String sub, IconData icon, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(12),
+          color: color.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(width: 20),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+                Text(sub, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+              ],
+            ),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios, color: color, size: 16)
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LobbyButton extends StatelessWidget {
+  final String title, subtitle;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _LobbyButton({required this.title, required this.subtitle, required this.color, required this.icon, required this.onTap});
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(12),
+          color: color.withOpacity(0.05),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(width: 20),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1.2)),
+              const SizedBox(height: 4),
+              Text(subtitle, style: TextStyle(color: Colors.white54, fontSize: 12)),
+            ]),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios, color: color.withOpacity(0.5), size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// SIGN UP WIZARD (Sanitized Session Logic)
+// -----------------------------------------------------------------------------
+class SignUpWizard extends StatefulWidget {
+  final String role;
+  const SignUpWizard({super.key, required this.role});
+  @override
+  State<SignUpWizard> createState() => _SignUpWizardState();
+}
+
+class _SignUpWizardState extends State<SignUpWizard> {
+  int _step = 1;
+  bool _consentGiven = false;
+  DateTime? _dob;
+  final _nameCtrl = TextEditingController();
+  final _userCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final List<String> _endpoints = ['ws://10.0.0.99:8765'];
+  bool _isDependent = false;
+  TextEditingController _parentCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // 2. CRITICAL FIX: Forces a clean slate to prevent "Ghost Linking"
+    _sanitizeSession();
+  }
+
+  Future<void> _sanitizeSession() async {
+    print(">>> [INTAKE] Sanitizing session to prevent auto-linking...");
+    await HardwareIdentity().clearSession();
+  }
+
+  int _calculateAge(DateTime birthDate) {
+    final now = DateTime.now();
+    int age = now.year - birthDate.year;
+    if (now.month < birthDate.month || (now.month == birthDate.month && now.day < birthDate.day)) age--;
+    return age;
+  }
+
+  void _submitRegistration() {
+    // 1. Validation
+    if (_dob == null) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is Required")));
+       return;
+    }
+    if (_calculateAge(_dob!) < 18) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
+       return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sending Data to Neural Core...")));
+
+    // 2. THE BURNER SOCKET
+    final regSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
+
+    regSocket.stream.listen((message) {
+      final data = jsonDecode(message);
+      print(">>> SERVER SAYS: $data"); // <--- Debug Print
+
+      // CASE A: Server created account AND logged us in (Ideal)
+      if (data['type'] == 'login_success') {
+        _handleLoginSuccess(data, regSocket);
+        Navigator.pushAndRemoveUntil(
+          context, 
+          MaterialPageRoute(builder: (_) => NeuralInterface(
+             currentUserProfile: data['profile'],
+             username: _userCtrl.text.trim(), // Pass form data
+             password: _passCtrl.text.trim(), // Pass form data
+          )),
+          (route) => false
+        );
+      } 
+      
+      // CASE B: Server created account but waits for login (Likely what is happening)
+      else if (data['type'] == 'register_success') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Identity Created. Logging in...")));
+        // Trigger the login manually using the SAME socket
+        regSocket.sink.add(jsonEncode({
+           "type": "login_request",
+           "username": _userCtrl.text.trim(),
+           "password": _passCtrl.text.trim(),
+           "expected_role": widget.role
+        }));
+      }
+      
+      // CASE C: Error
+      else if (data['type'] == 'error') {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("FAILURE: ${data['message']}"),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }, onError: (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e")));
+    });
+
+    // 3. Send Registration Command
+    regSocket.sink.add(jsonEncode({
+      "type": "register_request",
+      "consent_agreed": true,
+      "consent_version": "v12.6_2026_FINAL",
+      "role": widget.role,
+      "username": _userCtrl.text.trim(),
+      "password": _passCtrl.text.trim(),
+      "name": _nameCtrl.text.trim(),
+      "dob": DateFormat('yyyy-MM-dd').format(_dob!),
+      "modality": "General",
+      "parent_username": _isDependent ? _parentCtrl.text.trim() : null
+    }));
+  }
+
+  // Helper method to keep code clean
+  void _handleLoginSuccess(Map<String, dynamic> data, WebSocketChannel burnerSocket) {
+        // A. Save Credentials
+        HardwareIdentity().saveSession(_userCtrl.text, "NEW_REG_TOKEN", data['profile']);
+        
+        // B. Close the Burner Socket
+        burnerSocket.sink.close();
+
+        // C. Open a FRESH Connection for the Chat
+        final chatSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
+
+        // D. Perform Blind Login on the new socket
+        chatSocket.sink.add(jsonEncode({
+           "type": "login_request",
+           "username": _userCtrl.text.trim(),
+           "password": _passCtrl.text.trim(),
+           "expected_role": widget.role
+        }));
+
+        // E. Hand the FRESH socket to the Eye
+        Navigator.pushAndRemoveUntil(
+          context, 
+          MaterialPageRoute(builder: (_) => NeuralInterface(
+             currentUserProfile: data['profile'],
+             username: _userCtrl.text.trim(),
+             password: _passCtrl.text.trim(),
+          )),
+          (route) => false
+        );
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().subtract(const Duration(days: 6570)), 
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(data: ThemeData.dark(), child: child!)
+    );
+    if (picked != null) setState(() => _dob = picked);
+  }
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      // 3. RESTORED: Red Back Button in AppBar
+      appBar: AppBar(
+        title: Text("NEW ${widget.role}"), 
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.redAccent),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: _step == 1 
+          ? SovereignCovenantDoc(
+              consentGiven: _consentGiven,
+              onChanged: (v) => setState(() => _consentGiven = v!),
+              color: Colors.blueAccent,
+              btnText: "I COVENANT & PROCEED",
+              onNext: _consentGiven ? () => setState(() => _step = 2) : null,
+            )
+          : _buildForm(),
+      ),
+    );
+  }
+
+
+  Widget _buildForm() {
+    return Theme(
+      data: ThemeData.dark().copyWith(
+        inputDecorationTheme: InputDecorationTheme(
+          labelStyle: const TextStyle(color: Colors.white70),
+          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+          focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
+        ),
+        textTheme: const TextTheme(bodyMedium: TextStyle(color: Colors.white)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. STANDARD FIELDS
+            TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: "Full Name", prefixIcon: Icon(Icons.person))),
+            const SizedBox(height: 10),
+            
+            GestureDetector(
+              onTap: () => _selectDate(context),
+              child: AbsorbPointer(child: TextField(decoration: InputDecoration(
+                labelText: _dob == null ? "DOB (Required)" : "DOB: ${DateFormat('yyyy-MM-dd').format(_dob!)}", 
+                suffixIcon: const Icon(Icons.calendar_today)
+              ))),
+            ),
+            const SizedBox(height: 20),
+
+            // 2. FAMILY LINK SECTION (The Missing Piece)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: _isDependent ? Colors.blue : Colors.white12),
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.white.withOpacity(0.05)
+              ),
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    title: const Text("Is this a Child/Dependent Account?", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    subtitle: const Text("Link this account to a Head of Household", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    value: _isDependent,
+                    activeColor: Colors.blue,
+                    onChanged: (val) => setState(() => _isDependent = val),
+                  ),
+                  
+                  if (_isDependent) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _parentCtrl, 
+                      decoration: const InputDecoration(
+                        labelText: "Head of Household IDENTITY", 
+                        hintText: "Enter Parent's Username",
+                        prefixIcon: Icon(Icons.family_restroom, color: Colors.blue)
+                      )
+                    ),
+                  ]
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 3. CREDENTIALS
+            TextField(controller: _userCtrl, decoration: const InputDecoration(labelText: "Create Username", prefixIcon: Icon(Icons.alternate_email))),
+            const SizedBox(height: 10),
+            TextField(controller: _passCtrl, obscureText: true, decoration: const InputDecoration(labelText: "Create Password", prefixIcon: Icon(Icons.lock))),
+            
+            const SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: _submitRegistration, 
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, minimumSize: const Size(double.infinity, 50)),
+              child: const Text("CREATE ACCOUNT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+            )
+          ],
+        ),
+      ), 
+    );
+  }  
+}
+
+// =============================================================================
+// MODULE 6: LEGAL ENGINE (FIXED STATE CLASSES)
+// =============================================================================
+
+class ReConsentScreen extends StatefulWidget {
+  final String username, password;
+  const ReConsentScreen({super.key, required this.username, required this.password});
+  @override
+  State<ReConsentScreen> createState() => _ReConsentScreenState();
+}
+
+class _ReConsentScreenState extends State<ReConsentScreen> {
+  bool _agreed = false;
+  
+  void _send() {
+    final ws = WebSocketChannel.connect(Uri.parse('ws://10.0.0.99:8765'));
+    ws.stream.listen((message) { 
+      if (jsonDecode(message)['type'] == 'login_success') {
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false); 
+      }
+    });
+    ws.sink.add(jsonEncode({
+      "type": "submit_reconsent", 
+      "username": widget.username, 
+      "password": widget.password
+    }));
+  }
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      appBar: AppBar(title: const Text("LEGAL UPDATE"), backgroundColor: Colors.amber, automaticallyImplyLeading: false),
+      body: Padding(
+        padding: const EdgeInsets.all(24), 
+        child: SovereignCovenantDoc(
+          consentGiven: _agreed, 
+          onChanged: (v) => setState(() => _agreed = v!), 
+          color: Colors.amber, 
+          btnText: "I ACCEPT NEW TERMS", 
+          onNext: _agreed ? _send : null
+        )
+      ),
+    );
+  }
+}
+
+class EmancipationScreen extends StatefulWidget {
+  final String username, password;
+  const EmancipationScreen({super.key, required this.username, required this.password});
+  @override
+  State<EmancipationScreen> createState() => _EmancipationScreenState();
+}
+
+class _EmancipationScreenState extends State<EmancipationScreen> {
+  bool _agreed = false;
+  
+  void _send() {
+    final ws = WebSocketChannel.connect(Uri.parse('ws://10.0.0.99:8765'));
+    ws.stream.listen((message) { 
+      if (jsonDecode(message)['type'] == 'login_success') {
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false); 
+      }
+    });
+    ws.sink.add(jsonEncode({
+      "type": "submit_emancipation", 
+      "username": widget.username, 
+      "password": widget.password
+    }));
+  }
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF111111),
+      appBar: AppBar(title: const Text("HAPPY BIRTHDAY"), backgroundColor: Colors.amber, automaticallyImplyLeading: false),
+      body: Padding(
+        padding: const EdgeInsets.all(24), 
+        child: SovereignCovenantDoc(
+          consentGiven: _agreed, 
+          onChanged: (v) => setState(() => _agreed = v!), 
+          color: Colors.amber, 
+          btnText: "I CLAIM SOVEREIGNTY", 
+          onNext: _agreed ? _send : null
+        )
+      ),
+    );
+  }
+}
+
+class SovereignCovenantDoc extends StatelessWidget {
+  final bool consentGiven;
+  final ValueChanged<bool?> onChanged;
+  final Color color;
+  final String btnText;
+  final VoidCallback? onNext;
+
+  const SovereignCovenantDoc({super.key, required this.consentGiven, required this.onChanged, required this.color, required this.btnText, required this.onNext});
+
+  
+  // ===========================================================================
+  // PRIVATE COACHING UI
+
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      const Text("SOVEREIGN COVENANT", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 10),
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.all(16), 
+          decoration: BoxDecoration(border: Border.all(color: Colors.white24), color: Colors.white.withOpacity(0.05)),
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
+              _Header("1. PRIVATE MEMBERSHIP (1st AMENDMENT)"),
+              Text("You acknowledge this is a Private Membership Association operating under the First Amendment. Interactions are private exercises of speech.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("2. AI IDENTITY & LICENSING (CA AB 489)"),
+              Text("DISCLOSURE: 'Little Nate' is an AI, NOT a human. Neither the AI nor the App holds a medical license. Do not form a 'reasonable belief' that you are interacting with a licensed healthcare professional.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("3. AUTOMATED PROFILING CONSENT"),
+              Text("This system uses 'Automated Profiling'. By proceeding, you explicitly WAIVE any state-level rights (e.g., IN, KY, RI) to 'opt-out' of profiling, as it is the core function of this service.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("4. AGE & FAMILY ACCOUNTS (CA SB 243)"),
+              Text("You affirm you are 18+ years of age. Minors are prohibited from creating primary accounts. Parents must create the account and add minors as dependents under strict supervision.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("5. TEXAS 'TRAIGA' DISCLOSURE"),
+              Text("Pursuant to Texas law: This practitioner uses Generative AI in the formulation of guidance plans.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("6. CRISIS PROTOCOL"),
+              Text("STOP: If you are in crisis:\nâ€¢ Call 988 (Suicide & Crisis Lifeline)\nâ€¢ Go to an Emergency Room immediately.", style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+              SizedBox(height: 15),
+              
+              _Header("7. ZERO TOLERANCE POLICY"),
+              Text("Immediate termination for: Pornography, Solicitation, or Illegal Acts.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("8. PLATFORM IMMUNITY"),
+              Text("Sovereign Sanctuary is a Technology Provider, not a Clinic. Coaches are Independent Practitioners. You look solely to the Coach for claims arising from live sessions.", style: TextStyle(color: Colors.amber)),
+              SizedBox(height: 15),
+              
+              _Header("9. BIOMETRIC DATA & PRIVACY WAIVER"),
+              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. PROCESSING: Data is encrypted and processed by third-party cloud engines (Azure OpenAI).\n3. SOVEREIGNTY: You retain the 'Right to Delete.'", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("10. HOLD HARMLESS WAIVER"),
+              Text("You voluntarily agree to hold the Developers harmless from any claims arising from data breaches, Coach interactions, or AI outputs.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("11. DISPUTE RESOLUTION"),
+              Text("BINDING ARBITRATION: You agree that any disputes shall be resolved by binding individual arbitration. You explicitly WAIVE your right to a jury trial or to participate in any CLASS ACTION.", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+            ]),
+          ),
+        ),
+      ),
+      CheckboxListTile(
+        title: const Text("I AM 18+, WAIVE CLASS ACTION RIGHTS & CONSENT", style: TextStyle(fontSize: 11, color: Colors.white)), 
+        value: consentGiven, 
+        activeColor: color, 
+        onChanged: onChanged,
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+      ),
+      ElevatedButton(
+        onPressed: onNext, 
+        style: ElevatedButton.styleFrom(backgroundColor: consentGiven ? color : Colors.grey, minimumSize: const Size(double.infinity, 50)), 
+        child: Text(btnText, style: const TextStyle(color: Colors.black))
+      )
+    ]);
+  }
+}
+
+class _Header extends StatelessWidget {
+  final String text; const _Header(this.text);
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 5), child: Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)));
+}

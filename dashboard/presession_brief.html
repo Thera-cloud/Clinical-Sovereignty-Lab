@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pre-Session Brief | Sovereign Command</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-dark: #0A0A0A;
+            --bg-card: #111111;
+            --bg-elevated: #1A1A1A;
+            --border: #252525;
+            --gold: #FFD700;
+            --gold-dim: rgba(255, 215, 0, 0.2);
+            --cyan: #00D4FF;
+            --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88;
+            --green-dim: rgba(0, 255, 136, 0.15);
+            --orange: #FF9500;
+            --orange-dim: rgba(255, 149, 0, 0.15);
+            --red: #FF3B3B;
+            --purple: #9D4EDD;
+            --text-primary: #FFFFFF;
+            --text-secondary: #888888;
+            --text-muted: #555555;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(180deg, #1A1A10 0%, var(--bg-dark) 100%);
+            border-bottom: 1px solid var(--gold-dim);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            color: var(--gold);
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .header-content {
+            flex: 1;
+        }
+
+        .header-title {
+            color: var(--gold);
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header-subtitle {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .session-alert {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.15) 0%, rgba(0, 255, 136, 0.05) 100%);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .alert-icon {
+            font-size: 28px;
+        }
+
+        .alert-content {
+            flex: 1;
+        }
+
+        .alert-title {
+            color: var(--green);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .alert-time {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .join-btn {
+            background: linear-gradient(135deg, #4CAF50, #388E3C);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .main-content {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .client-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .client-avatar {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+
+        .client-info {
+            flex: 1;
+        }
+
+        .client-name {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .tier-badge {
+            padding: 4px 10px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            color: #000;
+            font-size: 10px;
+            font-weight: 700;
+            border-radius: 12px;
+        }
+
+        .client-meta {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .mood-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: var(--cyan-dim);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .mood-icon {
+            font-size: 28px;
+        }
+
+        .mood-content {
+            flex: 1;
+        }
+
+        .mood-label {
+            color: var(--cyan);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .mood-value {
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            overflow: hidden;
+        }
+
+        .card.family {
+            background: linear-gradient(135deg, rgba(255, 149, 0, 0.1) 0%, var(--bg-card) 100%);
+            border-color: rgba(255, 149, 0, 0.3);
+        }
+
+        .card.nate {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, var(--bg-card) 100%);
+            border-color: rgba(0, 212, 255, 0.3);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-icon {
+            font-size: 20px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gold);
+        }
+
+        .card.family .card-title { color: var(--orange); }
+        .card.nate .card-title { color: var(--cyan); }
+
+        .card-body {
+            padding: 16px;
+        }
+
+        .bullet-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .bullet-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .bullet-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--gold);
+            border-radius: 50%;
+            margin-top: 6px;
+            flex-shrink: 0;
+        }
+
+        .bullet-dot.caution { background: var(--orange); }
+        .bullet-dot.positive { background: var(--green); }
+        .bullet-dot.alert { background: var(--red); }
+
+        .family-member {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .family-member:last-child {
+            margin-bottom: 0;
+        }
+
+        .member-avatar {
+            width: 40px;
+            height: 40px;
+            background: var(--orange-dim);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .member-info {
+            flex: 1;
+        }
+
+        .member-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .member-relation {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .member-note {
+            font-size: 11px;
+            color: var(--orange);
+            margin-top: 4px;
+        }
+
+        .nate-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .nate-avatar {
+            width: 36px;
+            height: 36px;
+            background: radial-gradient(circle, #001a33 30%, #000 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 12px rgba(0, 212, 255, 0.3);
+        }
+
+        .nate-eyes {
+            display: flex;
+            gap: 6px;
+        }
+
+        .eye {
+            width: 6px;
+            height: 6px;
+            background: rgba(0, 255, 255, 0.6);
+            border-radius: 50%;
+        }
+
+        .nate-title {
+            color: var(--cyan);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .suggestion-text {
+            font-size: 13px;
+            line-height: 1.7;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .metric-box {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--cyan);
+        }
+
+        .metric-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <button class="back-btn" onclick="window.location.href='command.html'">←</button>
+        <div class="header-content">
+            <div class="header-title">📋 Pre-Session Brief</div>
+            <div class="header-subtitle">Summary and suggestions from Little Nate</div>
+        </div>
+    </header>
+
+    <div class="session-alert" id="sessionAlert" style="display:none;">
+        <span class="alert-icon">🎥</span>
+        <div class="alert-content">
+            <div class="alert-title">Upcoming Session</div>
+            <div class="alert-time" id="sessionTime">Loading...</div>
+        </div>
+        <button class="join-btn" id="joinBtn" onclick="joinSession()">
+            <span>🎥</span> Join Zoom
+        </button>
+    </div>
+
+    <div class="main-content" id="mainContent">
+        <div class="loading">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script>
+        function getWsUrl() {
+            const host = location.hostname;
+            if (!host || host === "localhost" || host === "127.0.0.1" || location.protocol === "file:") {
+                return "wss://api.sovereignsanctuary.net/ws";
+            }
+            if (host.includes("sovereignsanctuary")) {
+                return `wss://${host}/ws`;
+            }
+            const proto = (location.protocol === "https:") ? "wss" : "ws";
+            return `${proto}://${host}:8765`;
+        }
+        let socket = null;
+        let clientId = null;
+        let zoomLink = null;
+
+        function init() {
+            // Get client ID from URL
+            const params = new URLSearchParams(window.location.search);
+            clientId = params.get('client');
+            
+            connect();
+        }
+
+        function connect() {
+            var uname = sessionStorage.getItem("username");
+            var pwd = sessionStorage.getItem("password");
+            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            socket = new WebSocket(getWsUrl());
+            socket.onopen = () => {
+                const profile = JSON.parse(sessionStorage.getItem('profile') || '{}');
+                socket.send(JSON.stringify({
+                    type: 'login_request',
+                    username: sessionStorage.getItem("username") || profile.name,
+                    password: sessionStorage.getItem('password'),
+                    expected_role: profile.role || 'COACH'
+                }));
+            };
+            socket.onmessage = handleMessage;
+        }
+
+        function handleMessage(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'login_success') {
+                requestBrief();
+            } else if (data.type === 'presession_brief') {
+                renderBrief(data.brief);
+            } else if (data.type === 'coach_clients' && !clientId) {
+                // If no specific client, show selector
+                if (data.clients && data.clients.length > 0) {
+                    clientId = data.clients[0].id;
+                    requestBrief();
+                } else {
+                    document.getElementById('mainContent').innerHTML = '<div style="text-align:center;padding:60px 20px;"><div style="font-size:64px;margin-bottom:20px;">📋</div><h2 style="color:var(--gold);margin-bottom:12px;">No Clients Assigned</h2><p style="color:var(--text-secondary);margin-bottom:24px;">You have no clients to brief on yet.</p><button onclick="window.location.href=\'command.html\'" style="padding:12px 24px;background:var(--gold);color:black;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Back to Dashboard</button></div>';
+                }
+            }
+        }
+
+        function requestBrief() {
+            if (clientId) {
+                socket.send(JSON.stringify({
+                    type: 'get_presession_brief',
+                    client_id: clientId
+                }));
+            } else {
+                socket.send(JSON.stringify({ type: 'coach_get_clients' }));
+            }
+        }
+
+        function renderBrief(brief) {
+            const client = brief.client || {};
+            const metrics = brief.metrics || {};
+            const moodHistory = brief.mood_history || [];
+            const recentTopics = brief.recent_topics || [];
+            const recentConversations = brief.recent_conversations || [];
+            const familyMembers = brief.family_members || [];
+            const suggestion = brief.nate_suggestion || '';
+            const nextSession = brief.next_session || null;
+
+            // Show session alert if there's an upcoming session
+            if (nextSession) {
+                document.getElementById('sessionAlert').style.display = 'flex';
+                document.getElementById('sessionTime').textContent = `${nextSession.date} at ${nextSession.time}`;
+                zoomLink = nextSession.zoom_link;
+            }
+
+            const isTopTier = client.tier === 'PREMIUM' || client.tier === 'TOP_TIER';
+
+            document.getElementById('mainContent').innerHTML = `
+                <div class="client-header">
+                    <div class="client-avatar">👤</div>
+                    <div class="client-info">
+                        <div class="client-name">
+                            ${client.name || 'Client'}
+                            ${isTopTier ? '<span class="tier-badge">⭐ TOP TIER</span>' : ''}
+                        </div>
+                        <div class="client-meta">${client.total_sessions || 0} sessions total • Client since ${client.joined_date || 'Unknown'}</div>
+                    </div>
+                </div>
+
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-value">${Math.round((metrics.C_emo || 0.5) * 100)}%</div>
+                        <div class="metric-label">Coherence</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-value">${Math.round((metrics.GAP || 0.3) * 100)}%</div>
+                        <div class="metric-label">Growth Potential</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-value">${metrics.risk_level || 'LOW'}</div>
+                        <div class="metric-label">Risk Level</div>
+                    </div>
+                </div>
+
+                <div class="mood-indicator">
+                    <span class="mood-icon">📊</span>
+                    <div class="mood-content">
+                        <div class="mood-label">Recent AI Session Mood</div>
+                        <div class="mood-value">${metrics.mood_current || 'Neutral'} (${metrics.mood_trend || 'stable'})</div>
+                    </div>
+                </div>
+
+                ${recentTopics.length > 0 ? `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">🎯</span>
+                        <span class="card-title">Topics to Address</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="bullet-list">
+                            ${recentTopics.map((topic, i) => `
+                                <div class="bullet-item">
+                                    <div class="bullet-dot ${i === 0 ? '' : i === 1 ? 'caution' : 'positive'}"></div>
+                                    <span>${topic}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${brief.breakthroughs && brief.breakthroughs.length > 0 ? `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">⚡</span>
+                        <span class="card-title">Recent Breakthroughs</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="bullet-list">
+                            ${brief.breakthroughs.map(b => `
+                                <div class="bullet-item">
+                                    <div class="bullet-dot positive"></div>
+                                    <span>${b}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${familyMembers.length > 0 ? `
+                <div class="card family">
+                    <div class="card-header">
+                        <span class="card-icon">👨‍👩‍👧</span>
+                        <span class="card-title">Family Context</span>
+                    </div>
+                    <div class="card-body">
+                        ${familyMembers.map(member => `
+                            <div class="family-member">
+                                <div class="member-avatar">👤</div>
+                                <div class="member-info">
+                                    <div class="member-name">${member.name}</div>
+                                    <div class="member-relation">${member.relation} • ${member.is_client ? 'Also your client' : 'Not a client'}</div>
+                                    ${member.note ? `<div class="member-note">⚠️ ${member.note}</div>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="card nate">
+                    <div class="card-body">
+                        <div class="nate-header">
+                            <div class="nate-avatar">
+                                <div class="nate-eyes">
+                                    <div class="eye"></div>
+                                    <div class="eye"></div>
+                                </div>
+                            </div>
+                            <span class="nate-title">Little Nate's Suggestion</span>
+                        </div>
+                        <div class="suggestion-text">
+                            ${suggestion || `Based on recent sessions, I recommend checking in about their current emotional state and any sleep or stress patterns. Their coherence levels indicate they may be ready for deeper therapeutic work.`}
+                        </div>
+                    </div>
+                </div>
+
+                ${recentConversations.length > 0 ? `
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-icon">💬</span>
+                        <span class="card-title">Recent AI Conversations</span>
+                    </div>
+                    <div class="card-body">
+                        ${recentConversations.slice(0, 3).map(conv => `
+                            <div style="padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 10px;">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">${conv.timestamp || ''}</div>
+                                <div style="font-size: 12px; color: var(--text-secondary);"><strong>User:</strong> ${conv.user || ''}</div>
+                                <div style="font-size: 12px; color: var(--cyan); margin-top: 6px;"><strong>Nate:</strong> ${conv.ai?.slice(0, 150) || ''}...</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+            `;
+        }
+
+        function joinSession() {
+            if (zoomLink) {
+                window.open(zoomLink, '_blank');
+            } else {
+                alert('No Zoom link available');
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

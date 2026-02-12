@@ -1,0 +1,225 @@
+{
+  "client_id": "CLIENT_001",
+  "name": "John D.",
+  "story_updated": "2026-01-29",
+  "story_version": 8,
+  "who_you_are": {
+    "strengths": [
+      "Persistent - returns to difficult conversations",
+      "Willingness to acknowledge and work through intense emotions",
+      "John was open about his emotional state, which is a significant step in self-awareness.",
+      "Strengths cannot be assessed without recorded conversation or coaching sessions.",
+      "His willingness to engage in coaching indicates openness to improvement.",
+      "Willingness to communicate.",
+      "Openness to engage in private coaching, showing readiness to work on issues"
+    ],
+    "values": [
+      "honesty",
+      "family",
+      "being understood",
+      "loyalty"
+    ],
+    "how_they_love": "Through protection, presence, and fierce loyalty"
+  },
+  "wounds": {
+    "core_wounds": [
+      {
+        "wound": "Fear of rejection",
+        "origin": "Needs exploration - likely early attachment experiences",
+        "triggers": [
+          "feeling dismissed",
+          "intimacy conversations",
+          "perceived criticism",
+          "feeling unheard"
+        ],
+        "protective_response": "Anger, strong language, withdrawal",
+        "what_helps": "Validation before anything else, being heard fully"
+      }
+    ],
+    "recent_hurts": [
+      {
+        "date": "2026-01-26",
+        "event": "Jane hit John during argument",
+        "status": "disclosed but not fully processed",
+        "impact": "Physical violation of safety in relationship",
+        "needs": "Validation that this was not okay, safety planning, continued processing"
+      },
+      {
+        "date": "2026-01-26",
+        "event": "Intense conflict with Jane about intimacy and feeling rejected",
+        "status": "partially processed",
+        "impact": "Activated deep rejection fears",
+        "needs": "Continued exploration of the underlying fears"
+      }
+    ]
+  },
+  "growth": {
+    "breakthroughs": [
+      {
+        "date": "2026-01-26",
+        "moment": "Expressed vulnerability about rejection sensitivity",
+        "context": "After private coaching session, admitted the fear of abandonment underneath his anger",
+        "significance": "First time naming the deeper fear beneath the protective anger",
+        "anchor_phrase": "That took real courage, John - letting me see what's underneath"
+      },
+      {
+        "date": "2026-01-26",
+        "moment": "Returned to sanctuary conversation after taking a break",
+        "context": "Said 'I am not ready to go back in yet' - then came back",
+        "significance": "Showed self-awareness about his limits AND commitment to the relationship",
+        "anchor_phrase": "You knew what you needed and you still came back - that matters"
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "John D. expressing his anger and receiving validation, which can be the first step toward healing",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, John D."
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "John D. had a moment to express his feelings and felt heard.",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, John D."
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "Jane's return from private coaching with a seemingly calmer demeanor suggests some level of understanding or resolution was achieved.",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, John D."
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "John taking the step for private coaching, indicating a willingness to engage and work on issues",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, John D."
+      }
+    ],
+    "progress_markers": [
+      "Can identify and name 'angry' as a feeling",
+      "Accepted private coaching support when offered",
+      "Returns to conversation after breaks",
+      "Beginning to articulate what's underneath the anger"
+    ],
+    "edges_of_growth": [
+      "John could work on exploring and articulating the underlying reasons for his anger.",
+      "Potential growth areas are unclear without entry responses or conversation context.",
+      "Learning to identify and communicate his emotions more clearly.",
+      "Initiating dialogue and expressing personal viewpoints.",
+      "Developing healthier ways to process and express emotions"
+    ]
+  },
+  "patterns": {
+    "when_activated": {
+      "trigger": "Feeling rejected, dismissed, or unheard",
+      "early_signs": [
+        "Voice gets harder",
+        "Uses stronger language",
+        "Name-calling emerges"
+      ],
+      "full_response": "Escalates with intense words, may threaten to leave",
+      "underneath": "Deep hurt, fear of abandonment, fear of not mattering",
+      "what_helps": [
+        "Validation FIRST",
+        "Reflecting feeling behind words",
+        "Not matching his intensity",
+        "Staying calm and present"
+      ],
+      "what_doesnt_help": [
+        "Logic or problem-solving when activated",
+        "Defensiveness",
+        "Telling him to calm down",
+        "Dismissing his feelings"
+      ]
+    },
+    "session_patterns": [
+      {
+        "date": "2026-01-29",
+        "observation": "Expresses emotions strongly and seeks immediate support"
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "John displayed a direct expression of emotions but did not elaborate on the causes."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "No patterns observed as there was no conversation recorded."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "John's initial expression of anger suggests he might have difficulty managing strong emotions."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "No clear communication patterns observed yet due to limited interaction."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "Quick to express anger, possibly masking deeper emotions"
+      }
+    ]
+  },
+  "therapeutic_alliance": {
+    "trust_level": "building - showed vulnerability in coaching",
+    "what_builds_trust": [
+      "Remembering what he shared accurately",
+      "Not rushing to fix or advise",
+      "Naming his courage when he's vulnerable",
+      "Staying present and calm when he's angry",
+      "Validating before anything else"
+    ]
+  },
+  "unfinished_business": [
+    {
+      "topic": "Lack of entry context or participation from Jane D., which may indicate communication challenges",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "John D. expressed feeling anger, but no specific conflicts were identified in this session.",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "Both John and Jane expressed feelings of anger, indicating unresolved tensions.",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "John's expression of anger indicates underlying conflicts or stressors",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "Lack of clear communication or shared understanding between family members",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    }
+  ],
+  "corrective_experiences_needed": [
+    {
+      "old_experience": "Being forgotten or dismissed",
+      "corrective": "I remember accurately and reference his words back to him"
+    },
+    {
+      "old_experience": "Anger being met with rejection or counter-attack",
+      "corrective": "I stay present and curious with his anger, looking for the hurt underneath"
+    },
+    {
+      "old_experience": "Being reduced to worst moments",
+      "corrective": "I hold his whole person - his courage, his love, his struggle"
+    }
+  ],
+  "little_nate_notes": {
+    "remember_to": [
+      "He was hit by Jane - this is significant, validate when he mentions it",
+      "Rejection fear is his core wound - validate often",
+      "He responds to having his courage named",
+      "Validate BEFORE exploring or advising"
+    ]
+  }
+}

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Longitudinal Study</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .back-btn:hover { border-color: var(--purple); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: 280px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .icon.red { background: rgba(255, 59, 59, 0.15); }
+        .icon.orange { background: rgba(255, 149, 0, 0.15); }
+        .card-body { padding: 20px; }
+        .time-range { margin-bottom: 20px; }
+        .range-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .range-option { padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; text-align: center; font-size: 11px; cursor: pointer; }
+        .range-option.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        .filter-section { margin-bottom: 20px; }
+        .filter-title { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; text-transform: uppercase; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+        .checkbox-item { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+        .checkbox-item input { width: 16px; height: 16px; }
+        .export-btn { width: 100%; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; cursor: pointer; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; justify-content: center; color: var(--text-primary); }
+        .export-btn:hover { border-color: var(--purple); }
+        .timeline-graph { height: 340px; background: var(--bg-elevated); border-radius: 10px; padding: 16px; position: relative; }
+        .timeline-graph canvas { width: 100% !important; height: 100% !important; }
+        .cee-event { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--green); }
+        .cee-marker { width: 12px; height: 12px; background: var(--green); border-radius: 50%; flex-shrink: 0; }
+        .cee-info { flex: 1; }
+        .cee-time { font-size: 10px; color: var(--text-secondary); }
+        .cee-details { font-size: 11px; font-weight: 600; margin-top: 2px; }
+        .cee-context { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .stat-card { background: var(--bg-elevated); border-radius: 8px; padding: 16px; text-align: center; }
+        .stat-value { font-size: 32px; font-weight: 700; color: var(--purple); }
+        .stat-label { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .trend { display: flex; align-items: center; gap: 6px; justify-content: center; margin-top: 8px; font-size: 11px; }
+        .trend.up { color: var(--green); }
+        .trend.down { color: var(--red-critical); }
+        .trend.stable { color: var(--gold); }
+        .breakthrough-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
+        .bt-date { font-size: 10px; color: var(--cyan); font-weight: 600; }
+        .bt-score { font-size: 14px; font-weight: 700; margin-top: 4px; }
+        .bt-duration { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+        .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-label { font-size: 10px; color: var(--text-secondary); }
+        .metric-value { font-size: 12px; font-weight: 600; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+        .badge.normalizer { background: rgba(0, 212, 255, 0.15); color: var(--cyan); }
+        .badge.minimizer { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .badge.amplifier { background: rgba(255, 59, 59, 0.15); color: var(--red-critical); }
+        .badge.calibrated { background: rgba(0, 255, 136, 0.15); color: var(--green); }
+        .badge.calibrating { background: rgba(136, 136, 136, 0.15); color: var(--text-secondary); }
+        .badge.fight { background: rgba(255, 59, 59, 0.15); color: var(--red-critical); }
+        .badge.flight { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .badge.freeze { background: rgba(0, 212, 255, 0.15); color: var(--cyan); }
+        .badge.fawn { background: rgba(157, 78, 221, 0.15); color: var(--purple); }
+        .badge.mixed { background: rgba(136, 136, 136, 0.15); color: var(--text-secondary); }
+        .cee-freq-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+        .empty-state { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 11px; }
+        .var-toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .var-toggle { display: flex; align-items: center; gap: 4px; font-size: 10px; cursor: pointer; }
+        .var-toggle input { width: 12px; height: 12px; }
+        .var-toggle .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">+ Back to Lab</a>
+    </div>
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item active"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <main class="main-content">
+        <!-- LEFT PANEL: Controls -->
+        <aside>
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📅</div> Time Range</div>
+                </div>
+                <div class="card-body">
+                    <div class="time-range">
+                        <div class="range-options">
+                            <div class="range-option" data-range="7d">7 days</div>
+                            <div class="range-option active" data-range="30d">30 days</div>
+                            <div class="range-option" data-range="90d">90 days</div>
+                            <div class="range-option" data-range="all">All time</div>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Display Options</div>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" checked id="show-cees"> Show CEE markers</label>
+                            <label class="checkbox-item"><input type="checkbox" checked id="show-avg"> Show average line</label>
+                            <label class="checkbox-item"><input type="checkbox" id="show-trend"> Trend line</label>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Nevedal Formula Variables</div>
+                        <div class="var-toggles" id="var-toggles">
+                            <label class="var-toggle"><input type="checkbox" checked data-var="c_emo"><span class="swatch" style="background:#9D4EDD;"></span> C_emo</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="p_ent"><span class="swatch" style="background:#00D4FF;"></span> p_ent</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="t_tunnel"><span class="swatch" style="background:#00FF88;"></span> T_tunnel</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="d_distance"><span class="swatch" style="background:#FF9500;"></span> d_distance</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="gamma_env"><span class="swatch" style="background:#FF3B3B;"></span> gamma_env</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="e_g_joint"><span class="swatch" style="background:#FFD700;"></span> E_G_joint</label>
+                            <label class="var-toggle"><input type="checkbox" data-var="tau_emo"><span class="swatch" style="background:#4A90D9;"></span> tau_emo</label>
+                        </div>
+                    </div>
+                    <div class="filter-section">
+                        <div class="filter-title">Export Data</div>
+                        <button class="export-btn" id="btn-export-csv">📊 Export CSV Data</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">👤</div> Subject</div>
+                </div>
+                <div class="card-body">
+                    <select id="subject-select" style="width: 100%; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px;">
+                        <option value="">Loading clients...</option>
+                    </select>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Timeline + CEE Events -->
+        <section>
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📈</div> Nevedal Formula Trajectory</div>
+                    <span id="data-points" style="font-size: 10px; color: var(--text-secondary);">0 data points</span>
+                </div>
+                <div class="card-body">
+                    <div class="timeline-graph">
+                        <canvas id="trajectory-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🟢</div> Coherent Emotional Events</div>
+                    <span id="cee-total" style="font-size: 10px; color: var(--green);">0 events</span>
+                </div>
+                <div class="card-body" id="cee-events-list">
+                    <div class="empty-state">Waiting for session data...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Statistics + Patent 2 Metrics -->
+        <aside>
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">📊</div> Statistics</div>
+                </div>
+                <div class="card-body">
+                    <div class="stat-grid">
+                        <div class="stat-card"><div class="stat-value" id="avg-c-emo">--</div><div class="stat-label">Avg C<sub>emo</sub></div></div>
+                        <div class="stat-card"><div class="stat-value" id="peak-c-emo">--</div><div class="stat-label">Peak</div></div>
+                        <div class="stat-card"><div class="stat-value" id="low-c-emo">--</div><div class="stat-label">Lowest</div></div>
+                        <div class="stat-card"><div class="stat-value" id="total-cees">--</div><div class="stat-label">Total CEEs</div></div>
+                    </div>
+                    <div class="trend" id="trend-container">
+                        <span id="trend-text" style="color: var(--text-secondary);">Awaiting data...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CEE Frequency -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📈</div> CEE Frequency</div>
+                </div>
+                <div class="card-body" id="cee-frequency-body">
+                    <div class="empty-state">Awaiting data...</div>
+                </div>
+            </div>
+
+            <!-- Breakthroughs -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">⭐</div> Breakthroughs</div>
+                </div>
+                <div class="card-body" id="breakthroughs-body">
+                    <div class="empty-state">Awaiting data...</div>
+                </div>
+            </div>
+
+            <!-- Patent 2: Crisis Perception -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon red">🎯</div> Crisis Perception</div>
+                </div>
+                <div class="card-body" id="crisis-perception-body">
+                    <div class="empty-state">Select a client to view</div>
+                </div>
+            </div>
+
+            <!-- Patent 2: Shame Profile -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon orange">🛡️</div> Shame Profile</div>
+                </div>
+                <div class="card-body" id="shame-profile-body">
+                    <div class="empty-state">Select a client to view</div>
+                </div>
+            </div>
+
+            <!-- Patent 2: PMB Summary -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">🔮</div> PMB Summary</div>
+                </div>
+                <div class="card-body" id="pmb-summary-body">
+                    <div class="empty-state">Select a client to view</div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) window.location.href = "index.html";
+
+        let ws = null, authenticated = false, currentSubject = "", timeRange = "30d";
+        let trajectoryChart = null, lastHistoryData = null, pollInterval = null;
+
+        // Variable colors for the Nevedal Formula chart
+        const VAR_COLORS = {
+            c_emo: "#9D4EDD", p_ent: "#00D4FF", t_tunnel: "#00FF88",
+            d_distance: "#FF9500", gamma_env: "#FF3B3B", e_g_joint: "#FFD700", tau_emo: "#4A90D9"
+        };
+        const VAR_LABELS = {
+            c_emo: "C_emo", p_ent: "p_ent (Entanglement)", t_tunnel: "T_tunnel (Tunneling)",
+            d_distance: "d (Interpersonal Distance)", gamma_env: "gamma_env (Decoherence)",
+            e_g_joint: "E_G (Joint Load)", tau_emo: "tau_emo (Lifetime)"
+        };
+
+        function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username, password, expected_role: profile.role || "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data;
+                try { data = JSON.parse(event.data); } catch(e) { console.error("[Long] Bad JSON:", e); return; }
+                console.log("[Long] WS msg:", data.type, data.error || "");
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("[Long] Authenticated. Loading clients...");
+                    loadClientList();
+                    // Also request admin_get_users as primary source
+                    ws.send(JSON.stringify({ type: "admin_get_users" }));
+                    if (currentSubject) requestHistory();
+                    // Start polling every 10 seconds
+                    if (!pollInterval) pollInterval = setInterval(() => { if (currentSubject) requestHistory(); }, 10000);
+                }
+                if (data.type === "nevedal_history") {
+                    console.log("[Long] Got nevedal_history. user:", data.user_id, "count:", data.count, "timeline:", (data.timeline || []).length);
+                    displayHistory(data);
+                }
+                if (data.type === "admin_stats" && data.stats) populateClientDropdown(data);
+                if ((data.type === "admin_users" || data.type === "admin_users_list") && data.users) {
+                    console.log("[Long] Got users:", data.users.length);
+                    populateClientDropdownFromUsers(data);
+                }
+                if (data.type === "client_metrics") {
+                    console.log("[Long] Got client_metrics for:", data.client_id, "error:", data.error || "none");
+                    displayPatent2Metrics(data);
+                }
+                if (data.type === "error") { console.warn("[Long] Server error:", data.message); }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connectWebSocket, 3000); };
+            ws.onerror = function() {};
+        }
+
+        function loadClientList() {
+            if (ws && authenticated) ws.send(JSON.stringify({ type: "admin_get_stats" }));
+        }
+
+        function populateClientDropdown(data) {
+            if (ws && authenticated) ws.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        function populateClientDropdownFromUsers(data) {
+            var sel = document.getElementById("subject-select");
+            var clients = (data.users || []).filter(function(u) { return u.role === "CLIENT"; });
+            sel.innerHTML = clients.length === 0
+                ? '<option value="">No clients found</option>'
+                : clients.map(function(c) { return '<option value="' + escapeHtml(c.id || c.user_id || c.hardware_id) + '">' + escapeHtml(c.name || c.username || c.id) + '</option>'; }).join('');
+            if (clients.length > 0 && !currentSubject) {
+                currentSubject = clients[0].id || clients[0].user_id || clients[0].hardware_id;
+                requestHistory();
+                requestClientMetrics();
+            }
+        }
+
+        function requestHistory() {
+            if (ws && ws.readyState === 1 && authenticated && currentSubject) {
+                ws.send(JSON.stringify({ type: "nevedal_get_history", user_id: currentSubject, time_range: timeRange }));
+            }
+        }
+
+        function requestClientMetrics() {
+            if (ws && ws.readyState === 1 && authenticated && currentSubject) {
+                ws.send(JSON.stringify({ type: "admin_get_client_metrics", client_id: currentSubject }));
+            }
+        }
+
+        // ==================== TRAJECTORY CHART ====================
+        function initChart() {
+            const ctx = document.getElementById("trajectory-chart").getContext("2d");
+            trajectoryChart = new Chart(ctx, {
+                type: "line",
+                data: { labels: [], datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: "#888", font: { size: 9 }, maxTicksLimit: 12 }, grid: { color: "rgba(255,255,255,0.05)" } },
+                        y: { min: 0, max: 1, ticks: { color: "#888", font: { size: 9 } }, grid: { color: "rgba(255,255,255,0.08)" } }
+                    },
+                    plugins: { legend: { display: true, labels: { color: "#aaa", font: { size: 10 }, boxWidth: 12, padding: 8 } } },
+                    interaction: { mode: "index", intersect: false },
+                    elements: { point: { radius: 1, hoverRadius: 4 }, line: { tension: 0.3, borderWidth: 2 } }
+                }
+            });
+        }
+
+        function updateChart(timeline) {
+            if (!trajectoryChart || !timeline || timeline.length === 0) return;
+            const labels = timeline.map(t => {
+                const d = new Date(t.timestamp);
+                return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            });
+
+            const activeVars = [];
+            document.querySelectorAll("#var-toggles input:checked").forEach(cb => activeVars.push(cb.dataset.var));
+
+            const datasets = activeVars.map(v => ({
+                label: VAR_LABELS[v] || v,
+                data: timeline.map(t => t[v] !== undefined ? t[v] : null),
+                borderColor: VAR_COLORS[v],
+                backgroundColor: VAR_COLORS[v] + "22",
+                fill: v === "c_emo",
+                hidden: false
+            }));
+
+            // Add CEE markers if enabled
+            if (document.getElementById("show-cees").checked) {
+                const ceeData = timeline.map(t => t.cee_window ? t.c_emo : null);
+                if (ceeData.some(d => d !== null)) {
+                    datasets.push({
+                        label: "CEE Window",
+                        data: ceeData,
+                        borderColor: "#00FF88",
+                        backgroundColor: "#00FF8866",
+                        pointRadius: 6, pointStyle: "star",
+                        showLine: false, fill: false
+                    });
+                }
+            }
+
+            // Add average line if enabled
+            if (document.getElementById("show-avg").checked && timeline.length > 0) {
+                const avgVals = timeline.map(t => t.c_emo).filter(v => v !== undefined);
+                const avg = avgVals.reduce((a, b) => a + b, 0) / avgVals.length;
+                datasets.push({
+                    label: "Average C_emo (" + avg.toFixed(2) + ")",
+                    data: timeline.map(() => avg),
+                    borderColor: "#FFD700",
+                    borderDash: [5, 5],
+                    borderWidth: 1, pointRadius: 0, fill: false
+                });
+            }
+
+            trajectoryChart.data.labels = labels;
+            trajectoryChart.data.datasets = datasets;
+            trajectoryChart.update("none");
+        }
+
+        // ==================== DISPLAY HISTORY ====================
+        function displayHistory(data) {
+            lastHistoryData = data;
+
+            // Statistics
+            if (data.statistics) {
+                const s = data.statistics;
+                if (s.avg_c_emo !== undefined) document.getElementById("avg-c-emo").textContent = s.avg_c_emo.toFixed(2);
+                if (s.peak_c_emo !== undefined) document.getElementById("peak-c-emo").textContent = s.peak_c_emo.toFixed(2);
+                if (s.lowest_c_emo !== undefined) document.getElementById("low-c-emo").textContent = s.lowest_c_emo.toFixed(2);
+                if (s.total_cees !== undefined) document.getElementById("total-cees").textContent = s.total_cees;
+            }
+
+            // Compute trend from timeline
+            if (data.timeline && data.timeline.length >= 4) {
+                const tl = data.timeline;
+                const half = Math.floor(tl.length / 2);
+                const firstHalf = tl.slice(0, half).map(t => t.c_emo || 0);
+                const secondHalf = tl.slice(half).map(t => t.c_emo || 0);
+                const avg1 = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+                const avg2 = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+                const pctChange = avg1 > 0 ? Math.round(((avg2 - avg1) / avg1) * 100) : 0;
+                const trendEl = document.getElementById("trend-container");
+                const trendText = document.getElementById("trend-text");
+                if (pctChange > 0) {
+                    trendEl.className = "trend up";
+                    trendText.textContent = "Improving trend (+" + pctChange + "% vs earlier period)";
+                } else if (pctChange < 0) {
+                    trendEl.className = "trend down";
+                    trendText.textContent = "Declining trend (" + pctChange + "% vs earlier period)";
+                } else {
+                    trendEl.className = "trend stable";
+                    trendText.textContent = "Stable (no significant change)";
+                }
+            }
+
+            // CEE Events list
+            const ceeEl = document.getElementById("cee-events-list");
+            if (data.cee_events && data.cee_events.length > 0) {
+                document.getElementById("cee-total").textContent = data.cee_events.length + " events";
+                ceeEl.innerHTML = data.cee_events.slice(0, 20).map(e => {
+                    const ts = e.timestamp ? new Date(e.timestamp).toLocaleString() : "Unknown";
+                    const cemo = e.c_emo !== undefined ? e.c_emo.toFixed(2) : "--";
+                    const dur = e.duration_seconds || e.duration || "--";
+                    const ctx = e.context || e.interpretation || "";
+                    return '<div class="cee-event"><div class="cee-marker"></div><div class="cee-info">' +
+                        '<div class="cee-time">' + escapeHtml(ts) + '</div>' +
+                        '<div class="cee-details">C<sub>emo</sub>: ' + cemo + ' &bull; Duration: ' + dur + 's</div>' +
+                        (ctx ? '<div class="cee-context">Context: ' + escapeHtml(ctx) + '</div>' : '') +
+                        '</div></div>';
+                }).join('');
+            } else {
+                ceeEl.innerHTML = '<div class="empty-state">No CEE events in this period</div>';
+                document.getElementById("cee-total").textContent = "0 events";
+            }
+
+            // CEE Frequency by week
+            const freqEl = document.getElementById("cee-frequency-body");
+            if (data.cee_frequency) {
+                freqEl.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px;">By Week</div>' +
+                    Object.entries(data.cee_frequency).map(([week, count]) =>
+                        '<div class="cee-freq-row"><span style="font-size:10px;color:var(--text-secondary);">' + escapeHtml(week) + '</span><span style="font-size:12px;font-weight:600;">' + count + ' events</span></div>'
+                    ).join('');
+            } else if (data.cee_events && data.cee_events.length > 0) {
+                // Compute from events
+                const weeks = {};
+                data.cee_events.forEach(e => {
+                    if (!e.timestamp) return;
+                    const d = new Date(e.timestamp);
+                    const weekNum = Math.ceil((d.getDate()) / 7);
+                    const key = "Week " + weekNum;
+                    weeks[key] = (weeks[key] || 0) + 1;
+                });
+                freqEl.innerHTML = '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:12px;">By Week</div>' +
+                    Object.entries(weeks).map(([w, c]) =>
+                        '<div class="cee-freq-row"><span style="font-size:10px;color:var(--text-secondary);">' + w + '</span><span style="font-size:12px;font-weight:600;">' + c + ' events</span></div>'
+                    ).join('');
+            } else {
+                freqEl.innerHTML = '<div class="empty-state">No CEE data available</div>';
+            }
+
+            // Breakthroughs (CEEs with high C_emo)
+            const btEl = document.getElementById("breakthroughs-body");
+            if (data.breakthroughs && data.breakthroughs.length > 0) {
+                btEl.innerHTML = data.breakthroughs.slice(0, 5).map(b => {
+                    const ts = b.timestamp ? new Date(b.timestamp).toLocaleString() : "";
+                    return '<div class="breakthrough-item"><div class="bt-date">' + escapeHtml(ts) + '</div>' +
+                        '<div class="bt-score">C<sub>emo</sub>: ' + (b.c_emo || 0).toFixed(2) + '</div>' +
+                        '<div class="bt-duration">Duration: ' + (b.duration_seconds || b.duration || "--") + 's</div></div>';
+                }).join('');
+            } else if (data.cee_events && data.cee_events.length > 0) {
+                // Derive breakthroughs: CEEs with C_emo > 0.85
+                const breakthroughs = data.cee_events.filter(e => (e.c_emo || 0) >= 0.85).sort((a, b) => (b.c_emo || 0) - (a.c_emo || 0)).slice(0, 5);
+                if (breakthroughs.length > 0) {
+                    btEl.innerHTML = breakthroughs.map(b => {
+                        const ts = b.timestamp ? new Date(b.timestamp).toLocaleString() : "";
+                        return '<div class="breakthrough-item"><div class="bt-date">' + escapeHtml(ts) + '</div>' +
+                            '<div class="bt-score">C<sub>emo</sub>: ' + (b.c_emo || 0).toFixed(2) + '</div>' +
+                            '<div class="bt-duration">Duration: ' + (b.duration_seconds || "--") + 's</div></div>';
+                    }).join('');
+                } else {
+                    btEl.innerHTML = '<div class="empty-state">No breakthroughs (C_emo >= 0.85) in period</div>';
+                }
+            } else {
+                btEl.innerHTML = '<div class="empty-state">Awaiting data...</div>';
+            }
+
+            // Update chart
+            if (data.timeline) {
+                document.getElementById("data-points").textContent = data.timeline.length + " data points";
+                updateChart(data.timeline);
+            }
+        }
+
+        // ==================== PATENT 2 METRICS ====================
+        function displayPatent2Metrics(data) {
+            // Crisis Perception (Patent 2)
+            const cpEl = document.getElementById("crisis-perception-body");
+            if (data.crisis_perception) {
+                const cp = data.crisis_perception;
+                const bl = (cp.perception_baseline || "CALIBRATING").toUpperCase();
+                cpEl.innerHTML =
+                    '<div style="text-align:center;margin-bottom:12px;"><span class="badge ' + bl.toLowerCase() + '">' + bl + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Distress Discrepancy</span><span class="metric-value">' + (cp.distress_discrepancy || 0).toFixed(2) + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Minimization Score</span><span class="metric-value">' + (cp.minimization_score || 0).toFixed(2) + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Sensitivity Score</span><span class="metric-value">' + (cp.sensitivity_score || 0).toFixed(2) + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Normalization Index</span><span class="metric-value">' + (cp.normalization_index || 0).toFixed(2) + '</span></div>';
+            } else {
+                cpEl.innerHTML = '<div class="empty-state">No crisis perception data</div>';
+            }
+
+            // Shame Profile (Patent 2)
+            const spEl = document.getElementById("shame-profile-body");
+            if (data.shame_profile) {
+                const sp = data.shame_profile;
+                const mask = (sp.shame_masking_pattern || "UNKNOWN").replace("_MASKED", "").replace("_", " ");
+                spEl.innerHTML =
+                    '<div class="metric-row"><span class="metric-label">Shame Index</span><span class="metric-value" style="color:var(--orange);">' + (sp.shame_index || 0).toFixed(2) + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Baseline</span><span class="metric-value">' + (sp.shame_baseline || 0).toFixed(2) + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Masking Pattern</span><span class="metric-value">' + escapeHtml(mask) + '</span></div>' +
+                    (sp.core_beliefs && sp.core_beliefs.length > 0 ?
+                        '<div style="margin-top:10px;font-size:10px;color:var(--text-secondary);">Core Beliefs:</div>' +
+                        sp.core_beliefs.slice(0, 3).map(b =>
+                            '<div style="font-size:10px;padding:4px 0;border-bottom:1px solid var(--border);">' + escapeHtml(b.belief || b) + '</div>'
+                        ).join('') : '');
+            } else {
+                spEl.innerHTML = '<div class="empty-state">No shame profile data</div>';
+            }
+
+            // PMB Summary (Patent 2)
+            const pmbEl = document.getElementById("pmb-summary-body");
+            if (data.pmb) {
+                const pmb = data.pmb;
+                const rt = (pmb.reactivity_type || "MIXED").toUpperCase();
+                pmbEl.innerHTML =
+                    '<div style="text-align:center;margin-bottom:12px;"><span class="badge ' + rt.toLowerCase() + '">' + rt + '</span></div>' +
+                    '<div class="metric-row"><span class="metric-label">Reconsolidation Readiness</span><span class="metric-value" style="color:var(--green);">' + ((pmb.reconsolidation_readiness || 0) * 100).toFixed(0) + '%</span></div>' +
+                    (pmb.predictions && pmb.predictions.length > 0 ?
+                        '<div style="margin-top:10px;font-size:10px;color:var(--text-secondary);">Top Predictions:</div>' +
+                        pmb.predictions.slice(0, 3).map(p =>
+                            '<div style="font-size:10px;padding:4px 0;border-bottom:1px solid var(--border);">' + escapeHtml(p.prediction || p) +
+                            (p.confidence ? ' <span style="color:var(--cyan);">(' + (p.confidence * 100).toFixed(0) + '%)</span>' : '') + '</div>'
+                        ).join('') : '');
+            } else {
+                pmbEl.innerHTML = '<div class="empty-state">No PMB data</div>';
+            }
+        }
+
+        // ==================== CSV EXPORT ====================
+        document.getElementById("btn-export-csv").addEventListener("click", function() {
+            if (!lastHistoryData || !lastHistoryData.timeline) return alert("No data to export");
+            const headers = ["timestamp","c_emo","p_ent","t_tunnel","d_distance","gamma_env","e_g_joint","tau_emo","cee_window"];
+            const rows = lastHistoryData.timeline.map(t => headers.map(h => t[h] !== undefined ? t[h] : "").join(","));
+            const csv = headers.join(",") + "\n" + rows.join("\n");
+            const blob = new Blob([csv], { type: "text/csv" });
+            const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+            a.download = "nevedal_longitudinal_" + currentSubject + "_" + timeRange + ".csv";
+            a.click();
+        });
+
+        // ==================== EVENT HANDLERS ====================
+        document.querySelectorAll(".range-option").forEach(opt => {
+            opt.addEventListener("click", function() {
+                document.querySelectorAll(".range-option").forEach(o => o.classList.remove("active"));
+                this.classList.add("active");
+                timeRange = this.dataset.range;
+                requestHistory();
+            });
+        });
+
+        document.getElementById("subject-select").addEventListener("change", function() {
+            currentSubject = this.value;
+            if (currentSubject) { requestHistory(); requestClientMetrics(); }
+        });
+
+        // Variable toggles and display option checkboxes
+        document.querySelectorAll("#var-toggles input, #show-cees, #show-avg, #show-trend").forEach(cb => {
+            cb.addEventListener("change", function() {
+                if (lastHistoryData && lastHistoryData.timeline) updateChart(lastHistoryData.timeline);
+            });
+        });
+
+        // ==================== INIT ====================
+        initChart();
+        connectWebSocket();
+    </script>
+</body>
+</html>

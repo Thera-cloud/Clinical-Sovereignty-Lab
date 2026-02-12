@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Little Nate AI Features</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #0A1A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--cyan-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .nate-icon { width: 48px; height: 48px; background: linear-gradient(135deg, #001A33, #000); border: 2px solid var(--cyan); border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px var(--cyan-dim); }
+        .nate-eyes { display: flex; gap: 8px; }
+        .nate-eye { width: 8px; height: 8px; background: white; border-radius: 50%; animation: blink 4s infinite; }
+        @keyframes blink { 0%, 90%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--cyan); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--cyan); color: black; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .sub-nav-item.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.full { grid-column: span 2; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+        .card-title .icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.red { background: var(--red-dim); }
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.purple { background: var(--purple-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+        .card-body { padding: 20px; }
+
+        /* Feature Banner */
+        .feature-banner { background: linear-gradient(135deg, #0A1A1A 0%, #001A33 100%); border: 1px solid var(--cyan); border-radius: 12px; padding: 24px; display: flex; align-items: center; gap: 24px; margin-bottom: 20px; }
+        .feature-icon { width: 64px; height: 64px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 32px; }
+        .feature-icon.deadman { background: var(--red-dim); border: 2px solid var(--red-critical); }
+        .feature-icon.swarm { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .feature-icon.nudge { background: var(--green-dim); border: 2px solid var(--green); }
+        .feature-info { flex: 1; }
+        .feature-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+        .feature-title.red { color: var(--red-critical); }
+        .feature-title.purple { color: var(--purple); }
+        .feature-title.green { color: var(--green); }
+        .feature-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+        .feature-status { padding: 12px 20px; background: var(--bg-dark); border-radius: 10px; text-align: center; }
+        .feature-status-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 4px; }
+        .feature-status-value { font-size: 14px; font-weight: 600; }
+        .feature-status-value.active { color: var(--green); }
+        .feature-status-value.alert { color: var(--red-critical); }
+
+        /* Deadman Switch Dashboard */
+        .watchlist-item { display: flex; align-items: center; gap: 14px; padding: 14px; background: var(--bg-elevated); border-radius: 10px; margin-bottom: 10px; border-left: 3px solid var(--border); }
+        .watchlist-item.critical { border-left-color: var(--red-critical); background: var(--red-dim); }
+        .watchlist-item.warning { border-left-color: var(--orange); }
+        .watchlist-item.safe { border-left-color: var(--green); }
+        .watchlist-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .watchlist-avatar.critical { background: var(--red-dim); border: 2px solid var(--red-critical); }
+        .watchlist-avatar.warning { background: rgba(255, 149, 0, 0.2); border: 2px solid var(--orange); }
+        .watchlist-avatar.safe { background: var(--green-dim); border: 2px solid var(--green); }
+        .watchlist-info { flex: 1; }
+        .watchlist-name { font-size: 13px; font-weight: 600; }
+        .watchlist-meta { font-size: 10px; color: var(--text-secondary); }
+        .watchlist-days { text-align: right; }
+        .watchlist-days-value { font-size: 18px; font-weight: 700; }
+        .watchlist-days-value.critical { color: var(--red-critical); }
+        .watchlist-days-value.warning { color: var(--orange); }
+        .watchlist-days-value.safe { color: var(--green); }
+        .watchlist-days-label { font-size: 9px; color: var(--text-secondary); }
+        .watchlist-action { padding: 8px 14px; border-radius: 6px; font-size: 10px; cursor: pointer; border: none; margin-left: 12px; }
+        .watchlist-action.alert { background: var(--red-critical); color: white; }
+        .watchlist-action.check { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
+
+        /* Swarm Intelligence */
+        .swarm-insight { padding: 16px; background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--purple-dim) 100%); border: 1px solid var(--purple); border-radius: 12px; margin-bottom: 12px; }
+        .swarm-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .swarm-icon { font-size: 20px; }
+        .swarm-type { font-size: 10px; padding: 3px 8px; background: var(--purple); color: white; border-radius: 4px; }
+        .swarm-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--purple); }
+        .swarm-content { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+        .swarm-members { display: flex; gap: 8px; margin-top: 12px; }
+        .swarm-member { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg-dark); border-radius: 6px; font-size: 10px; }
+        .swarm-member-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .swarm-member-dot.father { background: var(--cyan); }
+        .swarm-member-dot.son { background: var(--orange); }
+        .swarm-member-dot.mother { background: var(--purple); }
+        .swarm-confidence { font-size: 10px; color: var(--green); margin-top: 8px; }
+
+        /* Nate Modes */
+        .mode-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .mode-card { padding: 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .mode-card:hover { border-color: var(--cyan); transform: translateY(-2px); }
+        .mode-card.active { border-color: var(--cyan); background: var(--cyan-dim); }
+        .mode-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .mode-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .mode-icon.tricorder { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .mode-icon.archivist { background: var(--gold-dim); border: 2px solid var(--gold); }
+        .mode-icon.guardian { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .mode-icon.supervisor { background: var(--green-dim); border: 2px solid var(--green); }
+        .mode-name { font-size: 14px; font-weight: 600; }
+        .mode-subtitle { font-size: 10px; color: var(--text-secondary); }
+        .mode-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px; }
+        .mode-stats { display: flex; gap: 16px; }
+        .mode-stat { text-align: center; }
+        .mode-stat-value { font-size: 16px; font-weight: 700; color: var(--cyan); }
+        .mode-stat-label { font-size: 9px; color: var(--text-secondary); }
+        .mode-toggle { margin-top: 12px; padding: 8px 16px; width: 100%; border-radius: 6px; font-size: 11px; cursor: pointer; border: none; }
+        .mode-toggle.enabled { background: var(--cyan); color: black; }
+        .mode-toggle.disabled { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
+
+        /* Tricorder Calibration */
+        .calibration-visual { background: var(--bg-dark); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+        .waveform { height: 80px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+        .wave-bar { width: 4px; background: var(--cyan); border-radius: 2px; animation: wave 1s ease-in-out infinite; }
+        .wave-bar:nth-child(1) { height: 20px; animation-delay: 0s; }
+        .wave-bar:nth-child(2) { height: 35px; animation-delay: 0.1s; }
+        .wave-bar:nth-child(3) { height: 50px; animation-delay: 0.2s; }
+        .wave-bar:nth-child(4) { height: 65px; animation-delay: 0.3s; }
+        .wave-bar:nth-child(5) { height: 80px; animation-delay: 0.4s; }
+        .wave-bar:nth-child(6) { height: 65px; animation-delay: 0.5s; }
+        .wave-bar:nth-child(7) { height: 50px; animation-delay: 0.6s; }
+        .wave-bar:nth-child(8) { height: 35px; animation-delay: 0.7s; }
+        .wave-bar:nth-child(9) { height: 20px; animation-delay: 0.8s; }
+        @keyframes wave { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.5); } }
+        .calibration-status { text-align: center; font-size: 12px; color: var(--cyan); margin-top: 12px; }
+        .baseline-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+        .baseline-metric { padding: 12px; background: var(--bg-elevated); border-radius: 8px; text-align: center; }
+        .baseline-value { font-size: 18px; font-weight: 700; }
+        .baseline-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; }
+
+        /* Nudge System */
+        .nudge-item { display: flex; align-items: center; gap: 14px; padding: 14px; background: var(--bg-elevated); border-radius: 10px; margin-bottom: 10px; }
+        .nudge-icon { width: 40px; height: 40px; background: var(--green-dim); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .nudge-info { flex: 1; }
+        .nudge-user { font-size: 12px; font-weight: 600; }
+        .nudge-message { font-size: 11px; color: var(--text-secondary); }
+        .nudge-time { font-size: 10px; color: var(--green); }
+        .nudge-status { font-size: 10px; padding: 4px 10px; border-radius: 6px; }
+        .nudge-status.sent { background: var(--green-dim); color: var(--green); }
+        .nudge-status.pending { background: rgba(255, 149, 0, 0.2); color: var(--orange); }
+        .nudge-status.opened { background: var(--cyan-dim); color: var(--cyan); }
+
+        /* Archivist Output */
+        .legacy-preview { background: var(--bg-dark); border: 1px solid var(--gold); border-radius: 12px; padding: 20px; }
+        .legacy-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+        .legacy-photo { width: 60px; height: 60px; background: var(--gold-dim); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+        .legacy-name { font-size: 16px; font-weight: 600; color: var(--gold); }
+        .legacy-dates { font-size: 11px; color: var(--text-secondary); }
+        .legacy-content { font-size: 12px; color: var(--text-secondary); line-height: 1.8; font-style: italic; }
+        .legacy-chapter { font-size: 11px; font-weight: 600; color: var(--gold); margin-top: 16px; margin-bottom: 8px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="nate-icon">
+                <div class="nate-eyes">
+                    <div class="nate-eye"></div>
+                    <div class="nate-eye"></div>
+                </div>
+            </div>
+            <div>
+                <div class="logo-text">LITTLE NATE AI</div>
+                <div class="page-title">Advanced Feature Configuration</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-secondary">📊 AI Analytics</button>
+            <button class="btn btn-primary">⚙️ Global Settings</button>
+        </div>
+    </header>
+    
+    <nav class="sub-nav">
+        <div class="sub-nav-item active"><span>🚨</span> Deadman Switch</div>
+        <div class="sub-nav-item"><span>🐝</span> Swarm Intelligence</div>
+        <div class="sub-nav-item"><span>📳</span> Nate Nudge</div>
+        <div class="sub-nav-item"><span>🎭</span> AI Modes</div>
+        <div class="sub-nav-item"><span>📊</span> Observer Metrics</div>
+    </nav>
+    
+    <main class="main-content">
+        <!-- Deadman Switch Feature -->
+        <div class="feature-banner" style="grid-column: span 2;">
+            <div class="feature-icon deadman">💀</div>
+            <div class="feature-info">
+                <div class="feature-title red">THE DEADMAN SWITCH</div>
+                <div class="feature-desc">Safety protocol for Crisis Watchlist users. If a user goes silent (no login) for X days, Nate initiates a wellness check protocol by sending secure messages to their assigned Coach or Guardian.</div>
+            </div>
+            <div class="feature-status">
+                <div class="feature-status-label">Silence Threshold</div>
+                <div class="feature-status-value alert">5 DAYS</div>
+                <button class="btn btn-secondary" style="margin-top: 8px; font-size: 10px;">Configure</button>
+            </div>
+        </div>
+
+        <!-- Watchlist Dashboard -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon red">🚨</div> Active Watchlist</div>
+                <span style="font-size: 11px; color: var(--red-critical);">3 alerts pending</span>
+            </div>
+            <div class="card-body">
+                <div class="watchlist-item critical">
+                    <div class="watchlist-avatar critical">SM</div>
+                    <div class="watchlist-info">
+                        <div class="watchlist-name">Sarah Mitchell</div>
+                        <div class="watchlist-meta">FAM_0042 • Last: "988" keyword detected</div>
+                    </div>
+                    <div class="watchlist-days">
+                        <div class="watchlist-days-value critical">5</div>
+                        <div class="watchlist-days-label">DAYS SILENT</div>
+                    </div>
+                    <button class="watchlist-action alert">🚨 Alert Now</button>
+                </div>
+                <div class="watchlist-item warning">
+                    <div class="watchlist-avatar warning">MR</div>
+                    <div class="watchlist-info">
+                        <div class="watchlist-name">Michael Rodriguez</div>
+                        <div class="watchlist-meta">FAM_0089 • Last: elevated stress pattern</div>
+                    </div>
+                    <div class="watchlist-days">
+                        <div class="watchlist-days-value warning">3</div>
+                        <div class="watchlist-days-label">DAYS SILENT</div>
+                    </div>
+                    <button class="watchlist-action check">Check In</button>
+                </div>
+                <div class="watchlist-item safe">
+                    <div class="watchlist-avatar safe">JD</div>
+                    <div class="watchlist-info">
+                        <div class="watchlist-name">Jennifer Davis</div>
+                        <div class="watchlist-meta">FAM_0156 • Recovery phase monitoring</div>
+                    </div>
+                    <div class="watchlist-days">
+                        <div class="watchlist-days-value safe">0</div>
+                        <div class="watchlist-days-label">ACTIVE TODAY</div>
+                    </div>
+                    <button class="watchlist-action check">Review</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Deadman Alerts Sent -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">📤</div> Auto-Alerts Sent</div>
+            </div>
+            <div class="card-body">
+                <div class="nudge-item">
+                    <div class="nudge-icon" style="background: var(--red-dim);">📧</div>
+                    <div class="nudge-info">
+                        <div class="nudge-user">→ Coach Hope (for Sarah M.)</div>
+                        <div class="nudge-message">"Subject requires wellness check. Silence threshold exceeded."</div>
+                        <div class="nudge-time">Sent 2 hours ago</div>
+                    </div>
+                    <span class="nudge-status opened">Opened</span>
+                </div>
+                <div class="nudge-item">
+                    <div class="nudge-icon" style="background: var(--red-dim);">📧</div>
+                    <div class="nudge-info">
+                        <div class="nudge-user">→ Guardian: Robert M. (for Sarah M.)</div>
+                        <div class="nudge-message">"Family member may need support. Please check in."</div>
+                        <div class="nudge-time">Sent 2 hours ago</div>
+                    </div>
+                    <span class="nudge-status sent">Delivered</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Swarm Intelligence -->
+        <div class="card full">
+            <div class="card-header">
+                <div class="card-title"><div class="icon purple">🐝</div> Swarm Intelligence — Family Dynamics</div>
+                <span style="font-size: 11px; color: var(--purple);">Cross-family pattern detection</span>
+            </div>
+            <div class="card-body">
+                <div class="swarm-insight">
+                    <div class="swarm-header">
+                        <span class="swarm-icon">🔗</span>
+                        <span class="swarm-type">CORRELATION DETECTED</span>
+                    </div>
+                    <div class="swarm-title">Family FAM_0023: Shared Stress Event</div>
+                    <div class="swarm-content">
+                        Client A (Robert - Father) and Client B (Billy - Son) both reported high stress regarding <strong>"School"</strong> on the same day (Jan 18). 
+                        This correlation suggests a shared family stressor. Recommend exploring during next session without revealing specifics from other family member's sessions.
+                    </div>
+                    <div class="swarm-members">
+                        <div class="swarm-member"><div class="swarm-member-dot father"></div> Robert T. (Father)</div>
+                        <div class="swarm-member"><div class="swarm-member-dot son"></div> Billy T. (Son)</div>
+                    </div>
+                    <div class="swarm-confidence">📊 Confidence: 87% • Privacy preserved: ✓ No specifics shared</div>
+                </div>
+                
+                <div class="swarm-insight">
+                    <div class="swarm-header">
+                        <span class="swarm-icon">📈</span>
+                        <span class="swarm-type">TREND DETECTED</span>
+                    </div>
+                    <div class="swarm-title">Family FAM_0089: Improving Dynamics</div>
+                    <div class="swarm-content">
+                        All 3 family members showed decreased anxiety levels over the past 2 weeks following family session #12. 
+                        Collective "Breakthrough" keywords increased by 40% across individual sessions.
+                    </div>
+                    <div class="swarm-members">
+                        <div class="swarm-member"><div class="swarm-member-dot father"></div> Michael R.</div>
+                        <div class="swarm-member"><div class="swarm-member-dot mother"></div> Angela R.</div>
+                        <div class="swarm-member"><div class="swarm-member-dot son"></div> Jason R.</div>
+                    </div>
+                    <div class="swarm-confidence">📊 Confidence: 92% • Positive trajectory confirmed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nate the Nudge -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon green">📳</div> Nate the Nudge — Proactive Care</div>
+            </div>
+            <div class="card-body">
+                <div class="nudge-item">
+                    <div class="nudge-icon">📅</div>
+                    <div class="nudge-info">
+                        <div class="nudge-user">Emma Thompson</div>
+                        <div class="nudge-message">"Your session with Coach Hope is tomorrow. Would you like to prep a topic?"</div>
+                        <div class="nudge-time">Scheduled: In 2 hours</div>
+                    </div>
+                    <span class="nudge-status pending">Pending</span>
+                </div>
+                <div class="nudge-item">
+                    <div class="nudge-icon">💪</div>
+                    <div class="nudge-info">
+                        <div class="nudge-user">John Doe</div>
+                        <div class="nudge-message">"I noticed you haven't logged your mood in 3 days. Quick check-in?"</div>
+                        <div class="nudge-time">Sent 4 hours ago</div>
+                    </div>
+                    <span class="nudge-status opened">Opened</span>
+                </div>
+                <div class="nudge-item">
+                    <div class="nudge-icon">🎯</div>
+                    <div class="nudge-info">
+                        <div class="nudge-user">Lisa Parker</div>
+                        <div class="nudge-message">"You completed 7 days of journaling! Keep the momentum going."</div>
+                        <div class="nudge-time">Sent yesterday</div>
+                    </div>
+                    <span class="nudge-status sent">Delivered</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Modes -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">🎭</div> Little Nate Modes</div>
+            </div>
+            <div class="card-body">
+                <div class="mode-grid">
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <div class="mode-icon tricorder">📊</div>
+                            <div>
+                                <div class="mode-name">Tri-Corder Mode</div>
+                                <div class="mode-subtitle">Biometric Baseline</div>
+                            </div>
+                        </div>
+                        <div class="mode-desc">30-second calibration session to establish voice stress baseline. Helps Nate distinguish between "excited" and "anxious" for each user.</div>
+                        <div class="mode-stats">
+                            <div class="mode-stat"><div class="mode-stat-value">234</div><div class="mode-stat-label">Calibrated</div></div>
+                            <div class="mode-stat"><div class="mode-stat-value">98%</div><div class="mode-stat-label">Accuracy</div></div>
+                        </div>
+                        <button class="mode-toggle enabled">✓ Enabled</button>
+                    </div>
+                    
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <div class="mode-icon archivist">📜</div>
+                            <div>
+                                <div class="mode-name">Archivist Mode</div>
+                                <div class="mode-subtitle">Legacy Builder</div>
+                            </div>
+                        </div>
+                        <div class="mode-desc">For elderly or terminally ill clients. Nate shifts to help record "Wisdom Memories" for their family vault.</div>
+                        <div class="mode-stats">
+                            <div class="mode-stat"><div class="mode-stat-value">12</div><div class="mode-stat-label">Active</div></div>
+                            <div class="mode-stat"><div class="mode-stat-value">47</div><div class="mode-stat-label">Legacies</div></div>
+                        </div>
+                        <button class="mode-toggle enabled">✓ Enabled</button>
+                    </div>
+                    
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <div class="mode-icon guardian">👨‍👩‍👧</div>
+                            <div>
+                                <div class="mode-name">Guardian Mode</div>
+                                <div class="mode-subtitle">Parental Proxy</div>
+                            </div>
+                        </div>
+                        <div class="mode-desc">Summarizes a child's sessions for parents without breaking confidentiality (e.g., "Billy is anxious about school").</div>
+                        <div class="mode-stats">
+                            <div class="mode-stat"><div class="mode-stat-value">89</div><div class="mode-stat-label">Minors</div></div>
+                            <div class="mode-stat"><div class="mode-stat-value">156</div><div class="mode-stat-label">Summaries</div></div>
+                        </div>
+                        <button class="mode-toggle enabled">✓ Enabled</button>
+                    </div>
+                    
+                    <div class="mode-card">
+                        <div class="mode-header">
+                            <div class="mode-icon supervisor">👨‍⚕️</div>
+                            <div>
+                                <div class="mode-name">Supervisor Mode</div>
+                                <div class="mode-subtitle">Coach Analysis</div>
+                            </div>
+                        </div>
+                        <div class="mode-desc">Nate acts as "Super-Supervisor" analyzing coach session transcripts to grade empathy and technique.</div>
+                        <div class="mode-stats">
+                            <div class="mode-stat"><div class="mode-stat-value">42</div><div class="mode-stat-label">Coaches</div></div>
+                            <div class="mode-stat"><div class="mode-stat-value">847</div><div class="mode-stat-label">Analyzed</div></div>
+                        </div>
+                        <button class="mode-toggle enabled">✓ Enabled</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tricorder Calibration Preview -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon cyan">📊</div> Tri-Corder Calibration</div>
+            </div>
+            <div class="card-body">
+                <div class="calibration-visual">
+                    <div class="waveform">
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                        <div class="wave-bar"></div>
+                    </div>
+                    <div class="calibration-status">🎙️ Voice Analysis Active — Establishing Baseline...</div>
+                </div>
+                <div class="baseline-metrics">
+                    <div class="baseline-metric">
+                        <div class="baseline-value" style="color: var(--cyan);">72 BPM</div>
+                        <div class="baseline-label">Resting Rate</div>
+                    </div>
+                    <div class="baseline-metric">
+                        <div class="baseline-value" style="color: var(--green);">0.23</div>
+                        <div class="baseline-label">Stress Index</div>
+                    </div>
+                    <div class="baseline-metric">
+                        <div class="baseline-value" style="color: var(--gold);">Normal</div>
+                        <div class="baseline-label">Voice Tremor</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Archivist Legacy Preview -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">📜</div> Legacy Builder Preview</div>
+            </div>
+            <div class="card-body">
+                <div class="legacy-preview">
+                    <div class="legacy-header">
+                        <div class="legacy-photo">👴</div>
+                        <div>
+                            <div class="legacy-name">Harold J. Thompson</div>
+                            <div class="legacy-dates">b. 1942 • Legacy started: Oct 2025</div>
+                        </div>
+                    </div>
+                    <div class="legacy-chapter">Chapter 1: The Early Years</div>
+                    <div class="legacy-content">
+                        "I grew up on a small farm in Iowa. My father taught me that hard work wasn't just about the labor—it was about showing up every day, even when you didn't feel like it. That lesson carried me through 40 years in business..."
+                    </div>
+                    <div class="legacy-chapter">Chapter 2: Building a Family</div>
+                    <div class="legacy-content">
+                        "When I met your grandmother, I knew within five minutes she was the one. She had this way of making everyone around her feel important..."
+                    </div>
+                    <div style="margin-top: 16px; text-align: center;">
+                        <button class="btn btn-secondary" style="display: inline-flex;">📄 View Full Biography</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

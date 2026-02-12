@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | User Management</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --bg-dark: #0A0A0A;
+            --bg-card: #111111;
+            --bg-elevated: #1A1A1A;
+            --gold: #FFD700;
+            --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B;
+            --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF;
+            --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88;
+            --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500;
+            --purple: #9D4EDD;
+            --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF;
+            --text-secondary: #888888;
+            --border: #252525;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        /* Reuse header styles from dashboard */
+        .header {
+            background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%);
+            border-bottom: 1px solid var(--gold-dim);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+        
+        .logo-text {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 2px;
+        }
+        
+        .page-title {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        /* Sub-navigation */
+        .sub-nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            display: flex;
+            gap: 24px;
+        }
+        
+        .sub-nav-item {
+            padding: 14px 0;
+            font-size: 12px;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .sub-nav-item.active {
+            color: var(--gold);
+            border-bottom-color: var(--gold);
+        }
+        
+        .sub-nav-item .count {
+            background: var(--red-critical);
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        
+        /* Main Layout */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            height: calc(100vh - 120px);
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-card);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+        }
+        
+        .search-box {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .search-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+        
+        .search-filters {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .filter-chip {
+            padding: 6px 12px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            font-size: 10px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        
+        .filter-chip.active {
+            background: var(--gold-dim);
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+        
+        .user-list {
+            padding: 8px;
+        }
+        
+        .user-item {
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            transition: all 0.2s;
+        }
+        
+        .user-item:hover {
+            background: var(--bg-elevated);
+        }
+        
+        .user-item.selected {
+            background: var(--gold-dim);
+            border: 1px solid var(--gold);
+        }
+        
+        .user-item-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+        
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        
+        .user-avatar.client { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .user-avatar.coach { background: var(--gold-dim); border: 2px solid var(--gold); }
+        .user-avatar.minor { background: var(--purple-dim); border: 2px solid var(--purple); }
+        
+        .user-name {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .user-role {
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: auto;
+        }
+        
+        .user-role.client { background: var(--cyan-dim); color: var(--cyan); }
+        .user-role.coach { background: var(--gold-dim); color: var(--gold); }
+        .user-role.minor { background: var(--purple-dim); color: var(--purple); }
+        
+        .user-meta {
+            font-size: 10px;
+            color: var(--text-secondary);
+            padding-left: 46px;
+        }
+        
+        /* Main Content */
+        .content {
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .content-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .content-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .content-subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: var(--gold);
+            color: black;
+        }
+        
+        .btn-secondary {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        
+        .btn-danger {
+            background: var(--red-dim);
+            color: var(--red-critical);
+            border: 1px solid rgba(255, 59, 59, 0.3);
+        }
+        
+        /* Profile Cards */
+        .profile-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        
+        .profile-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        
+        .profile-card.full {
+            grid-column: span 2;
+        }
+        
+        .card-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .profile-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .profile-field:last-child {
+            border-bottom: none;
+        }
+        
+        .field-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .field-value {
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .field-value.gold { color: var(--gold); }
+        .field-value.green { color: var(--green); }
+        .field-value.red { color: var(--red-critical); }
+        
+        /* Family Tree */
+        .family-tree {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .tree-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+        
+        .tree-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        
+        .tree-avatar.head {
+            background: var(--gold-dim);
+            border: 3px solid var(--gold);
+        }
+        
+        .tree-avatar.dependent {
+            background: var(--purple-dim);
+            border: 3px solid var(--purple);
+        }
+        
+        .tree-name {
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .tree-role {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        
+        .tree-connector {
+            width: 2px;
+            height: 30px;
+            background: var(--border);
+            margin: 10px 0;
+        }
+        
+        .tree-children {
+            display: flex;
+            gap: 40px;
+            position: relative;
+        }
+        
+        .tree-children::before {
+            content: '';
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: calc(100% - 60px);
+            height: 2px;
+            background: var(--border);
+        }
+        
+        .tree-child {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .tree-child::before {
+            content: '';
+            width: 2px;
+            height: 15px;
+            background: var(--border);
+        }
+        
+        /* Matchmaker Section */
+        .matchmaker-card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, rgba(157, 78, 221, 0.1) 100%);
+            border: 1px solid var(--purple);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .matchmaker-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .matchmaker-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--purple-dim);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        
+        .matchmaker-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--purple);
+        }
+        
+        .matchmaker-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        .compatibility-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        .coach-match {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .coach-match:hover {
+            border-color: var(--purple);
+            transform: translateY(-2px);
+        }
+        
+        .coach-match.recommended {
+            border-color: var(--green);
+            background: var(--green-dim);
+        }
+        
+        .match-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .match-avatar {
+            width: 40px;
+            height: 40px;
+            background: var(--gold-dim);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .match-name {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .match-specialty {
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+        
+        .compatibility-score {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .score-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-dark);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .score-fill {
+            height: 100%;
+            border-radius: 3px;
+        }
+        
+        .score-fill.high { background: var(--green); }
+        .score-fill.medium { background: var(--orange); }
+        .score-fill.low { background: var(--red-critical); }
+        
+        .score-value {
+            font-size: 12px;
+            font-weight: 700;
+        }
+        
+        .score-value.high { color: var(--green); }
+        .score-value.medium { color: var(--orange); }
+        
+        .match-reason {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            padding: 8px;
+            background: var(--bg-dark);
+            border-radius: 6px;
+        }
+        
+        .recommended-badge {
+            font-size: 9px;
+            background: var(--green);
+            color: black;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        
+        /* Identity Actions */
+        .identity-actions {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+        
+        .identity-action {
+            padding: 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .identity-action:hover {
+            border-color: var(--gold);
+        }
+        
+        .identity-action.danger:hover {
+            border-color: var(--red-critical);
+        }
+        
+        .identity-action .icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        
+        .identity-action .label {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        .identity-action.danger .label {
+            color: var(--red-critical);
+        }
+        
+        /* Nevedal State Card */
+        .nevedal-card {
+            background: linear-gradient(135deg, var(--bg-card) 0%, var(--cyan-dim) 100%);
+            border: 1px solid var(--cyan);
+        }
+        
+        .nevedal-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        
+        .nevedal-metric {
+            padding: 12px;
+            background: var(--bg-dark);
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .nevedal-value {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .nevedal-label {
+            font-size: 9px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">User & Hierarchy Management</div>
+            </div>
+        </div>
+        <div class="action-buttons">
+            <button class="btn btn-secondary">📥 Export Registry</button>
+            <button class="btn btn-primary">➕ Create User</button>
+        </div>
+    </header>
+    
+    <!-- SUB NAVIGATION -->
+    <nav class="sub-nav">
+        <div class="sub-nav-item active">
+            <span>👥</span> All Users
+        </div>
+        <div class="sub-nav-item">
+            <span>⏳</span> Pending Queue
+            <span class="count">5</span>
+        </div>
+        <div class="sub-nav-item">
+            <span>👨‍👩‍👧</span> Family Groups
+        </div>
+        <div class="sub-nav-item">
+            <span>💜</span> Matchmaker
+        </div>
+        <div class="sub-nav-item">
+            <span>🔒</span> Frozen Accounts
+        </div>
+    </nav>
+    
+    <!-- MAIN LAYOUT -->
+    <div class="main-layout">
+        <!-- SIDEBAR - User List -->
+        <aside class="sidebar">
+            <div class="search-box">
+                <input type="text" class="search-input" placeholder="🔍 Search by name, ID, or hardware...">
+                <div class="search-filters">
+                    <div class="filter-chip active">All</div>
+                    <div class="filter-chip">Clients</div>
+                    <div class="filter-chip">Coaches</div>
+                    <div class="filter-chip">Minors</div>
+                </div>
+            </div>
+            
+            <div class="user-list">
+                <div class="user-item selected">
+                    <div class="user-item-header">
+                        <div class="user-avatar client">ET</div>
+                        <div class="user-name">Emma Thompson</div>
+                        <span class="user-role client">CLIENT</span>
+                    </div>
+                    <div class="user-meta">FAM_0023 • Top Tier • Active</div>
+                </div>
+                
+                <div class="user-item">
+                    <div class="user-item-header">
+                        <div class="user-avatar coach">👨‍⚕️</div>
+                        <div class="user-name">Coach Hope</div>
+                        <span class="user-role coach">COACH</span>
+                    </div>
+                    <div class="user-meta">23 Active Clients • Verified</div>
+                </div>
+                
+                <div class="user-item">
+                    <div class="user-item-header">
+                        <div class="user-avatar minor">👦</div>
+                        <div class="user-name">Billy Thompson</div>
+                        <span class="user-role minor">MINOR</span>
+                    </div>
+                    <div class="user-meta">FAM_0023 • Guardian: Emma T.</div>
+                </div>
+                
+                <div class="user-item">
+                    <div class="user-item-header">
+                        <div class="user-avatar client">RT</div>
+                        <div class="user-name">Robert Thompson</div>
+                        <span class="user-role client">CLIENT</span>
+                    </div>
+                    <div class="user-meta">FAM_0023 • Standard • Active</div>
+                </div>
+                
+                <div class="user-item">
+                    <div class="user-item-header">
+                        <div class="user-avatar client">SM</div>
+                        <div class="user-name">Sarah Mitchell</div>
+                        <span class="user-role client">CLIENT</span>
+                    </div>
+                    <div class="user-meta">FAM_0042 • Top Tier • ⚠️ Crisis</div>
+                </div>
+                
+                <div class="user-item">
+                    <div class="user-item-header">
+                        <div class="user-avatar coach">👨‍⚕️</div>
+                        <div class="user-name">Dr. Amanda Wells</div>
+                        <span class="user-role coach" style="background: var(--orange); color: black;">PENDING</span>
+                    </div>
+                    <div class="user-meta">Awaiting Credential Verification</div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- MAIN CONTENT -->
+        <main class="content">
+            <div class="content-header">
+                <div>
+                    <div class="content-title">Emma Thompson</div>
+                    <div class="content-subtitle">FAM_0023 • Hardware ID: HW_8f3a9b2c4d1e</div>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary">📧 Send Message</button>
+                    <button class="btn btn-secondary">📊 View Analytics</button>
+                    <button class="btn btn-danger">🔒 Freeze Account</button>
+                </div>
+            </div>
+            
+            <!-- Matchmaker Protocol -->
+            <div class="matchmaker-card">
+                <div class="matchmaker-header">
+                    <div class="matchmaker-icon">💜</div>
+                    <div>
+                        <div class="matchmaker-title">Matchmaker Protocol</div>
+                        <div class="matchmaker-subtitle">AI-driven coach assignment based on Nevedal State compatibility</div>
+                    </div>
+                    <button class="btn btn-primary" style="margin-left: auto;">🔄 Suggest Assignment</button>
+                </div>
+                
+                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+                    Client Profile: <strong style="color: var(--cyan);">High Anxiety (72%)</strong> • 
+                    <strong style="color: var(--orange);">Moderate Regulation (58%)</strong> • 
+                    <strong style="color: var(--green);">High Openness (81%)</strong>
+                </div>
+                
+                <div class="compatibility-grid">
+                    <div class="coach-match recommended">
+                        <div class="match-header">
+                            <div class="match-avatar">👨‍⚕️</div>
+                            <div>
+                                <div class="match-name">Coach Hope</div>
+                                <div class="match-specialty">CBT • Anxiety Specialist</div>
+                            </div>
+                        </div>
+                        <div class="compatibility-score">
+                            <div class="score-bar"><div class="score-fill high" style="width: 94%;"></div></div>
+                            <span class="score-value high">94%</span>
+                        </div>
+                        <div class="match-reason">
+                            ✨ High regulation coach (89%) balances client's anxiety. Both share strong openness metrics.
+                        </div>
+                        <div style="margin-top: 8px;"><span class="recommended-badge">⭐ RECOMMENDED</span></div>
+                    </div>
+                    
+                    <div class="coach-match">
+                        <div class="match-header">
+                            <div class="match-avatar">👩‍⚕️</div>
+                            <div>
+                                <div class="match-name">Dr. Chen</div>
+                                <div class="match-specialty">Trauma • EMDR</div>
+                            </div>
+                        </div>
+                        <div class="compatibility-score">
+                            <div class="score-bar"><div class="score-fill high" style="width: 78%;"></div></div>
+                            <span class="score-value high">78%</span>
+                        </div>
+                        <div class="match-reason">
+                            Good match for deep work. Specializes in anxiety-trauma connections.
+                        </div>
+                    </div>
+                    
+                    <div class="coach-match">
+                        <div class="match-header">
+                            <div class="match-avatar">👨‍⚕️</div>
+                            <div>
+                                <div class="match-name">Marcus T.</div>
+                                <div class="match-specialty">Life Coaching</div>
+                            </div>
+                        </div>
+                        <div class="compatibility-score">
+                            <div class="score-bar"><div class="score-fill medium" style="width: 62%;"></div></div>
+                            <span class="score-value medium">62%</span>
+                        </div>
+                        <div class="match-reason">
+                            Moderate match. Life coaching focus may not address clinical anxiety.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="profile-grid">
+                <!-- Basic Info -->
+                <div class="profile-card">
+                    <div class="card-label">📋 Basic Information</div>
+                    <div class="profile-field">
+                        <span class="field-label">Username</span>
+                        <span class="field-value">emma_t_2024</span>
+                    </div>
+                    <div class="profile-field">
+                        <span class="field-label">Email</span>
+                        <span class="field-value"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="adc8c0c0cc83d9edc8c0ccc4c183cec2c0">[email&#160;protected]</a></span>
+                    </div>
+                    <div class="profile-field">
+                        <span class="field-label">Role</span>
+                        <span class="field-value gold">CLIENT (Head of Household)</span>
+                    </div>
+                    <div class="profile-field">
+                        <span class="field-label">Subscription</span>
+                        <span class="field-value green">TOP TIER</span>
+                    </div>
+                    <div class="profile-field">
+                        <span class="field-label">Assigned Coach</span>
+                        <span class="field-value">Coach Hope</span>
+                    </div>
+                </div>
+                
+                <!-- Nevedal State -->
+                <div class="profile-card nevedal-card">
+                    <div class="card-label" style="color: var(--cyan);">🧠 Current Nevedal State</div>
+                    <div class="nevedal-metrics">
+                        <div class="nevedal-metric">
+                            <div class="nevedal-value" style="color: var(--cyan);">0.72</div>
+                            <div class="nevedal-label">Coherence</div>
+                        </div>
+                        <div class="nevedal-metric">
+                            <div class="nevedal-value" style="color: var(--orange);">0.58</div>
+                            <div class="nevedal-label">GAP Index</div>
+                        </div>
+                        <div class="nevedal-metric">
+                            <div class="nevedal-value" style="color: var(--green);">0.34</div>
+                            <div class="nevedal-label">Velocity</div>
+                        </div>
+                        <div class="nevedal-metric">
+                            <div class="nevedal-value" style="color: var(--purple);">0.81</div>
+                            <div class="nevedal-label">T-Tunneling</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Family Genealogy -->
+                <div class="profile-card full">
+                    <div class="card-label">👨‍👩‍👧 Family Genealogy (FAM_0023)</div>
+                    <div class="family-tree">
+                        <div class="tree-node">
+                            <div class="tree-avatar head">👩</div>
+                            <div class="tree-name">Emma Thompson</div>
+                            <div class="tree-role">Head of Household</div>
+                        </div>
+                        <div class="tree-connector"></div>
+                        <div class="tree-children">
+                            <div class="tree-child">
+                                <div class="tree-avatar dependent">👦</div>
+                                <div class="tree-name">Billy Thompson</div>
+                                <div class="tree-role">Minor (Age 14)</div>
+                            </div>
+                            <div class="tree-child">
+                                <div class="tree-avatar head">👨</div>
+                                <div class="tree-name">Robert Thompson</div>
+                                <div class="tree-role">Linked Adult</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="text-align: center; margin-top: 16px;">
+                        <button class="btn btn-secondary">🔗 Link Account</button>
+                        <button class="btn btn-secondary">✂️ Unlink Account</button>
+                    </div>
+                </div>
+                
+                <!-- Identity Resolution -->
+                <div class="profile-card full">
+                    <div class="card-label">🔐 Identity Resolution</div>
+                    <div class="identity-actions">
+                        <div class="identity-action">
+                            <div class="icon">🔑</div>
+                            <div class="label">Reset Password</div>
+                        </div>
+                        <div class="identity-action">
+                            <div class="icon">👆</div>
+                            <div class="label">Reset Biometrics</div>
+                        </div>
+                        <div class="identity-action">
+                            <div class="icon">📱</div>
+                            <div class="label">Force Logout</div>
+                        </div>
+                        <div class="identity-action">
+                            <div class="icon">📜</div>
+                            <div class="label">Force Re-Consent</div>
+                        </div>
+                        <div class="identity-action">
+                            <div class="icon">🧹</div>
+                            <div class="label">Wipe Memory</div>
+                        </div>
+                        <div class="identity-action danger">
+                            <div class="icon">🚫</div>
+                            <div class="label">Ban Account</div>
+                        

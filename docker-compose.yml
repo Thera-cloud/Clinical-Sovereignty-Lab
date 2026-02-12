@@ -1,0 +1,187 @@
+# =============================================================================
+# CLINICAL SOVEREIGNTY LAB / LITTLE NATE
+# Docker Compose - Complete Development Stack
+# =============================================================================
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d postgres     # Start just database
+#   docker compose logs -f backend    # View backend logs
+#   docker compose down               # Stop all services
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: nate_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-little_nate}
+      POSTGRES_USER: ${POSTGRES_USER:-nate_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Database password required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nate_admin} -d ${POSTGRES_DB:-little_nate}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: nate_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Backend API Server (FastAPI)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nate_backend
+    restart: unless-stopped
+    user: root
+    command: ["sh", "-c", "pip install --quiet apscheduler sendgrid && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # WebSocket Bridge Server
+  # ---------------------------------------------------------------------------
+  bridge:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.bridge
+    container_name: nate_bridge
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - REDIS_URL=redis://redis:6379
+      - DATA_DIR=/app/data
+    ports:
+      - "${WEBSOCKET_PORT:-8765}:8765"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./data/bridge:/app/data
+      - bridge_logs:/app/logs
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Admin Console (React)
+  # ---------------------------------------------------------------------------
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: nate_admin
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=http://${SERVER_HOST:-10.0.0.81}:${SERVER_PORT:-8000}
+      - REACT_APP_WS_URL=ws://${SERVER_HOST:-10.0.0.81}:${WEBSOCKET_PORT:-8765}
+    ports:
+      - "${ADMIN_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
+  # Nginx Reverse Proxy (Production)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: nate_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - bridge
+      - admin
+    networks:
+      - nate_network
+    profiles:
+      - production
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_logs:
+    driver: local
+  bridge_data:
+    driver: local
+  bridge_logs:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  nate_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

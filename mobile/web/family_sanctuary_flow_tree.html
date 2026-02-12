@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sovereign Command | Family Sanctuary Flow Tree</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #0A0A0A; color: #FFF; }
+    header { padding: 16px 20px; border-bottom: 1px solid rgba(255,215,0,0.18); background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); display:flex; gap:12px; align-items:center; justify-content:space-between;}
+    .title { font-weight: 800; letter-spacing: 1.5px; color: #FFD700; }
+    .sub { color: #888; font-size: 12px; margin-top: 2px; }
+    .wrap { padding: 18px 20px; max-width: 1200px; margin: 0 auto; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+    input { background:#111; border:1px solid #252525; border-radius:10px; padding:10px 12px; color:#fff; min-width: 260px;}
+    .btn { background:#FFD700; border:none; border-radius:10px; padding:10px 12px; font-weight:700; cursor:pointer; color:#000; }
+    .btn.secondary { background:#1A1A1A; border:1px solid #252525; color:#FFF; }
+    .panel { margin-top: 16px; background:#111; border:1px solid #252525; border-radius:14px; overflow:hidden; }
+    .panel h3 { margin:0; padding:14px 16px; border-bottom:1px solid #252525; font-size: 13px; letter-spacing:1px; color:#FFD700;}
+    .meta { padding:14px 16px; color:#bbb; font-size: 12px; display:grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 10px;}
+    .meta div { background:#141414; border:1px solid #202020; border-radius:10px; padding:12px; }
+    .meta .k { color:#888; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+    .meta .v { margin-top: 6px; font-weight: 700; color:#fff; }
+    .cols { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 16px 16px 16px; }
+    @media (max-width: 920px) { .cols { grid-template-columns: 1fr; } .meta { grid-template-columns: repeat(2, minmax(140px, 1fr)); } }
+    .list { max-height: 520px; overflow:auto; border:1px solid #202020; border-radius:12px; }
+    .item { padding: 12px 12px; border-bottom:1px solid #202020; display:flex; gap:10px; }
+    .item:last-child { border-bottom:none; }
+    .badge { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 999px; border:1px solid rgba(255,255,255,0.12); white-space:nowrap;}
+    .badge.event { background: rgba(0,212,255,0.08); color: #00D4FF; border-color: rgba(0,212,255,0.25); }
+    .badge.charge { background: rgba(255,215,0,0.10); color: #FFD700; border-color: rgba(255,215,0,0.25); }
+    .main { flex:1; }
+    .main .t { font-weight: 800; font-size: 12px; color:#fff; }
+    .main .d { color:#9a9a9a; font-size: 11px; margin-top: 4px; }
+    .ts { color:#666; font-size: 10px; white-space:nowrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">FAMILY SANCTUARY • FLOW TREE</div>
+      <div class="sub">Builds from `analytics.json` events + `transactions.json` (by `sanctuary_id`)</div>
+    </div>
+    <a class="btn secondary" href="command.html">← Back</a>
+  </header>
+
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <div class="sub">API Base (override with ?api=)</div>
+        <input id="apiBase" />
+      </div>
+      <div>
+        <div class="sub">Sanctuary ID</div>
+        <input id="sid" placeholder="SANC_YYYYMMDD_001" />
+      </div>
+      <button class="btn" onclick="loadTimeline()">Load</button>
+    </div>
+
+    <div id="out" class="panel" style="display:none;">
+      <h3>Timeline</h3>
+      <div class="meta" id="meta"></div>
+      <div class="cols">
+        <div>
+          <div class="sub" style="margin: 0 0 8px 2px;">Events</div>
+          <div class="list" id="events"></div>
+        </div>
+        <div>
+          <div class="sub" style="margin: 0 0 8px 2px;">Transactions</div>
+          <div class="list" id="tx"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const api = params.get("api") || "http://localhost:8000";
+    document.getElementById("apiBase").value = api;
+
+    function fmtMoney(x) {
+      const n = Number(x || 0);
+      return "$" + n.toFixed(2);
+    }
+
+    function el(html) {
+      const d = document.createElement("div");
+      d.innerHTML = html.trim();
+      return d.firstChild;
+    }
+
+    function renderList(root, rows, kind) {
+      root.innerHTML = "";
+      if (!rows || rows.length === 0) {
+        root.appendChild(el(`<div class="item"><div class="main"><div class="t">No ${kind}</div><div class="d">Nothing recorded yet.</div></div></div>`));
+        return;
+      }
+      for (const r of rows) {
+        const ts = (r.timestamp || r.created_at || r.received_at || "").toString();
+        const title = kind === "events" ? (r.event_type || "event") : (r.type || "transaction");
+        const badge = kind === "events" ? "event" : "charge";
+        const desc = kind === "events"
+          ? JSON.stringify(r.data || {}).slice(0, 220)
+          : `${fmtMoney(r.amount)} • ${r.status || ""} • ${JSON.stringify(r.metadata || {}).slice(0, 160)}`;
+        root.appendChild(el(`
+          <div class="item">
+            <div class="badge ${badge}">${title}</div>
+            <div class="main">
+              <div class="t">${title}</div>
+              <div class="d">${desc.replaceAll("<", "&lt;")}</div>
+            </div>
+            <div class="ts">${ts.replaceAll("T", " ").slice(0, 19)}</div>
+          </div>
+        `));
+      }
+    }
+
+    async function loadTimeline() {
+      const apiBase = document.getElementById("apiBase").value.replace(/\/+$/, "");
+      const sid = document.getElementById("sid").value.trim();
+      if (!sid) return alert("Enter sanctuary id");
+
+      const url = `${apiBase}/api/admin/sanctuary/${encodeURIComponent(sid)}/timeline`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        const txt = await resp.text();
+        alert(`Failed: ${resp.status}\n${txt}`);
+        return;
+      }
+      const data = await resp.json();
+
+      document.getElementById("out").style.display = "block";
+      document.getElementById("meta").innerHTML = `
+        <div><div class="k">sanctuary</div><div class="v">${data.sanctuary_id || sid}</div></div>
+        <div><div class="k">family</div><div class="v">${data.family_id || "—"}</div></div>
+        <div><div class="k">status</div><div class="v">${data.status || "—"}</div></div>
+        <div><div class="k">charges</div><div class="v">${fmtMoney((data.sanctuary?.billing?.total_charges) || 0)}</div></div>
+      `;
+
+      renderList(document.getElementById("events"), (data.events || []).slice().reverse(), "events");
+      renderList(document.getElementById("tx"), (data.transactions || []).slice().reverse(), "transactions");
+    }
+  </script>
+</body>
+</html>
+

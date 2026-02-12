@@ -1,0 +1,1182 @@
+"""
+Scheduling & Session Management API Routes
+Handles appointment booking, calendar management, and session tracking
+"""
+
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime, timedelta, timezone
+import os
+import json
+import secrets
+import asyncio
+from pathlib import Path
+import httpx
+
+from app.config import settings
+from app.services.zoom_client import ZoomClient
+from app.services.blob_storage import upload_bytes
+
+# Import classroom analyzer for automatic analysis after archive
+try:
+    from app.services.classroom_analyzer import (
+        ClassroomAnalyzer,
+        VTTParser,
+        build_analysis_prompt,
+        ANALYSIS_SYSTEM_PROMPT,
+    )
+    CLASSROOM_AVAILABLE = True
+except ImportError:
+    CLASSROOM_AVAILABLE = False
+    ClassroomAnalyzer = None
+
+router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
+WORKBOOKS_DIR = Path(os.getenv("WORKBOOKS_DIR", "/app/workbooks"))
+
+# Initialize classroom analyzer for auto-analysis
+_classroom_analyzer = None
+if CLASSROOM_AVAILABLE:
+    try:
+        _classroom_analyzer = ClassroomAnalyzer(DATA_DIR, WORKBOOKS_DIR)
+        print("[Sessions] Classroom analyzer initialized for auto-analysis")
+    except Exception as e:
+        print(f"[Sessions] Could not initialize classroom analyzer: {e}")
+
+
+async def auto_analyze_transcript(
+    session_id: str,
+    transcript_content: str,
+    session_data: dict
+):
+    """
+    Automatically analyze a transcript after archiving.
+    Runs as a background task so archive completes quickly.
+    """
+    if not _classroom_analyzer:
+        print(f"[AutoAnalysis] Skipping - classroom analyzer not available")
+        return
+    
+    try:
+        print(f"[AutoAnalysis] Starting automatic analysis for session {session_id}")
+        
+        # Extract session info
+        client_id = session_data.get("client_id", "")
+        client_name = session_data.get("client_name", session_data.get("client", ""))
+        coach_id = session_data.get("coach_id", "")
+        family_id = session_data.get("family_id", "")
+        
+        # Try to get coach name and family_id from registry
+        coach_name = "Coach"
+        try:
+            registry_path = DATA_DIR / "registry.json"
+            if registry_path.exists():
+                with open(registry_path, 'r') as f:
+                    registry = json.load(f)
+                
+                # Get coach name
+                for _, v in registry.items():
+                    p = v.get("profile", {})
+                    if p.get("hardware_id") == coach_id:
+                        coach_name = p.get("name", "Coach")
+                        break
+                
+                # Get family_id if not in session
+                if not family_id and client_id:
+                    for _, v in registry.items():
+                        p = v.get("profile", {})
+                        if p.get("hardware_id") == client_id:
+                            family_id = p.get("family_id", "")
+                            if not client_name:
+                                client_name = p.get("name", "")
+                            break
+        except Exception as e:
+            print(f"[AutoAnalysis] Registry lookup error: {e}")
+        
+        # Run metrics analysis (synchronous part)
+        analysis = _classroom_analyzer.analyze_transcript(
+            session_id=session_id,
+            coach_id=coach_id,
+            client_id=client_id,
+            coach_name=coach_name,
+            vtt_content=transcript_content,
+            focus_area="general therapeutic skills",
+            due_date=None,
+            family_id=family_id,
+            client_name=client_name
+        )
+        
+        print(f"[AutoAnalysis] Metrics extracted for {session_id}: {analysis.get('metrics', {}).get('total_duration_minutes', 0):.1f} min")
+        
+        # Mark as ready for AI analysis
+        sessions = load_json(DATA_DIR / "sessions.json", [])
+        for s in sessions:
+            if s.get("session_id") == session_id:
+                s["classroom_auto_analyzed_at"] = str(datetime.now())
+                s["classroom_analysis_available"] = True
+                break
+        save_json(DATA_DIR / "sessions.json", sessions)
+        
+        # Queue AI analysis as background task
+        # This will run asynchronously and notify coach when complete
+        _classroom_analyzer.queue_ai_analysis(
+            session_id=session_id,
+            coach_id=coach_id,
+            coach_name=coach_name,
+            vtt_content=transcript_content,
+            focus_area="general therapeutic skills"
+        )
+        
+        print(f"[AutoAnalysis] Metrics complete, AI analysis queued for session {session_id}")
+        
+    except Exception as e:
+        print(f"[AutoAnalysis] Error analyzing session {session_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# Models
+class ScheduleSessionRequest(BaseModel):
+    client_id: str
+    coach_id: str
+    family_id: Optional[str] = ""  # optional linkage for families
+    client_name: Optional[str] = ""  # optional display label
+    scheduled_start: str  # ISO format
+    scheduled_end: str
+    session_type: str = "COACH"  # COACH, FAMILY, GROUP
+    notes: Optional[str] = ""
+    zoom_link: Optional[str] = ""
+    disable_recording: Optional[bool] = False  # Coach can opt-out of auto-recording
+
+class UpdateSessionRequest(BaseModel):
+    session_id: str
+    status: Optional[str] = None
+    coach_notes: Optional[str] = None
+    topics_covered: Optional[List[str]] = None
+    homework_assigned: Optional[List[str]] = None
+
+class CoachAvailabilityRequest(BaseModel):
+    coach_id: str
+    slots: List[dict]  # [{"day": "monday", "start": "09:00", "end": "17:00"}]
+    timezone: str = "America/New_York"
+
+# Helpers
+def load_json(filepath: Path, default=None):
+    if default is None: default = {}
+    if not filepath.exists(): return default
+    try:
+        with open(filepath, 'r') as f: return json.load(f)
+    except: return default
+
+def save_json(filepath: Path, data):
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, 'w') as f: json.dump(data, f, indent=2, default=str)
+
+def generate_session_id():
+    return f"SES_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(6).upper()}"
+
+# Zoom meeting map (meeting_id -> internal session metadata)
+ZOOM_MEETING_MAP_FILE = DATA_DIR / "zoom_meeting_map.json"
+
+def _parse_iso_dt(s: str) -> Optional[datetime]:
+    ss = (s or "").strip()
+    if not ss:
+        return None
+    try:
+        dtv = datetime.fromisoformat(ss.replace("Z", "+00:00"))
+        if dtv.tzinfo is None:
+            # Treat naive times as UTC for consistent comparisons/storage.
+            return dtv.replace(tzinfo=timezone.utc)
+        return dtv
+    except Exception:
+        return None
+
+def _iso_to_zoom_start(iso_str: str) -> str:
+    """
+    Zoom accepts ISO strings. If naive, we treat as UTC and add 'Z' for stability.
+    """
+    s = (iso_str or "").strip()
+    if not s:
+        return ""
+    try:
+        dtv = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dtv.tzinfo is None:
+            return dtv.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+        return dtv.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        # fallback: return as-is
+        return s
+
+def _update_zoom_meeting_map(
+    meeting_id: str,
+    *,
+    schedule_session_id: str,
+    client_id: str,
+    family_id: str,
+    topic: str,
+) -> None:
+    """
+    Best-effort: persist mapping so webhooks attach to the right internal folder.
+    """
+    mid = (meeting_id or "").strip()
+    if not mid:
+        return
+    mm = load_json(ZOOM_MEETING_MAP_FILE, {}) or {}
+    if not isinstance(mm, dict):
+        mm = {}
+    mm[mid] = {
+        "updated_at": datetime.utcnow().isoformat(),
+        "schedule_session_id": schedule_session_id or "",
+        "client_id": client_id or "",
+        "family_id": family_id or "",
+        "topic": topic or "",
+    }
+    save_json(ZOOM_MEETING_MAP_FILE, mm)
+
+def _make_zoom_client() -> ZoomClient:
+    return ZoomClient(
+        account_id=settings.ZOOM_ACCOUNT_ID,
+        client_id=settings.ZOOM_CLIENT_ID,
+        client_secret=settings.ZOOM_CLIENT_SECRET,
+        host_user=settings.ZOOM_HOST_USER,
+        default_timezone=settings.ZOOM_DEFAULT_TIMEZONE,
+        default_waiting_room=settings.ZOOM_DEFAULT_WAITING_ROOM,
+        default_join_before_host=settings.ZOOM_DEFAULT_JOIN_BEFORE_HOST,
+        default_auto_recording=settings.ZOOM_DEFAULT_AUTO_RECORDING,
+    )
+
+# Endpoints
+
+@router.post("/schedule")
+async def schedule_session(req: ScheduleSessionRequest):
+    """Schedule a new session"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    # Check for conflicts
+    for s in sessions:
+        if s.get("coach_id") == req.coach_id and s.get("status") in ["scheduled", "active"]:
+            existing_start = _parse_iso_dt(s.get("scheduled_start", ""))
+            existing_end = _parse_iso_dt(s.get("scheduled_end", ""))
+            new_start = _parse_iso_dt(req.scheduled_start)
+            new_end = _parse_iso_dt(req.scheduled_end)
+            if not (existing_start and existing_end and new_start and new_end):
+                continue
+            
+            if (new_start < existing_end and new_end > existing_start):
+                raise HTTPException(409, "Time slot conflict with existing session")
+    
+    session_id = generate_session_id()
+    session = {
+        "session_id": session_id,
+        "client_id": req.client_id,
+        "coach_id": req.coach_id,
+        "family_id": req.family_id or "",
+        "client_name": req.client_name or "",
+        "session_type": req.session_type,
+        "status": "scheduled",
+        "scheduled_start": req.scheduled_start,
+        "scheduled_end": req.scheduled_end,
+        "actual_start": None,
+        "actual_end": None,
+        "duration_minutes": 0,
+        "zoom_link": req.zoom_link,
+        "zoom_meeting_id": "",
+        "notes": req.notes,
+        "coach_notes": "",
+        "topics_covered": [],
+        "homework_assigned": [],
+        "mood_at_start": "",
+        "mood_at_end": "",
+        "nate_summary": "",
+        "recording_url": "",
+        "created_at": str(datetime.now())
+    }
+
+    # Optional: auto-create Zoom meeting if enabled and no link provided.
+    zoom_error = None
+    try:
+        if settings.ENABLE_ZOOM and not (req.zoom_link or "").strip():
+            print(f">>> [ZOOM] Auto-create enabled for session {session_id} (coach_id={req.coach_id}, client_id={req.client_id})")
+            # Compute duration from scheduled_start/end if possible
+            dur_min = 50
+            try:
+                st = _parse_iso_dt(req.scheduled_start)
+                en = _parse_iso_dt(req.scheduled_end)
+                if st and en and en > st:
+                    dur_min = max(5, int((en - st).total_seconds() / 60))
+            except Exception:
+                dur_min = 50
+
+            start_iso = _iso_to_zoom_start(req.scheduled_start)
+            if not start_iso:
+                start_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+            topic = f"Coaching Session {session_id}"
+            if req.session_type:
+                topic = f"{req.session_type} — {topic}"
+
+            client = _make_zoom_client()
+
+            # Build Zoom meeting settings - override recording if coach opts out
+            zoom_settings = {}
+            if req.disable_recording:
+                zoom_settings["auto_recording"] = "none"
+                session["recording_disabled"] = True
+                print(f">>> [ZOOM] Recording disabled by coach for session {session_id}")
+
+            zoom_resp = await client.create_meeting(
+                topic=topic,
+                start_time_iso=start_iso,
+                duration_minutes=int(dur_min or 50),
+                agenda=req.notes or "",
+                settings=zoom_settings if zoom_settings else None,
+            )
+            mid = str(zoom_resp.get("id") or "")
+            join_url = str(zoom_resp.get("join_url") or "")
+            start_url = str(zoom_resp.get("start_url") or "")  # Host URL for coaches
+            if join_url:
+                session["zoom_link"] = join_url
+            if start_url:
+                session["zoom_host_url"] = start_url  # Coach launches directly into Zoom as host
+            if mid:
+                session["zoom_meeting_id"] = mid
+                # We don't always know family_id in this API; allow client apps to pass via notes
+                _update_zoom_meeting_map(
+                    mid,
+                    schedule_session_id=session_id,
+                    client_id=req.client_id,
+                    family_id=req.family_id or "",
+                    topic=topic,
+                )
+            print(f">>> [ZOOM] Created meeting for session {session_id} (meeting_id={mid}, has_join_url={bool(join_url)})")
+    except Exception as e:
+        zoom_error = str(e)
+        print(f">>> [ZOOM] Auto-create failed for session {session_id}: {zoom_error}")
+    
+    sessions.append(session)
+    save_json(DATA_DIR / "sessions.json", sessions)
+    
+    resp = {"session": session}
+    if zoom_error:
+        resp["zoom_error"] = zoom_error
+    return resp
+
+@router.get("/client/{client_id}")
+async def get_client_sessions(client_id: str, status: str = None, limit: int = 20):
+    """Get sessions for a client"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    client_sessions = [s for s in sessions if s.get("client_id") == client_id]
+    
+    if status:
+        client_sessions = [s for s in client_sessions if s.get("status") == status]
+    
+    client_sessions.sort(key=lambda x: x.get("scheduled_start", ""), reverse=True)
+    return {"sessions": client_sessions[:limit]}
+
+@router.get("/coach/{coach_id}")
+async def get_coach_sessions(coach_id: str, status: str = None, limit: int = 50):
+    """Get sessions for a coach"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
+    
+    if status:
+        coach_sessions = [s for s in coach_sessions if s.get("status") == status]
+    
+    coach_sessions.sort(key=lambda x: x.get("scheduled_start", ""), reverse=True)
+    return {"sessions": coach_sessions[:limit]}
+
+@router.get("/upcoming/{user_id}")
+async def get_upcoming_sessions(user_id: str, days: int = 7):
+    """Get upcoming sessions for a user (as client or coach)"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    now = datetime.now(timezone.utc)
+    cutoff = now + timedelta(days=days)
+    
+    upcoming = []
+    for s in sessions:
+        if s.get("client_id") == user_id or s.get("coach_id") == user_id:
+            if s.get("status") == "scheduled":
+                try:
+                    start = _parse_iso_dt(s.get("scheduled_start", ""))
+                    if not start:
+                        continue
+                    if now <= start <= cutoff:
+                        upcoming.append(s)
+                except:
+                    pass
+    
+    upcoming.sort(key=lambda x: x.get("scheduled_start", ""))
+    return {"sessions": upcoming}
+
+@router.get("/{session_id}")
+async def get_session(session_id: str):
+    """Get session details"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            return {"session": s}
+    raise HTTPException(404, "Session not found")
+
+@router.post("/start/{session_id}")
+async def start_session(session_id: str):
+    """Mark session as started"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            s["status"] = "active"
+            s["actual_start"] = str(datetime.now())
+            save_json(DATA_DIR / "sessions.json", sessions)
+            return {"session": s}
+    
+    raise HTTPException(404, "Session not found")
+
+@router.post("/end/{session_id}")
+async def end_session(session_id: str, mood_at_end: str = "", summary: str = ""):
+    """Mark session as ended"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            s["status"] = "completed"
+            s["actual_end"] = str(datetime.now())
+            s["mood_at_end"] = mood_at_end
+            s["nate_summary"] = summary
+            
+            # Calculate duration
+            if s.get("actual_start"):
+                try:
+                    start = datetime.fromisoformat(s["actual_start"])
+                    end = datetime.now()
+                    s["duration_minutes"] = int((end - start).total_seconds() / 60)
+                except:
+                    pass
+            
+            save_json(DATA_DIR / "sessions.json", sessions)
+            
+            # Update client's session count
+            registry = load_json(DATA_DIR / "user_registry.json")
+            for k, v in registry.items():
+                if v.get("profile", {}).get("hardware_id") == s.get("client_id"):
+                    v["profile"]["total_sessions_count"] = v["profile"].get("total_sessions_count", 0) + 1
+                    save_json(DATA_DIR / "user_registry.json", registry)
+                    break
+            
+            return {"session": s}
+    
+    raise HTTPException(404, "Session not found")
+
+
+@router.post("/{session_id}/zoom/delete")
+async def delete_zoom_meeting(session_id: str):
+    """
+    Delete the Zoom meeting associated with a scheduled session.
+    This helps avoid wasted Zoom storage and reduces long-term clutter.
+    """
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    if not isinstance(sessions, list):
+        sessions = []
+
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            meeting_id = (s.get("zoom_meeting_id") or "").strip()
+            if not meeting_id:
+                return {"ok": True, "message": "No zoom_meeting_id on session", "session": s}
+
+            if not settings.ENABLE_ZOOM:
+                raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
+
+            client = _make_zoom_client()
+
+            try:
+                await client.delete_meeting(meeting_id=meeting_id)
+            except httpx.HTTPStatusError as e:
+                body = ""
+                try:
+                    body = (e.response.text or "")[:2000]
+                except Exception:
+                    body = ""
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error": "zoom_delete_failed", "zoom_status": getattr(e.response, "status_code", None), "zoom_body": body},
+                )
+            except Exception as e:
+                raise HTTPException(status_code=500, detail={"error": "zoom_delete_failed", "message": str(e)})
+
+            # Clean session fields (retain historical info in notes)
+            s["zoom_meeting_deleted_at"] = str(datetime.now())
+            s["zoom_meeting_id"] = ""
+            s["zoom_link"] = ""
+            save_json(DATA_DIR / "sessions.json", sessions)
+            return {"ok": True, "message": "Zoom meeting deleted", "session": s}
+
+    raise HTTPException(404, "Session not found")
+
+
+@router.get("/{session_id}/zoom/recording_status")
+async def get_recording_status(session_id: str):
+    """
+    Check if Zoom recording is ready for archiving.
+    
+    Returns:
+        - available: Whether any recordings exist
+        - status: "recording" | "processing" | "completed" | "unavailable"
+        - has_transcript: Whether a transcript file is available
+        - can_archive: Whether the session can be archived now
+        - message: Human-readable status message
+        - estimated_wait_minutes: How long to wait if processing
+    """
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
+    
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    if not isinstance(sessions, list):
+        sessions = []
+    
+    target = None
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            target = s
+            break
+    if not target:
+        raise HTTPException(404, "Session not found")
+    
+    meeting_id = (target.get("zoom_meeting_id") or "").strip()
+    if not meeting_id:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "has_transcript": False,
+            "can_archive": False,
+            "message": "Session has no Zoom meeting ID",
+            "already_archived": bool(target.get("transcript_archived_at")),
+        }
+    
+    # Check if already archived
+    if target.get("transcript_archived_at"):
+        return {
+            "available": True,
+            "status": "archived",
+            "has_transcript": True,
+            "can_archive": False,
+            "message": f"Transcript already archived on {target.get('transcript_archived_at')}",
+            "already_archived": True,
+            "transcript_location": target.get("transcript_location", ""),
+        }
+    
+    client = _make_zoom_client()
+    
+    try:
+        availability = await client.check_recording_availability(meeting_id=meeting_id)
+    except Exception as e:
+        return {
+            "available": False,
+            "status": "error",
+            "has_transcript": False,
+            "can_archive": False,
+            "message": f"Error checking Zoom: {str(e)}",
+            "already_archived": False,
+        }
+    
+    status = availability.get("status", "unavailable")
+    recording_files = availability.get("recording_files", [])
+    
+    # Check for transcript files
+    has_transcript = False
+    transcript_status = "unavailable"
+    for f in recording_files:
+        if not isinstance(f, dict):
+            continue
+        ftype = (f.get("file_type") or "").upper()
+        ext = (f.get("file_extension") or "").upper()
+        if ftype in ("TRANSCRIPT", "CC") or ext in ("VTT", "TXT"):
+            has_transcript = True
+            transcript_status = f.get("status", "completed")
+            break
+    
+    # Determine message and can_archive
+    can_archive = False
+    estimated_wait = 0
+    
+    if status == "unavailable":
+        message = "No recordings found. Meeting may not have been recorded, or recording not yet available."
+    elif status == "recording":
+        message = "Meeting is still recording. Please wait for meeting to end."
+        estimated_wait = 5
+    elif status == "processing":
+        message = "Recording is still processing. Zoom typically takes 5-15 minutes after meeting ends."
+        estimated_wait = 10
+    elif status == "completed":
+        if has_transcript:
+            if transcript_status == "processing":
+                message = "Recording complete but transcript is still processing. Please wait a few more minutes."
+                estimated_wait = 5
+            else:
+                message = "Recording and transcript ready for archiving."
+                can_archive = True
+        else:
+            message = "Recording available but NO TRANSCRIPT found. Ensure 'Audio Transcript' is enabled in your Zoom settings."
+            can_archive = False
+    else:
+        message = f"Unknown status: {status}"
+    
+    return {
+        "available": availability.get("available", False),
+        "status": status,
+        "has_transcript": has_transcript,
+        "transcript_status": transcript_status if has_transcript else "unavailable",
+        "can_archive": can_archive,
+        "message": message,
+        "estimated_wait_minutes": estimated_wait,
+        "already_archived": False,
+        "days_remaining": availability.get("days_remaining", 30),
+        "recording_files_count": len(recording_files),
+    }
+
+
+@router.post("/{session_id}/zoom/archive_transcript")
+async def archive_zoom_transcript(
+    session_id: str,
+    delete_recordings: bool = True,
+    delete_meeting: bool = False,
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Archive transcript artifacts (VTT/CC) to Azure Blob (or local fallback) and optionally delete Zoom recordings.
+
+    Best practice for storage:
+    - Keep only transcript + Nate summary.
+    - Delete cloud recording media to avoid waste.
+    
+    IMPORTANT: Check recording_status first to ensure transcript is ready.
+    """
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
+
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    if not isinstance(sessions, list):
+        sessions = []
+
+    target = None
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            target = s
+            break
+    if not target:
+        raise HTTPException(404, "Session not found")
+
+    meeting_id = (target.get("zoom_meeting_id") or "").strip()
+    if not meeting_id:
+        raise HTTPException(status_code=400, detail="Session has no zoom_meeting_id")
+
+    client = _make_zoom_client()
+    
+    # Check recording status FIRST before attempting download
+    try:
+        availability = await client.check_recording_availability(meeting_id=meeting_id)
+        status = availability.get("status", "unavailable")
+        
+        if status == "unavailable":
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "recording_unavailable",
+                    "message": "No recordings found. The meeting may not have been recorded, or the recording has been deleted.",
+                    "suggestion": "Ensure 'Cloud Recording' is enabled in Zoom settings before the meeting."
+                }
+            )
+        
+        if status == "recording":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "recording_in_progress",
+                    "message": "The meeting is still being recorded. Please wait for the meeting to end.",
+                    "status": status
+                }
+            )
+        
+        if status == "processing":
+            raise HTTPException(
+                status_code=202,
+                detail={
+                    "error": "recording_processing",
+                    "message": "Recording is still being processed by Zoom. Please try again in 5-15 minutes.",
+                    "status": status,
+                    "estimated_wait_minutes": 10
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[Archive] Status check failed, proceeding with archive attempt: {e}")
+        # Continue to try archive anyway - the status check is advisory
+
+    # Find transcript-like files
+    try:
+        rec = await client.get_meeting_recordings(meeting_id=meeting_id)
+    except httpx.HTTPStatusError as e:
+        body = ""
+        try:
+            body = (e.response.text or "")[:2000]
+        except Exception:
+            body = ""
+        
+        # Parse Zoom error for better messaging
+        error_code = None
+        try:
+            import json as json_lib
+            error_data = json_lib.loads(body)
+            error_code = error_data.get("code")
+        except:
+            pass
+        
+        if error_code == 3301:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "recording_not_found",
+                    "message": "Recording does not exist. It may have been deleted or never created.",
+                    "zoom_error_code": 3301,
+                    "suggestion": "Ensure meetings are set to record to cloud and the recording hasn't been manually deleted."
+                }
+            )
+        
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "zoom_recordings_failed", "zoom_status": getattr(e.response, "status_code", None), "zoom_body": body},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "zoom_recordings_failed", "message": str(e)})
+
+    files = []
+    try:
+        files = (rec.get("recording_files") or []) if isinstance(rec, dict) else []
+    except Exception:
+        files = []
+
+    transcript_files = []
+    for f in files:
+        if not isinstance(f, dict):
+            continue
+        ftype = (f.get("file_type") or "").upper()
+        ext = (f.get("file_extension") or "").upper()
+        # Zoom commonly uses "TRANSCRIPT" or "CC" for captions
+        if ftype in ("TRANSCRIPT", "CC") or ext in ("VTT", "TXT"):
+            transcript_files.append(f)
+
+    if not transcript_files:
+        # Check if there are video files but no transcript
+        video_files = [f for f in files if (f.get("file_type") or "").upper() in ("MP4", "M4A", "SHARED_SCREEN_WITH_SPEAKER_VIEW")]
+        
+        if video_files:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "no_transcript_found",
+                    "message": "Recording exists but NO AUDIO TRANSCRIPT was generated.",
+                    "suggestion": "Enable 'Audio Transcript' in Zoom Settings > Recording > Advanced Cloud Recording Settings. The transcript may still be processing - try again in a few minutes.",
+                    "has_video": True,
+                    "video_count": len(video_files)
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error": "no_transcript_found",
+                    "message": "No transcript/CC files found for this meeting.",
+                    "suggestion": "Ensure the meeting was recorded to cloud with audio transcription enabled.",
+                    "has_video": False
+                }
+            )
+
+    # Pick the newest transcript artifact
+    transcript_files.sort(key=lambda x: (x.get("recording_start") or ""), reverse=True)
+    chosen = transcript_files[0]
+    download_url = (chosen.get("download_url") or "").strip()
+    if not download_url:
+        raise HTTPException(status_code=404, detail={"error": "missing_download_url", "message": "Transcript file missing download_url."})
+
+    content = await client.download_recording_file(download_url=download_url)
+    
+    # Decode transcript content
+    transcript_text = content.decode("utf-8", errors="ignore") if isinstance(content, bytes) else str(content)
+    ext = ((chosen.get("file_extension") or "vtt").strip().lower() or "vtt")
+    
+    # ============================================================
+    # PHASE 1: Little Nate READS and LEARNS from transcript FIRST
+    # (Before archiving to ensure learning happens even if archive fails)
+    # ============================================================
+    analysis_result = None
+    learning_completed = False
+    
+    if CLASSROOM_AVAILABLE and _classroom_analyzer:
+        try:
+            print(f"[Archive] Step 1: Little Nate reading transcript for session {session_id}")
+            
+            # Extract session info for analysis
+            client_id = target.get("client_id", "")
+            client_name = target.get("client_name", target.get("client", ""))
+            coach_id = target.get("coach_id", "")
+            family_id = target.get("family_id", "")
+            
+            # Try to get coach name from registry
+            coach_name = "Coach"
+            try:
+                registry_path = DATA_DIR / "registry.json"
+                if not registry_path.exists():
+                    registry_path = DATA_DIR / "user_registry.json"
+                if registry_path.exists():
+                    with open(registry_path, 'r') as f:
+                        registry = json.load(f)
+                    for _, v in registry.items():
+                        p = v.get("profile", {})
+                        if p.get("hardware_id") == coach_id:
+                            coach_name = p.get("name", "Coach")
+                            break
+                        if not family_id and p.get("hardware_id") == client_id:
+                            family_id = p.get("family_id", "")
+                            if not client_name:
+                                client_name = p.get("name", "")
+            except Exception as e:
+                print(f"[Archive] Registry lookup warning: {e}")
+            
+            # Run metrics analysis (synchronous)
+            analysis_result = _classroom_analyzer.analyze_transcript(
+                session_id=session_id,
+                coach_id=coach_id,
+                client_id=client_id,
+                coach_name=coach_name,
+                vtt_content=transcript_text,
+                focus_area="general therapeutic skills",
+                due_date=None,
+                family_id=family_id,
+                client_name=client_name
+            )
+            
+            print(f"[Archive] Step 2: Metrics extracted - {analysis_result.get('metrics', {}).get('total_duration_minutes', 0):.1f} min session")
+            target["nate_read_transcript_at"] = str(datetime.now())
+            target["nate_extracted_metrics"] = True
+            
+            # Queue AI analysis (will run in background and push to Night School)
+            _classroom_analyzer.queue_ai_analysis(
+                session_id=session_id,
+                coach_id=coach_id,
+                coach_name=coach_name,
+                vtt_content=transcript_text,
+                focus_area="general therapeutic skills"
+            )
+            
+            learning_completed = True
+            target["nate_learning_queued_at"] = str(datetime.now())
+            print(f"[Archive] Step 3: AI analysis queued for Night School learning")
+            
+        except Exception as e:
+            print(f"[Archive] Warning - Learning failed but continuing with archive: {e}")
+            import traceback
+            traceback.print_exc()
+            target["nate_learning_error"] = str(e)
+    else:
+        print(f"[Archive] Classroom analyzer not available - skipping learning phase")
+    
+    # ============================================================
+    # PHASE 2: Archive transcript to Azure Blob Storage
+    # (After learning so transcript is preserved even if we learned)
+    # ============================================================
+    rel_path = f"sessions/{session_id}/{meeting_id}/transcript.{ext}"
+    storage_kind, location = upload_bytes(rel_path=rel_path, content=content, content_type="text/vtt" if ext == "vtt" else "text/plain")
+
+    target["transcript_archived_at"] = str(datetime.now())
+    target["transcript_storage"] = storage_kind
+    target["transcript_location"] = location
+    target["transcript_file_type"] = (chosen.get("file_type") or "")
+    target["transcript_file_extension"] = ext
+    target["classroom_analysis_available"] = learning_completed
+
+    # Do not keep recording_url by default (storage minimization)
+    target["recording_url"] = ""
+    
+    print(f"[Archive] Step 4: Transcript archived to {storage_kind}: {location}")
+
+    # ============================================================
+    # PHASE 3: Clean up Zoom recordings (optional)
+    # ============================================================
+    recordings_deleted = False
+    if delete_recordings:
+        try:
+            await client.delete_meeting_recordings(meeting_id=meeting_id)
+            recordings_deleted = True
+            target["zoom_recordings_deleted_at"] = str(datetime.now())
+            print(f"[Archive] Step 5: Zoom recordings deleted")
+        except Exception as e:
+            target["zoom_recordings_delete_error"] = str(e)
+
+    # Optionally delete meeting itself
+    meeting_deleted = False
+    if delete_meeting:
+        try:
+            await client.delete_meeting(meeting_id=meeting_id)
+            meeting_deleted = True
+            target["zoom_meeting_deleted_at"] = str(datetime.now())
+            target["zoom_meeting_id"] = ""
+            target["zoom_link"] = ""
+        except Exception as e:
+            target["zoom_meeting_delete_error"] = str(e)
+
+    save_json(DATA_DIR / "sessions.json", sessions)
+    
+    return {
+        "ok": True,
+        "session": target,
+        "archived_to": {"storage": storage_kind, "location": location},
+        "recordings_deleted": recordings_deleted,
+        "meeting_deleted": meeting_deleted,
+        "nate_learning_completed": learning_completed,
+        "analysis_summary": {
+            "duration_minutes": analysis_result.get("metrics", {}).get("total_duration_minutes", 0) if analysis_result else 0,
+            "techniques_found": len(analysis_result.get("metrics", {}).get("techniques", {})) if analysis_result else 0,
+        } if analysis_result else None,
+    }
+
+@router.put("/{session_id}")
+async def update_session(session_id: str, req: UpdateSessionRequest):
+    """Update session details"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            if req.status: s["status"] = req.status
+            if req.coach_notes: s["coach_notes"] = req.coach_notes
+            if req.topics_covered: s["topics_covered"] = req.topics_covered
+            if req.homework_assigned: s["homework_assigned"] = req.homework_assigned
+            s["updated_at"] = str(datetime.now())
+            save_json(DATA_DIR / "sessions.json", sessions)
+            return {"session": s}
+    
+    raise HTTPException(404, "Session not found")
+
+@router.delete("/{session_id}")
+async def cancel_session(session_id: str, reason: str = "", hard_delete: bool = False):
+    """Cancel or delete a session.
+    
+    Args:
+        session_id: The session ID to cancel/delete
+        reason: Optional cancellation reason
+        hard_delete: If True, permanently removes the session. If False, just marks as cancelled.
+    """
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    for i, s in enumerate(sessions):
+        if s.get("session_id") == session_id:
+            if hard_delete:
+                # Permanently remove the session
+                deleted_session = sessions.pop(i)
+                save_json(DATA_DIR / "sessions.json", sessions)
+                return {"message": "Session permanently deleted", "session": deleted_session}
+            else:
+                # Just mark as cancelled
+                s["status"] = "cancelled"
+                s["cancellation_reason"] = reason
+                s["cancelled_at"] = str(datetime.now())
+                save_json(DATA_DIR / "sessions.json", sessions)
+                return {"message": "Session cancelled", "session": s}
+    
+    raise HTTPException(404, "Session not found")
+
+# Coach Availability
+
+@router.post("/availability")
+async def set_coach_availability(req: CoachAvailabilityRequest):
+    """Set coach's availability slots"""
+    availability_file = DATA_DIR / "Vaults" / "Coaches" / req.coach_id / "availability.json"
+    availability_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    data = {
+        "coach_id": req.coach_id,
+        "timezone": req.timezone,
+        "slots": req.slots,
+        "updated_at": str(datetime.now())
+    }
+    
+    save_json(availability_file, data)
+    return {"availability": data}
+
+@router.get("/availability/{coach_id}")
+async def get_coach_availability(coach_id: str):
+    """Get coach's availability"""
+    availability_file = DATA_DIR / "Vaults" / "Coaches" / coach_id / "availability.json"
+    availability = load_json(availability_file, {"slots": [], "timezone": "America/New_York"})
+    return {"availability": availability}
+
+@router.get("/available-slots/{coach_id}")
+async def get_available_slots(coach_id: str, date: str):
+    """Get available time slots for a specific date"""
+    # Load availability
+    availability_file = DATA_DIR / "Vaults" / "Coaches" / coach_id / "availability.json"
+    availability = load_json(availability_file, {"slots": []})
+    
+    # Load existing sessions
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    
+    # Parse date
+    try:
+        target_date = _parse_iso_dt(date) or datetime.fromisoformat(date)
+        day_name = target_date.strftime("%A").lower()
+    except:
+        raise HTTPException(400, "Invalid date format")
+    
+    # Find slots for this day of week
+    day_slots = [s for s in availability.get("slots", []) if s.get("day", "").lower() == day_name]
+    
+    # Get booked times for this date
+    booked = []
+    for s in sessions:
+        if s.get("coach_id") == coach_id and s.get("status") in ["scheduled", "active"]:
+            try:
+                start = _parse_iso_dt(s.get("scheduled_start", ""))
+                if not start:
+                    continue
+                if start.date() == target_date.date():
+                    booked.append({
+                        "start": s["scheduled_start"],
+                        "end": s["scheduled_end"]
+                    })
+            except:
+                pass
+    
+    # Generate available 1-hour slots
+    available = []
+    for slot in day_slots:
+        start_hour = int(slot.get("start", "09:00").split(":")[0])
+        end_hour = int(slot.get("end", "17:00").split(":")[0])
+        
+        for hour in range(start_hour, end_hour):
+            slot_start = target_date.replace(hour=hour, minute=0, second=0)
+            slot_end = slot_start + timedelta(hours=1)
+            
+            # Check if slot is available
+            is_available = True
+            for b in booked:
+                b_start = _parse_iso_dt(b.get("start", ""))
+                b_end = _parse_iso_dt(b.get("end", ""))
+                if not (b_start and b_end):
+                    continue
+                if slot_start < b_end and slot_end > b_start:
+                    is_available = False
+                    break
+            
+            if is_available and slot_start > datetime.now(timezone.utc):
+                available.append({
+                    "start": slot_start.isoformat(),
+                    "end": slot_end.isoformat()
+                })
+    
+    return {"available_slots": available, "booked": booked}
+
+# Analytics
+
+@router.get("/stats/coach/{coach_id}")
+async def get_coach_stats(coach_id: str):
+    """Get session statistics for a coach"""
+    sessions = load_json(DATA_DIR / "sessions.json", [])
+    coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
+    
+    completed = [s for s in coach_sessions if s.get("status") == "completed"]
+    cancelled = [s for s in coach_sessions if s.get("status") == "cancelled"]
+    scheduled = [s for s in coach_sessions if s.get("status") == "scheduled"]
+    
+    total_minutes = sum(s.get("duration_minutes", 0) for s in completed)
+    
+    # This month
+    month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0)
+    this_month = [s for s in completed if datetime.fromisoformat(s.get("actual_end", "2000-01-01")) >= month_start]
+    
+    return {
+        "total_sessions": len(coach_sessions),
+        "completed": len(completed),
+        "cancelled": len(cancelled),
+        "scheduled": len(scheduled),
+        "total_hours": round(total_minutes / 60, 1),
+        "sessions_this_month": len(this_month),
+        "unique_clients": len(set(s.get("client_id") for s in coach_sessions))
+    }
+
+
+# =============================================================================
+# CLASSROOM VIDEO UPLOAD
+# =============================================================================
+
+ALLOWED_VIDEO_TYPES = {
+    "video/mp4", "video/quicktime", "video/webm", "video/x-msvideo",
+    "video/mpeg", "video/x-matroska", "application/octet-stream"
+}
+MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
+
+
+@router.post("/api/classroom/upload-video")
+async def upload_classroom_video(
+    file: UploadFile = File(...),
+    coach_id: str = Form(...),
+    client_id: str = Form(...),
+    family_id: str = Form(""),
+    description: str = Form(""),
+):
+    """Upload a video from device for Classroom analysis."""
+    # Validate file type
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_VIDEO_TYPES:
+        ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+        if ext not in ("mp4", "mov", "webm", "avi", "mkv", "mpeg"):
+            raise HTTPException(400, f"Invalid file type: {content_type}. Allowed: MP4, MOV, WEBM, AVI")
+    
+    # Read file content
+    content = await file.read()
+    if len(content) > MAX_VIDEO_SIZE:
+        raise HTTPException(413, f"File too large. Maximum size: {MAX_VIDEO_SIZE // (1024*1024)}MB")
+    
+    # Generate video ID
+    video_id = f"VID_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(4).upper()}"
+    
+    # Save to classroom_videos directory
+    video_dir = DATA_DIR / "classroom_videos" / coach_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    
+    ext = (file.filename or "video.mp4").rsplit(".", 1)[-1].lower()
+    if ext not in ("mp4", "mov", "webm", "avi", "mkv"):
+        ext = "mp4"
+    video_path = video_dir / f"{video_id}.{ext}"
+    
+    with open(video_path, "wb") as f:
+        f.write(content)
+    
+    # Create a pseudo-session record for the classroom
+    classroom_sessions_file = DATA_DIR / "classroom_sessions.json"
+    sessions = load_json(classroom_sessions_file, [])
+    
+    video_session = {
+        "session_id": video_id,
+        "coach_id": coach_id,
+        "client_id": client_id,
+        "family_id": family_id,
+        "source": "device_upload",
+        "filename": file.filename or f"{video_id}.{ext}",
+        "video_path": str(video_path),
+        "description": description,
+        "content_type": content_type,
+        "file_size": len(content),
+        "status": "uploaded",
+        "created_at": str(datetime.now()),
+    }
+    
+    sessions.append(video_session)
+    save_json(classroom_sessions_file, sessions)
+    
+    return {
+        "video_id": video_id,
+        "filename": file.filename,
+        "file_size": len(content),
+        "message": "Video uploaded successfully. Ready for analysis.",
+    }

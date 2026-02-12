@@ -1,0 +1,105 @@
+{
+  "sanctuary_id": "SANC_20260126_003",
+  "family_id": "FAM_1834DACF",
+  "head_of_household_id": "CLIENT_001",
+  "legal_consent": {
+    "version": "v1.0_2026",
+    "agreed_at": "2026-01-26T22:49:05.901220",
+    "ip_address": null,
+    "signature": null,
+    "terms_acknowledged": true,
+    "no_refund_acknowledged": true
+  },
+  "status": "COMPLETED",
+  "created_at": "2026-01-26T22:49:05.901232",
+  "started_at": null,
+  "last_activity_at": "2026-01-29T03:42:00.298568",
+  "current_cycle_start": "2026-01-26T22:49:05.901240",
+  "current_cycle_end": "2026-01-27T22:49:05.901243",
+  "members": [
+    {
+      "user_id": "CLIENT_001",
+      "name": "John D.",
+      "role": "member",
+      "age": null,
+      "status": "ACTIVE",
+      "member_consent_agreed": false,
+      "member_consent_agreed_at": null,
+      "joined_at": "2026-01-29T03:42:00.298547",
+      "last_seen": "2026-01-29T03:42:00.298560",
+      "exited_at": null,
+      "initial_reason": null,
+      "personal_goal": null,
+      "family_concerns": null,
+      "message_count": 0,
+      "coaching_received": 0,
+      "free_coaching_used": false,
+      "coaching_charges_incurred": 0.0
+    }
+  ],
+  "invited_member_ids": [],
+  "messages": [],
+  "billing": {
+    "base_fee_charged": false,
+    "total_charges": 0.0,
+    "charges": [],
+    "free_coaching_summary": {
+      "total_free_given": 0,
+      "members_used_free": []
+    },
+    "thresholds_notified": [],
+    "next_threshold": 50
+  },
+  "metrics": {
+    "total_messages": 0,
+    "intervention_count": 0,
+    "free_interventions": 0,
+    "paid_interventions": 0,
+    "breakthrough_moments": 0,
+    "escalation_events": 0,
+    "de_escalation_success_rate": 1.0,
+    "family_c_emo_avg": 0.0,
+    "individual_c_emo": {}
+  },
+  "initial_topic": "",
+  "therapeutic_approach": "FAMILY_SYSTEMS_EFT_LEGACY",
+  "current_focus": "",
+  "coach_escalation": {
+    "recommended": false,
+    "reason": null,
+    "coach_notified": false,
+    "coach_assigned": null
+  },
+  "session_summary": {
+    "generated_at": "2026-01-29T03:42:04.717257",
+    "summary": {
+      "key_conflicts": [
+        "Please review session manually"
+      ],
+      "points_of_agreement": [
+        "Unable to analyze automatically"
+      ],
+      "corrective_experiences": [],
+      "individual_insights": {
+        "John D.": {
+          "patterns_observed": "Review needed",
+          "growth_areas": "Discuss with coach",
+          "strengths_shown": "Participated in session",
+          "suggested_focus": "Schedule follow-up"
+        }
+      },
+      "overall_progress": 5,
+      "recommended_next_steps": [
+        "Schedule a follow-up family discussion",
+        "Consider live coaching session"
+      ],
+      "coach_notes": "AI summary failed: name 'call_azure_openai' is not defined. Manual review recommended."
+    },
+    "duration_minutes": 0,
+    "total_messages": 0,
+    "coaching_sessions": 0
+  },
+  "completed_at": "2026-01-29T03:42:04.717277",
+  "needs_coach_review": false,
+  "review_reasons": []
+}

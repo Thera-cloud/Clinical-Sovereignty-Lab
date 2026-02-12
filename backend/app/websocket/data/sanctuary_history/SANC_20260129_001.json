@@ -1,0 +1,187 @@
+{
+  "sanctuary_id": "SANC_20260129_001",
+  "family_id": "FAM_1834DACF",
+  "head_of_household_id": "CLIENT_001B",
+  "legal_consent": {
+    "version": "v1.0_2026",
+    "agreed_at": "2026-01-29T22:49:29.156928",
+    "ip_address": null,
+    "signature": null,
+    "terms_acknowledged": true,
+    "no_refund_acknowledged": true
+  },
+  "status": "COMPLETED",
+  "created_at": "2026-01-29T22:49:29.156935",
+  "started_at": null,
+  "last_activity_at": "2026-01-29T22:55:31.694618",
+  "current_cycle_start": "2026-01-29T22:49:29.156939",
+  "current_cycle_end": "2026-01-30T22:49:29.156942",
+  "members": [
+    {
+      "user_id": "CLIENT_001B",
+      "name": "Jane D.",
+      "role": "member",
+      "age": null,
+      "status": "ACTIVE",
+      "member_consent_agreed": true,
+      "member_consent_agreed_at": "2026-01-29T22:49:46.424031",
+      "joined_at": "2026-01-29T22:49:29.159164",
+      "last_seen": "2026-01-29T22:55:34.501573",
+      "exited_at": null,
+      "initial_reason": "",
+      "personal_goal": "",
+      "family_concerns": "",
+      "message_count": 0,
+      "coaching_received": 0,
+      "free_coaching_used": false,
+      "coaching_charges_incurred": 0.0,
+      "exit_reason": ""
+    },
+    {
+      "user_id": "CLIENT_001",
+      "name": "John D.",
+      "role": "member",
+      "age": null,
+      "status": "ACTIVE",
+      "member_consent_agreed": false,
+      "member_consent_agreed_at": null,
+      "joined_at": "2026-01-29T22:49:34.024109",
+      "last_seen": "2026-01-29T22:49:34.024122",
+      "exited_at": null,
+      "initial_reason": null,
+      "personal_goal": null,
+      "family_concerns": null,
+      "message_count": 1,
+      "coaching_received": 1,
+      "free_coaching_used": false,
+      "coaching_charges_incurred": 0.0
+    }
+  ],
+  "invited_member_ids": [],
+  "messages": [
+    {
+      "message_id": "MSG_1",
+      "message_type": "MEMBER_MESSAGE",
+      "sender_id": "CLIENT_001",
+      "sender_name": "John D.",
+      "content": "angry",
+      "timestamp": "2026-01-29T22:55:18.246995",
+      "is_private": false,
+      "emotional_tone": null,
+      "escalation_detected": false,
+      "intervention_triggered": true
+    },
+    {
+      "message_id": "LN_2",
+      "message_type": "LITTLE_NATE",
+      "sender_id": "LITTLE_NATE",
+      "sender_name": "Little Nate",
+      "content": "John, I can hear the anger in your voice, and it's important to address these feelings constructively. Let\u2019s focus on understanding each other's perspectives and finding a way forward that respects everyone's emotions. What would be a small step toward feeling understood right now?",
+      "timestamp": "2026-01-29T22:55:20.273133",
+      "crisis_level": "P2"
+    },
+    {
+      "message_id": "SYS_1769745325",
+      "message_type": "SYSTEM",
+      "sender_id": "SYSTEM",
+      "sender_name": "System",
+      "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate (FREE)",
+      "timestamp": "2026-01-29T22:55:25.593556"
+    }
+  ],
+  "billing": {
+    "base_fee_charged": false,
+    "total_charges": 0.0,
+    "charges": [],
+    "free_coaching_summary": {
+      "total_free_given": 0,
+      "members_used_free": []
+    },
+    "thresholds_notified": [],
+    "next_threshold": 50
+  },
+  "metrics": {
+    "total_messages": 1,
+    "intervention_count": 1,
+    "free_interventions": 0,
+    "paid_interventions": 0,
+    "breakthrough_moments": 0,
+    "escalation_events": 0,
+    "de_escalation_success_rate": 1.0,
+    "family_c_emo_avg": 0.0,
+    "individual_c_emo": {}
+  },
+  "initial_topic": "",
+  "therapeutic_approach": "FAMILY_SYSTEMS_EFT_LEGACY",
+  "current_focus": "",
+  "coach_escalation": {
+    "recommended": false,
+    "reason": null,
+    "coach_notified": false,
+    "coach_assigned": null
+  },
+  "coaching_sessions": {
+    "CLIENT_001": {
+      "session_id": "COACH_SANC_20260129_001_CLIENT_001",
+      "sanctuary_id": "SANC_20260129_001",
+      "member_id": "CLIENT_001",
+      "member_name": "John D.",
+      "intervention_id": "INT_3",
+      "started_at": "2026-01-29T22:55:22.962954",
+      "triggering_message": "angry",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "Hey John, I can sense that you're feeling pretty angry right now, and that's completely valid. It's natural to feel this way when something's really bothering us. Often, anger can be a signal that something deeper is going on, like feeling hurt or misunderstood.\n\nLet's take a moment to look beneath the surface. What do you think might be fueling these strong emotions? Maybe there's a specific incident or conversation that triggered this reaction? I'm here to listen and support you in exploring this.",
+          "timestamp": "2026-01-29T22:55:25.592739"
+        }
+      ],
+      "attempt_number": 0,
+      "is_deescalated": false,
+      "status": "COMPLETED",
+      "ended_at": "2026-01-29T22:55:47.277278"
+    }
+  },
+  "session_summary": {
+    "generated_at": "2026-01-29T23:08:08.611011",
+    "summary": {
+      "key_conflicts": [
+        "John's expression of anger indicates underlying conflicts or stressors",
+        "Lack of clear communication or shared understanding between family members"
+      ],
+      "points_of_agreement": [
+        "A shared desire for improved communication and emotional understanding"
+      ],
+      "corrective_experiences": [
+        "John taking the step for private coaching, indicating a willingness to engage and work on issues"
+      ],
+      "individual_insights": {
+        "Jane D.": {
+          "patterns_observed": "Passive communication, possibly avoiding confrontation",
+          "growth_areas": "Expressing her feelings and needs more openly",
+          "strengths_shown": "Patience and willingness to listen to John's concerns",
+          "suggested_focus": "Building assertive communication skills to express her own perspective"
+        },
+        "John D.": {
+          "patterns_observed": "Quick to express anger, possibly masking deeper emotions",
+          "growth_areas": "Developing healthier ways to process and express emotions",
+          "strengths_shown": "Openness to engage in private coaching, showing readiness to work on issues",
+          "suggested_focus": "Exploring underlying causes of anger and practicing calm communication"
+        }
+      },
+      "overall_progress": 6,
+      "recommended_next_steps": [
+        "Schedule a follow-up session to discuss insights from John's private coaching",
+        "Encourage Jane to share her feelings and perspectives in the next session",
+        "Practice active listening and empathy exercises as a family"
+      ],
+      "coach_notes": "The session revealed a need for improved communication and understanding of emotions. John's willingness to engage in coaching is a positive sign. Focus on building emotional literacy and open dialogue in future sessions."
+    },
+    "duration_minutes": 0,
+    "total_messages": 3,
+    "coaching_sessions": 1
+  },
+  "completed_at": "2026-01-29T23:08:08.611025",
+  "needs_coach_review": false,
+  "review_reasons": []
+}

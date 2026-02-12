@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Family Dynamics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .back-btn:hover { border-color: var(--purple); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; min-height: calc(100vh - 140px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .card-body { padding: 20px; }
+        
+        /* Family Selector */
+        .family-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 12px; cursor: pointer; border: 1px solid var(--border); }
+        .family-card.active { border-color: var(--purple); background: var(--purple-dim); }
+        .family-card:hover { border-color: var(--purple); }
+        .family-id { font-size: 11px; color: var(--purple); font-weight: 600; margin-bottom: 6px; }
+        .family-members-list { font-size: 10px; color: var(--text-secondary); }
+        .family-stat { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        
+        /* Coherence Matrix */
+        .matrix-container { background: var(--bg-elevated); border-radius: 10px; padding: 20px; }
+        .matrix-table { width: 100%; border-collapse: collapse; }
+        .matrix-table th { font-size: 11px; font-weight: 600; padding: 10px; text-align: center; }
+        .matrix-table td { font-size: 12px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .matrix-score { font-weight: 700; }
+        .matrix-score.high { color: var(--green); }
+        .matrix-score.medium { color: var(--gold); }
+        .matrix-score.low { color: var(--orange); }
+        .matrix-diagonal { background: var(--bg-dark); color: var(--text-secondary); }
+        
+        /* Network Visualization */
+        .network-visual { height: 280px; background: var(--bg-elevated); border-radius: 10px; padding: 20px; position: relative; }
+        .network-placeholder { text-align: center; padding: 100px 20px; color: var(--text-secondary); font-size: 11px; }
+        
+        /* Member Scores */
+        .member-score { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .member-name { font-size: 11px; font-weight: 600; }
+        .member-c-emo { font-size: 14px; font-weight: 700; color: var(--purple); }
+        
+        /* Family Wellness */
+        .wellness-display { text-align: center; padding: 32px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
+        .wellness-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
+        .wellness-value { font-size: 52px; font-weight: 700; color: var(--purple); margin: 8px 0; }
+        .wellness-grade { font-size: 14px; font-weight: 600; color: var(--green); }
+        
+        /* Bond Strength */
+        .bond-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .bond-label { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
+        .bond-pair { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+        .bond-score { font-size: 14px; font-weight: 700; }
+        .bond-item.strongest { border-left: 3px solid var(--green); }
+        .bond-item.weakest { border-left: 3px solid var(--orange); }
+        
+        /* Collective CEE */
+        .cee-collective { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
+        .cee-time { font-size: 10px; color: var(--text-secondary); }
+        .cee-sync { font-size: 11px; font-weight: 600; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
+    </div>
+
+    <!-- Sub Navigation -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item active"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Family Selection -->
+        <aside>
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">👨‍👩‍👧</div> Family Selection</div>
+                </div>
+                <div class="card-body">
+                    <div class="family-card active">
+                        <div class="family-id">FAM_0023</div>
+                        <div class="family-members-list">👨 Dad • 👩 Mom • 👦 Son (12)</div>
+                        <div class="family-stat">23 family sessions • Index: 0.74</div>
+                    </div>
+                    <div class="family-card">
+                        <div class="family-id">FAM_0015</div>
+                        <div class="family-members-list">👩 Mom • 👧 Daughter (16) • 👦 Son (9)</div>
+                        <div class="family-stat">14 family sessions • Index: 0.68</div>
+                    </div>
+                    <div class="family-card">
+                        <div class="family-id">FAM_0042</div>
+                        <div class="family-members-list">👨 Dad • 👩 Mom • 👧 Daughter (8) • 👧 Daughter (5)</div>
+                        <div class="family-stat">31 family sessions • Index: 0.81</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Info -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">📅</div> Session Info</div>
+                </div>
+                <div class="card-body">
+                    <div style="font-size: 11px; margin-bottom: 8px;">
+                        <strong>Family Therapy Session</strong>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
+                        📅 January 24, 2026 • 6:00 PM
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
+                        ⏱️ Duration: 60 minutes
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-secondary);">
+                        👥 All 3 members present
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Matrix & Network -->
+        <section>
+            <!-- Coherence Matrix -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div>
+                </div>
+                <div class="card-body">
+                    <div class="matrix-container">
+                        <div id="coherence-matrix" style="font-size: 11px; color: var(--text-secondary); text-align: center; padding: 12px;">
+                            Waiting for live family metrics…
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Visualization -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">🕸️</div> Coherence Network</div>
+                </div>
+                <div class="card-body">
+                    <div class="network-visual">
+                        <div class="network-placeholder">
+                            Visual network diagram<br>
+                            <span style="font-size: 10px; margin-top: 8px; display: block;">Nodes = Family members</span>
+                            <span style="font-size: 10px; margin-top: 4px; display: block;">Edge thickness = Bond strength</span>
+                            <span style="font-size: 10px; margin-top: 4px; display: block;">Requires admin_get_family_metrics handler</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Individual Scores -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">👤</div> Individual C<sub>emo</sub> Scores</div>
+                </div>
+                <div class="card-body">
+                    <div id="member-scores" style="font-size: 11px; color: var(--text-secondary); text-align: center; padding: 12px;">
+                        Waiting for live member scores…
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Analysis -->
+        <aside>
+            <!-- Family Wellness Index -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">💚</div> Family Index</div>
+                </div>
+                <div class="card-body">
+                    <div class="wellness-display">
+                        <div class="wellness-label">Family Wellness Index</div>
+                        <div class="wellness-value" id="family-index">0.74</div>
+                        <div class="wellness-grade">GOOD</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bond Strength -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🔗</div> Bond Analysis</div>
+                </div>
+                <div class="card-body">
+                    <div class="bond-item strongest">
+                        <div class="bond-label">STRONGEST BOND</div>
+                        <div class="bond-pair" id="strongest-pair">—</div>
+                        <div class="bond-score" id="strongest-score" style="color: var(--green);">—</div>
+                    </div>
+                    <div class="bond-item weakest">
+                        <div class="bond-label">DEVELOPING BOND</div>
+                        <div class="bond-pair" id="weakest-pair">—</div>
+                        <div class="bond-score" id="weakest-score" style="color: var(--orange);">—</div>
+                    </div>
+                    <div id="bond-note" style="font-size: 10px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4; padding: 10px; background: var(--bg-elevated); border-radius: 6px;">
+                        Waiting for live bond analysis…
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collective CEE Events -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">⭐</div> Collective CEEs</div>
+                </div>
+                <div class="card-body">
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 12px;">
+                        Moments when all members synchronized
+                    </div>
+                    <div id="collective-cees"></div>
+                    <div id="collective-note" style="font-size: 10px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4; padding: 10px; background: var(--bg-elevated); border-radius: 6px;">
+                        Waiting for live collective events…
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Authentication check
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) {
+            window.location.href = "index.html";
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let authenticated = false;
+        let currentFamily = profile.family_id || "FAM_0023";
+        let refreshTimer = null;
+
+        function getWsUrl() {
+            const proto = (location.protocol === "https:") ? "wss" : "ws";
+            const host = location.hostname || "10.0.0.81";
+            return `${proto}://${host}:8765`;
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(getWsUrl());
+            
+            ws.onopen = function() {
+                console.log("✅ WebSocket connected");
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username: username,
+                    password: password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log("📩 Received:", data.type);
+                
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("🔓 Authenticated! Requesting family metrics...");
+                    try {
+                        ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
+                    } catch (e) {}
+                    requestFamilyMetrics();
+
+                    if (refreshTimer) clearInterval(refreshTimer);
+                    refreshTimer = setInterval(() => {
+                        try { requestFamilyMetrics(); } catch (e) {}
+                    }, 4000);
+                }
+                
+                if (data.type === "family_metrics") {
+                    displayFamilyMetrics(data);
+                }
+
+                if (data.type === "nevedal_update") {
+                    // Optional: if you want family metrics to react immediately,
+                    // keep the polling interval above; this is just a fast path.
+                    if (authenticated) requestFamilyMetrics();
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error("❌ WebSocket error:", error);
+            };
+
+            ws.onclose = function() {
+                console.log("⚠️ WebSocket closed; retrying…");
+                authenticated = false;
+                if (refreshTimer) clearInterval(refreshTimer);
+                setTimeout(connectWebSocket, 1200);
+            };
+        }
+
+        function requestFamilyMetrics() {
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({
+                    type: "admin_get_family_metrics",
+                    family_id: currentFamily
+                }));
+                console.log("📡 Requested family metrics for:", currentFamily);
+            }
+        }
+
+        function displayFamilyMetrics(data) {
+            console.log("👨‍👩‍👧 Displaying family metrics:", data);
+            
+            // Update family wellness index
+            if (data.family_wellness_index !== undefined) {
+                document.getElementById("family-index").textContent = data.family_wellness_index.toFixed(2);
+            }
+            
+            // Update individual scores
+            const members = Array.isArray(data.members) ? data.members : [];
+            const memberScoresEl = document.getElementById("member-scores");
+            if (memberScoresEl) {
+                if (!members.length) {
+                    memberScoresEl.textContent = "No members found for this family_id.";
+                } else {
+                    memberScoresEl.innerHTML = members.map(m => {
+                        const name = (m.name || m.id || "Unknown");
+                        const c = (m.c_emo_avg ?? 0.5);
+                        return `
+                            <div class="member-score">
+                                <span class="member-name">${escapeHtml(name)}</span>
+                                <span class="member-c-emo">${Number(c).toFixed(2)}</span>
+                            </div>
+                        `;
+                    }).join("");
+                }
+            }
+
+            // Render coherence matrix dynamically from member C_emo values
+            const matrixEl = document.getElementById("coherence-matrix");
+            if (matrixEl) {
+                if (members.length < 2) {
+                    matrixEl.textContent = "Need at least 2 family members to compute a matrix.";
+                } else {
+                    matrixEl.innerHTML = buildMatrixTable(members);
+                }
+            }
+
+            // Strongest / weakest bonds
+            const strongest = data.strongest_bond || {};
+            const weakest = data.weakest_bond || {};
+            const sp = document.getElementById("strongest-pair");
+            const ss = document.getElementById("strongest-score");
+            const wp = document.getElementById("weakest-pair");
+            const wsScore = document.getElementById("weakest-score");
+            if (sp) sp.textContent = formatPair(strongest.pair);
+            if (ss) ss.textContent = (strongest.score != null) ? Number(strongest.score).toFixed(2) : "—";
+            if (wp) wp.textContent = formatPair(weakest.pair);
+            if (wsScore) wsScore.textContent = (weakest.score != null) ? Number(weakest.score).toFixed(2) : "—";
+
+            const bondNote = document.getElementById("bond-note");
+            if (bondNote) {
+                if (sp && wp && members.length) {
+                    bondNote.textContent = "Live bonds reflect current Nevedal C_emo alignment (higher = more synchronized).";
+                }
+            }
+
+            // Collective CEEs
+            const ceesEl = document.getElementById("collective-cees");
+            const cees = Array.isArray(data.collective_cees) ? data.collective_cees : [];
+            if (ceesEl) {
+                if (!cees.length) {
+                    ceesEl.innerHTML = `<div style="font-size: 10px; color: var(--text-secondary);">No collective CEE events detected right now.</div>`;
+                } else {
+                    ceesEl.innerHTML = cees.map(e => `
+                        <div class="cee-collective">
+                            <div class="cee-time">${escapeHtml(e.timestamp || "—")} into session</div>
+                            <div class="cee-sync">All members synced (C<sub>emo</sub> &gt; 0.75)</div>
+                        </div>
+                    `).join("");
+                }
+            }
+            const collectiveNote = document.getElementById("collective-note");
+            if (collectiveNote) {
+                collectiveNote.textContent = cees.length
+                    ? `${cees.length} collective synchrony event(s) indicates meaningful shared alignment.`
+                    : "Collective synchrony events will appear here during high-alignment moments.";
+            }
+        }
+
+        // Family selection
+        document.querySelectorAll(".family-card").forEach(card => {
+            card.addEventListener("click", function() {
+                document.querySelectorAll(".family-card").forEach(c => c.classList.remove("active"));
+                this.classList.add("active");
+                console.log("👨‍👩‍👧 Selected family");
+                const fidEl = this.querySelector(".family-id");
+                if (fidEl) currentFamily = fidEl.textContent.trim();
+                requestFamilyMetrics();
+            });
+        });
+
+        function buildMatrixTable(members) {
+            const safeNames = members.map(m => escapeHtml(m.name || m.id || "Unknown"));
+            const cemos = members.map(m => Number(m.c_emo_avg ?? 0.5));
+
+            let html = `<table class="matrix-table"><thead><tr><th></th>`;
+            for (const n of safeNames) html += `<th>${n}</th>`;
+            html += `</tr></thead><tbody>`;
+
+            for (let i = 0; i < members.length; i++) {
+                html += `<tr><th>${safeNames[i]}</th>`;
+                for (let j = 0; j < members.length; j++) {
+                    if (i === j) {
+                        html += `<td class="matrix-diagonal">—</td>`;
+                    } else {
+                        const score = Math.max(0, Math.min(1, 1 - Math.abs(cemos[i] - cemos[j])));
+                        const cls = score >= 0.85 ? "high" : (score >= 0.70 ? "medium" : "low");
+                        html += `<td><span class="matrix-score ${cls}">${score.toFixed(2)}</span></td>`;
+                    }
+                }
+                html += `</tr>`;
+            }
+
+            html += `</tbody></table>`;
+            return html;
+        }
+
+        function formatPair(pair) {
+            if (!Array.isArray(pair) || pair.length < 2) return "—";
+            return `${pair[0]} ⟷ ${pair[1]}`;
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? "").replace(/[&<>"']/g, ch => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#039;"
+            }[ch]));
+        }
+
+        // Initialize
+        connectWebSocket();
+        
+        console.log("👨‍👩‍👧 Nevedal Lab Family Dynamics initialized");
+    </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+[
+  {
+    "id": "71e33c248b057c74",
+    "recipient_id": "test_sendgrid",
+    "type": "info",
+    "title": "SendGrid Test \u2013 Little Nate",
+    "message": "If you received this email, SendGrid integration is working correctly.",
+    "priority": "NORMAL",
+    "data": {},
+    "read": false,
+    "created_at": "2026-02-10T23:56:52.212901"
+  },
+  {
+    "id": "31f555cda2f7fb64",
+    "recipient_id": "test_sendgrid",
+    "type": "info",
+    "title": "SendGrid Test \u2013 Little Nate",
+    "message": "If you received this email, SendGrid integration is working correctly.",
+    "priority": "NORMAL",
+    "data": {},
+    "read": false,
+    "created_at": "2026-02-10T23:58:29.611770"
+  }
+]

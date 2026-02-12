@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Family Dynamics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .icon.red { background: rgba(255,59,59,0.15); }
+        .icon.orange { background: rgba(255,149,0,0.15); }
+        .card-body { padding: 20px; }
+        .family-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 12px; cursor: pointer; border: 1px solid var(--border); }
+        .family-card.active { border-color: var(--purple); background: var(--purple-dim); }
+        .family-card:hover { border-color: var(--purple); }
+        .family-id { font-size: 11px; color: var(--purple); font-weight: 600; margin-bottom: 6px; }
+        .family-members-list { font-size: 10px; color: var(--text-secondary); }
+        .family-stat { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        .matrix-container { background: var(--bg-elevated); border-radius: 10px; padding: 20px; overflow-x: auto; }
+        .matrix-table { width: 100%; border-collapse: collapse; }
+        .matrix-table th { font-size: 11px; font-weight: 600; padding: 10px; text-align: center; }
+        .matrix-table td { font-size: 12px; padding: 12px; text-align: center; border: 1px solid var(--border); }
+        .matrix-score { font-weight: 700; }
+        .matrix-score.high { color: var(--green); }
+        .matrix-score.medium { color: var(--gold); }
+        .matrix-score.low { color: var(--orange); }
+        .matrix-diagonal { background: var(--bg-dark); color: var(--text-secondary); }
+        .network-visual { height: 300px; background: var(--bg-elevated); border-radius: 10px; position: relative; }
+        .network-visual canvas { width: 100%; height: 100%; }
+        .member-score { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; position: relative; }
+        .member-name { font-size: 11px; font-weight: 600; }
+        .member-c-emo { font-size: 14px; font-weight: 700; color: var(--purple); }
+        .wellness-display { text-align: center; padding: 32px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
+        .wellness-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
+        .wellness-value { font-size: 52px; font-weight: 700; color: var(--purple); margin: 8px 0; }
+        .wellness-grade { font-size: 14px; font-weight: 600; }
+        .bond-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .bond-label { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
+        .bond-pair { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+        .bond-score { font-size: 14px; font-weight: 700; }
+        .bond-item.strongest { border-left: 3px solid var(--green); }
+        .bond-item.weakest { border-left: 3px solid var(--orange); }
+        .cee-collective { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
+        .cee-time { font-size: 10px; color: var(--text-secondary); }
+        .cee-sync { font-size: 11px; font-weight: 600; margin-top: 4px; }
+        .empty-state { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 11px; }
+        .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-label { font-size: 10px; color: var(--text-secondary); }
+        .metric-value { font-size: 12px; font-weight: 600; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
+        .badge-escalation { background: rgba(255,59,59,0.15); color: var(--red-critical); padding: 2px 6px; border-radius: 3px; font-size: 8px; font-weight: 700; margin-left: 8px; }
+        .badge-ventriloquism { background: rgba(255,149,0,0.15); color: var(--orange); padding: 2px 6px; border-radius: 3px; font-size: 8px; font-weight: 700; margin-left: 8px; }
+        .stage-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
+        .eft-stage { background: var(--purple-dim); color: var(--purple); }
+        .schema-card { background: var(--bg-elevated); border-radius: 8px; padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
+        .schema-name { font-size: 11px; font-weight: 600; }
+        .schema-meta { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        .alert-item { padding: 10px; background: rgba(255,59,59,0.08); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--red-critical); }
+        .alert-item.ventriloquism { border-left-color: var(--orange); background: rgba(255,149,0,0.08); }
+        .alert-text { font-size: 10px; }
+        .alert-time { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab_old.html" class="back-btn">+ Back to Lab</a>
+    </div>
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item active"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <main class="main-content">
+        <!-- LEFT PANEL -->
+        <aside>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">👨‍👩‍👧</div> Family Selection</div></div>
+                <div class="card-body" id="family-list">
+                    <div class="empty-state">Loading families...</div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">📅</div> Session Info</div></div>
+                <div class="card-body" id="session-info-body">
+                    <div class="empty-state">Select a family</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL -->
+        <section>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div></div>
+                <div class="card-body">
+                    <div class="matrix-container"><div id="coherence-matrix" class="empty-state">Waiting for family metrics...</div></div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">🕸️</div> Coherence Network</div></div>
+                <div class="card-body">
+                    <div class="network-visual"><canvas id="network-canvas"></canvas></div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon green">👤</div> Individual C<sub>emo</sub> Scores</div></div>
+                <div class="card-body" id="member-scores"><div class="empty-state">Waiting for member scores...</div></div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL -->
+        <aside>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">💚</div> Family Index</div></div>
+                <div class="card-body">
+                    <div class="wellness-display">
+                        <div class="wellness-label">Family Wellness Index</div>
+                        <div class="wellness-value" id="family-index">--</div>
+                        <div class="wellness-grade" id="family-grade">AWAITING</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon green">🔗</div> Bond Analysis</div></div>
+                <div class="card-body">
+                    <div class="bond-item strongest"><div class="bond-label">STRONGEST BOND</div><div class="bond-pair" id="strongest-pair">--</div><div class="bond-score" id="strongest-score" style="color:var(--green);">--</div></div>
+                    <div class="bond-item weakest"><div class="bond-label">DEVELOPING BOND</div><div class="bond-pair" id="weakest-pair">--</div><div class="bond-score" id="weakest-score" style="color:var(--orange);">--</div></div>
+                </div>
+            </div>
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon gold">⭐</div> Collective CEEs</div></div>
+                <div class="card-body" id="collective-cees-body"><div class="empty-state">Awaiting data...</div></div>
+            </div>
+            <!-- Patent 3: EFT Tracker -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">🔄</div> EFT Cycle Tracker</div></div>
+                <div class="card-body" id="eft-tracker-body"><div class="empty-state">No EFT data</div></div>
+            </div>
+            <!-- Patent 3: Reconsolidation Tracker -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🧠</div> Reconsolidation</div></div>
+                <div class="card-body" id="recon-tracker-body"><div class="empty-state">No reconsolidation data</div></div>
+            </div>
+            <!-- Patent 3: Escalation + Ventriloquism Alerts -->
+            <div class="card research" style="margin-top:20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon red">⚠️</div> Alerts</div>
+                    <span id="alert-count" style="font-size:10px;color:var(--red-critical);">0</span>
+                </div>
+                <div class="card-body" id="alerts-body"><div class="empty-state">No alerts</div></div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) window.location.href = "index.html";
+
+        let ws = null, authenticated = false;
+        let currentFamily = profile.family_id || "";
+        let refreshTimer = null;
+
+        function escapeHtml(s) { return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c]); }
+        function formatPair(pair) { return Array.isArray(pair) && pair.length >= 2 ? pair[0] + " &#x27F7; " + pair[1] : "--"; }
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.includes("sovereignsanctuary")) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data;
+                try { data = JSON.parse(event.data); } catch(e) { console.error("[Family] Bad JSON:", e); return; }
+                console.log("[Family] WS msg:", data.type, data.error || "");
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("[Family] Authenticated. Requesting families...");
+                    // Request families list
+                    ws.send(JSON.stringify({ type: "admin_get_families" }));
+                    // Also try admin_get_users as fallback
+                    ws.send(JSON.stringify({ type: "admin_get_users" }));
+                    if (currentFamily) requestFamilyMetrics();
+                    if (refreshTimer) clearInterval(refreshTimer);
+                    refreshTimer = setInterval(function() { if (currentFamily) requestFamilyMetrics(); }, 4000);
+                }
+                if (data.type === "families_list" || data.type === "admin_families_list") {
+                    console.log("[Family] Got families:", (data.families || []).length);
+                    buildFamilyList(data.families || []);
+                }
+                if ((data.type === "admin_users" || data.type === "admin_users_list") && data.users && !currentFamily) buildFamilyListFromUsers(data.users);
+                if (data.type === "family_metrics") {
+                    console.log("[Family] Got family_metrics for:", data.family_id, "members:", (data.members || []).length, "error:", data.error || "none");
+                    displayFamilyMetrics(data);
+                }
+                if (data.type === "error") { console.warn("[Family] Server error:", data.message); }
+            };
+            ws.onclose = function() { authenticated = false; if (refreshTimer) clearInterval(refreshTimer); setTimeout(connectWebSocket, 1200); };
+        }
+
+        function buildFamilyList(families) {
+            var el = document.getElementById("family-list");
+            if (!families.length) { el.innerHTML = '<div class="empty-state">No families registered</div>'; return; }
+            el.innerHTML = families.map(function(f) {
+                var members = (f.members || []).map(function(m) { return escapeHtml(m.name || m.id || "?"); }).join(", ");
+                return '<div class="family-card" data-fid="' + escapeHtml(f.family_id || f.id) + '">' +
+                    '<div class="family-id">' + escapeHtml(f.family_id || f.id) + '</div>' +
+                    '<div class="family-members-list">' + (members || "Members pending") + '</div>' +
+                    '<div class="family-stat">' + (f.session_count || 0) + ' sessions &bull; Index: ' + (f.wellness_index ? f.wellness_index.toFixed(2) : "--") + '</div></div>';
+            }).join('');
+            wireFamily();
+            if (families.length > 0 && !currentFamily) {
+                currentFamily = families[0].family_id || families[0].id;
+                el.querySelector(".family-card").classList.add("active");
+                requestFamilyMetrics();
+            }
+        }
+
+        function buildFamilyListFromUsers(users) {
+            // Group by family_id
+            var fams = {};
+            users.forEach(function(u) {
+                var fid = u.family_id;
+                if (!fid) return;
+                if (!fams[fid]) fams[fid] = { family_id: fid, members: [], session_count: 0 };
+                fams[fid].members.push({ name: u.name || u.username, id: u.user_id || u.hardware_id });
+            });
+            var arr = Object.values(fams);
+            if (arr.length > 0) buildFamilyList(arr);
+        }
+
+        function wireFamily() {
+            document.querySelectorAll(".family-card").forEach(function(card) {
+                card.addEventListener("click", function() {
+                    document.querySelectorAll(".family-card").forEach(function(c) { c.classList.remove("active"); });
+                    this.classList.add("active");
+                    currentFamily = this.dataset.fid;
+                    requestFamilyMetrics();
+                });
+            });
+        }
+
+        function requestFamilyMetrics() {
+            if (ws && ws.readyState === 1 && authenticated && currentFamily) {
+                ws.send(JSON.stringify({ type: "admin_get_family_metrics", family_id: currentFamily }));
+            }
+        }
+
+        // ==================== NETWORK VISUALIZATION ====================
+        function drawNetwork(members) {
+            var canvas = document.getElementById("network-canvas");
+            var ctx = canvas.getContext("2d");
+            var rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (!members || members.length === 0) return;
+
+            var cx = canvas.width / 2, cy = canvas.height / 2;
+            var radius = Math.min(cx, cy) * 0.55;
+            var n = members.length;
+            var positions = [];
+            for (var i = 0; i < n; i++) {
+                var angle = (2 * Math.PI * i / n) - Math.PI / 2;
+                positions.push({ x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) });
+            }
+            // Draw edges (bond lines)
+            for (var i = 0; i < n; i++) {
+                for (var j = i + 1; j < n; j++) {
+                    var cemoI = members[i].c_emo_avg || 0.5;
+                    var cemoJ = members[j].c_emo_avg || 0.5;
+                    var bond = Math.max(0, Math.min(1, 1 - Math.abs(cemoI - cemoJ)));
+                    var lineWidth = 1 + bond * 5;
+                    var alpha = 0.2 + bond * 0.6;
+                    ctx.beginPath();
+                    ctx.moveTo(positions[i].x, positions[i].y);
+                    ctx.lineTo(positions[j].x, positions[j].y);
+                    ctx.strokeStyle = "rgba(157,78,221," + alpha + ")";
+                    ctx.lineWidth = lineWidth;
+                    ctx.stroke();
+                    // Bond score at midpoint
+                    var mx = (positions[i].x + positions[j].x) / 2;
+                    var my = (positions[i].y + positions[j].y) / 2;
+                    ctx.fillStyle = "#888";
+                    ctx.font = "9px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText(bond.toFixed(2), mx, my - 4);
+                }
+            }
+            // Draw nodes
+            for (var i = 0; i < n; i++) {
+                var m = members[i];
+                var cemo = m.c_emo_avg || 0.5;
+                var nodeR = 22;
+                ctx.beginPath();
+                ctx.arc(positions[i].x, positions[i].y, nodeR, 0, 2 * Math.PI);
+                var hue = cemo >= 0.7 ? "rgba(0,255,136,0.2)" : cemo >= 0.5 ? "rgba(255,215,0,0.2)" : "rgba(255,59,59,0.2)";
+                ctx.fillStyle = hue;
+                ctx.fill();
+                ctx.strokeStyle = cemo >= 0.7 ? "#00FF88" : cemo >= 0.5 ? "#FFD700" : "#FF3B3B";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Name
+                ctx.fillStyle = "#fff";
+                ctx.font = "bold 10px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText((m.name || m.id || "?").split(" ")[0], positions[i].x, positions[i].y - 4);
+                // Score
+                ctx.fillStyle = "#9D4EDD";
+                ctx.font = "bold 11px sans-serif";
+                ctx.fillText(cemo.toFixed(2), positions[i].x, positions[i].y + 10);
+            }
+        }
+
+        // ==================== DISPLAY ====================
+        function displayFamilyMetrics(data) {
+            var members = Array.isArray(data.members) ? data.members : [];
+
+            // Family Wellness Index
+            if (data.family_wellness_index !== undefined) {
+                var idx = data.family_wellness_index;
+                document.getElementById("family-index").textContent = idx.toFixed(2);
+                var g = document.getElementById("family-grade");
+                if (idx >= 0.8) { g.textContent = "EXCELLENT"; g.style.color = "var(--green)"; }
+                else if (idx >= 0.65) { g.textContent = "GOOD"; g.style.color = "var(--cyan)"; }
+                else if (idx >= 0.5) { g.textContent = "MODERATE"; g.style.color = "var(--gold)"; }
+                else { g.textContent = "DEVELOPING"; g.style.color = "var(--orange)"; }
+            }
+
+            // Member scores with escalation badges
+            var scoresEl = document.getElementById("member-scores");
+            if (members.length === 0) { scoresEl.innerHTML = '<div class="empty-state">No members in this family</div>'; }
+            else {
+                var escalations = data.escalation_events || {};
+                var ventriloquisms = data.ventriloquism_events || {};
+                scoresEl.innerHTML = members.map(function(m) {
+                    var name = m.name || m.id || "Unknown";
+                    var c = (m.c_emo_avg || 0.5).toFixed(2);
+                    var escBadge = (escalations[name] || escalations[m.id]) ? '<span class="badge-escalation">ESCALATION</span>' : '';
+                    var ventBadge = (ventriloquisms[name] || ventriloquisms[m.id]) ? '<span class="badge-ventriloquism">PROXY SPEECH</span>' : '';
+                    return '<div class="member-score"><span class="member-name">' + escapeHtml(name) + escBadge + ventBadge + '</span><span class="member-c-emo">' + c + '</span></div>';
+                }).join('');
+            }
+
+            // Coherence Matrix
+            var matrixEl = document.getElementById("coherence-matrix");
+            if (members.length < 2) { matrixEl.innerHTML = '<div class="empty-state">Need 2+ members for matrix</div>'; }
+            else { matrixEl.innerHTML = buildMatrixTable(members); }
+
+            // Network Visualization
+            drawNetwork(members);
+
+            // Bonds
+            var s = data.strongest_bond || {};
+            var w = data.weakest_bond || {};
+            document.getElementById("strongest-pair").innerHTML = formatPair(s.pair);
+            document.getElementById("strongest-score").textContent = s.score != null ? Number(s.score).toFixed(2) : "--";
+            document.getElementById("weakest-pair").innerHTML = formatPair(w.pair);
+            document.getElementById("weakest-score").textContent = w.score != null ? Number(w.score).toFixed(2) : "--";
+
+            // Collective CEEs
+            var cees = Array.isArray(data.collective_cees) ? data.collective_cees : [];
+            var ceesEl = document.getElementById("collective-cees-body");
+            if (cees.length === 0) {
+                ceesEl.innerHTML = '<div class="empty-state">No collective CEE events detected</div>';
+            } else {
+                ceesEl.innerHTML = cees.map(function(e) {
+                    return '<div class="cee-collective"><div class="cee-time">' + escapeHtml(e.timestamp || "--") + '</div><div class="cee-sync">All members synced (C<sub>emo</sub> &gt; 0.75)</div></div>';
+                }).join('');
+            }
+
+            // Session Info
+            var siEl = document.getElementById("session-info-body");
+            if (data.session_date || data.duration || members.length) {
+                siEl.innerHTML = '<div style="font-size:11px;margin-bottom:8px;"><strong>Family Therapy Session</strong></div>' +
+                    (data.session_date ? '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">Session: ' + escapeHtml(data.session_date) + '</div>' : '') +
+                    (data.duration ? '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">Duration: ' + data.duration + ' min</div>' : '') +
+                    '<div style="font-size:10px;color:var(--text-secondary);">' + members.length + ' member(s) present</div>';
+            }
+
+            // ==================== PATENT 3: EFT TRACKER ====================
+            var eftEl = document.getElementById("eft-tracker-body");
+            if (data.eft_tracker) {
+                var eft = data.eft_tracker;
+                var stageLabels = {
+                    "CYCLE_IDENTIFICATION": "Cycle Identification",
+                    "ACCESSING_UNDERLYING_EMOTIONS": "Accessing Underlying Emotions",
+                    "RESTRUCTURING_INTERACTIONS": "Restructuring Interactions",
+                    "CONSOLIDATION": "Consolidation"
+                };
+                var stage = eft.session_stage || "UNKNOWN";
+                eftEl.innerHTML =
+                    '<div style="text-align:center;margin-bottom:12px;"><span class="stage-badge eft-stage">' + escapeHtml(stageLabels[stage] || stage) + '</span></div>' +
+                    (eft.negative_cycle ? '<div class="metric-row"><span class="metric-label">Negative Cycle</span><span class="metric-value">' + escapeHtml(eft.negative_cycle) + '</span></div>' : '') +
+                    (eft.member_longings && Object.keys(eft.member_longings).length > 0 ?
+                        '<div style="margin-top:10px;font-size:10px;color:var(--text-secondary);">Member Longings:</div>' +
+                        Object.entries(eft.member_longings).map(function(e) {
+                            return '<div class="metric-row"><span class="metric-label">' + escapeHtml(e[0]) + '</span><span class="metric-value">' + escapeHtml(Array.isArray(e[1]) ? e[1].join(", ") : e[1]) + '</span></div>';
+                        }).join('') : '') +
+                    (eft.corrective_moments ?
+                        '<div class="metric-row"><span class="metric-label">Corrective Moments</span><span class="metric-value" style="color:var(--green);">' + eft.corrective_moments + '</span></div>' : '');
+            } else {
+                eftEl.innerHTML = '<div class="empty-state">No EFT tracker data for this family</div>';
+            }
+
+            // ==================== PATENT 3: RECONSOLIDATION TRACKER ====================
+            var reconEl = document.getElementById("recon-tracker-body");
+            if (data.reconsolidation_tracker) {
+                var rt = data.reconsolidation_tracker;
+                var schemas = rt.active_schemas || rt.schemas || [];
+                if (schemas.length > 0) {
+                    reconEl.innerHTML = schemas.map(function(s) {
+                        return '<div class="schema-card"><div class="schema-name">' + escapeHtml(s.name || s.schema || "Unknown Schema") + '</div>' +
+                            '<div class="schema-meta">Activations: ' + (s.activation_count || 0) + ' | Mismatches: ' + (s.mismatch_count || 0) + ' | Reconsolidated: ' + (s.reconsolidated ? "Yes" : "No") + '</div></div>';
+                    }).join('') +
+                    (rt.active_windows ? '<div class="metric-row"><span class="metric-label">Active Windows</span><span class="metric-value" style="color:var(--cyan);">' + rt.active_windows + '</span></div>' : '') +
+                    (rt.verified_reconsolidations !== undefined ? '<div class="metric-row"><span class="metric-label">Verified</span><span class="metric-value" style="color:var(--green);">' + rt.verified_reconsolidations + '</span></div>' : '');
+                } else {
+                    reconEl.innerHTML = '<div class="empty-state">No active schemas tracked</div>';
+                }
+            } else {
+                reconEl.innerHTML = '<div class="empty-state">No reconsolidation data</div>';
+            }
+
+            // ==================== ALERTS: ESCALATION + VENTRILOQUISM ====================
+            var alertsEl = document.getElementById("alerts-body");
+            var alerts = [];
+            // Escalation events
+            if (data.escalation_events) {
+                Object.entries(data.escalation_events).forEach(function(e) {
+                    var member = e[0];
+                    var events = Array.isArray(e[1]) ? e[1] : [e[1]];
+                    events.forEach(function(ev) {
+                        alerts.push({ type: "escalation", member: member, text: ev.description || ev.text || "Escalation detected", time: ev.timestamp || "" });
+                    });
+                });
+            }
+            // Ventriloquism events
+            if (data.ventriloquism_events) {
+                Object.entries(data.ventriloquism_events).forEach(function(e) {
+                    var member = e[0];
+                    var events = Array.isArray(e[1]) ? e[1] : [e[1]];
+                    events.forEach(function(ev) {
+                        alerts.push({ type: "ventriloquism", member: member, text: ev.description || ev.phrase || "Proxy speech: speaking for another member", time: ev.timestamp || "" });
+                    });
+                });
+            }
+            document.getElementById("alert-count").textContent = alerts.length;
+            if (alerts.length > 0) {
+                alertsEl.innerHTML = alerts.map(function(a) {
+                    var cls = a.type === "ventriloquism" ? "ventriloquism" : "";
+                    return '<div class="alert-item ' + cls + '"><div class="alert-text">' +
+                        '<strong>' + escapeHtml(a.member) + ':</strong> ' + escapeHtml(a.text) + '</div>' +
+                        (a.time ? '<div class="alert-time">' + escapeHtml(a.time) + '</div>' : '') + '</div>';
+                }).join('');
+            } else {
+                alertsEl.innerHTML = '<div class="empty-state">No escalation or ventriloquism alerts</div>';
+            }
+        }
+
+        function buildMatrixTable(members) {
+            var names = members.map(function(m) { return escapeHtml(m.name || m.id || "?"); });
+            var cemos = members.map(function(m) { return Number(m.c_emo_avg || 0.5); });
+            var html = '<table class="matrix-table"><thead><tr><th></th>';
+            names.forEach(function(n) { html += '<th>' + n + '</th>'; });
+            html += '</tr></thead><tbody>';
+            for (var i = 0; i < members.length; i++) {
+                html += '<tr><th>' + names[i] + '</th>';
+                for (var j = 0; j < members.length; j++) {
+                    if (i === j) { html += '<td class="matrix-diagonal">--</td>'; }
+                    else {
+                        var score = Math.max(0, Math.min(1, 1 - Math.abs(cemos[i] - cemos[j])));
+                        var cls = score >= 0.85 ? "high" : score >= 0.70 ? "medium" : "low";
+                        html += '<td><span class="matrix-score ' + cls + '">' + score.toFixed(2) + '</span></td>';
+                    }
+                }
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            return html;
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

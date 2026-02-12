@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html><head><title>WS Test</title></head><body>
+<h1>WebSocket Test</h1>
+<div id="status">Testing...</div>
+<script>
+const ws = new WebSocket('wss://api.sovereignsanctuary.net/ws');
+ws.onopen = () => document.getElementById('status').innerHTML = '✅ CONNECTED!';
+ws.onerror = () => document.getElementById('status').innerHTML = '❌ FAILED!';
+ws.onclose = () => document.getElementById('status').innerHTML = '⚠️ CLOSED!';
+</script>
+</body></html>

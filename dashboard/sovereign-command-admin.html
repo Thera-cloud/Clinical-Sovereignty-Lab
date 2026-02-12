@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sovereign Command — Marketing Hub</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0c10;--bg2:#12151c;--bg3:#1a1e28;--bg4:#222838;--bg5:#0d0f14;
+  --bdr:#2a2f3d;--bdr2:#363d50;
+  --t1:#e8eaf0;--t2:#8b92a8;--t3:#5a6178;
+  --gold:#d4a853;--gold2:#b8923f;--goldg:rgba(212,168,83,.15);
+  --grn:#3dd68c;--grng:rgba(61,214,140,.12);
+  --blu:#5b8af5;--blug:rgba(91,138,245,.12);
+  --pur:#9b7af5;--purg:rgba(155,122,245,.12);
+  --red:#f56565;--redg:rgba(245,101,101,.12);
+  --org:#f5a623;--cyan:#56d4e0;
+  --r:10px;--rs:6px;--rl:14px;
+}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh}
+
+/* SIDEBAR */
+.sb{position:fixed;left:0;top:0;bottom:0;width:250px;background:var(--bg2);border-right:1px solid var(--bdr);display:flex;flex-direction:column;z-index:100}
+.sb-brand{padding:22px 18px;border-bottom:1px solid var(--bdr)}
+.sb-brand h1{font-family:'Playfair Display',serif;font-size:17px;color:var(--gold)}
+.sb-brand span{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:2px;display:block;margin-top:3px}
+.sb-nav{flex:1;padding:14px 10px;overflow-y:auto}
+.ns{margin-bottom:20px}
+.ns-t{font-size:9px;text-transform:uppercase;letter-spacing:2px;color:var(--t3);padding:0 10px;margin-bottom:6px}
+.ni{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:var(--rs);color:var(--t2);cursor:pointer;font-size:13px;font-weight:500;transition:.2s;position:relative}
+.ni:hover{background:var(--bg3);color:var(--t1)}
+.ni.act{background:var(--goldg);color:var(--gold)}
+.ni.act::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;background:var(--gold);border-radius:0 3px 3px 0}
+.ni-i{font-size:15px;width:18px;text-align:center}
+.ni-b{margin-left:auto;font-size:10px;background:var(--goldg);color:var(--gold);padding:2px 7px;border-radius:8px;font-weight:600}
+.sb-ft{padding:14px 18px;border-top:1px solid var(--bdr);display:flex;align-items:center;gap:10px}
+.sb-av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--org));display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--bg)}
+.sb-un{font-size:13px;font-weight:600}.sb-ur{font-size:10px;color:var(--t3)}
+
+/* MAIN */
+.mn{margin-left:250px;min-height:100vh}
+.tb{position:sticky;top:0;z-index:50;background:rgba(10,12,16,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--bdr);padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
+.tb h2{font-family:'Playfair Display',serif;font-size:20px}
+.tb .bc{font-size:11px;color:var(--t3);margin-left:14px}
+.tb-r{display:flex;gap:10px}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;transition:.2s;border:none;white-space:nowrap}
+.btn-p{background:linear-gradient(135deg,var(--gold),var(--gold2));color:var(--bg)}
+.btn-p:hover{box-shadow:0 0 16px var(--goldg);transform:translateY(-1px)}
+.btn-s{background:var(--bg3);color:var(--t1);border:1px solid var(--bdr)}.btn-s:hover{background:var(--bg4)}
+.btn-g{background:0;color:var(--t2);border:none}.btn-g:hover{color:var(--t1)}
+
+/* CONTENT */
+.ct{padding:24px 28px}
+.tab{display:none}.tab.on{display:block}
+
+/* METRICS */
+.mrow{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
+.mc{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--r);padding:18px;transition:.2s}
+.mc:hover{border-color:var(--bdr2);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.mc-l{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3);margin-bottom:6px}
+.mc-v{font-family:'Playfair Display',serif;font-size:28px;font-weight:800;line-height:1}
+.mc-c{display:inline-flex;align-items:center;gap:3px;font-size:11px;margin-top:6px;padding:2px 7px;border-radius:6px}
+.mc-c.up{color:var(--grn);background:var(--grng)}
+
+/* PANELS */
+.pgrid{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-bottom:24px}
+.pn{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rl);overflow:hidden}
+.pn-h{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--bdr)}
+.pn-t{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px}
+.pn-b{padding:20px}
+
+/* FUNNEL */
+.fn{display:flex;flex-direction:column;gap:4px;padding:18px}
+.fn-s{display:flex;align-items:center;gap:12px}
+.fn-l{width:110px;font-size:11px;color:var(--t2);text-align:right;flex-shrink:0}
+.fn-bw{flex:1;height:32px;background:var(--bg5);border-radius:var(--rs);overflow:hidden}
+.fn-b{height:100%;border-radius:var(--rs);display:flex;align-items:center;padding-left:10px;font-size:11px;font-weight:600;color:var(--bg);min-width:40px;transition:width 1s cubic-bezier(.4,0,.2,1)}
+.fn-v{width:40px;font-size:12px;font-weight:700;text-align:right;flex-shrink:0}
+.fn-p{width:36px;font-size:10px;color:var(--t3);flex-shrink:0}
+
+/* TIMELINE */
+.tl{position:relative;padding-left:26px}
+.tl::before{content:'';position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--bdr)}
+.tl-i{position:relative;padding-bottom:18px}
+.tl-i:last-child{padding-bottom:0}
+.tl-d{position:absolute;left:-22px;top:2px;width:11px;height:11px;border-radius:50%;border:2px solid var(--gold);background:var(--bg)}
+.tl-d.done{background:var(--gold)}.tl-d.cur{border-color:var(--grn);background:var(--grn);box-shadow:0 0 8px rgba(61,214,140,.4)}
+.tl-c h4{font-size:12px;font-weight:600;margin-bottom:2px}
+.tl-c p{font-size:11px;color:var(--t3)}
+.tl-ip{margin-top:7px;padding:8px 12px;background:var(--bg5);border-left:3px solid var(--gold);border-radius:0 var(--rs) var(--rs) 0;font-size:11px;color:var(--t2);line-height:1.4;font-style:italic}
+
+/* TABLE */
+.dt{width:100%;border-collapse:separate;border-spacing:0}
+.dt th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3);padding:10px 14px;border-bottom:1px solid var(--bdr);font-weight:600}
+.dt td{padding:12px 14px;border-bottom:1px solid rgba(42,47,61,.4);font-size:12px}
+.dt tr:hover td{background:rgba(26,30,40,.5)}.dt tr:last-child td{border-bottom:none}
+.sb-i{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:8px;font-size:10px;font-weight:600}
+.sb-i.act{background:var(--grng);color:var(--grn)}.sb-i.dft{background:rgba(139,146,168,.12);color:var(--t2)}
+.sb-i.pau{background:rgba(245,166,35,.12);color:var(--org)}
+.sb-i .sd{width:5px;height:5px;border-radius:50%;background:currentColor}
+
+/* QUIZ BUILDER */
+.qb{display:grid;grid-template-columns:240px 1fr 240px;gap:18px;min-height:500px}
+.qb>div{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rl);padding:18px}
+.qt-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;background:var(--bg5);border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t2);font-size:11.5px;font-family:inherit;cursor:grab;transition:.2s;margin-bottom:5px}
+.qt-btn:hover{background:var(--bg4);color:var(--t1);border-color:var(--gold)}
+.qc{background:var(--bg5);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;margin-bottom:10px;transition:.2s}
+.qc:hover{border-color:var(--gold)}
+.qc-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.qc-n{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold);font-weight:700}
+.qc-tag{font-size:9px;padding:2px 7px;border-radius:5px;background:var(--blug);color:var(--blu);font-weight:600}
+.qc-txt{font-size:13px;font-weight:500;line-height:1.5;margin-bottom:10px}
+.qc-opts{display:flex;flex-direction:column;gap:4px}
+.qc-opt{display:flex;align-items:center;gap:7px;padding:5px 8px;background:rgba(42,47,61,.3);border-radius:var(--rs);font-size:11px;color:var(--t2)}
+.qc-om{width:14px;height:14px;border-radius:50%;border:2px solid var(--bdr2);flex-shrink:0}
+.sc-prev{display:flex;gap:5px;margin-top:6px}
+.sc-d{width:28px;height:28px;border-radius:50%;background:var(--bg5);border:2px solid var(--bdr);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--t3);cursor:pointer;transition:.2s}
+.sc-d:hover,.sc-d.sel{border-color:var(--gold);color:var(--gold);background:var(--goldg)}
+
+/* FORM */
+.fg{margin-bottom:14px}
+.fl{display:block;font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3);margin-bottom:5px;font-weight:600}
+.fi,.fsel,.fta{width:100%;padding:8px 12px;background:var(--bg5);border:1px solid var(--bdr);border-radius:var(--rs);color:var(--t1);font-family:inherit;font-size:12px;transition:.2s}
+.fi:focus,.fsel:focus,.fta:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--goldg)}
+.fta{resize:vertical;min-height:70px}
+
+/* GOLDEN TICKET */
+.gt{background:linear-gradient(135deg,#2a2210,#1a1a10,#2a2210);border:2px solid var(--gold);border-radius:18px;padding:24px;position:relative;overflow:hidden}
+.gt::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at 30% 30%,rgba(212,168,83,.08),transparent 60%);pointer-events:none}
+.gt h3{font-family:'Playfair Display',serif;font-size:18px;color:var(--gold);margin-bottom:4px}
+.gt-code{font-family:monospace;font-size:11px;color:var(--gold2);letter-spacing:2px;margin-bottom:12px}
+.gt-info{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gt-f label{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3)}
+.gt-f p{font-size:13px;font-weight:600;color:var(--t1);margin-top:1px}
+
+/* INTEGRATION CARDS */
+.ic{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--rl);padding:22px;display:flex;align-items:flex-start;gap:16px;transition:.2s;margin-bottom:16px}
+.ic:hover{border-color:var(--bdr2)}
+.ic-icon{width:44px;height:44px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.ic-icon.sg{background:var(--blug);color:var(--blu)}.ic-icon.tw{background:var(--redg);color:var(--red)}
+.ic-d h4{font-size:14px;font-weight:700;margin-bottom:3px}.ic-d p{font-size:11px;color:var(--t3);line-height:1.4}
+.ic-st{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.ic-s{background:var(--bg5);padding:8px 10px;border-radius:var(--rs)}
+.ic-sv{font-size:16px;font-weight:700;font-family:'Playfair Display',serif}
+.ic-sl{font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:1px}
+
+/* PROSPECT DETAIL */
+.ph{display:flex;align-items:center;gap:18px;padding:22px;background:linear-gradient(135deg,rgba(212,168,83,.04),rgba(155,122,245,.04));border-bottom:1px solid var(--bdr)}
+.p-av{width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--pur));display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--bg);flex-shrink:0}
+.p-inf h3{font-size:16px;font-weight:700}
+.p-meta{display:flex;gap:14px;margin-top:3px}
+.p-meta span{font-size:11px;color:var(--t3)}
+
+/* PROGRESS DOTS */
+.prog{display:flex;gap:6px;align-items:center;margin-top:8px}
+.prog-d{width:10px;height:10px;border-radius:50%;background:var(--bdr);transition:.2s}
+.prog-d.done{background:var(--gold)}.prog-d.cur{background:var(--grn);box-shadow:0 0 6px rgba(61,214,140,.4)}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.anim{animation:fadeIn .35s ease forwards}
+
+@media(max-width:1100px){.mrow{grid-template-columns:repeat(3,1fr)}.pgrid,.qb{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sb">
+  <div class="sb-brand"><h1>Sovereign Command</h1><span>Marketing Hub</span></div>
+  <nav class="sb-nav">
+    <div class="ns"><div class="ns-t">Overview</div>
+      <div class="ni act" onclick="showTab('dashboard',this)"><span class="ni-i">📊</span><span>Dashboard</span></div>
+    </div>
+    <div class="ns"><div class="ns-t">Marketing</div>
+      <div class="ni" onclick="showTab('campaigns',this)"><span class="ni-i">📧</span><span>Campaigns</span><span class="ni-b">2</span></div>
+      <div class="ni" onclick="showTab('quiz-builder',this)"><span class="ni-i">📝</span><span>Quiz Builder</span></div>
+      <div class="ni" onclick="showTab('prospects',this)"><span class="ni-i">👥</span><span>Prospects</span><span class="ni-b">147</span></div>
+    </div>
+    <div class="ns"><div class="ns-t">Intelligence</div>
+      <div class="ni" onclick="showTab('insights',this)"><span class="ni-i">🤖</span><span>Little Nate Insights</span></div>
+      <div class="ni" onclick="showTab('golden-tickets',this)"><span class="ni-i">🎫</span><span>Golden Tickets</span></div>
+    </div>
+    <div class="ns"><div class="ns-t">Integrations</div>
+      <div class="ni" onclick="showTab('integrations',this)"><span class="ni-i">📡</span><span>SendGrid & Twilio</span></div>
+    </div>
+    <div class="ns"><div class="ns-t">System</div>
+      <div class="ni" onclick="showTab('settings',this)"><span class="ni-i">⚙️</span><span>Settings</span></div>
+    </div>
+  </nav>
+  <div class="sb-ft"><div class="sb-av">NN</div><div><div class="sb-un">Nathan N.</div><div class="sb-ur">Admin · CSL</div></div></div>
+</aside>
+
+<div class="mn">
+  <!-- TOPBAR -->
+  <div class="tb">
+    <div style="display:flex;align-items:center;gap:12px">
+      <a href="command.html" class="btn btn-s" style="padding:6px 10px;font-size:14px;text-decoration:none" title="Back to Sovereign Command">←</a>
+      <h2 id="pg-t">Dashboard</h2><span class="bc" id="pg-bc">Sovereign Command → Overview</span>
+    </div>
+    <div class="tb-r"><button class="btn btn-s">Export</button><button class="btn btn-p" onclick="showTab('campaigns',document.querySelectorAll('.ni')[1])">+ New Campaign</button></div>
+  </div>
+
+  <!-- ══════════ DASHBOARD ══════════ -->
+  <div class="ct tab on" id="tab-dashboard">
+    <div class="mrow anim">
+      <div class="mc"><div class="mc-l">Active Prospects</div><div class="mc-v" id="dash-active">--</div></div>
+      <div class="mc"><div class="mc-l">Quizzes Completed</div><div class="mc-v" id="dash-quizzes">--</div></div>
+      <div class="mc"><div class="mc-l">Golden Tickets</div><div class="mc-v" id="dash-tickets">--</div></div>
+      <div class="mc"><div class="mc-l">Conversion Rate</div><div class="mc-v" id="dash-conversion">--</div></div>
+      <div class="mc"><div class="mc-l">Email Open Rate</div><div class="mc-v" id="dash-open">--</div></div>
+    </div>
+    <div class="pgrid anim">
+      <div class="pn">
+        <div class="pn-h"><span class="pn-t">🎯 Drip Funnel — Emotional Coherence</span><span style="font-size:10px;color:var(--t3)">Last 30 days</span></div>
+        <div class="fn" id="dashboard-funnel">
+          <div style="text-align:center;color:var(--t3);padding:30px;font-size:12px">Loading funnel data...</div>
+        </div>
+      </div>
+      <div class="pn">
+        <div class="pn-h"><span class="pn-t">⚡ Recent Activity</span></div>
+        <div class="pn-b">
+          <div class="tl" id="activity-timeline">
+            <div style="text-align:center;color:var(--t3);padding:30px;font-size:12px">Loading activity...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ CAMPAIGNS ══════════ -->
+  <div class="ct tab" id="tab-campaigns">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 style="font-size:16px">Email & SMS Campaigns</h3>
+      <button class="btn btn-p">+ Create Campaign</button>
+    </div>
+    <div class="pn anim">
+      <div class="pn-b" style="padding:0">
+        <table class="dt">
+          <thead><tr><th>Campaign</th><th>Status</th><th>Prospects</th><th>Open Rate</th><th>Quiz Complete</th><th>Conversions</th><th>Created</th><th></th></tr></thead>
+          <tbody>
+            <tr><td colspan="8" style="text-align:center;color:var(--t3);padding:40px">Loading campaigns...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Campaign Steps (dynamic) -->
+    <div class="pn anim" style="margin-top:20px" id="campaign-steps-panel">
+      <div class="pn-h"><span class="pn-t" id="campaign-steps-title">📧 Campaign Steps</span></div>
+      <div class="pn-b">
+        <div id="campaign-steps-area" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px">
+          <div style="text-align:center;color:var(--t3);padding:30px;font-size:12px;width:100%">Select a campaign above to view its steps</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ QUIZ BUILDER ══════════ -->
+  <div class="ct tab" id="tab-quiz-builder">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 style="font-size:16px">Quiz Builder</h3>
+      <div style="display:flex;gap:8px"><button class="btn btn-s">Preview</button><button class="btn btn-p">Save Quiz</button></div>
+    </div>
+    <div class="qb anim">
+      <!-- Left: Quiz List + Question Types -->
+      <div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--t2)">QUIZZES</div>
+        <div id="quiz-list" style="margin-bottom:16px">
+          <div style="font-size:11px;color:var(--t3);padding:10px">Loading quizzes...</div>
+        </div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--t2)">QUESTION TYPES</div>
+        <button class="qt-btn">📊 Scale (1-5)</button>
+        <button class="qt-btn">📊 Scale (1-10)</button>
+        <button class="qt-btn">🔘 Multiple Choice</button>
+        <button class="qt-btn">☑️ Multi-Select</button>
+        <button class="qt-btn">📋 Ranking</button>
+        <button class="qt-btn">✏️ Open Text</button>
+        <button class="qt-btn">✅ Yes / Partly / No</button>
+        <div style="margin-top:20px;font-size:11px;font-weight:700;margin-bottom:12px;color:var(--t2)">DIMENSIONS</div>
+        <div style="font-size:11px;color:var(--t3);line-height:1.8">
+          <div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--blu)"></span> Self-Awareness</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--pur)"></span> Regulation</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--grn)"></span> Relational</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--org)"></span> Purpose</div>
+          <div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:var(--gold)"></span> Integration</div>
+        </div>
+      </div>
+
+      <!-- Center: Question Canvas -->
+      <div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--gold)" id="quiz-canvas-title">Select a quiz to view questions</div>
+        <div id="quiz-canvas">
+          <div style="text-align:center;color:var(--t3);padding:40px;font-size:12px">Choose a quiz from the sidebar to view and edit its questions.</div>
+        </div>
+      </div>
+
+      <!-- Right: Properties -->
+      <div>
+        <div style="font-size:11px;font-weight:700;margin-bottom:12px;color:var(--t2)">QUIZ PROPERTIES</div>
+        <div id="quiz-properties">
+          <div style="font-size:11px;color:var(--t3);padding:10px">Select a quiz to view its properties.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ PROSPECTS ══════════ -->
+  <div class="ct tab" id="tab-prospects">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 style="font-size:16px">Prospect Tracker</h3>
+      <div style="display:flex;gap:8px">
+        <input class="fi" placeholder="Search prospects..." style="width:240px" id="prospect-search" oninput="debouncedProspectSearch()">
+        <select class="fsel" style="width:140px" id="prospect-status-filter" onchange="loadProspects(1)"><option value="">All Status</option><option value="active_journey">Active Journey</option><option value="golden_ticket_issued">Golden Ticket</option><option value="converted">Converted</option><option value="lapsed">Lapsed</option></select>
+        <button class="btn btn-s" onclick="window.open(API+'/api/prospects/export','_blank')">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="pn anim">
+      <div class="pn-b" style="padding:0">
+        <table class="dt">
+          <thead><tr><th>Prospect</th><th>Status</th><th>Progress</th><th>Campaign</th><th>Joined</th></tr></thead>
+          <tbody>
+            <tr><td colspan="5" style="text-align:center;color:var(--t3);padding:40px">Loading prospects...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="prospect-pagination" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px"></div>
+  </div>
+
+  <!-- ══════════ INSIGHTS ══════════ -->
+  <div class="ct tab" id="tab-insights">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+      <h3 style="font-size:16px">🤖 Little Nate Insights</h3>
+      <select class="fsel" style="width:220px" id="insight-prospect-select" onchange="loadInsightDetail(this.value)">
+        <option value="">Select a prospect...</option>
+      </select>
+    </div>
+
+    <div id="insight-detail-area">
+      <div class="pn anim">
+        <div style="text-align:center;color:var(--t3);padding:60px;font-size:13px">
+          <div style="font-size:28px;margin-bottom:12px">🤖</div>
+          Loading prospects with insights...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ GOLDEN TICKETS ══════════ -->
+  <div class="ct tab" id="tab-golden-tickets">
+    <h3 style="font-size:16px;margin-bottom:20px">🎫 Golden Tickets</h3>
+    <div class="mrow anim" style="grid-template-columns:repeat(4,1fr)">
+      <div class="mc"><div class="mc-l">Issued</div><div class="mc-v" id="gt-issued">--</div></div>
+      <div class="mc"><div class="mc-l">Redeemed</div><div class="mc-v" id="gt-redeemed">--</div></div>
+      <div class="mc"><div class="mc-l">Pending</div><div class="mc-v" id="gt-pending">--</div></div>
+      <div class="mc"><div class="mc-l">Expired</div><div class="mc-v" id="gt-expired">--</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px" class="anim" id="golden-ticket-cards">
+      <div style="text-align:center;color:var(--t3);padding:40px;font-size:12px;grid-column:1/-1">Loading golden tickets...</div>
+    </div>
+  </div>
+
+  <!-- ══════════ INTEGRATIONS ══════════ -->
+  <div class="ct tab" id="tab-integrations">
+    <h3 style="font-size:16px;margin-bottom:20px">📡 Integrations</h3>
+
+    <div class="ic anim">
+      <div class="ic-icon sg">📧</div>
+      <div style="flex:1">
+        <div class="ic-d"><h4>SendGrid</h4><p>Email delivery, dynamic templates, contact management, and drip automation. Connected and active.</p></div>
+        <div class="ic-st">
+          <div class="ic-s"><div class="ic-sv" style="color:var(--grn)">98.4%</div><div class="ic-sl">Delivery Rate</div></div>
+          <div class="ic-s"><div class="ic-sv">52%</div><div class="ic-sl">Open Rate</div></div>
+          <div class="ic-s"><div class="ic-sv">31%</div><div class="ic-sl">Click Rate</div></div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-s">Email Templates</button>
+          <button class="btn btn-s">Contact Lists</button>
+          <button class="btn btn-s">Delivery Logs</button>
+        </div>
+      </div>
+      <div><span class="sb-i act"><span class="sd"></span>Connected</span></div>
+    </div>
+
+    <div class="ic anim" style="animation-delay:.1s">
+      <div class="ic-icon tw">📱</div>
+      <div style="flex:1">
+        <div class="ic-d"><h4>Twilio</h4><p>SMS nudges, delivery notifications, and conversion reminders. Opt-in compliant messaging.</p></div>
+        <div class="ic-st">
+          <div class="ic-s"><div class="ic-sv" style="color:var(--grn)">96.1%</div><div class="ic-sl">Delivery Rate</div></div>
+          <div class="ic-s"><div class="ic-sv">42</div><div class="ic-sl">SMS Sent (7d)</div></div>
+          <div class="ic-s"><div class="ic-sv">34%</div><div class="ic-sl">Nudge Convert</div></div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button class="btn btn-s">SMS Templates</button>
+          <button class="btn btn-s">Phone Lists</button>
+          <button class="btn btn-s">Delivery Logs</button>
+        </div>
+      </div>
+      <div><span class="sb-i act"><span class="sd"></span>Connected</span></div>
+    </div>
+
+    <div class="pn anim" style="margin-top:20px;animation-delay:.2s">
+      <div class="pn-h"><span class="pn-t">📋 Webhook Activity</span><span style="font-size:10px;color:var(--t3)">Last 24 hours</span></div>
+      <div class="pn-b" style="padding:0">
+        <table class="dt">
+          <thead><tr><th>Time</th><th>Source</th><th>Event</th><th>Prospect</th><th>Status</th></tr></thead>
+          <tbody id="webhook-activity-body">
+            <tr><td colspan="5" style="text-align:center;color:var(--t3);padding:30px">Loading webhook activity...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ SETTINGS ══════════ -->
+  <div class="ct tab" id="tab-settings">
+    <h3 style="font-size:16px;margin-bottom:20px">⚙️ Settings</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px" class="anim">
+      <div class="pn">
+        <div class="pn-h"><span class="pn-t">🎫 Golden Ticket Configuration</span></div>
+        <div class="pn-b">
+          <div class="fg"><label class="fl">Conversion Window (Days)</label><input class="fi" type="number" value="7"></div>
+          <div class="fg"><label class="fl">Reminder Email (Day)</label><input class="fi" type="number" value="5"></div>
+          <div class="fg"><label class="fl">Final Reminder SMS (Day)</label><input class="fi" type="number" value="6"></div>
+          <div class="fg"><label class="fl">Archive Lapsed After (Days)</label><input class="fi" type="number" value="30"></div>
+          <div class="fg"><label class="fl">Free Trial Tier</label>
+            <select class="fsel"><option selected>Starter — 7 days</option><option>Explorer — 14 days</option><option>Custom</option></select>
+          </div>
+          <button class="btn btn-p" style="margin-top:8px">Save Configuration</button>
+        </div>
+      </div>
+      <div class="pn">
+        <div class="pn-h"><span class="pn-t">🔑 API Keys & Authentication</span></div>
+        <div class="pn-b">
+          <div style="padding:16px;background:var(--bg5);border-radius:var(--r);border:1px solid var(--bdr);margin-bottom:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--org);margin-bottom:6px">🔒 Security Notice</div>
+            <div style="font-size:12px;color:var(--t2);line-height:1.5">API keys and authentication credentials are managed through environment variables on the server for security. They cannot be viewed or edited from this dashboard.</div>
+          </div>
+          <div style="font-size:11px;color:var(--t3);line-height:1.8">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:var(--grn)">●</span> SendGrid — Configured</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:var(--grn)">●</span> Twilio — Configured</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="color:var(--grn)">●</span> Azure OpenAI — Configured</div>
+            <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--grn)">●</span> PostgreSQL — Connected</div>
+          </div>
+          <div style="margin-top:14px;font-size:10px;color:var(--t3)">To update credentials, modify <code style="color:var(--gold)">.env</code> on the server and restart the backend container.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// =============================================================================
+// SOVEREIGN COMMAND — API WIRING (Fully Dynamic)
+// =============================================================================
+
+const API = (window.location.hostname === 'app.sovereignsanctuary.net') ? '' : 'https://app.sovereignsanctuary.net';
+
+// Tab navigation
+function showTab(id, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.querySelectorAll('.ni').forEach(n => n.classList.remove('act'));
+  const tab = document.getElementById('tab-' + id);
+  if (tab) tab.classList.add('on');
+  if (el) el.classList.add('act');
+
+  const titles = {
+    'dashboard': ['Dashboard', 'Sovereign Command → Overview'],
+    'campaigns': ['Campaigns', 'Sovereign Command → Marketing → Campaigns'],
+    'quiz-builder': ['Quiz Builder', 'Sovereign Command → Marketing → Quiz Builder'],
+    'prospects': ['Prospects', 'Sovereign Command → Marketing → Prospects'],
+    'insights': ['Little Nate Insights', 'Sovereign Command → Intelligence → Insights'],
+    'golden-tickets': ['Golden Tickets', 'Sovereign Command → Intelligence → Golden Tickets'],
+    'integrations': ['Integrations', 'Sovereign Command → Integrations'],
+    'settings': ['Settings', 'Sovereign Command → System → Settings']
+  };
+
+  const t = titles[id] || ['Dashboard', ''];
+  document.getElementById('pg-t').textContent = t[0];
+  document.getElementById('pg-bc').textContent = t[1];
+
+  // Load data for the activated tab
+  if (id === 'dashboard') loadDashboard();
+  if (id === 'campaigns') loadCampaigns();
+  if (id === 'quiz-builder') loadQuizBuilder();
+  if (id === 'prospects') loadProspects();
+  if (id === 'insights') loadInsights();
+  if (id === 'golden-tickets') loadGoldenTickets();
+  if (id === 'integrations') { loadIntegrations(); loadWebhookActivity(); }
+}
+
+// Helper: safe fetch with fallback
+async function apiFetch(path) {
+  try {
+    const resp = await fetch(`${API}${path}`);
+    if (!resp.ok) throw new Error(`API ${resp.status}`);
+    return await resp.json();
+  } catch (e) {
+    console.warn(`API error ${path}:`, e);
+    return null;
+  }
+}
+
+function fmtDate(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtTime(d) {
+  if (!d) return '—';
+  const dt = new Date(d);
+  return dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function timeAgo(d) {
+  if (!d) return '';
+  const diff = Date.now() - new Date(d).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins !== 1 ? 's' : ''} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs !== 1 ? 's' : ''} ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} day${days !== 1 ? 's' : ''} ago`;
+}
+
+function statusBadge(status) {
+  const map = { active: 'act', draft: 'dft', paused: 'pau', archived: 'dft' };
+  const cls = map[status] || 'dft';
+  return `<span class="sb-i ${cls}"><span class="sd"></span>${status.charAt(0).toUpperCase() + status.slice(1)}</span>`;
+}
+
+function initials(first, last, email) {
+  if (first && last) return (first[0] + last[0]).toUpperCase();
+  if (first) return first.slice(0, 2).toUpperCase();
+  if (email) return email.slice(0, 2).toUpperCase();
+  return '??';
+}
+
+// =============================================================================
+// DASHBOARD TAB
+// =============================================================================
+
+async function loadDashboard() {
+  const data = await apiFetch('/api/analytics/overview');
+  if (!data) return;
+
+  // Metric cards (using IDs now)
+  const el = (id) => document.getElementById(id);
+  if (el('dash-active')) el('dash-active').textContent = data.active_prospects || 0;
+  if (el('dash-quizzes')) el('dash-quizzes').textContent = data.total_quizzes_completed || 0;
+  if (el('dash-tickets')) el('dash-tickets').textContent = data.tickets_issued || 0;
+  if (el('dash-conversion')) el('dash-conversion').textContent = (data.conversion_rate || 0) + '%';
+  if (el('dash-open')) el('dash-open').textContent = (data.open_rate || 0) + '%';
+
+  // Update sidebar badges
+  document.querySelectorAll('.ni').forEach(ni => {
+    const text = ni.textContent;
+    const badge = ni.querySelector('.ni-b');
+    if (badge && text.includes('Prospects')) badge.textContent = data.total_prospects || 0;
+    if (badge && text.includes('Campaigns')) badge.textContent = data.active_campaigns || 0;
+  });
+
+  // Funnel
+  const breakdown = data.prospect_status_breakdown || {};
+  const total = data.total_prospects || 1;
+  const funnelData = [
+    { label: 'Subscribed', count: total, color: 'var(--blu),var(--pur)' },
+    { label: 'Active Journey', count: breakdown.active_journey || 0, color: 'var(--blu),var(--pur)' },
+    { label: 'Quiz Complete', count: breakdown.quiz_complete || 0, color: 'var(--blu),var(--pur)' },
+    { label: 'Ticket Issued', count: breakdown.golden_ticket_issued || 0, color: 'var(--gold),var(--org)' },
+    { label: 'Redeemed', count: breakdown.redeemed || 0, color: 'var(--gold),var(--org)' },
+    { label: 'Converted', count: breakdown.converted || 0, color: 'var(--grn),#2cb874' },
+  ];
+
+  const fnEl = document.getElementById('dashboard-funnel');
+  if (fnEl) {
+    fnEl.innerHTML = funnelData.map(f => {
+      const pct = total > 0 ? Math.round(f.count / total * 100) : 0;
+      return `<div class="fn-s">
+        <span class="fn-l">${f.label}</span>
+        <div class="fn-bw"><div class="fn-b" style="width:${Math.max(pct, 2)}%;background:linear-gradient(90deg,${f.color})">${f.count}</div></div>
+        <span class="fn-v">${f.count}</span>
+        <span class="fn-p">${pct}%</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Activity feed
+  loadActivityFeed();
+}
+
+async function loadActivityFeed() {
+  const activities = await apiFetch('/api/analytics/activity?limit=6');
+  const tlEl = document.getElementById('activity-timeline');
+  if (!tlEl) return;
+
+  if (!activities || !activities.length) {
+    tlEl.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px;font-size:12px">No recent activity yet.</div>';
+    return;
+  }
+
+  tlEl.innerHTML = activities.map((a, i) => {
+    const icons = {
+      quiz_completed: 'done',
+      ticket_redeemed: 'cur',
+      ticket_issued: 'done',
+      new_prospect: ''
+    };
+    const dotCls = icons[a.event_type] || '';
+    const titles = {
+      quiz_completed: `${(a.actor || '').trim()} completed ${a.detail || 'a quiz'}`,
+      ticket_redeemed: `${(a.actor || '').trim()} redeemed Golden Ticket 🎫`,
+      ticket_issued: `Golden Ticket issued to ${(a.actor || '').trim()}`,
+      new_prospect: `New prospect: ${(a.actor || '').trim()} (${a.detail || 'unknown source'})`
+    };
+    return `<div class="tl-i">
+      <div class="tl-d ${dotCls}"></div>
+      <div class="tl-c">
+        <h4>${titles[a.event_type] || a.event_type}</h4>
+        <p>${timeAgo(a.event_time)}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// =============================================================================
+// CAMPAIGNS TAB
+// =============================================================================
+
+let _campaignCache = [];
+
+async function loadCampaigns() {
+  const campaigns = await apiFetch('/api/campaigns');
+  if (!campaigns) return;
+  _campaignCache = campaigns;
+
+  const tbody = document.querySelector('#tab-campaigns .dt tbody');
+  if (!tbody) return;
+
+  if (campaigns.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:40px">No campaigns yet. Create your first campaign to get started.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = campaigns.map(c => `
+    <tr style="cursor:pointer" onclick="loadCampaignSteps('${c.id}', '${c.name.replace(/'/g, "\\'")}')">
+      <td><strong>${c.name}</strong><br><span style="font-size:10px;color:var(--t3)">${c.conversion_window_days || 7}-day window</span></td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${c.total_prospects || 0}</td>
+      <td>—</td>
+      <td>${c.total_quiz_responses || 0}</td>
+      <td>${c.converted_prospects || 0}</td>
+      <td style="color:var(--t3)">${fmtDate(c.created_at)}</td>
+      <td>
+        <button class="btn btn-g" onclick="event.stopPropagation(); campaignAction('${c.id}', '${c.status}')">⋯</button>
+      </td>
+    </tr>
+  `).join('');
+
+  // Auto-load steps for the first campaign
+  if (campaigns.length > 0) {
+    loadCampaignSteps(campaigns[0].id, campaigns[0].name);
+  }
+}
+
+async function loadCampaignSteps(campaignId, campaignName) {
+  const titleEl = document.getElementById('campaign-steps-title');
+  const area = document.getElementById('campaign-steps-area');
+  if (!area) return;
+
+  if (titleEl) titleEl.textContent = `📧 Campaign Steps — ${campaignName || 'Loading...'}`;
+  area.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px;font-size:12px;width:100%">Loading steps...</div>';
+
+  const steps = await apiFetch(`/api/campaigns/${campaignId}/steps`);
+  if (!steps || steps.length === 0) {
+    area.innerHTML = '<div style="text-align:center;color:var(--t3);padding:30px;font-size:12px;width:100%">No steps configured for this campaign yet.</div>';
+    return;
+  }
+
+  const cards = steps.map((s, i) => {
+    const isLast = i === steps.length - 1;
+    const border = isLast ? '2px solid var(--gold)' : '1px solid var(--bdr)';
+    const channels = [];
+    if (s.email_template_id) channels.push('📧 Email');
+    if (s.quiz_id) channels.push('📝 Quiz');
+    if (s.sms_template) channels.push('📱 SMS');
+    if (isLast) channels.push('🎫 Ticket');
+    const delayText = s.delay_hours === 0 ? 'Immediate' : `${s.delay_hours} hours`;
+
+    return `<div style="min-width:200px;background:var(--bg5);border:${border};border-radius:var(--r);padding:14px;flex-shrink:0">
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold);margin-bottom:6px">Step ${s.step_order} · Day ${s.step_order}${isLast ? ' 🎫' : ''}</div>
+      <div style="font-size:12px;font-weight:600;margin-bottom:4px">${s.name || s.quiz_title || 'Step ' + s.step_order}</div>
+      <div style="font-size:10px;color:var(--t3);margin-bottom:8px">${channels.join(' + ') || 'No channels'}</div>
+      <div style="font-size:10px;color:var(--t3)">Delay: ${delayText}</div>
+    </div>`;
+  });
+
+  // Interleave arrows
+  const result = [];
+  cards.forEach((card, i) => {
+    result.push(card);
+    if (i < cards.length - 1) {
+      result.push('<div style="display:flex;align-items:center;color:var(--t3);font-size:18px;flex-shrink:0">→</div>');
+    }
+  });
+
+  area.innerHTML = result.join('');
+}
+
+async function campaignAction(id, status) {
+  const action = status === 'draft' ? 'launch' : status === 'active' ? 'pause' : 'launch';
+  if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this campaign?`)) return;
+  await fetch(`${API}/api/campaigns/${id}/${action}`, { method: 'POST' });
+  loadCampaigns();
+}
+
+// =============================================================================
+// QUIZ BUILDER TAB
+// =============================================================================
+
+let _currentQuizId = null;
+
+async function loadQuizBuilder() {
+  const quizzes = await apiFetch('/api/quizzes');
+  const listEl = document.getElementById('quiz-list');
+  if (!listEl) return;
+
+  if (!quizzes || quizzes.length === 0) {
+    listEl.innerHTML = '<div style="font-size:11px;color:var(--t3);padding:10px">No quizzes found.</div>';
+    return;
+  }
+
+  listEl.innerHTML = quizzes.map(q => {
+    const active = q.id === _currentQuizId;
+    return `<div style="padding:8px 10px;border-radius:var(--rs);cursor:pointer;font-size:12px;margin-bottom:4px;transition:.2s;
+      background:${active ? 'var(--goldg)' : 'var(--bg5)'};
+      border:1px solid ${active ? 'var(--gold)' : 'var(--bdr)'};
+      color:${active ? 'var(--gold)' : 'var(--t2)'};"
+      onclick="loadQuizDetail('${q.id}')" onmouseover="if(!${active})this.style.borderColor='var(--bdr2)'" onmouseout="if(!${active})this.style.borderColor='var(--bdr)'">
+      <div style="font-weight:600">${q.title}</div>
+      <div style="font-size:10px;color:var(--t3);margin-top:2px">${q.question_count || 0} questions · ${q.dimension || 'General'}</div>
+    </div>`;
+  }).join('');
+
+  // Auto-select first quiz if none selected
+  if (!_currentQuizId && quizzes.length > 0) {
+    loadQuizDetail(quizzes[0].id);
+  }
+}
+
+async function loadQuizDetail(quizId) {
+  _currentQuizId = quizId;
+  const quiz = await apiFetch(`/api/quizzes/${quizId}`);
+  if (!quiz) return;
+
+  // Re-render sidebar to highlight active
+  loadQuizBuilder();
+
+  // Canvas
+  const canvas = document.getElementById('quiz-canvas');
+  const canvasTitle = document.getElementById('quiz-canvas-title');
+  if (canvasTitle) canvasTitle.textContent = `${quiz.title || 'Quiz'}`.toUpperCase();
+
+  if (!canvas) return;
+
+  const questions = quiz.questions || [];
+  if (questions.length === 0) {
+    canvas.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px;font-size:12px">No questions in this quiz yet.</div>';
+  } else {
+    canvas.innerHTML = questions.map((q, i) => {
+      const typeTag = (q.question_type || 'unknown').replace(/_/g, ' ');
+      let optionsHtml = '';
+      const opts = q.options;
+
+      if (q.question_type === 'scale') {
+        const max = (opts && opts.max) || 5;
+        const dots = Array.from({length: max}, (_, j) =>
+          `<div class="sc-d">${j + 1}</div>`
+        ).join('');
+        optionsHtml = `<div class="sc-prev">${dots}</div>`;
+        if (opts && opts.low_label) {
+          optionsHtml += `<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-top:4px"><span>${opts.low_label}</span><span>${opts.high_label || ''}</span></div>`;
+        }
+      } else if (q.question_type === 'multiple_choice' || q.question_type === 'multi_select' || q.question_type === 'yes_partly_no') {
+        const choices = (opts && opts.choices) || (q.question_type === 'yes_partly_no' ? ['Yes', 'Partly', 'No'] : []);
+        optionsHtml = '<div class="qc-opts">' + choices.map(c =>
+          `<div class="qc-opt"><div class="qc-om"></div>${c}</div>`
+        ).join('') + '</div>';
+      } else if (q.question_type === 'open_text') {
+        optionsHtml = '<div style="padding:8px;background:rgba(42,47,61,.2);border-radius:var(--rs);font-size:10px;color:var(--t3)">✏️ Free text response</div>';
+      } else if (q.question_type === 'ranking') {
+        const items = (opts && opts.choices) || [];
+        optionsHtml = '<div class="qc-opts">' + items.map((c, j) =>
+          `<div class="qc-opt"><span style="color:var(--gold);font-weight:700;font-size:10px;min-width:16px">${j + 1}.</span>${c}</div>`
+        ).join('') + '</div>';
+      }
+
+      const followUp = (opts && opts.follow_up) ? `<div style="margin-top:8px;padding:8px;background:rgba(42,47,61,.2);border-radius:var(--rs);font-size:10px;color:var(--t3)">✏️ Follow-up: "${opts.follow_up}"</div>` : '';
+
+      return `<div class="qc">
+        <div class="qc-h"><span class="qc-n">Question ${i + 1}</span><span class="qc-tag">${typeTag}</span></div>
+        <div class="qc-txt">${q.question_text}</div>
+        ${optionsHtml}
+        ${followUp}
+      </div>`;
+    }).join('');
+  }
+
+  // Properties panel
+  const propsEl = document.getElementById('quiz-properties');
+  if (propsEl) {
+    propsEl.innerHTML = `
+      <div class="fg"><label class="fl">Quiz Title</label><input class="fi" value="${quiz.title || ''}" readonly></div>
+      <div class="fg"><label class="fl">Theme</label><input class="fi" value="${quiz.theme || ''}" readonly></div>
+      <div class="fg"><label class="fl">Description</label><textarea class="fta" rows="3" readonly>${quiz.description || ''}</textarea></div>
+      <div class="fg"><label class="fl">Dimension</label><input class="fi" value="${quiz.dimension || '—'}" readonly></div>
+      <div class="fg"><label class="fl">Quiz Order</label><input class="fi" value="${quiz.quiz_order || '—'} of 5${quiz.is_final ? ' (Final)' : ''}" readonly></div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--bdr)">
+        <div style="font-size:11px;font-weight:700;margin-bottom:10px;color:var(--t2)">STATS</div>
+        <div style="font-size:12px;color:var(--t1)">${questions.length} questions</div>
+        <div style="font-size:10px;color:var(--t3)">ID: ${quiz.id}</div>
+      </div>`;
+  }
+}
+
+// =============================================================================
+// PROSPECTS TAB (with search + filter)
+// =============================================================================
+
+let prospectPage = 1;
+let _prospectSearchTimer = null;
+
+function debouncedProspectSearch() {
+  clearTimeout(_prospectSearchTimer);
+  _prospectSearchTimer = setTimeout(() => loadProspects(1), 350);
+}
+
+async function loadProspects(page = 1) {
+  prospectPage = page;
+  const search = (document.getElementById('prospect-search') || {}).value || '';
+  const status = (document.getElementById('prospect-status-filter') || {}).value || '';
+
+  let url = `/api/prospects?page=${page}&per_page=20`;
+  if (search.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
+  if (status) url += `&status=${encodeURIComponent(status)}`;
+
+  const data = await apiFetch(url);
+  if (!data) return;
+
+  const tbody = document.querySelector('#tab-prospects .dt tbody');
+  if (!tbody) return;
+
+  if (!data.prospects || data.prospects.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--t3);padding:40px">No prospects found.</td></tr>';
+    document.getElementById('prospect-pagination').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = data.prospects.map(p => {
+    const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email.split('@')[0];
+    const progress = p.quizzes_completed || 0;
+    const dots = Array.from({length: 5}, (_, i) =>
+      `<div class="prog-d ${i < progress ? 'done' : ''} ${i === progress ? 'cur' : ''}"></div>`
+    ).join('');
+
+    const statusColors = {
+      active_journey: 'var(--blu)',
+      quiz_complete: 'var(--gold)',
+      golden_ticket_issued: 'var(--org)',
+      redeemed: 'var(--grn)',
+      converted: 'var(--grn)',
+      lapsed: 'var(--red)',
+      subscribed: 'var(--t2)',
+      unsubscribed: 'var(--t3)'
+    };
+    const sColor = statusColors[p.status] || 'var(--t2)';
+
+    return `<tr onclick="viewProspect('${p.id}')" style="cursor:pointer">
+      <td><strong>${name}</strong><br><span style="font-size:10px;color:var(--t3)">${p.email}</span></td>
+      <td><span style="color:${sColor};font-weight:600;font-size:11px">${(p.status || '').replace(/_/g, ' ')}</span></td>
+      <td><div class="prog">${dots}</div></td>
+      <td>${p.campaign_name || '—'}</td>
+      <td style="color:var(--t3)">${fmtDate(p.created_at)}</td>
+    </tr>`;
+  }).join('');
+
+  // Pagination
+  const pag = document.getElementById('prospect-pagination');
+  if (pag) {
+    pag.innerHTML = `
+      <span style="font-size:12px;color:var(--t3)">Page ${data.page} of ${data.pages} (${data.total} total)</span>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-s" ${data.page <= 1 ? 'disabled' : ''} onclick="loadProspects(${data.page - 1})">Prev</button>
+        <button class="btn btn-s" ${data.page >= data.pages ? 'disabled' : ''} onclick="loadProspects(${data.page + 1})">Next</button>
+      </div>`;
+  }
+}
+
+async function viewProspect(id) {
+  const data = await apiFetch(`/api/prospects/${id}`);
+  if (!data) return;
+  const name = [data.first_name, data.last_name].filter(Boolean).join(' ') || data.email;
+  const parts = [
+    `Name: ${name}`,
+    `Email: ${data.email}`,
+    `Status: ${(data.status || '').replace(/_/g, ' ')}`,
+    `Quizzes: ${data.story?.quizzes_completed || 0}/5`,
+    data.assessment ? 'Assessment: Generated' : '',
+    data.insights?.length ? `Insights: ${data.insights.length}` : ''
+  ].filter(Boolean);
+  alert(parts.join('\n'));
+}
+
+// =============================================================================
+// INSIGHTS TAB
+// =============================================================================
+
+async function loadInsights() {
+  const sel = document.getElementById('insight-prospect-select');
+  const area = document.getElementById('insight-detail-area');
+
+  // Fetch prospects that have at least some activity
+  const data = await apiFetch('/api/prospects?per_page=100');
+  if (!data || !data.prospects) {
+    if (area) area.innerHTML = '<div class="pn"><div style="text-align:center;color:var(--t3);padding:60px;font-size:13px">No prospects found.</div></div>';
+    return;
+  }
+
+  // Populate the dropdown with prospects who have quiz completions
+  const withActivity = data.prospects.filter(p => (p.quizzes_completed || 0) > 0);
+  if (sel) {
+    sel.innerHTML = '<option value="">Select a prospect...</option>' +
+      withActivity.map(p => {
+        const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email;
+        return `<option value="${p.id}">${name} (${p.quizzes_completed || 0}/5 quizzes)</option>`;
+      }).join('');
+
+    // Also add remaining prospects
+    const withoutActivity = data.prospects.filter(p => !(p.quizzes_completed > 0));
+    if (withoutActivity.length > 0) {
+      sel.innerHTML += '<option disabled>────────────</option>' +
+        withoutActivity.map(p => {
+          const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email;
+          return `<option value="${p.id}">${name} (no quizzes)</option>`;
+        }).join('');
+    }
+  }
+
+  // Auto-load the first one with activity
+  if (withActivity.length > 0) {
+    if (sel) sel.value = withActivity[0].id;
+    loadInsightDetail(withActivity[0].id);
+  } else if (data.prospects.length > 0) {
+    if (sel) sel.value = data.prospects[0].id;
+    loadInsightDetail(data.prospects[0].id);
+  } else {
+    if (area) area.innerHTML = '<div class="pn"><div style="text-align:center;color:var(--t3);padding:60px;font-size:13px"><div style="font-size:28px;margin-bottom:12px">🤖</div>No prospects with insights yet.<br>Insights appear after prospects complete quizzes.</div></div>';
+  }
+}
+
+async function loadInsightDetail(prospectId) {
+  if (!prospectId) return;
+  const area = document.getElementById('insight-detail-area');
+  if (!area) return;
+
+  area.innerHTML = '<div class="pn"><div style="text-align:center;color:var(--t3);padding:60px;font-size:13px">Loading insights...</div></div>';
+
+  const profile = await apiFetch(`/api/prospects/${prospectId}`);
+  if (!profile) {
+    area.innerHTML = '<div class="pn"><div style="text-align:center;color:var(--t3);padding:60px;font-size:13px">Could not load prospect data.</div></div>';
+    return;
+  }
+
+  const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.email;
+  const ini = initials(profile.first_name, profile.last_name, profile.email);
+  const quizzes = profile.story?.quizzes_completed || 0;
+  const insights = profile.insights || [];
+  const story = profile.story;
+
+  // Progress dots
+  const dots = Array.from({length: 5}, (_, i) =>
+    `<div class="prog-d ${i < quizzes ? 'done' : ''} ${i === quizzes ? 'cur' : ''}"></div>`
+  ).join('');
+
+  // Insight timeline
+  let timelineHtml = '';
+  if (insights.length === 0) {
+    timelineHtml = '<div style="text-align:center;color:var(--t3);padding:30px;font-size:12px">No insights generated yet for this prospect.</div>';
+  } else {
+    timelineHtml = '<div class="tl">' + insights.map((ins, i) => {
+      const isCurrent = i === insights.length - 1;
+      const dotCls = isCurrent ? 'cur' : 'done';
+      const strengths = ins.strengths || [];
+      const growth = ins.growth_areas || [];
+
+      return `<div class="tl-i">
+        <div class="tl-d ${dotCls}"></div>
+        <div class="tl-c">
+          <h4>${ins.quiz_title || 'Quiz'} Insight</h4>
+          <p>${fmtDate(ins.created_at)}</p>
+          ${ins.insight_text ? `<div class="tl-ip">"${ins.insight_text}"</div>` : ''}
+          ${strengths.length > 0 ? `<div style="margin-top:6px;font-size:10px"><span style="color:var(--grn)">Strength:</span> <span style="color:var(--t2)">${strengths.join(', ')}</span></div>` : ''}
+          ${growth.length > 0 ? `<div style="font-size:10px"><span style="color:var(--org)">Growth:</span> <span style="color:var(--t2)">${growth.join(', ')}</span></div>` : ''}
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Cumulative narrative
+  let narrativeHtml = '';
+  if (story && story.cumulative_narrative) {
+    narrativeHtml = `<div style="margin-top:20px;padding:16px;background:var(--bg5);border-radius:var(--r);border:1px solid var(--bdr)">
+      <div style="font-size:11px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px">Cumulative Narrative</div>
+      <div style="font-size:12px;color:var(--t2);line-height:1.6">${story.cumulative_narrative}</div>
+    </div>`;
+  }
+
+  // Render
+  area.innerHTML = `<div class="pn anim">
+    <div class="ph">
+      <div class="p-av">${ini}</div>
+      <div>
+        <div class="p-inf"><h3>${name}</h3></div>
+        <div class="p-meta">
+          <span>📧 ${profile.email}</span>
+          <span>📅 Joined ${fmtDate(profile.created_at)}</span>
+          <span>📊 Quiz ${quizzes} of 5</span>
+        </div>
+        <div class="prog" style="margin-top:6px">${dots}</div>
+      </div>
+      ${!profile.golden_ticket_token ? `<div style="margin-left:auto"><button class="btn btn-p" onclick="issueTicketFromInsights('${profile.id}')">Issue Golden Ticket</button></div>` : `<div style="margin-left:auto"><span class="sb-i act"><span class="sd"></span>Ticket Issued</span></div>`}
+    </div>
+    <div class="pn-b">
+      <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px">Little Nate's Progressive Story</div>
+      ${timelineHtml}
+      ${narrativeHtml}
+    </div>
+  </div>`;
+}
+
+async function issueTicketFromInsights(prospectId) {
+  if (!confirm('Issue a Golden Ticket to this prospect?')) return;
+  const resp = await fetch(`${API}/api/golden-ticket/${prospectId}/issue`, { method: 'POST' });
+  if (resp.ok) {
+    alert('Golden Ticket issued!');
+    loadInsightDetail(prospectId);
+  } else {
+    const err = await resp.json().catch(() => ({}));
+    alert('Failed: ' + (err.detail || 'Unknown error'));
+  }
+}
+
+// =============================================================================
+// GOLDEN TICKETS TAB
+// =============================================================================
+
+async function loadGoldenTickets() {
+  // Load summary counts from analytics
+  const overview = await apiFetch('/api/analytics/overview');
+  if (overview) {
+    const el = (id) => document.getElementById(id);
+    const issued = overview.tickets_issued || 0;
+    const redeemed = overview.tickets_redeemed || 0;
+    const pending = overview.tickets_pending || 0;
+    const expired = overview.lapsed || 0;
+    if (el('gt-issued')) el('gt-issued').textContent = issued;
+    if (el('gt-redeemed')) el('gt-redeemed').textContent = redeemed;
+    if (el('gt-pending')) el('gt-pending').textContent = pending;
+    if (el('gt-expired')) el('gt-expired').textContent = expired;
+  }
+
+  // Load ticket cards
+  const data = await apiFetch('/api/golden-ticket/list?per_page=20');
+  const ticketArea = document.getElementById('golden-ticket-cards');
+  if (!ticketArea) return;
+
+  if (!data || !data.tickets || data.tickets.length === 0) {
+    ticketArea.innerHTML = '<div style="text-align:center;color:var(--t3);padding:40px;font-size:13px;grid-column:1/-1"><div style="font-size:28px;margin-bottom:12px">🎫</div>No golden tickets issued yet.</div>';
+    return;
+  }
+
+  ticketArea.innerHTML = data.tickets.map(t => {
+    const redeemed = !!t.golden_ticket_redeemed_at;
+    const expired = !redeemed && t.golden_ticket_expires_at && new Date(t.golden_ticket_expires_at) < new Date();
+    const borderColor = redeemed ? 'var(--grn)' : expired ? 'var(--red)' : 'var(--gold)';
+    const statusText = redeemed ? 'Redeemed' : expired ? 'Expired' : 'Pending';
+    const statusColor = redeemed ? 'var(--grn)' : expired ? 'var(--red)' : 'var(--org)';
+    const name = [t.first_name, t.last_name].filter(Boolean).join(' ') || t.email;
+
+    let daysLeft = '';
+    if (!redeemed && !expired && t.golden_ticket_expires_at) {
+      const d = Math.ceil((new Date(t.golden_ticket_expires_at) - new Date()) / 86400000);
+      daysLeft = ` · ${d} day${d !== 1 ? 's' : ''} left`;
+    }
+
+    return `<div class="gt" style="border-color:${borderColor};margin-bottom:16px">
+      <h3 style="color:${borderColor}">🎫 Golden Ticket — ${statusText}</h3>
+      <div class="gt-code" style="color:${borderColor}">${(t.golden_ticket_token || '').slice(0, 20)}...</div>
+      <div class="gt-info">
+        <div class="gt-f"><label>${redeemed ? 'Client' : 'Prospect'}</label><p>${name}</p></div>
+        <div class="gt-f"><label>Status</label><p style="color:${statusColor}">${statusText}${daysLeft}</p></div>
+        <div class="gt-f"><label>Issued</label><p>${fmtDate(t.golden_ticket_issued_at)}</p></div>
+        <div class="gt-f"><label>${redeemed ? 'Redeemed' : 'Expires'}</label><p>${fmtDate(redeemed ? t.golden_ticket_redeemed_at : t.golden_ticket_expires_at)}</p></div>
+        ${t.has_assessment ? '<div class="gt-f"><label>Assessment</label><p style="color:var(--grn)">✓ Generated</p></div>' : ''}
+      </div>
+      ${!redeemed && !expired ? `<div style="margin-top:14px"><button class="btn btn-p" onclick="sendTicketReminder('${t.id}')">Send Reminder</button></div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function sendTicketReminder(prospectId) {
+  await fetch(`${API}/api/golden-ticket/${prospectId}/remind`, { method: 'POST' });
+  alert('Reminder queued.');
+}
+
+// =============================================================================
+// INTEGRATIONS TAB
+// =============================================================================
+
+async function loadIntegrations() {
+  const [sg, tw] = await Promise.all([
+    apiFetch('/api/analytics/integrations/sendgrid/stats?days=30'),
+    apiFetch('/api/analytics/integrations/twilio/stats?days=30')
+  ]);
+
+  // SendGrid stats
+  if (sg) {
+    const sgCards = document.querySelectorAll('#tab-integrations .ic')[0]?.querySelectorAll('.ic-sv');
+    if (sgCards && sgCards.length >= 3) {
+      const deliveryRate = sg.total > 0 ? ((sg.delivered / sg.total) * 100).toFixed(1) : '0';
+      const openRate = sg.total > 0 ? ((sg.opened / sg.total) * 100).toFixed(0) : '0';
+      const clickRate = sg.total > 0 ? ((sg.clicked / sg.total) * 100).toFixed(0) : '0';
+      sgCards[0].textContent = deliveryRate + '%';
+      sgCards[1].textContent = openRate + '%';
+      sgCards[2].textContent = clickRate + '%';
+    }
+  }
+
+  // Twilio stats
+  if (tw) {
+    const twCards = document.querySelectorAll('#tab-integrations .ic')[1]?.querySelectorAll('.ic-sv');
+    if (twCards && twCards.length >= 3) {
+      const deliveryRate = tw.total > 0 ? ((tw.delivered / tw.total) * 100).toFixed(1) : '0';
+      twCards[0].textContent = deliveryRate + '%';
+      twCards[1].textContent = tw.total || 0;
+      twCards[2].textContent = '—';
+    }
+  }
+}
+
+async function loadWebhookActivity() {
+  const activities = await apiFetch('/api/analytics/activity?limit=15');
+  const tbody = document.getElementById('webhook-activity-body');
+  if (!tbody) return;
+
+  if (!activities || activities.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--t3);padding:30px">No recent webhook activity.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = activities.map(a => {
+    const sourceMap = {
+      quiz_completed: 'Quiz API',
+      ticket_redeemed: 'Golden Ticket',
+      ticket_issued: 'Golden Ticket',
+      new_prospect: 'Subscriber'
+    };
+    const eventMap = {
+      quiz_completed: 'quiz.completed',
+      ticket_redeemed: 'ticket.redeemed',
+      ticket_issued: 'ticket.issued',
+      new_prospect: 'prospect.subscribed'
+    };
+    const statusMap = {
+      quiz_completed: '<span style="color:var(--grn)">✓ Processed</span>',
+      ticket_redeemed: '<span style="color:var(--grn)">✓ Converted</span>',
+      ticket_issued: '<span style="color:var(--grn)">✓ Issued</span>',
+      new_prospect: '<span style="color:var(--grn)">✓ Added</span>'
+    };
+
+    return `<tr>
+      <td style="color:var(--t3)">${fmtTime(a.event_time)}</td>
+      <td>${sourceMap[a.event_type] || a.event_type}</td>
+      <td>${eventMap[a.event_type] || a.event_type}</td>
+      <td>${(a.actor || '').trim() || a.actor_email || '—'}</td>
+      <td>${statusMap[a.event_type] || '<span style="color:var(--t3)">—</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// =============================================================================
+// ACTIVITY POLLING
+// =============================================================================
+
+setInterval(() => {
+  const dashTab = document.getElementById('tab-dashboard');
+  if (dashTab && dashTab.classList.contains('on')) {
+    loadActivityFeed();
+  }
+}, 30000);
+
+// =============================================================================
+// INITIAL LOAD
+// =============================================================================
+
+loadDashboard();
+</script>
+</body>
+</html>

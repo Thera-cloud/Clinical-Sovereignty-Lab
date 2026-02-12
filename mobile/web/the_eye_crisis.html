@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Crisis Watchlist</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --orange-dim: rgba(255, 149, 0, 0.1);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        
+        .main-content { padding: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-body { padding: 20px; }
+        
+        .alert-count { font-size: 11px; color: var(--red-critical); }
+        
+        .crisis-item { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--bg-elevated); border: 1px solid var(--red-dim); border-radius: 10px; margin-bottom: 12px; }
+        .crisis-item.warning { background: var(--orange-dim); border-color: rgba(255, 149, 0, 0.2); }
+        
+        .crisis-severity { width: 12px; height: 12px; border-radius: 50%; }
+        .crisis-severity.critical { background: var(--red-critical); box-shadow: 0 0 10px var(--red-critical); }
+        .crisis-severity.warning { background: var(--orange); box-shadow: 0 0 10px var(--orange); }
+        
+        .crisis-info { flex: 1; }
+        .crisis-user { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+        .crisis-trigger { font-size: 12px; color: var(--red-critical); margin-bottom: 4px; }
+        .crisis-item.warning .crisis-trigger { color: var(--orange); }
+        .crisis-time { font-size: 10px; color: var(--text-secondary); }
+        
+        .crisis-actions { display: flex; gap: 8px; }
+        .crisis-btn { padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; }
+        .crisis-btn.primary { background: var(--red-critical); color: white; }
+        .crisis-btn.secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👁️</div>
+            <div>
+                <div class="logo-text">THE EYE</div>
+                <div class="page-title">Crisis Watchlist</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">← Back to The Eye</a>
+    </header>
+
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="window.location.href='the_eye.html'" style="cursor: pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="windation.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_monitor.html'">Live Monitor</div>
+        <div class="sub-nav-item active">Crisis</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_community.html'">Community</div>
+    </nav>
+
+    <main class="main-content">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">🚨 Active Crisis Alerts</div>
+                <span class="alert-count" id="alert-count">0 active alerts</span>
+            </div>
+            <div class="card-body">
+                <div id="crisis-list">
+                    <div class="loading">Loading crisis alerts...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        if (!sessionStorage.getItem("username")) {
+            window.location.href = "index.html";
+        }
+
+        const profile = JSON.parse(sessionStorage.getem("profile") || "{}");
+        if (profile.role !== "ADMIN") {
+            alert("Admin access required");
+            window.location.href = "command.html";
+        }
+
+        const ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+
+        ws.onopen = function() {
+            console.log("Connected to bridge server");
+            ws.send(JSON.stringify({type: "admin_get_crisis_log"}));
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("Received:", data);
+            
+            if (data.type === "crisis_log") {
+                displayCrisis(data.events || []);
+            }
+        };
+
+        function displayCrisis(events) {
+            if (events.length === 0) {
+                document.getElementById("alert-count").textContent = "No active alerts";
+                document.getElementById("crisis-list").innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        ✅ No crisis alerts at this time
+                    </div>
+                `;
+                return;
+            }
+
+            document.getElementById("alert-count").textContent = `${events.length} active alert${events.length > 1 ? 's' : ''}`;
+            
+            document.getElementById("crisis-list").innerHTML = events.map(event => `
+                <div class="crisis-item ${event.risk_level === 'CRITICAL' ? '' : 'warning'}">
+                    <div class="crisis-severity ${event.risk_level === 'CRITICAL' ? 'critical' : 'warning'}"></div>
+                    <div class="crisis-info">
+                        <div class="crisis-user">${event.user_name || 'Unknown User'}</div>
+                        <div class="crisis-trigger">⚠️ ${event.keywords ? `Keywords: "${event.keywords.join('", "')}"` : event.reason || 'Alert triggered'}</div>
+                        <div class="crisis-time">${new Date(event.timestamp).toLocaleString()} • ${event.session_id || 'No sessiv>
+                    </div>
+                    <div class="crisis-actions">
+                        ${!event.resolved ? `
+                            <button class="crisis-btn primary" onclick="resolveCrisis('${event.timestamp}', '${event.user_id}')">
+                                Alert Coach
+                            </button>
+                            <button class="crisis-btn secondary" onclick="resolveCrisis('${event.timestamp}', '${event.user_id}')">
+                                Resolve
+                            </button>
+                        ` : `
+                            <span style="color: var(--green); font-size: 11px;">✓ Resolved</span>
+                        `}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function resolveCrisis(timestamp, userId) {
+            if (confirm("Mark this crisis as resolved?")) {
+                ws.send(JSON.stringify({
+                    type: "admin_resolve_crisis",
+                    timestamptimestamp,
+                    user_id: userId,
+                    notes: "Resolved by admin"
+                }));
+                // Refresh the list
+                setTimeout(() => {
+                    ws.send(JSON.stringify({type: "admin_get_crisis_log"}));
+                }, 500);
+            }
+        }
+    </script>
+</body>
+</html>

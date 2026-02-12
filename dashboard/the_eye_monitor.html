@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Live Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .main-content { padding: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-body { padding: 20px; }
+        .live-indicator { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 12px; font-weight: 600; }
+        .live-dot { width: 10px; height: 10px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .sessions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+        .session-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 16px; border-left: 4px solid var(--cyan); transition: all 0.2s; }
+        .session-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .session-card.top-tier { border-left-color: var(--gold); background: linear-gradient(135deg, var(--bg-elevated), var(--gold-dim)); }
+        .session-card.crisis { border-left-color: var(--red-critical); animation: crisis-pulse 1.5s infinite; }
+        @keyframes crisis-pulse { 0%, 100% { background: var(--bg-elevated); } 50% { background: var(--red-dim); } }
+        .session-card.family { border-left-color: var(--purple); }
+        .session-card.coach { border-left-color: var(--green); }
+        .session-user { font-size: 14px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .session-badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 9px; font-weight: 600; }
+        .session-badge.top-tier { background: var(--gold); color: black; }
+        .session-badge.trial { background: var(--text-secondary); color: white; }
+        .session-badge.ai { background: var(--cyan-dim); color: var(--cyan); }
+        .session-badge.coach { background: var(--green-dim); color: var(--green); }
+        .session-badge.crisis { background: var(--red-critical); color: white; }
+        .session-badge.family { background: var(--purple-dim); color: var(--purple); }
+        .session-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+        .session-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+        .session-metric { background: var(--bg-dark); border-radius: 6px; padding: 8px; text-align: center; }
+        .session-metric-val { font-size: 14px; font-weight: 700; }
+        .session-metric-val.good { color: var(--green); }
+        .session-metric-val.warn { color: var(--orange); }
+        .session-metric-val.bad { color: var(--red-critical); }
+        .session-metric-label { font-size: 8px; color: var(--text-secondary); text-transform: uppercase; }
+        .session-alerts { margin-top: 8px; }
+        .session-alert { font-size: 9px; padding: 4px 8px; border-radius: 4px; margin-bottom: 4px; }
+        .session-alert.dysreg { background: var(--red-dim); color: var(--red-critical); }
+        .session-alert.breakthrough { background: var(--green-dim); color: var(--green); }
+        .session-alert.cee { background: var(--cyan-dim); color: var(--cyan); }
+        .session-alert.escalation { background: var(--red-dim); color: var(--red-critical); }
+        .disconnect-btn { width: 100%; padding: 8px; background: transparent; border: 1px solid rgba(255,59,59,0.3); color: var(--red-critical); border-radius: 6px; font-size: 10px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+        .disconnect-btn:hover { background: var(--red-dim); }
+        .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
+        .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+        .stat-box { background: var(--bg-elevated); border-radius: 10px; padding: 14px; text-align: center; }
+        .stat-val { font-size: 24px; font-weight: 700; color: var(--gold); }
+        .stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">&#x1F441;&#xFE0F;</div>
+            <div>
+                <div class="logo-text">THE EYE</div>
+                <div class="page-title">Live Session Monitor</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">&larr; Back to The Eye</a>
+    </header>
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="location.href='the_eye.html'" style="cursor:pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item active">Live Monitor</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_crisis.html'">Crisis</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_community.html'">Community</div>
+    </nav>
+    <main class="main-content">
+        <div class="stats-row" id="stats-row">
+            <div class="stat-box"><div class="stat-val" id="st-active">0</div><div class="stat-label">Active Sessions</div></div>
+            <div class="stat-box"><div class="stat-val" id="st-clients" style="color:var(--cyan);">0</div><div class="stat-label">Online Clients</div></div>
+            <div class="stat-box"><div class="stat-val" id="st-coaches" style="color:var(--green);">0</div><div class="stat-label">Online Coaches</div></div>
+            <div class="stat-box"><div class="stat-val" id="st-cee" style="color:var(--green);">0</div><div class="stat-label">Active CEEs</div></div>
+            <div class="stat-box"><div class="stat-val" id="st-crisis" style="color:var(--red-critical);">0</div><div class="stat-label">Crisis Alerts</div></div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">&#x1F534; Live Sessions</div>
+                <div class="live-indicator"><span class="live-dot"></span><span id="session-count">0 Active</span></div>
+            </div>
+            <div class="card-body">
+                <div id="sessions" class="sessions-grid"><div class="empty-state">Connecting to live stream...</div></div>
+            </div>
+        </div>
+    </main>
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+        if (profile.role !== "ADMIN") { alert("Admin access required"); window.location.href = "command.html"; return; }
+
+        var ws = null, authenticated = false;
+        var allUsers = [];
+        var nevedalByUser = {};
+        var crisisUsers = {};
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+        function connect() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function() {
+                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+            };
+            ws.onmessage = function(event) {
+                var data; try { data = JSON.parse(event.data); } catch(e) { return; }
+
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
+                    ws.send(JSON.stringify({ type: "admin_get_stats" }));
+                    ws.send(JSON.stringify({ type: "admin_get_users" }));
+                    return;
+                }
+                if (data.type === "nevedal_update") {
+                    var st = data.data || {};
+                    if (st.user_id) { nevedalByUser[st.user_id] = st; renderSessions(); }
+                    return;
+                }
+                if (data.type === "admin_stats") {
+                    var stats = data.stats || {};
+                    document.getElementById("st-active").textContent = stats.live_sessions || Object.keys(nevedalByUser).length;
+                    document.getElementById("st-clients").textContent = (stats.online_client_ids || []).length;
+                    document.getElementById("st-coaches").textContent = (stats.online_coach_ids || []).length;
+                    document.getElementById("st-crisis").textContent = (stats.crisis_watchlist || []).length;
+                    (stats.crisis_watchlist || []).forEach(function(c) { crisisUsers[c.user_id] = c; });
+                    return;
+                }
+                if ((data.type === "admin_users" || data.type === "admin_users_list") && data.users) {
+                    allUsers = data.users;
+                    return;
+                }
+            };
+            ws.onclose = function() { authenticated = false; setTimeout(connect, 2000); };
+        }
+
+        function renderSessions() {
+            var keys = Object.keys(nevedalByUser);
+            document.getElementById("session-count").textContent = keys.length + " Active";
+            document.getElementById("st-active").textContent = keys.length;
+            if (keys.length === 0) { document.getElementById("sessions").innerHTML = '<div class="empty-state">No active Nevedal sessions right now</div>'; return; }
+
+            var activeCees = 0;
+            var html = "";
+            keys.forEach(function(uid) {
+                var ns = nevedalByUser[uid];
+                var user = allUsers.find(function(u){ return (u.id || u.user_id || u.hardware_id) === uid; });
+                var name = user ? (user.name || user.username || uid) : uid;
+                var role = user ? user.role : "CLIENT";
+                var tier = user ? (user.subscription_plan || "standard") : "standard";
+                var isCrisis = !!crisisUsers[uid];
+                var isFamily = user && user.family_id;
+                var cemo = ns.c_emo || 0;
+                var pent = ns.p_ent || 0;
+                var cee = !!ns.cee_window;
+                if (cee) activeCees++;
+                var cardClass = isCrisis ? "crisis" : role === "COACH" ? "coach" : tier.toLowerCase().indexOf("top") >= 0 ? "top-tier" : isFamily ? "family" : "";
+                var badgeClass = isCrisis ? "crisis" : role === "COACH" ? "coach" : tier.toLowerCase().indexOf("top") >= 0 ? "top-tier" : tier.toLowerCase().indexOf("trial") >= 0 ? "trial" : "ai";
+                var badgeText = isCrisis ? "\u26A0 CRISIS" : role === "COACH" ? "\uD83D\uDC68\u200D\u2695\uFE0F" : tier.toUpperCase();
+
+                html += '<div class="session-card ' + cardClass + '">';
+                html += '<div class="session-user">' + esc(name) + ' <span class="session-badge ' + badgeClass + '">' + badgeText + '</span></div>';
+                html += '<div class="session-meta">' + esc(role) + (isFamily ? " \u2022 Family: " + esc(user.family_id) : "") + (ns.timestamp ? " \u2022 " + new Date(ns.timestamp).toLocaleTimeString() : "") + '</div>';
+                html += '<div class="session-metrics">';
+                html += '<div class="session-metric"><div class="session-metric-val ' + (cemo >= 0.7 ? "good" : cemo >= 0.4 ? "warn" : "bad") + '">' + cemo.toFixed(2) + '</div><div class="session-metric-label">C<sub>emo</sub></div></div>';
+                html += '<div class="session-metric"><div class="session-metric-val ' + (pent >= 0.6 ? "good" : pent >= 0.3 ? "warn" : "bad") + '">' + pent.toFixed(2) + '</div><div class="session-metric-label">p<sub>ent</sub></div></div>';
+                html += '<div class="session-metric"><div class="session-metric-val ' + (cee ? "good" : "") + '">' + (cee ? "\u26A1 YES" : "No") + '</div><div class="session-metric-label">CEE</div></div>';
+                html += '</div>';
+                // Alerts
+                html += '<div class="session-alerts">';
+                if (cemo < 0.3) html += '<div class="session-alert dysreg">\u26A0 DYSREGULATION: C_emo below 0.30</div>';
+                if (cemo > 0.9 && cee && (ns.cee_duration_seconds || 0) >= 15) html += '<div class="session-alert breakthrough">\u2B50 BREAKTHROUGH: Sustained high coherence</div>';
+                if (cee) html += '<div class="session-alert cee">\u26A1 CEE Window Active (' + (ns.cee_duration_seconds || 0) + 's)</div>';
+                if (ns.escalation_detected) html += '<div class="session-alert escalation">\uD83D\uDEA8 Escalation detected</div>';
+                if (ns.ventriloquism_detected) html += '<div class="session-alert escalation">\uD83D\uDDE3 Proxy speech detected</div>';
+                if (ns.reconsolidation_window_open) html += '<div class="session-alert cee">\uD83E\uDDE0 Reconsolidation window open</div>';
+                html += '</div>';
+                html += '<button class="disconnect-btn" onclick="alert(\'Force disconnect coming soon\')">Force Disconnect</button>';
+                html += '</div>';
+            });
+            document.getElementById("sessions").innerHTML = html;
+            document.getElementById("st-cee").textContent = activeCees;
+        }
+
+        // Refresh stats every 5s
+        setInterval(function() {
+            if (ws && authenticated) ws.send(JSON.stringify({ type: "admin_get_stats" }));
+        }, 5000);
+
+        connect();
+    })();
+    </script>
+</body>
+</html>

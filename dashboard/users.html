@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --purple: #9D4EDD;
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .main-layout { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 73px); }
+        .sidebar { background: var(--bg-card); border-right: 1px solid var(--border); overflow-y: auto; }
+        .search-box { padding: 16px; border-bottom: 1px solid var(--border); }
+        .search-input { width: 100%; padding: 12px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 13px; }
+        .search-filters { display: flex; gap: 8px; margin-top: 10px; }
+        .filter-chip { padding: 6px 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; font-size: 10px; color: var(--text-secondary); cursor: pointer; }
+        .filter-chip.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+        .user-list { padding: 8px; }
+        .user-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; }
+        .user-item:hover { background: var(--bg-elevated); }
+        .user-item.selected { background: var(--gold-dim); border-color: var(--gold); }
+        .user-item-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .user-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
+        .user-avatar.client { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .user-avatar.coach { background: var(--gold-dim); border: 2px solid var(--gold); }
+        .user-avatar.admin { background: var(--red-dim); border: 2px solid var(--red); }
+        .user-avatar-wrap { position: relative; }
+        .online-dot { position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; background: var(--green); border: 2px solid var(--bg-card); border-radius: 50%; }
+        .user-name { font-size: 13px; font-weight: 600; flex: 1; }
+        .user-tier { font-size: 9px; padding: 3px 8px; border-radius: 4px; background: var(--bg-elevated); color: var(--text-secondary); }
+        .user-tier.coach-verified { background: rgba(0, 255, 136, 0.15); color: var(--green); }
+        .user-tier.coach-pending { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .user-tier.online { background: rgba(0, 255, 136, 0.15); color: var(--green); }
+        .user-meta { font-size: 10px; color: var(--text-secondary); margin-left: 46px; }
+        .content { padding: 24px; overflow-y: auto; }
+        .content-header { margin-bottom: 20px; }
+        .content-title { font-size: 20px; font-weight: 700; }
+        .content-subtitle { font-size: 12px; color: var(--text-secondary); }
+        .profile-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+        .profile-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+        .profile-card.full { grid-column: span 2; }
+        .card-label { font-size: 12px; font-weight: 600; margin-bottom: 14px; }
+        .profile-field { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+        .field-label { color: var(--text-secondary); }
+        .field-value { font-weight: 500; }
+        .gold { color: var(--gold); }
+        .green { color: var(--green); }
+        .cyan { color: var(--cyan); }
+        .nevedal-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .nevedal-metric { text-align: center; padding: 12px; background: var(--bg-dark); border-radius: 8px; }
+        .nevedal-value { font-size: 24px; font-weight: 700; }
+        .nevedal-label { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .identity-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .identity-action { padding: 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; text-align: center; cursor: pointer; }
+        .identity-action:hover { border-color: var(--cyan); }
+        .identity-action .icon { font-size: 20px; margin-bottom: 6px; }
+        .identity-action .label { font-size: 10px; color: var(--text-secondary); }
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary); }
+        .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">User Management</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+    </header>
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="search-box">
+                <input type="text" class="search-input" id="searchInput" placeholder="Search users..." oninput="filterUsers()">
+                <div class="search-filters">
+                    <span class="filter-chip active" onclick="setFilter('all', this)">All</span>
+                    <span class="filter-chip" onclick="setFilter('client', this)">Clients</span>
+                    <span class="filter-chip" onclick="setFilter('coach', this)">Coaches</span>
+                    <span class="filter-chip" onclick="setFilter('admin', this)">Admins</span>
+                </div>
+            </div>
+            <div class="user-list" id="userList">Loading...</div>
+        </aside>
+        <main class="content" id="mainContent">
+            <div class="empty-state">
+                <div class="icon">👤</div>
+                <div>Select a user to view details</div>
+            </div>
+        </main>
+    </div>
+    <script>
+        var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
+        var socket = null;
+        var allUsers = [];
+        var selectedUser = null;
+        var currentFilter = "all";
+
+        function init() {
+            connect();
+        }
+
+        function connect() {
+            var uname = sessionStorage.getItem("username");
+            var pwd = sessionStorage.getItem("password");
+            if (!uname || !pwd) {
+                window.location.href = "index.html";
+                return;
+            }
+            socket = new WebSocket(SERVER_URL);
+            socket.onopen = function() {
+                var profileStr = sessionStorage.getItem("profile");
+                var profile = profileStr ? JSON.parse(profileStr) : {};
+                socket.send(JSON.stringify({
+                    type: "login_request",
+                    username: uname,
+                    password: pwd,
+                    expected_role: profile.role
+                }));
+            };
+            socket.onmessage = handleMessage;
+            socket.onclose = function() { setTimeout(connect, 3000); };
+        }
+
+        function handleMessage(event) {
+            var data = JSON.parse(event.data);
+            console.log("Received:", data.type);
+            if (data.type === "login_success") {
+                socket.send(JSON.stringify({ type: "admin_get_users" }));
+            } else if (data.type === "admin_users") {
+                allUsers = data.users || [];
+                console.log("Got users:", allUsers.length);
+                renderUserList();
+            } else if (data.type === "password_reset_done") {
+                alert("Password updated for user.");
+                socket.send(JSON.stringify({ type: "admin_get_users" }));
+            } else if (data.type === "error" && data.message) {
+                alert("Error: " + data.message);
+            }
+        }
+
+        function resetPasswordForUser() {
+            if (!selectedUser || !selectedUser.id) {
+                alert("Select a user first.");
+                return;
+            }
+            var p1 = prompt("Enter new password (min 6 characters):");
+            if (p1 === null) return;
+            if (p1.length < 6) {
+                alert("Password must be at least 6 characters.");
+                return;
+            }
+            var p2 = prompt("Confirm new password:");
+            if (p2 === null) return;
+            if (p1 !== p2) {
+                alert("Passwords do not match.");
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: "admin_reset_user_password",
+                user_id: selectedUser.id,
+                new_password: p1
+            }));
+        }
+
+        function renderUserList() {
+            var list = document.getElementById("userList");
+            var search = document.getElementById("searchInput").value.toLowerCase();
+            var filtered = [];
+            for (var i = 0; i < allUsers.length; i++) {
+                var u = allUsers[i];
+                var name = (u.name || "").toLowerCase();
+                var uname = (u.username || "").toLowerCase();
+                var uid = (u.id || "").toLowerCase();
+                var matchesSearch = name.indexOf(search) >= 0 || uname.indexOf(search) >= 0 || uid.indexOf(search) >= 0;
+                var role = (u.role || "").toLowerCase();
+                var matchesFilter = currentFilter === "all" || role === currentFilter || (currentFilter === "client" && (role === "user" || role === "client"));
+                if (matchesSearch && matchesFilter) {
+                    filtered.push(u);
+                }
+            }
+            if (filtered.length === 0) {
+                list.innerHTML = "<div style='padding:20px;text-align:center;color:#888'>No users found</div>";
+                return;
+            }
+            var html = "";
+            for (var j = 0; j < filtered.length; j++) {
+                var user = filtered[j];
+                var r = (user.role || "").toUpperCase();
+                var roleClass = "client";
+                if (r === "ADMIN") roleClass = "admin";
+                if (r === "COACH") roleClass = "coach";
+                var sel = "";
+                if (selectedUser && selectedUser.id === user.id) sel = "selected";
+                var initials = getInitials(user.name || user.username);
+                var isOnline = user.online;
+
+                // Build tier/status badge
+                var badgeText = r;
+                var badgeClass = "user-tier";
+                if (r === "COACH") {
+                    if (user.coach_verified) {
+                        badgeText = "COACH ✓";
+                        badgeClass = "user-tier coach-verified";
+                    } else if (user.subscription_status === "PENDING_VERIFICATION") {
+                        badgeText = "PENDING";
+                        badgeClass = "user-tier coach-pending";
+                    }
+                } else if (r === "CLIENT") {
+                    var plan = (user.subscription_plan || user.tier || "TRIAL").toUpperCase();
+                    badgeText = plan;
+                }
+
+                // Build meta line
+                var metaParts = [];
+                if (user.family_id) metaParts.push(user.family_id);
+                else metaParts.push("No Family");
+                if (isOnline) metaParts.push("🟢 Online");
+                if (r === "CLIENT" && user.assigned_coach_id) metaParts.push("Coach: " + user.assigned_coach_id);
+
+                html += "<div class='user-item " + sel + "' onclick=\"selectUser('" + user.id + "')\">";
+                html += "<div class='user-item-header'>";
+                html += "<div class='user-avatar-wrap'><div class='user-avatar " + roleClass + "'>" + initials + "</div>";
+                if (isOnline) html += "<div class='online-dot'></div>";
+                html += "</div>";
+                html += "<span class='user-name'>" + (user.name || user.username) + "</span>";
+                html += "<span class='" + badgeClass + "'>" + badgeText + "</span>";
+                html += "</div>";
+                html += "<div class='user-meta'>" + metaParts.join(" · ") + "</div>";
+                html += "</div>";
+            }
+            list.innerHTML = html;
+        }
+
+        function getInitials(name) {
+            if (!name) return "?";
+            var parts = name.split(" ");
+            var result = "";
+            for (var i = 0; i < parts.length && i < 2; i++) {
+                if (parts[i].length > 0) result += parts[i][0];
+            }
+            return result.toUpperCase();
+        }
+
+        function selectUser(userId) {
+            selectedUser = null;
+            for (var i = 0; i < allUsers.length; i++) {
+                if (allUsers[i].id === userId) {
+                    selectedUser = allUsers[i];
+                    break;
+                }
+            }
+            renderUserList();
+            if (selectedUser) renderUserDetail(selectedUser);
+        }
+
+        function renderUserDetail(user) {
+            var content = document.getElementById("mainContent");
+            var r = (user.role || "").toUpperCase();
+            var coh = "0.00";
+            var gap = "0.00";
+            var growth = "0.00";
+            var risk = "LOW";
+            if (user.metrics) {
+                if (user.metrics.coherence) coh = user.metrics.coherence;
+                if (user.metrics.gap_index) gap = user.metrics.gap_index;
+                if (user.metrics.growth) growth = user.metrics.growth;
+                if (user.metrics.risk) risk = user.metrics.risk;
+            }
+            var html = "<div class='content-header'>";
+            html += "<div class='content-title'>" + (user.name || user.username) + "</div>";
+            html += "<div class='content-subtitle'>" + (user.family_id || "No Family") + " - ID: " + user.id + "</div>";
+            html += "</div>";
+            html += "<div class='profile-grid'>";
+            html += "<div class='profile-card'><div class='card-label'>Basic Info</div>";
+            html += "<div class='profile-field'><span class='field-label'>Username</span><span class='field-value'>" + (user.username || user.id) + "</span></div>";
+            html += "<div class='profile-field'><span class='field-label'>Email</span><span class='field-value'>" + (user.email || "Not set") + "</span></div>";
+            html += "<div class='profile-field'><span class='field-label'>Role</span><span class='field-value gold'>" + r + "</span></div>";
+            html += "<div class='profile-field'><span class='field-label'>Subscription</span><span class='field-value green'>" + (user.subscription_plan || user.tier || "TRIAL") + "</span></div>";
+            if (r === "COACH") {
+                html += "<div class='profile-field'><span class='field-label'>Verified</span><span class='field-value " + (user.coach_verified ? "green'>✓ Verified" : "' style='color:var(--orange)'>Pending") + "</span></div>";
+            }
+            if (r === "CLIENT") {
+                html += "<div class='profile-field'><span class='field-label'>Assigned Coach</span><span class='field-value'>" + (user.assigned_coach_id || "None") + "</span></div>";
+            }
+            html += "<div class='profile-field'><span class='field-label'>Status</span><span class='field-value " + (user.online ? "green'>🟢 Online" : "'>⚫ Offline") + "</span></div>";
+            html += "<div class='profile-field'><span class='field-label'>Last Login</span><span class='field-value'>" + (user.last_login ? String(user.last_login).slice(0, 16) : "Never") + "</span></div>";
+            html += "<div class='profile-field'><span class='field-label'>Family</span><span class='field-value'>" + (user.family_id || "None") + "</span></div>";
+            html += "</div>";
+            html += "<div class='profile-card'><div class='card-label cyan'>Nevedal State</div>";
+            html += "<div class='nevedal-metrics'>";
+            html += "<div class='nevedal-metric'><div class='nevedal-value cyan'>" + coh + "</div><div class='nevedal-label'>Coherence</div></div>";
+            html += "<div class='nevedal-metric'><div class='nevedal-value' style='color:#FF9500'>" + gap + "</div><div class='nevedal-label'>GAP</div></div>";
+            html += "<div class='nevedal-metric'><div class='nevedal-value green'>" + growth + "</div><div class='nevedal-label'>Growth</div></div>";
+            html += "<div class='nevedal-metric'><div class='nevedal-value' style='color:#9D4EDD'>" + risk + "</div><div class='nevedal-label'>Risk</div></div>";
+            html += "</div></div>";
+            html += "<div class='profile-card full'><div class='card-label'>Identity Actions</div>";
+            html += "<div class='identity-actions'>";
+            html += "<div class='identity-action' onclick=\"resetPasswordForUser()\"><div class='icon'>🔑</div><div class='label'>Reset Password</div></div>";
+            html += "<div class='identity-action' onclick=\"alert('Reset biometrics')\"><div class='icon'>👆</div><div class='label'>Reset Biometrics</div></div>";
+            html += "<div class='identity-action' onclick=\"alert('Force logout')\"><div class='icon'>📱</div><div class='label'>Force Logout</div></div>";
+            html += "<div class='identity-action' onclick=\"alert('Wipe memory')\"><div class='icon'>🧹</div><div class='label'>Wipe Memory</div></div>";
+            html += "<div class='identity-action' onclick=\"alert('Ban account')\"><div class='icon'>🚫</div><div class='label'>Ban Account</div></div>";
+            html += "</div></div></div>";
+            content.innerHTML = html;
+        }
+
+        function setFilter(f, elem) {
+            currentFilter = f;
+            var chips = document.querySelectorAll(".filter-chip");
+            for (var i = 0; i < chips.length; i++) {
+                chips[i].classList.remove("active");
+            }
+            elem.classList.add("active");
+            renderUserList();
+        }
+
+        function filterUsers() {
+            renderUserList();
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

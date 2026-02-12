@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crisis Center | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --orange: #FF9500; --orange-dim: rgba(255, 149, 0, 0.12);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--red), #FF6B6B); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--red); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .back-btn:hover { background: #222; }
+        .content { padding: 24px; }
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; text-align: center; }
+        .stat-card.danger { border-color: rgba(255, 59, 59, 0.3); background: var(--red-dim); }
+        .stat-card.warning { border-color: rgba(255, 149, 0, 0.3); background: var(--orange-dim); }
+        .stat-value { font-size: 32px; font-weight: 700; }
+        .stat-value.red { color: var(--red); }
+        .stat-value.orange { color: var(--orange); }
+        .stat-value.green { color: var(--green); }
+        .stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .panel { background: var(--bg-card); border-radius: 12px; overflow: hidden; }
+        .panel-header { padding: 16px 20px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; letter-spacing: 1px; }
+        .panel-header.live { background: var(--red-dim); border-bottom: 1px solid rgba(255, 59, 59, 0.3); color: var(--red); }
+        .panel-header.history { background: var(--orange-dim); border-bottom: 1px solid rgba(255, 149, 0, 0.3); color: var(--orange); }
+        .panel-body { padding: 16px; max-height: 600px; overflow-y: auto; }
+        
+        .crisis-card { border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+        .crisis-card.live { background: var(--red-dim); border: 1px solid rgba(255, 59, 59, 0.2); }
+        .crisis-card.historical { background: var(--orange-dim); border: 1px solid rgba(255, 149, 0, 0.2); }
+        .crisis-card.resolved { background: rgba(0, 255, 136, 0.05); border: 1px solid rgba(0, 255, 136, 0.15); opacity: 0.7; }
+        
+        .crisis-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .crisis-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .crisis-avatar.live { background: rgba(255, 59, 59, 0.2); animation: pulse 1.5s infinite; }
+        .crisis-avatar.historical { background: rgba(255, 149, 0, 0.2); }
+        @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+        .crisis-name { font-weight: 600; font-size: 15px; }
+        .crisis-name.live { color: var(--red); }
+        .crisis-name.historical { color: var(--orange); }
+        .crisis-meta { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+        .crisis-detail { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5; }
+        
+        .risk-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+        .risk-badge.CRITICAL { background: rgba(255, 59, 59, 0.25); color: #FF3B3B; }
+        .risk-badge.HIGH { background: rgba(255, 100, 60, 0.2); color: #FF6B3B; }
+        .risk-badge.MEDIUM { background: rgba(255, 149, 0, 0.2); color: #FF9500; }
+        .risk-badge.resolved { background: rgba(0, 255, 136, 0.15); color: #00FF88; }
+        
+        .crisis-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .crisis-btn { padding: 7px 14px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; }
+        .crisis-btn.primary { background: var(--red); color: white; }
+        .crisis-btn.primary:hover { background: #E03333; }
+        .crisis-btn.resolve { background: rgba(0, 255, 136, 0.15); color: #00FF88; border: 1px solid rgba(0, 255, 136, 0.3); }
+        .crisis-btn.resolve:hover { background: rgba(0, 255, 136, 0.25); }
+        .crisis-btn.secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .crisis-btn.secondary:hover { background: #222; }
+        
+        .empty-state { text-align: center; padding: 50px 20px; color: var(--text-secondary); }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state h3 { font-size: 16px; margin-bottom: 6px; }
+        .empty-state.clear h3 { color: var(--green); }
+        .empty-state.quiet h3 { color: var(--orange); }
+        
+        .resolve-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+        .resolve-modal.active { display: flex; }
+        .resolve-form { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 400px; }
+        .resolve-form h3 { margin-bottom: 16px; color: var(--green); }
+        .resolve-form textarea { width: 100%; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--text-primary); font-family: inherit; font-size: 13px; resize: vertical; min-height: 80px; margin-bottom: 16px; }
+        .resolve-form textarea:focus { outline: none; border-color: var(--green); }
+        .resolve-form .btn-row { display: flex; gap: 10px; justify-content: flex-end; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🚨</div>
+            <div>
+                <div class="logo-text">CRISIS CENTER</div>
+                <div class="page-title">Hybrid view: live risk + historical events</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Dashboard</a>
+    </header>
+    <div class="content">
+        <div class="stats-row">
+            <div class="stat-card danger"><div class="stat-value red" id="liveCount">0</div><div class="stat-label">Live Risk</div></div>
+            <div class="stat-card warning"><div class="stat-value orange" id="unresolvedCount">0</div><div class="stat-label">Unresolved History</div></div>
+            <div class="stat-card"><div class="stat-value green" id="resolvedCount">0</div><div class="stat-label">Resolved</div></div>
+            <div class="stat-card"><div class="stat-value" id="totalEvents">0</div><div class="stat-label">Total Events</div></div>
+        </div>
+        
+        <div class="panels">
+            <!-- LIVE WATCHLIST PANEL (RED) -->
+            <div class="panel" style="border: 1px solid rgba(255, 59, 59, 0.2);">
+                <div class="panel-header live">🔴 LIVE WATCHLIST <span style="font-size:11px;font-weight:400;margin-left:auto;color:var(--text-secondary);">Real-time risk from metrics</span></div>
+                <div class="panel-body" id="livePanel">
+                    <div class="empty-state clear"><div class="icon">✅</div><h3>All Clear</h3><div>No clients at elevated risk</div></div>
+                </div>
+            </div>
+            
+            <!-- CRISIS HISTORY PANEL (AMBER) -->
+            <div class="panel" style="border: 1px solid rgba(255, 149, 0, 0.2);">
+                <div class="panel-header history">📋 CRISIS HISTORY <span style="font-size:11px;font-weight:400;margin-left:auto;color:var(--text-secondary);">Past events for Nate's learning</span></div>
+                <div class="panel-body" id="historyPanel">
+                    <div class="empty-state quiet"><div class="icon">📋</div><h3>No History</h3><div>No crisis events logged</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Resolve Modal -->
+    <div class="resolve-modal" id="resolveModal">
+        <div class="resolve-form">
+            <h3>✅ Resolve Crisis Event</h3>
+            <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px;" id="resolveTarget"></p>
+            <textarea id="resolveNotes" placeholder="Resolution notes (optional)..."></textarea>
+            <div class="btn-row">
+                <button class="crisis-btn secondary" onclick="closeResolveModal()">Cancel</button>
+                <button class="crisis-btn resolve" onclick="confirmResolve()">Mark Resolved</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
+        var socket = null;
+        var crisisWatchlist = [];
+        var crisisLog = [];
+        var resolvingId = null;
+        
+        function init() {
+            var uname = sessionStorage.getItem("username");
+            if (!uname) { window.location.href = "index.html"; return; }
+            connect();
+        }
+        
+        function connect() {
+            socket = new WebSocket(SERVER_URL);
+            socket.onopen = function() {
+                var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+                socket.send(JSON.stringify({
+                    type: "login_request",
+                    username: sessionStorage.getItem("username"),
+                    password: sessionStorage.getItem("password"),
+                    expected_role: profile.role
+                }));
+            };
+            socket.onmessage = handleMessage;
+            socket.onclose = function() { setTimeout(connect, 3000); };
+        }
+        
+        function handleMessage(event) {
+            var data = JSON.parse(event.data);
+            console.log("Crisis Center Received:", data);
+            
+            if (data.type === "login_success") {
+                // Request both data sources
+                socket.send(JSON.stringify({ type: "admin_get_crisis_watchlist" }));
+                socket.send(JSON.stringify({ type: "admin_get_crisis_log" }));
+                socket.send(JSON.stringify({ type: "admin_get_stats" }));
+            }
+            else if (data.type === "admin_stats") {
+                if (data.crisis_watchlist) {
+                    crisisWatchlist = data.crisis_watchlist;
+                    renderLivePanel();
+                    updateStats();
+                }
+            }
+            else if (data.type === "crisis_watchlist") {
+                crisisWatchlist = data.watchlist || [];
+                renderLivePanel();
+                updateStats();
+            }
+            else if (data.type === "crisis_log_data") {
+                crisisLog = data.entries || [];
+                renderHistoryPanel();
+                updateStats();
+            }
+            else if (data.type === "crisis_resolved") {
+                closeResolveModal();
+                // Refresh data
+                socket.send(JSON.stringify({ type: "admin_get_crisis_log" }));
+                socket.send(JSON.stringify({ type: "admin_get_stats" }));
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById("liveCount").textContent = crisisWatchlist.length;
+            var unresolved = crisisLog.filter(function(e) { return e.status !== "resolved" && !e.resolved; }).length;
+            var resolved = crisisLog.filter(function(e) { return e.status === "resolved" || e.resolved; }).length;
+            document.getElementById("unresolvedCount").textContent = unresolved;
+            document.getElementById("resolvedCount").textContent = resolved;
+            document.getElementById("totalEvents").textContent = crisisLog.length;
+        }
+        
+        function renderLivePanel() {
+            var panel = document.getElementById("livePanel");
+            if (crisisWatchlist.length === 0) {
+                panel.innerHTML = '<div class="empty-state clear"><div class="icon">✅</div><h3>All Clear</h3><div>No clients at elevated risk</div></div>';
+                return;
+            }
+            var html = "";
+            for (var i = 0; i < crisisWatchlist.length; i++) {
+                var c = crisisWatchlist[i];
+                html += '<div class="crisis-card live">';
+                html += '<div class="crisis-top">';
+                html += '<div class="crisis-avatar live">⚠️</div>';
+                html += '<div><div class="crisis-name live">' + escapeHtml(c.name || c.user_id || "Unknown") + '</div>';
+                html += '<div class="crisis-meta"><span class="risk-badge ' + (c.risk_level || "MEDIUM") + '">' + (c.risk_level || "MEDIUM") + '</span></div></div>';
+                html += '</div>';
+                html += '<div class="crisis-detail">';
+                html += 'Anxiety: ' + ((c.anxiety_level || 0) * 100).toFixed(0) + '% · Depression: ' + ((c.depression_indicators || 0) * 100).toFixed(0) + '%';
+                if (c.last_assessment) html += ' · Last assessed: ' + c.last_assessment.slice(0, 16);
+                html += '</div>';
+                html += '<div class="crisis-actions">';
+                html += '<button class="crisis-btn primary" onclick="viewClient(\'' + c.user_id + '\')">View Client</button>';
+                html += '</div></div>';
+            }
+            panel.innerHTML = html;
+        }
+        
+        function renderHistoryPanel() {
+            var panel = document.getElementById("historyPanel");
+            if (crisisLog.length === 0) {
+                panel.innerHTML = '<div class="empty-state quiet"><div class="icon">📋</div><h3>No History</h3><div>No crisis events logged yet</div></div>';
+                return;
+            }
+            // Sort by timestamp descending (most recent first)
+            var sorted = crisisLog.slice().sort(function(a, b) { return (b.timestamp || "").localeCompare(a.timestamp || ""); });
+            var html = "";
+            for (var i = 0; i < sorted.length; i++) {
+                var e = sorted[i];
+                var isResolved = e.status === "resolved" || e.resolved;
+                html += '<div class="crisis-card ' + (isResolved ? "resolved" : "historical") + '">';
+                html += '<div class="crisis-top">';
+                html += '<div class="crisis-avatar historical">' + (isResolved ? '✅' : '📋') + '</div>';
+                html += '<div><div class="crisis-name historical">' + escapeHtml(e.user_name || e.user_id || "Unknown") + '</div>';
+                html += '<div class="crisis-meta">';
+                if (isResolved) {
+                    html += '<span class="risk-badge resolved">RESOLVED</span>';
+                } else {
+                    html += '<span class="risk-badge MEDIUM">UNRESOLVED</span>';
+                }
+                html += ' · ' + (e.timestamp || "").slice(0, 16);
+                html += '</div></div></div>';
+                html += '<div class="crisis-detail">';
+                html += '<strong>Trigger:</strong> ' + escapeHtml(e.trigger_keyword || "Unknown") + '<br>';
+                html += '<strong>Context:</strong> ' + escapeHtml((e.context || "").slice(0, 150));
+                if (isResolved && e.resolution_notes) {
+                    html += '<br><strong style="color:var(--green);">Resolution:</strong> ' + escapeHtml(e.resolution_notes);
+                    html += '<br><span style="font-size:11px;">Resolved by ' + escapeHtml(e.resolved_by || "Admin") + ' at ' + (e.resolved_at || "").slice(0, 16) + '</span>';
+                }
+                html += '</div>';
+                if (!isResolved) {
+                    html += '<div class="crisis-actions">';
+                    html += '<button class="crisis-btn resolve" onclick="openResolveModal(\'' + escapeHtml(e.timestamp || "") + '\', \'' + escapeHtml(e.user_name || e.user_id || "") + '\')">✅ Resolve</button>';
+                    html += '<button class="crisis-btn secondary" onclick="viewClient(\'' + (e.user_id || "") + '\')">View Client</button>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            panel.innerHTML = html;
+        }
+        
+        function openResolveModal(crisisId, userName) {
+            resolvingId = crisisId;
+            document.getElementById("resolveTarget").textContent = "Resolving event for: " + userName;
+            document.getElementById("resolveNotes").value = "";
+            document.getElementById("resolveModal").classList.add("active");
+        }
+        
+        function closeResolveModal() {
+            document.getElementById("resolveModal").classList.remove("active");
+            resolvingId = null;
+        }
+        
+        function confirmResolve() {
+            if (!resolvingId) return;
+            var notes = document.getElementById("resolveNotes").value;
+            socket.send(JSON.stringify({
+                type: "admin_resolve_crisis",
+                crisis_id: resolvingId,
+                notes: notes
+            }));
+        }
+        
+        function viewClient(id) {
+            window.location.href = "my_clients.html?id=" + id;
+        }
+        
+        function escapeHtml(str) {
+            if (!str) return "";
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+        
+        window.onload = init;
+    </script>
+</body>
+</html>

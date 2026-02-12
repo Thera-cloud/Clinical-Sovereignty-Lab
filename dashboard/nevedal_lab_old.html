@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Nevedal Research Laboratory</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --blue: #4A90D9; --blue-dim: rgba(74, 144, 217, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; box-shadow: 0 0 20px var(--purple-dim); }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .header-badge { padding: 6px 14px; background: var(--purple-dim); border: 1px solid var(--purple); border-radius: 20px; font-size: 10px; color: var(--purple); font-weight: 600; }
+        
+        /* Buttons */
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--purple); color: white; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-gold { background: var(--gold); color: black; }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 320px 1fr 320px; gap: 20px; min-height: calc(100vh - 120px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .card-title .icon.purple { background: var(--purple-dim); }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+        .card-title .icon.blue { background: var(--blue-dim); }
+        .card-body { padding: 16px; }
+
+        /* Subject Selector Panel */
+        .subject-panel { display: flex; flex-direction: column; gap: 16px; }
+        .search-box { position: relative; }
+        .search-box input { width: 100%; padding: 12px 16px 12px 40px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; }
+        .search-box::before { content: '🔍'; position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 14px; }
+        .filter-tabs { display: flex; gap: 8px; }
+        .filter-tab { padding: 8px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font-size: 10px; cursor: pointer; }
+        .filter-tab.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        .subject-list { max-height: 400px; overflow-y: auto; }
+        .subject-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+        .subject-item:hover { border-color: var(--purple); }
+        .subject-item.selected { background: var(--purple-dim); border-color: var(--purple); }
+        .subject-item.selected-b { background: var(--cyan-dim); border-color: var(--cyan); }
+        .subject-avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; }
+        .subject-avatar.client { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .subject-avatar.coach { background: var(--gold-dim); border: 2px solid var(--gold); }
+        .subject-avatar.family { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .subject-info { flex: 1; }
+        .subject-name { font-size: 12px; font-weight: 600; }
+        .subject-meta { font-size: 10px; color: var(--text-secondary); }
+        .subject-tag { font-size: 8px; padding: 3px 8px; border-radius: 4px; }
+        .subject-tag.a { background: var(--purple); color: white; }
+        .subject-tag.b { background: var(--cyan); color: black; }
+
+        /* Dyad Selection */
+        .dyad-selection { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .dyad-title { font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .dyad-pair { display: flex; align-items: center; gap: 12px; }
+        .dyad-subject { flex: 1; padding: 12px; background: var(--bg-dark); border-radius: 8px; text-align: center; }
+        .dyad-subject.empty { border: 2px dashed var(--border); }
+        .dyad-subject .avatar { width: 48px; height: 48px; border-radius: 50%; margin: 0 auto 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .dyad-subject.a .avatar { background: var(--purple-dim); border: 2px solid var(--purple); }
+        .dyad-subject.b .avatar { background: var(--cyan-dim); border: 2px solid var(--cyan); }
+        .dyad-connector { font-size: 20px; color: var(--purple); }
+        .dyad-label { font-size: 11px; font-weight: 600; }
+        .dyad-role { font-size: 9px; color: var(--text-secondary); }
+
+        /* Master Formula Display */
+        .formula-banner { background: linear-gradient(135deg, #0A0A1A 0%, #1A0A2A 100%); border: 1px solid var(--purple); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .formula-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .formula-title { font-size: 14px; font-weight: 700; color: var(--purple); }
+        .formula-badge { padding: 4px 12px; background: var(--green); color: black; border-radius: 12px; font-size: 9px; font-weight: 600; }
+        .formula-display { background: var(--bg-dark); border-radius: 10px; padding: 20px; text-align: center; font-family: 'Times New Roman', serif; }
+        .formula-main { font-size: 20px; color: var(--text-primary); margin-bottom: 16px; line-height: 1.8; }
+        .formula-var { color: var(--cyan); font-style: italic; }
+        .formula-sub { font-size: 10px; vertical-align: sub; }
+        .formula-sup { font-size: 10px; vertical-align: super; }
+        .formula-frac { display: inline-block; text-align: center; vertical-align: middle; }
+        .formula-num { border-bottom: 1px solid var(--text-primary); padding-bottom: 2px; display: block; }
+        .formula-den { padding-top: 2px; display: block; }
+        .formula-exp { background: var(--bg-elevated); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+
+        /* Real-time Coherence Gauge */
+        .coherence-gauge { text-align: center; padding: 20px; }
+        .gauge-container { position: relative; width: 200px; height: 200px; margin: 0 auto 16px; }
+        .gauge-bg { width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 225deg, var(--red-critical) 0deg, var(--orange) 90deg, var(--gold) 135deg, var(--green) 180deg, var(--cyan) 225deg, var(--purple) 270deg, transparent 270deg); }
+        .gauge-inner { position: absolute; top: 20px; left: 20px; right: 20px; bottom: 20px; background: var(--bg-dark); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gauge-value { font-size: 48px; font-weight: 700; color: var(--cyan); }
+        .gauge-label { font-size: 11px; color: var(--text-secondary); }
+        .gauge-needle { position: absolute; bottom: 50%; left: 50%; width: 4px; height: 80px; background: linear-gradient(to top, var(--gold), transparent); transform-origin: bottom center; transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+        .gauge-center { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; background: var(--gold); border-radius: 50%; transform: translate(-50%, -50%); }
+        .cee-indicator { margin-top: 16px; padding: 12px 20px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+        .cee-indicator.active { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); animation: cee-pulse 1.5s infinite; }
+        .cee-indicator.inactive { background: var(--bg-elevated); color: var(--text-secondary); }
+        @keyframes cee-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.4); } 50% { box-shadow: 0 0 0 10px rgba(0, 255, 136, 0); } }
+
+        /* Component Variables */
+        .component-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+        .component-card { background: var(--bg-elevated); border-radius: 10px; padding: 14px; border-left: 3px solid var(--border); }
+        .component-card.p-ent { border-left-color: var(--purple); }
+        .component-card.t-tunnel { border-left-color: var(--cyan); }
+        .component-card.gamma { border-left-color: var(--orange); }
+        .component-card.e-joint { border-left-color: var(--gold); }
+        .component-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .component-symbol { font-family: 'Times New Roman', serif; font-size: 16px; font-style: italic; }
+        .component-symbol.purple { color: var(--purple); }
+        .component-symbol.cyan { color: var(--cyan); }
+        .component-symbol.orange { color: var(--orange); }
+        .component-symbol.gold { color: var(--gold); }
+        .component-value { font-size: 20px; font-weight: 700; }
+        .component-name { font-size: 10px; color: var(--text-secondary); margin-bottom: 8px; }
+        .component-bar { height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden; }
+        .component-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+        .component-fill.purple { background: var(--purple); }
+        .component-fill.cyan { background: var(--cyan); }
+        .component-fill.orange { background: var(--orange); }
+        .component-fill.gold { background: var(--gold); }
+
+        /* Biometric Mapping */
+        .biometric-section { margin-top: 20px; }
+        .biometric-title { font-size: 12px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .biometric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .bio-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-elevated); border-radius: 8px; }
+        .bio-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .bio-icon.hrv { background: var(--red-dim); }
+        .bio-icon.breath { background: var(--cyan-dim); }
+        .bio-icon.voice { background: var(--purple-dim); }
+        .bio-icon.gaze { background: var(--gold-dim); }
+        .bio-icon.posture { background: var(--green-dim); }
+        .bio-icon.eda { background: var(--orange); color: black; }
+        .bio-info { flex: 1; }
+        .bio-name { font-size: 10px; color: var(--text-secondary); }
+        .bio-value { font-size: 12px; font-weight: 600; }
+        .bio-sync { font-size: 9px; padding: 2px 6px; border-radius: 4px; }
+        .bio-sync.high { background: var(--green-dim); color: var(--green); }
+        .bio-sync.medium { background: var(--gold-dim); color: var(--gold); }
+        .bio-sync.low { background: var(--red-dim); color: var(--red-critical); }
+
+        /* Time Series Graph */
+        .graph-container { background: var(--bg-dark); border-radius: 10px; padding: 16px; margin-top: 16px; }
+        .graph-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .graph-title { font-size: 12px; font-weight: 600; }
+        .graph-controls { display: flex; gap: 8px; }
+        .graph-btn { padding: 4px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; font-size: 9px; color: var(--text-secondary); cursor: pointer; }
+        .graph-btn.active { background: var(--purple-dim); border-color: var(--purple); color: var(--purple); }
+        .graph-area { height: 150px; position: relative; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .graph-line { position: absolute; bottom: 0; left: 0; right: 0; height: 100%; }
+        .graph-svg { width: 100%; height: 100%; }
+        .graph-path { fill: none; stroke-width: 2; }
+        .graph-path.coherence { stroke: var(--cyan); }
+        .graph-path.p-ent { stroke: var(--purple); }
+        .graph-path.tunnel { stroke: var(--gold); }
+        .graph-fill { opacity: 0.1; }
+        .graph-fill.coherence { fill: var(--cyan); }
+        .graph-y-labels { position: absolute; left: -30px; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: space-between; font-size: 9px; color: var(--text-secondary); }
+        .graph-x-labels { display: flex; justify-content: space-between; font-size: 9px; color: var(--text-secondary); margin-top: 8px; }
+        .cee-marker { position: absolute; top: 0; bottom: 0; width: 30px; background: var(--green-dim); border-left: 2px solid var(--green); opacity: 0.5; }
+        .graph-legend { display: flex; gap: 16px; justify-content: center; margin-top: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 10px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.coherence { background: var(--cyan); }
+        .legend-dot.p-ent { background: var(--purple); }
+        .legend-dot.cee { background: var(--green); }
+
+        /* Research Tools Panel */
+        .research-panel { display: flex; flex-direction: column; gap: 16px; }
+        .study-info { background: var(--purple-dim); border: 1px solid var(--purple); border-radius: 10px; padding: 16px; }
+        .study-title { font-size: 11px; font-weight: 600; color: var(--purple); margin-bottom: 8px; }
+        .study-id { font-size: 10px; color: var(--text-secondary); margin-bottom: 12px; font-family: monospace; }
+        .study-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .study-stat { text-align: center; padding: 10px; background: var(--bg-dark); border-radius: 6px; }
+        .study-stat-value { font-size: 18px; font-weight: 700; color: var(--purple); }
+        .study-stat-label { font-size: 9px; color: var(--text-secondary); }
+
+        /* Report Generator */
+        .report-section { background: var(--bg-elevated); border-radius: 10px; padding: 16px; }
+        .report-title { font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+        .report-option { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+        .report-option:hover { background: var(--purple-dim); }
+        .report-icon { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; background: var(--bg-elevated); }
+        .report-info { flex: 1; }
+        .report-name { font-size: 11px; font-weight: 500; }
+        .report-desc { font-size: 9px; color: var(--text-secondary); }
+        .report-arrow { color: var(--text-secondary); }
+
+        /* Cross-Reference Tool */
+        .xref-section { background: var(--bg-elevated); border-radius: 10px; padding: 16px; }
+        .xref-title { font-size: 12px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .xref-matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+        .xref-cell { padding: 8px; text-align: center; border-radius: 4px; font-size: 10px; }
+        .xref-cell.header { background: var(--bg-dark); color: var(--text-secondary); font-weight: 600; }
+        .xref-cell.high { background: var(--green-dim); color: var(--green); }
+        .xref-cell.medium { background: var(--gold-dim); color: var(--gold); }
+        .xref-cell.low { background: var(--red-dim); color: var(--red-critical); }
+        .xref-cell.self { background: var(--bg-dark); color: var(--text-secondary); }
+
+        /* Longitudinal Trends */
+        .trend-section { background: var(--bg-elevated); border-radius: 10px; padding: 16px; }
+        .trend-title { font-size: 12px; font-weight: 600; margin-bottom: 12px; }
+        .trend-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .trend-item:last-child { border-bottom: none; }
+        .trend-metric { flex: 1; }
+        .trend-name { font-size: 11px; font-weight: 500; }
+        .trend-period { font-size: 9px; color: var(--text-secondary); }
+        .trend-change { font-size: 14px; font-weight: 700; }
+        .trend-change.up { color: var(--green); }
+        .trend-change.down { color: var(--red-critical); }
+        .trend-change.stable { color: var(--gold); }
+        .trend-spark { width: 60px; height: 24px; }
+
+        /* Session History */
+        .session-list { max-height: 250px; overflow-y: auto; }
+        .session-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+        .session-item:hover { background: var(--purple-dim); }
+        .session-date { font-size: 10px; color: var(--text-secondary); width: 70px; }
+        .session-coherence { width: 50px; text-align: center; }
+        .session-coherence-value { font-size: 12px; font-weight: 600; }
+        .session-cee { flex: 1; }
+        .session-cee-count { font-size: 11px; }
+        .session-cee-count .count { color: var(--green); font-weight: 600; }
+        .session-duration { font-size: 10px; color: var(--text-secondary); }
+
+        /* Ethics Notice */
+        .ethics-notice { background: linear-gradient(135deg, var(--blue-dim), var(--purple-dim)); border: 1px solid var(--blue); border-radius: 10px; padding: 14px; margin-top: 16px; }
+        .ethics-title { font-size: 10px; font-weight: 600; color: var(--blue); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+        .ethics-text { font-size: 9px; color: var(--text-secondary); line-height: 1.5; }
+
+        /* Formula Interpretation */
+        .interpretation-section { background: var(--bg-dark); border-radius: 10px; padding: 16px; margin-top: 16px; }
+        .interpretation-title { font-size: 11px; font-weight: 600; margin-bottom: 12px; color: var(--purple); }
+        .interpretation-item { display: flex; gap: 10px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .interpretation-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        .interpretation-icon { font-size: 16px; }
+        .interpretation-text { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+        .interpretation-text strong { color: var(--text-primary); }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🔬</div>
+            <div>
+                <div class="logo-text">NEVEDAL RESEARCH LABORATORY</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Study Platform</div>
+            </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span class="header-badge">IRB APPROVED • PROTOCOL #QEC-2026-001</span>
+            <button class="btn btn-secondary">📊 Export Data</button>
+            <button class="btn btn-primary">📄 Generate Report</button>
+            <a href="command.html" class="btn btn-secondary">← Back to Dashboard</a>
+        </div>
+    </header>
+    
+    <!-- NAVIGATION -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item active"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+        <div class="sub-nav-item"><span>📚</span> Literature Links</div>
+        <div class="sub-nav-item"><span>⚙️</span> Calibration</div>
+    </nav>
+    
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Subject Selection -->
+        <div class="subject-panel">
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">👥</div> Dyad Selection</div>
+                </div>
+                <div class="card-body">
+                    <!-- Current Dyad -->
+                    <div class="dyad-selection">
+                        <div class="dyad-title">Current Analysis Pair</div>
+                        <div class="dyad-pair">
+                            <div class="dyad-subject a">
+                                <div class="avatar">ET</div>
+                                <div class="dyad-label" id="dyad-a-name">John D.</div>
+                                <div class="dyad-role">Subject A (Client)</div>
+                            </div>
+                            <div class="dyad-connector">⟷</div>
+                            <div class="dyad-subject b">
+                                <div class="avatar">👩‍⚕️</div>
+                                <div class="dyad-label" id="dyad-b-name">Jane D.</div>
+                                <div class="dyad-role">Subject B (Client)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search & Filters -->
+                    <div class="search-box">
+                        <input type="text" placeholder="Search subjects...">
+                    </div>
+                    <div class="filter-tabs">
+                        <div class="filter-tab active">All</div>
+                        <div class="filter-tab">Clients</div>
+                        <div class="filter-tab">Coaches</div>
+                        <div class="filter-tab">Family</div>
+                    </div>
+
+                    <!-- Subject List -->
+                    <div class="subject-list">
+                        <div class="subject-item selected">
+                            <div class="subject-avatar client">ET</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Emma Thompson</div>
+                                <div class="subject-meta">Client • FAM_0023 • 47 sessions</div>
+                            </div>
+                            <span class="subject-tag a">A</span>
+                        </div>
+                        <div class="subject-item selected-b">
+                            <div class="subject-avatar coach">👩‍⚕️</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Coach Hope</div>
+                                <div class="subject-meta">Therapist • 847 total sessions</div>
+                            </div>
+                            <span class="subject-tag b">B</span>
+                        </div>
+                        <div class="subject-item">
+                            <div class="subject-avatar family">BT</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Billy Thompson</div>
+                                <div class="subject-meta">Minor • FAM_0023 • 12 sessions</div>
+                            </div>
+                        </div>
+                        <div class="subject-item">
+                            <div class="subject-avatar family">RT</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Robert Thompson</div>
+                                <div class="subject-meta">HoH • FAM_0023 • 23 sessions</div>
+                            </div>
+                        </div>
+                        <div class="subject-item">
+                            <div class="subject-avatar client">SM</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Sarah Mitchell</div>
+                                <div class="subject-meta">Client • FAM_0042 • 31 sessions</div>
+                            </div>
+                        </div>
+                        <div class="subject-item">
+                            <div class="subject-avatar coach">👩‍⚕️</div>
+                            <div class="subject-info">
+                                <div class="subject-name">Dr. Chen</div>
+                                <div class="subject-meta">Therapist • 612 total sessions</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cross-Reference Matrix -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">🔗</div> Cross-Reference</div>
+                </div>
+                <div class="card-body">
+                    <div class="xref-section" style="padding: 0; background: transparent;">
+                        <div class="xref-title">Family FAM_0023 Coherence Matrix</div>
+                        <div class="xref-matrix">
+                            <div class="xref-cell header"></div>
+                            <div class="xref-cell header">Emma</div>
+                            <div class="xref-cell header">Robert</div>
+                            <div class="xref-cell header">Billy</div>
+                            
+                            <div class="xref-cell header">Emma</div>
+                            <div class="xref-cell self">—</div>
+                            <div class="xref-cell medium">0.67</div>
+                            <div class="xref-cell high">0.82</div>
+                            
+                            <div class="xref-cell header">Robert</div>
+                            <div class="xref-cell medium">0.67</div>
+                            <div class="xref-cell self">—</div>
+                            <div class="xref-cell low">0.41</div>
+                            
+                            <div class="xref-cell header">Billy</div>
+                            <div class="xref-cell high">0.82</div>
+                            <div class="xref-cell low">0.41</div>
+                            <div class="xref-cell self">—</div>
+                        </div>
+                        <div style="font-size: 9px; color: var(--text-secondary); margin-top: 8px; text-align: center;">
+                            Average coherence across 12 family sessions
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER PANEL: Main Analysis -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <!-- Master Formula Banner -->
+            <div class="formula-banner">
+                <div class="formula-header">
+                    <div class="formula-title">🧬 NEVEDAL MASTER FORMULA — Quantum Emotional Coherence</div>
+                    <span class="formula-badge">✓ COMPUTING LIVE</span>
+                </div>
+                <div class="formula-display">
+                    <div class="formula-main">
+                        <span class="formula-var">C</span><span class="formula-sub">emo</span>(<span class="formula-var">t</span>) = 
+                        <span class="formula-frac">
+                            <span class="formula-num"><span class="formula-var">β</span> · <span class="formula-var">p</span><span class="formula-sub">ent</span> · <span class="formula-var">T</span><span class="formula-sub">0</span> · <span class="formula-exp">e<sup>−d/λ</sup></span></span>
+                            <span class="formula-den"><span class="formula-var">γ</span><span class="formula-sub">env</span> + <span class="formula-frac"><span class="formula-num"><span class="formula-var">E</span><span class="formula-sub">G</span><span class="formula-sup">(joint)</span></span><span class="formula-den">ℏ</span></span></span>
+                        </span>
+                        · exp[−(<span class="formula-var">γ</span><span class="formula-sub">env</span> + <span class="formula-frac"><span class="formula-num"><span class="formula-var">E</span><span class="formula-sub">G</span><span class="formula-sup">(joint)</span></span><span class="formula-den">ℏ</span></span>)<span class="formula-var">t</span>]
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Gauge + Components -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- C_emo Gauge -->
+                <div class="card research">
+                    <div class="card-header">
+                        <div class="card-title"><div class="icon cyan">📊</div> Real-time C<sub>emo</sub>(t)</div>
+                        <span style="font-size: 10px; color: var(--green);">● LIVE</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="coherence-gauge">
+                            <div class="gauge-container">
+                                <div class="gauge-bg"></div>
+                                <div class="gauge-inner">
+                                    <div class="gauge-value" id="dyad-c-emo">—</div>
+                                    <div class="gauge-label">Emotional Coherence</div>
+                                </div>
+                                <div class="gauge-needle" id="dyad-needle" style="transform: translateX(-50%) rotate(225deg);"></div>
+                                <div class="gauge-center"></div>
+                            </div>
+                            <div class="cee-indicator inactive" id="dyad-cee">⚪ Waiting for live dyad data…</div>
+                            <div style="font-size: 10px; color: var(--text-secondary); margin-top: 8px;">
+                                Subject A: <span id="subject-a-label">—</span> • Subject B: <span id="subject-b-label">—</span>
+                                <br>
+                                Last updated: <span id="dyad-last-updated">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Component Variables -->
+                <div class="card research">
+                    <div class="card-header">
+                        <div class="card-title"><div class="icon purple">🧮</div> Component Variables</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="component-grid">
+                            <div class="component-card p-ent">
+                                <div class="component-header">
+                                    <span class="component-symbol purple">E<sub>warmth</sub></span>
+                                    <span class="component-value" id="metric-e-warmth" style="color: var(--purple);">—</span>
+                                </div>
+                                <div class="component-name">Warmth / Relational Safety (Observer)</div>
+                                <div class="component-bar"><div class="component-fill purple" id="metric-e-warmth-bar" style="width: 0%;"></div></div>
+                            </div>
+                            <div class="component-card t-tunnel">
+                                <div class="component-header">
+                                    <span class="component-symbol cyan">T<sub>tunnel</sub></span>
+                                    <span class="component-value" id="metric-t-tunnel" style="color: var(--cyan);">—</span>
+                                </div>
+                                <div class="component-name">Tunneling / Gap-Bridging</div>
+                                <div class="component-bar"><div class="component-fill cyan" id="metric-t-tunnel-bar" style="width: 0%;"></div></div>
+                            </div>
+                            <div class="component-card gamma">
+                                <div class="component-header">
+                                    <span class="component-symbol orange">GAP</span>
+                                    <span class="component-value" id="metric-gap" style="color: var(--orange);">—</span>
+                                </div>
+                                <div class="component-name">Growth Attunement Potential</div>
+                                <div class="component-bar"><div class="component-fill orange" id="metric-gap-bar" style="width: 0%;"></div></div>
+                            </div>
+                            <div class="component-card e-joint">
+                                <div class="component-header">
+                                    <span class="component-symbol gold">Quantum</span>
+                                    <span class="component-value" id="metric-quantum" style="color: var(--gold);">—</span>
+                                </div>
+                                <div class="component-name">Quantum Wellness Score</div>
+                                <div class="component-bar"><div class="component-fill gold" id="metric-quantum-bar" style="width: 0%;"></div></div>
+                            </div>
+                        </div>
+
+                        <!-- Interpretation -->
+                        <div class="interpretation-section">
+                            <div class="interpretation-title">📖 Current State Interpretation</div>
+                            <div class="interpretation-item">
+                                <span class="interpretation-icon">✅</span>
+                                <span class="interpretation-text"><strong>High entanglement (p<sub>ent</sub>=0.81)</strong> indicates strong dyadic synchrony. HRV, breathing, and vocal patterns are highly correlated.</span>
+                            </div>
+                            <div class="interpretation-item">
+                                <span class="interpretation-icon">✅</span>
+                                <span class="interpretation-text"><strong>Good tunneling (T<sub>tunnel</sub>=0.68)</strong> suggests reduced defensive distance. Client is leaning in, maintaining eye contact.</span>
+                            </div>
+                            <div class="interpretation-item">
+                                <span class="interpretation-icon">✅</span>
+                                <span class="interpretation-text"><strong>Low noise (γ<sub>env</sub>=0.23)</strong> indicates regulated emotional state. No physiological arousal spikes or fragmented speech.</span>
+                            </div>
+                            <div class="interpretation-item">
+                                <span class="interpretation-icon">⚠️</span>
+                                <span class="interpretation-text"><strong>Moderate load (E<sub>G</sub>=0.54)</strong> shows significant therapeutic material is present. Trauma content being processed.</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Biometric Mapping -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🩺</div> Biometric Signal Mapping</div>
+                    <span style="font-size: 10px; color: var(--text-secondary);">Raw signals → Nevedal variables</span>
+                </div>
+                <div class="card-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <!-- Subject A Biometrics -->
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 10px; color: var(--purple);">Subject A: Emma Thompson</div>
+                            <div class="biometric-grid">
+                                <div class="bio-item">
+                                    <div class="bio-icon hrv">❤️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Heart Rate Variability</div>
+                                        <div class="bio-value">68 ms RMSSD</div>
+                                    </div>
+                                    <span class="bio-sync high">↔ 89%</span>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon breath">🫁</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Respiratory Rate</div>
+                                        <div class="bio-value">14 BPM</div>
+                                    </div>
+                                    <span class="bio-sync high">↔ 92%</span>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon voice">🎙️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Vocal Prosody</div>
+                                        <div class="bio-value">Warm, Open</div>
+                                    </div>
+                                    <span class="bio-sync high">↔ 85%</span>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon gaze">👁️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Gaze Pattern</div>
+                                        <div class="bio-value">78% contact</div>
+                                    </div>
+                                    <span class="bio-sync medium">↔ 71%</span>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon posture">🧍</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Body Orientation</div>
+                                        <div class="bio-value">+15° lean</div>
+                                    </div>
+                                    <span class="bio-sync high">↔ 88%</span>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon eda">⚡</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Electrodermal (EDA)</div>
+                                        <div class="bio-value">2.3 µS</div>
+                                    </div>
+                                    <span class="bio-sync low">↔ 34%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Subject B Biometrics -->
+                        <div>
+                            <div style="font-size: 11px; font-weight: 600; margin-bottom: 10px; color: var(--cyan);">Subject B: Coach Hope</div>
+                            <div class="biometric-grid">
+                                <div class="bio-item">
+                                    <div class="bio-icon hrv">❤️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Heart Rate Variability</div>
+                                        <div class="bio-value">72 ms RMSSD</div>
+                                    </div>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon breath">🫁</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Respiratory Rate</div>
+                                        <div class="bio-value">13 BPM</div>
+                                    </div>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon voice">🎙️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Vocal Prosody</div>
+                                        <div class="bio-value">Calm, Attuned</div>
+                                    </div>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon gaze">👁️</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Gaze Pattern</div>
+                                        <div class="bio-value">82% contact</div>
+                                    </div>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon posture">🧍</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Body Orientation</div>
+                                        <div class="bio-value">+12° lean</div>
+                                    </div>
+                                </div>
+                                <div class="bio-item">
+                                    <div class="bio-icon eda">⚡</div>
+                                    <div class="bio-info">
+                                        <div class="bio-name">Electrodermal (EDA)</div>
+                                        <div class="bio-value">1.8 µS</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mapping Legend -->
+                    <div style="margin-top: 16px; padding: 12px; background: var(--bg-dark); border-radius: 8px;">
+                        <div style="font-size: 10px; font-weight: 600; margin-bottom: 8px;">📐 Signal → Variable Mapping</div>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; font-size: 9px;">
+                            <div><span style="color: var(--purple);">p<sub>ent</sub></span> ← HRV sync, Breath sync, Vocal mirroring, Postural echo</div>
+                            <div><span style="color: var(--cyan);">T<sub>tunnel</sub></span> ← Gaze contact, Body lean, Verbal sharing rate</div>
+                            <div><span style="color: var(--orange);">γ<sub>env</sub></span> ← EDA spikes, HR elevation, Speech fragmentation</div>
+                            <div><span style="color: var(--gold);">E<sub>G</sub></span> ← Sentiment polarity, Topic weight, Trauma markers</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time Series Graph -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon blue">📈</div> Session Trajectory</div>
+                    <div class="graph-controls">
+                        <button class="graph-btn">5m</button>
+                        <button class="graph-btn active">15m</button>
+                        <button class="graph-btn">Full</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="graph-container">
+                        <div class="graph-header">
+                            <div class="graph-title">C<sub>emo</sub>(t) Coherence Trajectory — Current Session</div>
+                        </div>
+                        <div class="graph-area">
+                            <div class="graph-y-labels">
+                                <span>1.0</span>
+                                <span>0.5</span>
+                                <span>0.0</span>
+                            </div>
+                            <!-- CEE Windows -->
+                            <div class="cee-marker" style="left: 25%;"></div>
+                            <div class="cee-marker" style="left: 65%;"></div>
+                            <div class="graph-line">
+                                <svg class="graph-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                    <!-- Coherence line -->
+                                    <path class="graph-path coherence" d="M0,70 Q10,65 15,55 T25,35 T35,40 T45,50 T55,45 T65,30 T75,35 T85,40 T100,38"/>
+                                    <path class="graph-fill coherence" d="M0,70 Q10,65 15,55 T25,35 T35,40 T45,50 T55,45 T65,30 T75,35 T85,40 T100,38 L100,100 L0,100 Z"/>
+                                    <!-- p_ent line -->
+                                    <path class="graph-path p-ent" d="M0,60 Q10,55 15,45 T25,30 T35,35 T45,40 T55,35 T65,25 T75,28 T85,32 T100,30" style="stroke-dasharray: 4,2;"/>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="graph-x-labels">
+                            <span>0:00</span>
+                            <span>7:30</span>
+                            <span>15:00</span>
+                            <span>22:30</span>
+                            <span>30:00</span>
+                        </div>
+                        <div class="graph-legend">
+                            <div class="legend-item"><div class="legend-dot coherence"></div> C<sub>emo</sub>(t)</div>
+                            <div class="legend-item"><div class="legend-dot p-ent"></div> p<sub>ent</sub></div>
+                            <div class="legend-item"><div class="legend-dot cee"></div> CEE Windows</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: Research Tools -->
+        <div class="research-panel">
+            <!-- Study Info -->
+            <div class="study-info">
+                <div class="study-title">📋 Active Research Study</div>
+                <div class="study-id">QEC-2026-001 • "Quantum Emotional Coherence in Therapeutic Dyads"</div>
+                <div class="study-stats">
+                    <div class="study-stat">
+                        <div class="study-stat-value">847</div>
+                        <div class="study-stat-label">Total Sessions</div>
+                    </div>
+                    <div class="study-stat">
+                        <div class="study-stat-value">156</div>
+                        <div class="study-stat-label">Participants</div>
+                    </div>
+                    <div class="study-stat">
+                        <div class="study-stat-value">42</div>
+                        <div class="study-stat-label">Therapists</div>
+                    </div>
+                    <div class="study-stat">
+                        <div class="study-stat-value">23</div>
+                        <div class="study-stat-label">Families</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Report Generator -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">📄</div> Report Generator</div>
+                </div>
+                <div class="card-body">
+                    <div class="report-section" style="padding: 0; background: transparent;">
+                        <div class="report-option">
+                            <div class="report-icon">📊</div>
+                            <div class="report-info">
+                                <div class="report-name">Individual Coherence Report</div>
+                                <div class="report-desc">Full C_emo trajectory for selected subject</div>
+                            </div>
+                            <span class="report-arrow">→</span>
+                        </div>
+                        <div class="report-option">
+                            <div class="report-icon">👥</div>
+                            <div class="report-info">
+                                <div class="report-name">Dyad Comparison Report</div>
+                                <div class="report-desc">Compare coherence across dyad pairings</div>
+                            </div>
+                            <span class="report-arrow">→</span>
+                        </div>
+                        <div class="report-option">
+                            <div class="report-icon">👨‍👩‍👧</div>
+                            <div class="report-info">
+                                <div class="report-name">Family Dynamics Report</div>
+                                <div class="report-desc">Cross-member coherence matrix analysis</div>
+                            </div>
+                            <span class="report-arrow">→</span>
+                        </div>
+                        <div class="report-option">
+                            <div class="report-icon">📈</div>
+                            <div class="report-info">
+                                <div class="report-name">Longitudinal Trends</div>
+                                <div class="report-desc">CEE frequency over 12-week period</div>
+                            </div>
+                            <span class="report-arrow">→</span>
+                        </div>
+                        <div class="report-option">
+                            <div class="report-icon">🧬</div>
+                            <div class="report-info">
+                                <div class="report-name">Coach Efficacy Analysis</div>
+                                <div class="report-desc">Therapist coherence patterns across clients</div>
+                            </div>
+                            <span class="report-arrow">→</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Longitudinal Trends -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📈</div> Trends (12 weeks)</div>
+                </div>
+                <div class="card-body">
+                    <div class="trend-section" style="padding: 0; background: transparent;">
+                        <div class="trend-item">
+                            <div class="trend-metric">
+                                <div class="trend-name">Avg C<sub>emo</sub></div>
+                                <div class="trend-period">Emma + Coach Hope</div>
+                            </div>
+                            <div class="trend-change up">+34%</div>
+                        </div>
+                        <div class="trend-item">
+                            <div class="trend-metric">
+                                <div class="trend-name">CEE Windows/Session</div>
+                                <div class="trend-period">Mean count</div>
+                            </div>
+                            <div class="trend-change up">+2.4</div>
+                        </div>
+                        <div class="trend-item">
+                            <div class="trend-metric">
+                                <div class="trend-name">Baseline p<sub>ent</sub></div>
+                                <div class="trend-period">Session start average</div>
+                            </div>
+                            <div class="trend-change up">+28%</div>
+                        </div>
+                        <div class="trend-item">
+                            <div class="trend-metric">
+                                <div class="trend-name">Avg γ<sub>env</sub></div>
+                                <div class="trend-period">Decoherence rate</div>
+                            </div>
+                            <div class="trend-change up">−41%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session History -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">📚</div> Session History</div>
+                </div>
+                <div class="card-body">
+                    <div class="session-list">
+                        <div class="session-item">
+                            <div class="session-date">Jan 20</div>
+                            <div class="session-coherence">
+                                <div class="session-coherence-value" style="color: var(--green);">0.73</div>
+                            </div>
+                            <div class="session-cee">
+                                <div class="session-cee-count"><span class="count">3</span> CEE</div>
+                            </div>
+                            <div class="session-duration">52m</div>
+                        </div>
+                        <div class="session-item">
+                            <div class="session-date">Jan 17</div>
+                            <div class="session-coherence">
+                                <div class="session-coherence-value" style="color: var(--green);">0.68</div>
+                            </div>
+                            <div class="session-cee">
+                                <div class="session-cee-count"><span class="count">2</span> CEE</div>
+                            </div>
+                            <div class="session-duration">48m</div>
+                        </div>
+                        <div class="session-item">
+                            <div class="session-date">Jan 13</div>
+                            <div class="session-coherence">
+                                <div class="session-coherence-value" style="color: var(--gold);">0.54</div>
+                            </div>
+                            <div class="session-cee">
+                                <div class="session-cee-count"><span class="count">1</span> CEE</div>
+                            </div>
+                            <div class="session-duration">45m</div>
+                        </div>
+                        <div class="session-item">
+                            <div class="session-date">Jan 10</div>
+                            <div class="session-coherence">
+                                <div class="session-coherence-value" style="color: var(--green);">0.71</div>
+                            </div>
+                            <div class="session-cee">
+                                <div class="session-cee-count"><span class="count">4</span> CEE</div>
+                            </div>
+                            <div class="session-duration">58m</div>
+                        </div>
+                        <div class="session-item">
+                            <div class="session-date">Jan 6</div>
+                            <div class="session-coherence">
+                                <div class="session-coherence-value" style="color: var(--gold);">0.49</div>
+                            </div>
+                            <div class="session-cee">
+                                <div class="session-cee-count"><span class="count">1</span> CEE</div>
+                            </div>
+                            <div class="session-duration">42m</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ethics Notice -->
+            <div class="ethics-notice">
+                <div class="ethics-title">⚖️ Research Ethics Notice</div>
+                <div class="ethics-text">
+                    This research platform operates under IRB Protocol #QEC-2026-001. All participants have provided informed consent for quantum coherence measurement. Data is de-identified for aggregate analysis. The "quantum" framework is a metaphorical model for organizing biometric synchrony data, not a claim of literal quantum effects between brains.
+                </div>
+            </div>
+        </div>
+    </main>
+    <script>
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) window.location.href = "index.html";
+
+        let ws = null;
+        let authenticated = false;
+
+        // Default to John + Jane in your current registry:
+        // John D. = CLIENT_001
+        // Jane D. = CLIENT_001B
+        let subjectA = sessionStorage.getItem("nevedal_subject_a") || "CLIENT_001";
+        let subjectB = sessionStorage.getItem("nevedal_subject_b") || "CLIENT_001B";
+
+        const latestByUser = new Map();
+        let refreshTimer = null;
+
+        function getWsUrl() {
+            const host = location.hostname;
+            if (!host || host === "localhost" || host === "127.0.0.1" || location.protocol === "file:") {
+                return "wss://api.sovereignsanctuary.net/ws";
+            }
+            if (host.includes("sovereignsanctuary")) {
+                return `wss://${host}/ws`;
+            }
+            const proto = (location.protocol === "https:") ? "wss" : "ws";
+            return `${proto}://${host}:8765`;
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(getWsUrl());
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username,
+                    password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+
+                if (msg.type === "login_success" || msg.type === "auth_success") {
+                    authenticated = true;
+                    startPolling();
+                    return;
+                }
+
+                if (msg.type === "admin_user_metrics") {
+                    latestByUser.set(msg.user_id, msg);
+                    renderDyad();
+                    return;
+                }
+
+                if (msg.type === "error") {
+                    console.warn("[Nevedal Lab] error:", msg.message);
+                }
+            };
+
+            ws.onclose = () => {
+                authenticated = false;
+                if (refreshTimer) clearInterval(refreshTimer);
+                setTimeout(connectWebSocket, 1200);
+            };
+        }
+
+        function startPolling() {
+            if (!ws || !authenticated) return;
+            pollOnce();
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(pollOnce, 1500);
+        }
+
+        function pollOnce() {
+            try {
+                ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: subjectA }));
+                ws.send(JSON.stringify({ type: "admin_get_user_metrics", user_id: subjectB }));
+            } catch (e) {}
+        }
+
+        function n01(x) {
+            const n = Number(x);
+            if (!Number.isFinite(n)) return null;
+            return Math.max(0, Math.min(1, n));
+        }
+
+        function fmt2(x) {
+            const n = Number(x);
+            return Number.isFinite(n) ? n.toFixed(2) : "—";
+        }
+
+        function setBar(id, value01) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (value01 == null) return;
+            el.style.width = (value01 * 100) + "%";
+        }
+
+        function setText(id, text) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = text;
+        }
+
+        function renderDyad() {
+            const a = latestByUser.get(subjectA);
+            const b = latestByUser.get(subjectB);
+            if (!a || !b) return;
+
+            const aNs = a.nevedal_state || {};
+            const bNs = b.nevedal_state || {};
+
+            const aC = n01(aNs.C_emo);
+            const bC = n01(bNs.C_emo);
+            if (aC == null || bC == null) return;
+
+            // "Dyad coherence" display = average of both C_emo values
+            const dyadC = (aC + bC) / 2;
+            setText("dyad-c-emo", dyadC.toFixed(2));
+
+            // Gauge rotation:
+            // 0..1 => 225deg..495deg (270deg sweep)
+            const deg = 225 + (dyadC * 270);
+            const needle = document.getElementById("dyad-needle");
+            if (needle) needle.style.transform = `translateX(-50%) rotate(${deg}deg)`;
+
+            // Components (Observer metrics)
+            const eWarmth = n01(aNs.E_warmth);
+            const tTunnel = n01(aNs.T_tunnel);
+            const gap = n01(aNs.GAP);
+            const quantum = n01(aNs.Quantum);
+
+            setText("metric-e-warmth", fmt2(eWarmth));
+            setText("metric-t-tunnel", fmt2(tTunnel));
+            setText("metric-gap", fmt2(gap));
+            setText("metric-quantum", fmt2(quantum));
+
+            setBar("metric-e-warmth-bar", eWarmth);
+            setBar("metric-t-tunnel-bar", tTunnel);
+            setBar("metric-gap-bar", gap);
+            setBar("metric-quantum-bar", quantum);
+
+            // CEE placeholder heuristic (until true CEE stream is wired)
+            const cee = (dyadC >= 0.75);
+            const ceeEl = document.getElementById("dyad-cee");
+            if (ceeEl) {
+                ceeEl.className = "cee-indicator " + (cee ? "active" : "inactive");
+                ceeEl.textContent = cee
+                    ? "⚡ HIGH COHERENCE — Potential CEE moment (observer-derived)"
+                    : "⚪ Coherence below CEE threshold (observer-derived)";
+            }
+
+            setText("subject-a-label", `${a.name || subjectA} (${subjectA})`);
+            setText("subject-b-label", `${b.name || subjectB} (${subjectB})`);
+            setText("dyad-a-name", a.name || subjectA);
+            setText("dyad-b-name", b.name || subjectB);
+            setText("dyad-last-updated", a.last_updated || a.server_time || "—");
+        }
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

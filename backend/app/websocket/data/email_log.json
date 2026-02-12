@@ -1,0 +1,16 @@
+[
+  {
+    "to": "support@sovereignsanctuary.net",
+    "subject": "SendGrid Test \u2013 Little Nate",
+    "status": "error",
+    "details": "<urlopen error [Errno 8] nodename nor servname provided, or not known>",
+    "timestamp": "2026-02-10T23:56:52.245854"
+  },
+  {
+    "to": "your@email.com",
+    "subject": "SendGrid Test \u2013 Little Nate",
+    "status": "error",
+    "details": "HTTP Error 403: Forbidden",
+    "timestamp": "2026-02-10T23:58:29.957806"
+  }
+]

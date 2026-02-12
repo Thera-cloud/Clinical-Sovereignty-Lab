@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Circle — Little Nate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #161616;
+            --bg-input: #0D0D0D;
+            --border-subtle: #1A1A1A;
+            --border-active: #2A2A2A;
+            
+            --gold-primary: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            
+            --cyan-primary: #4ECDC4;
+            --cyan-dim: #2D7A75;
+            
+            --text-primary: #F5F5F5;
+            --text-secondary: #9A9A9A;
+            --text-muted: #5A5A5A;
+            
+            --success: #4ADE80;
+            --warning: #FBBF24;
+            --danger: #EF4444;
+            
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        /* Layout */
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: var(--bg-chamber);
+            border-right: 1px solid var(--border-subtle);
+            padding: 32px 24px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .sidebar-header {
+            margin-bottom: 40px;
+        }
+        
+        .sidebar-header h1 {
+            font-family: var(--font-display);
+            font-size: 24px;
+            font-weight: 400;
+            color: var(--gold-primary);
+            margin-bottom: 4px;
+        }
+        
+        .sidebar-header p {
+            font-size: 12px;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .nav-item:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+        
+        .nav-item.active {
+            background: rgba(201, 169, 98, 0.1);
+            color: var(--gold-primary);
+            border-left: 2px solid var(--gold-primary);
+        }
+        
+        .nav-item svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            stroke-width: 1.5;
+            fill: none;
+        }
+        
+        .nav-item span {
+            font-size: 14px;
+        }
+        
+        .sidebar-footer {
+            padding-top: 24px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        
+        .user-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--gold-dim), var(--gold-primary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--bg-void);
+        }
+        
+        .user-info .name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        
+        .user-info .tier {
+            font-size: 11px;
+            color: var(--gold-primary);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 40px;
+            overflow-y: auto;
+        }
+        
+        .page-header {
+            margin-bottom: 40px;
+        }
+        
+        .page-header h2 {
+            font-family: var(--font-display);
+            font-size: 36px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        .page-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        /* Billing Summary Card */
+        .billing-summary {
+            background: linear-gradient(135deg, rgba(201, 169, 98, 0.1) 0%, var(--bg-card) 100%);
+            border: 1px solid var(--gold-dim);
+            border-radius: 4px;
+            padding: 32px;
+            margin-bottom: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .billing-info h3 {
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        
+        .billing-info .amount {
+            font-family: var(--font-display);
+            font-size: 48px;
+            font-weight: 300;
+            color: var(--text-primary);
+        }
+        
+        .billing-info .amount span {
+            font-size: 20px;
+            color: var(--text-secondary);
+        }
+        
+        .billing-info .breakdown {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+        
+        .billing-actions {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            font-family: var(--font-body);
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            border-radius: 2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border-active);
+            color: var(--text-primary);
+        }
+        
+        .btn-outline:hover {
+            background: var(--bg-elevated);
+            border-color: var(--text-muted);
+        }
+        
+        .btn-primary {
+            background: var(--gold-primary);
+            border: 1px solid var(--gold-primary);
+            color: var(--bg-void);
+        }
+        
+        .btn-primary:hover {
+            background: var(--gold-bright);
+            border-color: var(--gold-bright);
+        }
+        
+        /* Family Members Section */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        
+        .section-header h3 {
+            font-family: var(--font-display);
+            font-size: 24px;
+            font-weight: 400;
+        }
+        
+        /* Member Cards */
+        .members-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 40px;
+        }
+        
+        .member-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            padding: 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: all 0.2s ease;
+        }
+        
+        .member-card:hover {
+            border-color: var(--border-active);
+        }
+        
+        .member-card.primary {
+            border-color: var(--gold-dim);
+            background: linear-gradient(90deg, rgba(201, 169, 98, 0.05) 0%, var(--bg-card) 100%);
+        }
+        
+        .member-avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: var(--bg-elevated);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+        
+        .member-card.primary .member-avatar {
+            background: linear-gradient(135deg, var(--gold-dim), var(--gold-primary));
+            color: var(--bg-void);
+        }
+        
+        .member-info {
+            flex: 1;
+        }
+        
+        .member-info .name {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        
+        .member-info .role {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .member-info .role-badge {
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 4px 10px;
+            border-radius: 2px;
+            background: var(--bg-elevated);
+            color: var(--text-muted);
+        }
+        
+        .member-card.primary .role-badge {
+            background: rgba(201, 169, 98, 0.2);
+            color: var(--gold-primary);
+        }
+        
+        .member-info .role .access {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        
+        .member-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+        
+        .member-price {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .member-price.included {
+            color: var(--success);
+        }
+        
+        .member-status {
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--success);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .member-status::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+        
+        .member-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .member-actions button {
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            color: var(--text-muted);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .member-actions button:hover {
+            border-color: var(--border-active);
+            color: var(--text-primary);
+        }
+        
+        .member-actions button.danger:hover {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+        
+        /* Add Member Card */
+        .add-member-card {
+            background: var(--bg-card);
+            border: 2px dashed var(--border-subtle);
+            border-radius: 4px;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .add-member-card:hover {
+            border-color: var(--cyan-dim);
+            background: rgba(78, 205, 196, 0.02);
+        }
+        
+        .add-member-card svg {
+            width: 32px;
+            height: 32px;
+            stroke: var(--text-muted);
+            stroke-width: 1.5;
+            fill: none;
+            margin-bottom: 12px;
+        }
+        
+        .add-member-card:hover svg {
+            stroke: var(--cyan-primary);
+        }
+        
+        .add-member-card .label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        .add-member-card .price {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        
+        /* Invite Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            border-radius: 4px;
+            width: 100%;
+            max-width: 480px;
+            padding: 40px;
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+        }
+        
+        .modal-overlay.active .modal {
+            transform: translateY(0);
+        }
+        
+        .modal-header {
+            margin-bottom: 32px;
+        }
+        
+        .modal-header h3 {
+            font-family: var(--font-display);
+            font-size: 28px;
+            font-weight: 400;
+            margin-bottom: 8px;
+        }
+        
+        .modal-header p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 14px 16px;
+            background: var(--bg-input);
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 14px;
+            transition: border-color 0.2s ease;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--cyan-primary);
+        }
+        
+        .form-group select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239A9A9A' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            padding-right: 40px;
+        }
+        
+        .form-group select option {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+        
+        .price-preview {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .price-preview .label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .price-preview .value {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .price-preview .value.free {
+            color: var(--success);
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        /* Pending Invites */
+        .pending-section {
+            margin-top: 40px;
+            padding-top: 40px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        
+        .pending-invite {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-left: 3px solid var(--warning);
+            border-radius: 4px;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        
+        .pending-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .pending-info svg {
+            width: 20px;
+            height: 20px;
+            stroke: var(--warning);
+            stroke-width: 1.5;
+            fill: none;
+        }
+        
+        .pending-info .email {
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+        
+        .pending-info .sent {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        
+        .pending-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .pending-actions button {
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            border-radius: 2px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .pending-actions button:hover {
+            border-color: var(--text-muted);
+            color: var(--text-primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>Sanctuary</h1>
+                <p>Settings</p>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <div class="nav-item">
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                    <span>Subscription</span>
+                </div>
+                <div class="nav-item active">
+                    <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Family Circle</span>
+                </div>
+                <div class="nav-item">
+                    <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                    <span>Payment Methods</span>
+                </div>
+                <div class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span>Invoices</span>
+                </div>
+                <div class="nav-item">
+                    <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span>Notifications</span>
+                </div>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-card">
+                    <div class="user-avatar">SC</div>
+                    <div class="user-info">
+                        <div class="name">Sarah Chen</div>
+                        <div class="tier">Sovereign Circle</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="page-header">
+                <h2>Family Circle</h2>
+                <p>Manage your family members and their access to the Sanctuary</p>
+            </div>
+            
+            <!-- Billing Summary -->
+            <div class="billing-summary">
+                <div class="billing-info">
+                    <h3>Monthly Total</h3>
+                    <div class="amount">$224<span>/mo</span></div>
+                    <div class="breakdown">Base $149 + 1 additional member $75</div>
+                </div>
+                <div class="billing-actions">
+                    <button class="btn btn-outline">View Invoice</button>
+                    <button class="btn btn-primary">Manage Plan</button>
+                </div>
+            </div>
+            
+            <!-- Family Members -->
+            <div class="section-header">
+                <h3>Family Members</h3>
+            </div>
+            
+            <div class="members-grid">
+                <!-- Primary (You) -->
+                <div class="member-card primary">
+                    <div class="member-avatar">SC</div>
+                    <div class="member-info">
+                        <div class="name">Sarah Chen</div>
+                        <div class="role">
+                            <span class="role-badge">Primary Holder</span>
+                            <span class="access">Full Sovereign Circle Access</span>
+                        </div>
+                    </div>
+                    <div class="member-meta">
+                        <div class="member-price">$149/mo</div>
+                        <div class="member-status">Active</div>
+                    </div>
+                </div>
+                
+                <!-- Spouse -->
+                <div class="member-card">
+                    <div class="member-avatar">MC</div>
+                    <div class="member-info">
+                        <div class="name">Michael Chen</div>
+                        <div class="role">
+                            <span class="role-badge">Spouse</span>
+                            <span class="access">Standard Access</span>
+                        </div>
+                    </div>
+                    <div class="member-meta">
+                        <div class="member-price included">Included</div>
+                        <div class="member-status">Active</div>
+                    </div>
+                    <div class="member-actions">
+                        <button>View</button>
+                        <button class="danger">Remove</button>
+                    </div>
+                </div>
+                
+                <!-- First Dependent -->
+                <div class="member-card">
+                    <div class="member-avatar">EC</div>
+                    <div class="member-info">
+                        <div class="name">Emma Chen</div>
+                        <div class="role">
+                            <span class="role-badge">Dependent</span>
+                            <span class="access">Standard Access</span>
+                        </div>
+                    </div>
+                    <div class="member-meta">
+                        <div class="member-price included">Included</div>
+                        <div class="member-status">Active</div>
+                    </div>
+                    <div class="member-actions">
+                        <button>View</button>
+                        <button class="danger">Remove</button>
+                    </div>
+                </div>
+                
+                <!-- Additional Member -->
+                <div class="member-card">
+                    <div class="member-avatar">JC</div>
+                    <div class="member-info">
+                        <div class="name">Jake Chen</div>
+                        <div class="role">
+                            <span class="role-badge">Additional</span>
+                            <span class="access">Standard Access</span>
+                        </div>
+                    </div>
+                    <div class="member-meta">
+                        <div class="member-price">+$75/mo</div>
+                        <div class="member-status">Active</div>
+                    </div>
+                    <div class="member-actions">
+                        <button>View</button>
+                        <button class="danger">Remove</button>
+                    </div>
+                </div>
+                
+                <!-- Add Member Card -->
+                <div class="add-member-card" onclick="openModal()">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="16"/>
+                        <line x1="8" y1="12" x2="16" y2="12"/>
+                    </svg>
+                    <div class="label">Add Family Member</div>
+                    <div class="price">+$75/month</div>
+                </div>
+            </div>
+            
+            <!-- Pending Invites -->
+            <div class="pending-section">
+                <div class="section-header">
+                    <h3>Pending Invitations</h3>
+                </div>
+                
+                <div class="pending-invite">
+                    <div class="pending-info">
+                        <svg viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <div>
+                            <div class="email"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="93f4e1f2fdf7fef2bdf0fbf6fdd3f6fef2faffbdf0fcfe">[email&#160;protected]</a></div>
+                            <div class="sent">Sent 2 days ago</div>
+                        </div>
+                    </div>
+                    <div class="pending-actions">
+                        <button>Resend</button>
+                        <button>Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Invite Modal -->
+    <div class="modal-overlay" id="inviteModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Invite Family Member</h3>
+                <p>Send an invitation to join your Family Circle</p>
+            </div>
+            
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" placeholder="family@example.com" />
+            </div>
+            
+            <div class="form-group">
+                <label>Relationship</label>
+                <select id="relationshipSelect" onchange="updatePrice()">
+                    <option value="spouse">Spouse / Partner</option>
+                    <option value="dependent">Dependent (Child)</option>
+                    <option value="additional">Other Family Member</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Their Name</label>
+                <input type="text" placeholder="Full name" />
+            </div>
+            
+            <div class="price-preview">
+                <span class="label">Monthly Cost</span>
+                <span class="value free" id="priceValue">Included</span>
+            </div>
+            
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary">Send Invitation</button>
+            </div>
+        </div>
+    </div>
+    
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+        function openModal() {
+            document.getElementById('inviteModal').classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('inviteModal').classList.remove('active');
+        }
+        
+        function updatePrice() {
+            const select = document.getElementById('relationshipSelect');
+            const priceEl = document.getElementById('priceValue');
+            
+            if (select.value === 'additional') {
+                priceEl.textContent = '+$75/mo';
+                priceEl.classList.remove('free');
+            } else {
+                priceEl.textContent = 'Included';
+                priceEl.classList.add('free');
+            }
+        }
+        
+        // Close 

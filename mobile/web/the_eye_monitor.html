@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Live Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        
+        .main-content { padding: 24px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-body { padding: 20px; }
+        
+        .live-indicator { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 11px; }
+        .live-dot { width: 8px; height: 8px; background: var(--green); border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        
+        .sessions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .session-card { background: var(--bg-elevated); border: 1px solid; border-radius: 10px; padding: 16px; }
+        .session-card.top-tier { border-color: var(--gold); }
+        .session-card.ai { border-color: var(--cyan); }
+        .session-card.coach { border-color: var(--orange); }
+        .session-card.crisis { border-color: var(--red-critical); }
+        
+        .session-user { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+        .session-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 9px; font-weight: 600; margin-left: 8px; }
+        .session-badge.top-tier { background: var(--gold); color: black; }
+        .session-badge.trial { background: var(--text-secondary); color: white; }
+        .session-badge.ai { background: var(--cyan); color: black; }
+        .session-badge.coach { background: var(--orange); color: black; }
+        
+        .session-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
+        .session-cost { font-size: 12px; font-weight: 600; color: var(--green); margin-bottom: 12px; }
+        .session-cost.high { color: var(--orange); }
+        
+        .disconnect-btn { width: 100%; padding: 8px; background: var(--red-dim); border: 1px solid var(--red-critical); color: var(--red-critical); border-radius: 6px; font-size: 10px; font-weight: 600; cursor: pointer; }
+        .disconnect-btn:hover { background: var(--red-critical); color: white; }
+        
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👁️</div>
+            <div>
+                <diass="logo-text">THE EYE</div>
+                <div class="page-title">Live Session Monitor</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">← Back to The Eye</a>
+    </header>
+
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="window.location.href='the_eye.html'" style="cursor: pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item active">Live Monitor</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_crisis.html'">Crisis</div>
+        <div class="sub-nav-item" onclick="window.location.href='the_eye_community.html'">Community</div>
+    </nav>
+
+    <main class="main-content">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">🔴 Live Sessions</div>
+                <div class="liveicator">
+                    <span class="live-dot"></span>
+                    <span id="session-count">0 Active Sessions</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="sessions" class="sessions-grid">
+                    <div class="loading">Loading live sessions...</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        if (!sessionStorage.getItem("username")) {
+            window.location.href = "index.html";
+        }
+
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (profile.role !== "ADMIN") {
+            alert("Admin access required");
+            window.location.href = "command.html";
+        }
+
+        const ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+
+        ws.onopen = function() {
+            console.log("Connected to bridge server");
+            ws.send(JSON.stringify({type: "admin_get_stats"}));
+            // Refresh every 5 seconds
+            setInterval(() => {
+                ws.send(JSON.stringify({type: "admin_get_stats"}));
+            }, 5000);
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === "admin_stats") {
+                displaySessions(data.stats);
+            }
+        };
+
+        function displaySessions(stats) {
+            // Mock data for now - replace with real live sessions when available
+            const mockSessions = [
+                { name: "John D.", type: "top-tier", tier: "⭐ TOP", session: "with Coach Hope", time: "23:45", cost: "$2.34" },
+                { name: "Sarah M.", type: "crisis", tier: "🚨 CRISIS", session: "AI Session", time: "08:12", cost: "$0.89" },
+                { name: "Lisa P.", type: "ai", tier: "🤖 AI", session: "AI Session", time: "12:34", cost: "$0.45" },
+                { name: "Thompson Fam", type: "top-tier", tier: "⭐ TOP", session: "Family Session", time: "41:02", cost: "$4.12" },
+             e: "Alex C.", type: "trial", tier: "TRIAL", session: "AI Calibration", time: "02:34", cost: "$0.12" }
+            ];
+
+            document.getElementById("session-count").textContent = `${mockSessions.length} Active Sessions`;
+            
+            document.getElementById("sessions").innerHTML = mockSessions.map(session => `
+                <div class="session-card ${session.type}">
+                    <div class="session-user">
+                        ${session.name} 
+                        <span class="session-badge ${session.type}">${session.tier}</span>
+                    </div>
+                    <div class="session-meta">${session.session} • ${session.time}</div>
+                    <div class="session-cost ${parseFloat(session.cost.substring(1)) > 2 ? 'high' : ''}">${session.cost} used</div>
+                    <button class="disconnect-btn" onclick="forceDisconnect('${session.name}')">Force Disconnect</button>
+                </div>
+            `).join('');
+        }
+
+        function forceDconnect(name) {
+            if (confirm(`Force disconnect ${name}?`)) {
+                alert("Disconnect functionality coming soon");
+            }
+        }
+    </script>
+</body>
+</html>

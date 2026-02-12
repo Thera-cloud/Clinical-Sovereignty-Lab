@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Live Session — Little Nate</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --bg-elevated: #111111;
+            --bg-card: #161616;
+            --border-subtle: #1A1A1A;
+            --border-active: #2A2A2A;
+            --gold-primary: #C9A962;
+            --gold-dim: #8B7355;
+            --cyan-primary: #4ECDC4;
+            --cyan-dim: #2D7A75;
+            --cyan-glow: rgba(78, 205, 196, 0.15);
+            --purple-primary: #A78BFA;
+            --purple-dim: #7C5DBF;
+            --text-primary: #F5F5F5;
+            --text-secondary: #9A9A9A;
+            --text-muted: #5A5A5A;
+            --success: #4ADE80;
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
+        
+        .header { background: var(--bg-chamber); border-bottom: 1px solid var(--border-subtle); padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        .back-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--bg-elevated); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .back-btn svg { width: 18px; height: 18px; stroke: var(--text-secondary); stroke-width: 2; fill: none; }
+        .header h1 { font-family: var(--font-display); font-size: 24px; font-weight: 400; }
+        .session-balance { display: flex; align-items: center; gap: 16px; }
+        .balance-pill { background: var(--cyan-glow); border: 1px solid var(--cyan-dim); border-radius: 20px; padding: 8px 20px; display: flex; align-items: center; gap: 8px; }
+        .balance-pill .count { font-size: 18px; font-weight: 600; color: var(--cyan-primary); }
+        .balance-pill .label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+        .buy-more-btn { padding: 10px 20px; background: transparent; border: 1px solid var(--border-active); border-radius: 2px; color: var(--text-secondary); font-size: 12px; letter-spacing: 1px; cursor: pointer; }
+        
+        .main-layout { display: grid; grid-template-columns: 380px 1fr; min-height: calc(100vh - 81px); }
+        @media (max-width: 900px) { .main-layout { grid-template-columns: 1fr; } }
+        
+        .coach-panel { background: var(--bg-chamber); border-right: 1px solid var(--border-subtle); padding: 40px; }
+        .coach-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 32px; text-align: center; margin-bottom: 32px; }
+        .coach-avatar { width: 100px; height: 100px; border-radius: 50%; background: linear-gradient(135deg, var(--purple-dim), var(--purple-primary)); margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 36px; color: white; position: relative; }
+        .coach-avatar::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--purple-dim); opacity: 0.3; }
+        .coach-name { font-family: var(--font-display); font-size: 24px; font-weight: 400; margin-bottom: 4px; }
+        .coach-credentials { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+        .coach-specialty { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 24px; }
+        .specialty-tag { background: var(--bg-elevated); border: 1px solid var(--border-subtle); padding: 6px 12px; border-radius: 2px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+        .nate-match { background: rgba(201, 169, 98, 0.1); border: 1px solid var(--gold-dim); border-radius: 4px; padding: 16px; }
+        .nate-match .label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold-dim); margin-bottom: 8px; }
+        .nate-match .message { font-size: 14px; color: var(--text-secondary); font-style: italic; line-height: 1.6; }
+        .nate-match .message em { color: var(--gold-primary); font-style: normal; }
+        
+        .session-info { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 24px; }
+        .session-info h3 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 16px; }
+        .info-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+        .info-row:last-child { border-bottom: none; }
+        .info-row .label { font-size: 13px; color: var(--text-muted); }
+        .info-row .value { font-size: 13px; color: var(--text-primary); }
+        
+        .calendar-panel { padding: 40px; }
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+        .calendar-header h2 { font-family: var(--font-display); font-size: 28px; font-weight: 400; }
+        .calendar-nav { display: flex; gap: 8px; }
+        .calendar-nav button { width: 40px; height: 40px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 2px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .calendar-nav button svg { width: 16px; height: 16px; stroke: var(--text-secondary); stroke-width: 2; fill: none; }
+        
+        .date-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin-bottom: 40px; }
+        .day-header { text-align: center; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); padding-bottom: 12px; }
+        .date-cell { aspect-ratio: 1; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s ease; }
+        .date-cell:hover { border-color: var(--cyan-dim); }
+        .date-cell.disabled { opacity: 0.3; cursor: not-allowed; }
+        .date-cell.selected { background: var(--cyan-glow); border-color: var(--cyan-primary); }
+        .date-cell.has-slots::after { content: ''; width: 4px; height: 4px; border-radius: 50%; background: var(--success); margin-top: 4px; }
+        .date-cell .day { font-size: 18px; color: var(--text-primary); }
+        .date-cell .month { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+        
+        .time-section { margin-bottom: 40px; }
+        .time-section h3 { font-family: var(--font-display); font-size: 20px; font-weight: 400; margin-bottom: 8px; }
+        .time-section p { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
+        .time-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+        .time-slot { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s ease; }
+        .time-slot:hover { border-color: var(--cyan-dim); }
+        .time-slot.selected { background: var(--cyan-glow); border-color: var(--cyan-primary); }
+        .time-slot .time { font-size: 16px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px; }
+        .time-slot .period { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+        
+        .booking-summary { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 32px; }
+        .booking-summary h3 { font-family: var(--font-display); font-size: 20px; font-weight: 400; margin-bottom: 24px; }
+        .summary-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+        .summary-row:last-of-type { border-bottom: none; margin-bottom: 24px; }
+        .summary-row .label { font-size: 14px; color: var(--text-secondary); }
+        .summary-row .value { font-size: 14px; color: var(--text-primary); }
+        
+        .payment-options { margin-bottom: 24px; }
+        .payment-option { display: flex; align-items: center; gap: 12px; padding: 16px; background: var(--bg-elevated); border: 1px solid var(--border-subtle); border-radius: 4px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s ease; }
+        .payment-option.selected { border-color: var(--cyan-primary); background: var(--cyan-glow); }
+        .payment-option input[type="radio"] { display: none; }
+        .payment-option .radio { width: 18px; height: 18px; border: 2px solid var(--text-muted); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+        .payment-option.selected .radio { border-color: var(--cyan-primary); }
+        .payment-option.selected .radio::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--cyan-primary); }
+        .payment-option .details { flex: 1; }
+        .payment-option .details .name { font-size: 14px; color: var(--text-primary); margin-bottom: 2px; }
+        .payment-option .details .desc { font-size: 12px; color: var(--text-muted); }
+        .payment-option .price { font-size: 16px; font-weight: 500; color: var(--text-primary); }
+        .payment-option .price.free { color: var(--success); }
+        
+        .confirm-btn { width: 100%; padding: 18px; background: var(--cyan-primary); border: none; border-radius: 2px; color: var(--bg-void); font-family: var(--font-body); font-size: 14px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; }
+        .confirm-btn:hover { background: #5DE0D6; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <button class="back-btn"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+            <h1>Book Live Session</h1>
+        </div>
+        <div class="session-balance">
+            <div class="balance-pill">
+                <span class="count">2</span>
+                <span class="label">Sessions Remaining</span>
+            </div>
+            <button class="buy-more-btn">Buy More Sessions</button>
+        </div>
+    </header>
+    
+    <div class="main-layout">
+        <aside class="coach-panel">
+            <div class="coach-card">
+                <div class="coach-avatar">SM</div>
+                <div class="coach-name">Dr. Sarah Mitchell</div>
+                <div class="coach-credentials">LMFT, PhD • 12 years experience</div>
+                <div class="coach-specialty">
+                    <span class="specialty-tag">Anxiety</span>
+                    <span class="specialty-tag">Family</span>
+                    <span class="specialty-tag">Trauma</span>
+                </div>
+                <div class="nate-match">
+                    <div class="label">Matched by Nate</div>
+                    <div class="message">"Based on your journey, Dr. Mitchell's expertise in <em>anxiety management</em> and <em>family dynamics</em> aligns well with your current focus areas."</div>
+                </div>
+            </div>
+            <div class="session-info">
+                <h3>Session Details</h3>
+                <div class="info-row"><span class="label">Duration</span><span class="value">45 minutes</span></div>
+                <div class="info-row"><span class="label">Format</span><span class="value">Video Call</span></div>
+                <div class="info-row"><span class="label">Pre-Brief</span><span class="value">Nate will brief coach</span></div>
+                <div class="info-row"><span class="label">Integration</span><span class="value">Post-session with Nate</span></div>
+            </div>
+        </aside>
+        
+        <main class="calendar-panel">
+            <div class="calendar-header">
+                <h2>January 2026</h2>
+                <div class="calendar-nav">
+                    <button><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+                    <button><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
+                </div>
+            </div>
+            
+            <div class="date-grid">
+                <div class="day-header">Sun</div><div class="day-header">Mon</div><div class="day-header">Tue</div><div class="day-header">Wed</div><div class="day-header">Thu</div><div class="day-header">Fri</div><div class="day-header">Sat</div>
+                <div class="date-cell disabled"><span class="day">19</span></div>
+                <div class="date-cell disabled"><span class="day">20</span></div>
+                <div class="date-cell disabled"><span class="day">21</span></div>
+                <div class="date-cell has-slots selected"><span class="day">22</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">23</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">24</span><span class="month">Jan</span></div>
+                <div class="date-cell"><span class="day">25</span><span class="month">Jan</span></div>
+                <div class="date-cell"><span class="day">26</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">27</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">28</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">29</span><span class="month">Jan</span></div>
+                <div class="date-cell"><span class="day">30</span><span class="month">Jan</span></div>
+                <div class="date-cell has-slots"><span class="day">31</span><span class="month">Jan</span></div>
+                <div class="date-cell"><span class="day">1</span><span class="month">Feb</span></div>
+            </div>
+            
+            <div class="time-section">
+                <h3>Thursday, January 22</h3>
+                <p>Select an available time slot</p>
+                <div class="time-grid">
+                    <div class="time-slot"><div class="time">9:00</div><div class="period">AM</div></div>
+                    <div class="time-slot selected"><div class="time">10:30</div><div class="period">AM</div></div>
+                    <div class="time-slot"><div class="time">1:00</div><div class="period">PM</div></div>
+                    <div class="time-slot"><div class="time">2:30</div><div class="period">PM</div></div>
+                    <div class="time-slot"><div class="time">4:00</div><div class="period">PM</div></div>
+                </div>
+            </div>
+            
+            <div class="booking-summary">
+                <h3>Confirm Your Session</h3>
+                <div class="summary-row"><span class="label">Date</span><span class="value">Thursday, January 22, 2026</span></div>
+                <div class="summary-row"><span class="label">Time</span><span class="value">10:30 AM — 11:15 AM (EST)</span></div>
+                <div class="summary-row"><span class="label">Coach</span><span class="value">Dr. Sarah Mitchell</span></div>
+                
+                <div class="payment-options">
+                    <label class="payment-option selected">
+                        <input type="radio" name="payment" checked>
+                        <span class="radio"></span>
+                        <div class="details">
+                            <div class="name">Use Session Pack</div>
+                            <div class="desc">2 sessions remaining (expires Mar 15)</div>
+                        </div>
+                        <span class="price free">$0</span>
+                    </label>
+                    <label class="payment-option">
+                        <input type="radio" name="payment">
+                        <span class="radio"></span>
+                        <div class="details">
+                            <div class="name">Pay for Single Session</div>
+                            <div class="desc">Charged to card ending in 4242</div>
+                        </div>
+                        <span class="price">$175</span>
+                    </label>
+                </div>
+                
+                <button class="confirm-btn">Confirm Booking</button>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        document.querySelectorAll('.date-cell:not(.disabled)').forEach(cell => {
+            cell.addEventListener('click', function() {
+                document.querySelectorAll('.date-cell').forEach(c => c.classList.remove('selected'));
+                this.classList.add('selected');
+            });
+        });
+        document.querySelectorAll('.time-slot').forEach(slot => {
+            slot.addEventListener('click', function() {
+                document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
+                this.classList.add('selected');
+            });
+        });
+        document.querySelectorAll('.payment-option').forEach(option => {
+            option.addEventListener('click', function() {
+                document.querySelectorAll('.payment-option').forEach(o => o.classList.remove('selected'));
+                this.classList.add('selected');
+                this.querySelector('input').checked = true;
+            });
+        });
+    </script>
+</body>
+</html>

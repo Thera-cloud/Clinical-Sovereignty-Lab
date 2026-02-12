@@ -1,0 +1,284 @@
+# Cursor AI Rules for Clinical Sovereignty Lab
+# Place this file in your project root as .cursorrules
+# Last Updated: January 27, 2026
+
+## ⚠️ MANDATORY DOCUMENTATION REVIEW
+
+Before writing, modifying, or generating ANY code in this project, you MUST:
+
+1. **ASK to see relevant specification documents** if they are not already in context
+2. **READ the documentation FIRST** before suggesting code
+3. **VERIFY alignment** with existing architecture
+4. **USE existing system classes** - do NOT recreate functionality
+
+---
+
+## 📚 PROJECT DOCUMENTATION INDEX
+
+### Master Documentation
+- `docs/PROJECT_MASTER_DOCUMENTATION.md` - Complete project overview, all features
+
+### Feature Specifications
+- `docs/FAMILY_SANCTUARY_SPEC.md` - Family Sanctuary multi-member sessions
+- `docs/LITTLE_NATE_INTEGRATION_GUIDE.md` - Azure OpenAI + The Eye + Nevedal + Night School
+
+### Architecture & Data
+- `docs/DATA_SOURCE_MAPPING_V2.md` - Complete data architecture, billing flows, storage
+- `docs/DEVELOPMENT_PROTOCOL.md` - Required reading before ANY code changes
+
+### Authentication & Security
+- `docs/LOGIN_REQUIREMENTS_GUIDE.md` - Login system requirements
+- `docs/LOGIN_REQUIREMENTS_V2.md` - Updated authentication specifications
+
+---
+
+## 📋 REQUIRED READING BY TASK
+
+### For ANY backend changes:
+```
+MUST READ:
+├── docs/DATA_SOURCE_MAPPING_V2.md      # Data architecture
+├── docs/DEVELOPMENT_PROTOCOL.md        # Coding standards
+└── docs/PROJECT_MASTER_DOCUMENTATION.md # Project overview
+```
+
+### For Family Sanctuary work:
+```
+MUST READ:
+├── docs/FAMILY_SANCTUARY_SPEC.md       # Full feature specification
+├── docs/DATA_SOURCE_MAPPING_V2.md      # Data architecture & billing
+└── docs/DEVELOPMENT_PROTOCOL.md        # Coding standards
+```
+
+### For Little Nate / AI work:
+```
+MUST READ:
+├── docs/LITTLE_NATE_INTEGRATION_GUIDE.md  # Azure OpenAI integration
+├── docs/DATA_SOURCE_MAPPING_V2.md         # Data flows
+└── docs/PROJECT_MASTER_DOCUMENTATION.md   # System overview
+```
+
+### For Night School / Training work:
+```
+MUST READ:
+├── docs/PROJECT_MASTER_DOCUMENTATION.md   # Night School section
+├── docs/DATA_SOURCE_MAPPING_V2.md         # Training data flows
+└── docs/DEVELOPMENT_PROTOCOL.md           # Coding standards
+```
+
+### For Authentication / Login work:
+```
+MUST READ:
+├── docs/LOGIN_REQUIREMENTS_V2.md          # Auth specifications
+├── docs/LOGIN_REQUIREMENTS_GUIDE.md       # Login requirements
+└── docs/DATA_SOURCE_MAPPING_V2.md         # User data structure
+```
+
+### For Billing / Payment work:
+```
+MUST READ:
+├── docs/DATA_SOURCE_MAPPING_V2.md         # Billing flow (Tree 4)
+├── docs/FAMILY_SANCTUARY_SPEC.md          # Sanctuary billing section
+└── docs/DEVELOPMENT_PROTOCOL.md           # BillingSystem usage
+```
+
+### For Nevedal / Analytics work:
+```
+MUST READ:
+├── docs/LITTLE_NATE_INTEGRATION_GUIDE.md  # Nevedal integration
+├── docs/DATA_SOURCE_MAPPING_V2.md         # Metrics storage
+└── docs/PROJECT_MASTER_DOCUMENTATION.md   # Nevedal Lab section
+```
+
+---
+
+## 🏗️ EXISTING SYSTEM CLASSES - USE THESE
+
+Do NOT recreate functionality. Use existing classes from bridge_server.py:
+
+| Class | Line | Purpose | When to Use |
+|-------|------|---------|-------------|
+| `BillingSystem` | 869 | All billing operations | ANY payment/charge |
+| `AnalyticsEngine` | 1155 | Event tracking & stats | Recording events |
+| `MetricsEngine` | 486 | Client/coach metrics | Nevedal data |
+| `SessionTracker` | 743 | Live session management | Session state |
+| `MemorySystem` | 364 | Conversation memory | Chat history |
+| `NightSchool` | 1011 | Training engine | Wisdom/RAG |
+| `AzureCortex` | 1283 | Azure OpenAI integration | AI responses |
+| `FamilySanctuaryEngine` | sanctuary_engine.py | Sanctuary sessions | Family features |
+
+---
+
+## 📁 DATA FILE LOCATIONS
+
+Per DATA_SOURCE_MAPPING_V2.md:
+
+```
+backend/app/websocket/data/
+├── user_registry.json          # Users, profiles, subscriptions
+├── billing.json                # Billing records, customers
+├── transactions.json           # Transaction history
+├── analytics.json              # Platform analytics
+├── family_sanctuaries.json     # Sanctuary sessions
+│
+└── Vaults/
+    ├── Clients/{hardware_id}/
+    │   └── metrics.json        # Per-client Nevedal metrics
+    ├── Coaches/{hardware_id}/
+    │   └── metrics.json        # Per-coach metrics
+    └── Admin/
+        ├── wisdom_database.json
+        ├── COACH_NOTES_INBOX/
+        ├── COACH_NOTES/
+        └── ADMIN_CURRICULUM/
+```
+
+---
+
+## ✅ INTEGRATION REQUIREMENTS
+
+### Billing - ALWAYS use BillingSystem:
+```python
+# CORRECT
+billing_system.record_transaction(user_id, amount, description, type)
+
+# WRONG - Never do direct Stripe calls
+stripe.Charge.create(...)  # DON'T DO THIS
+```
+
+### Analytics - ALWAYS record significant events:
+```python
+# CORRECT
+analytics_engine.record_event("event_type", user_id, {"key": "value"})
+
+# Events to record:
+# - sanctuary_created, sanctuary_member_joined, sanctuary_completed
+# - login, registration, session_start
+# - coaching_provided, message_sent
+```
+
+### Nevedal Metrics - Use MetricsEngine:
+```python
+# CORRECT
+metrics_engine.load_metrics(profile)
+metrics_engine.update_nevedal_state(profile, c_emo, p_ent, ...)
+
+# Store in: Vaults/Clients/{id}/metrics.json
+```
+
+### Night School - Use existing RAG:
+```python
+# Wisdom stored in: Vaults/Admin/wisdom_database.json
+# Use NightSchool class for training operations
+```
+
+---
+
+## 🔄 RESPONSE PROTOCOL
+
+When asked to write code for this project:
+
+### Step 1: Identify Required Documentation
+"Before I write this code, I need to review the relevant specifications. Based on your request, I should read:
+- [List specific .md files needed]
+
+Can you confirm these are available, or share them?"
+
+### Step 2: If Documentation Provided
+- Read thoroughly before writing ANY code
+- Verify code uses existing system classes
+- Follow data patterns from DATA_SOURCE_MAPPING_V2.md
+- Match the specification requirements
+
+### Step 3: If Documentation NOT Available
+- State assumptions clearly
+- Recommend reviewing documentation before implementation
+- Flag potential integration issues
+
+### Step 4: Before Providing Code
+Verify against checklist:
+- [ ] Aligns with SPEC.md requirements
+- [ ] Uses BillingSystem (not direct Stripe)
+- [ ] Uses AnalyticsEngine for events
+- [ ] Stores data in correct locations
+- [ ] Follows existing code patterns
+- [ ] Integrates with existing classes
+
+---
+
+## 🚫 COMMON MISTAKES TO AVOID
+
+1. **Direct Stripe calls** → Use `BillingSystem`
+2. **Skipping analytics** → Always call `analytics_engine.record_event()`
+3. **Wrong data locations** → Check DATA_SOURCE_MAPPING_V2.md
+4. **Recreating classes** → Use existing system classes
+5. **Ignoring specs** → Read the .md files FIRST
+6. **Missing aiohttp** → Required for Azure OpenAI (see LITTLE_NATE_INTEGRATION_GUIDE.md)
+7. **Wrong member status** → Use INVITED/JOINED/ACTIVE/PAUSED/EXITED per FAMILY_SANCTUARY_SPEC.md
+
+---
+
+## 🔗 FOUR-WAY INTEGRATION (Per LITTLE_NATE_INTEGRATION_GUIDE.md)
+
+```
+                    LITTLE NATE (Azure GPT-4)
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+   THE EYE              NEVEDAL LAB         NIGHT SCHOOL
+   (Analytics)          (Emotional Data)    (Training/RAG)
+        │                    │                    │
+   Tracks:              Provides:           Provides:
+   • Messages          • C_emo              • Techniques
+   • Tokens            • CEE events         • Wisdom
+   • Costs             • Risk levels        • Strategies
+```
+
+All AI features must integrate with this architecture.
+
+---
+
+## 📝 QUICK REFERENCE
+
+### Key Files:
+- `bridge_server.py` - Main backend, all system classes
+- `sanctuary_engine.py` - Family Sanctuary logic
+- `user_registry.json` - All user data
+- `billing.json` - All billing data
+
+### Key Environment Variables:
+- `SANCTUARY_BILLING_ENABLED` - Enable/disable sanctuary billing
+- `AZURE_OPENAI_ENDPOINT` - Azure OpenAI connection
+- `STRIPE_SECRET_KEY` - Stripe API key
+
+### Key WebSocket Message Types:
+- `login_request` / `login_success`
+- `sanctuary_get_or_create` / `sanctuary_joined` / `sanctuary_reconnected`
+- `ask_nate_coaching` - Little Nate conversations
+- `admin_get_stats` - The Eye dashboard
+
+---
+
+## ⚠️ ENFORCEMENT
+
+**This file is read automatically by Cursor AI.**
+
+Before generating ANY code:
+1. Request relevant .md files if not in context
+2. Verify alignment with specifications
+3. Use existing system classes
+4. Follow established data patterns
+5. Record appropriate analytics events
+
+**Failure to follow these rules results in:**
+- Integration bugs
+- Data inconsistencies  
+- Billing errors
+- Technical debt
+
+---
+
+**Version:** 2.0  
+**Created:** January 27, 2026  
+**Maintainer:** Nathan N.  
+**Documents Referenced:** 7

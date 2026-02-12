@@ -1,0 +1,121 @@
+{
+  "client_id": "CLIENT_001B",
+  "name": "Jane D.",
+  "story_version": 8,
+  "who_you_are": {
+    "strengths": [
+      "Willingness to seek private coaching suggests a desire for personal growth",
+      "Strengths cannot be assessed without recorded conversation or coaching sessions.",
+      "Jane showed a positive step by participating in private coaching and returning to the session.",
+      "Polite and open to communication.",
+      "Potential willingness to participate, as indicated by attendance.",
+      "Patience and willingness to listen to John's concerns"
+    ],
+    "values": []
+  },
+  "wounds": {
+    "core_wounds": [],
+    "recent_hurts": []
+  },
+  "growth": {
+    "breakthroughs": [
+      {
+        "date": "2026-01-29",
+        "moment": "John D. expressing his anger and receiving validation, which can be the first step toward healing",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, Jane D."
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "Jane's return from private coaching with a seemingly calmer demeanor suggests some level of understanding or resolution was achieved.",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, Jane D."
+      },
+      {
+        "date": "2026-01-29",
+        "moment": "John taking the step for private coaching, indicating a willingness to engage and work on issues",
+        "context": "Family Sanctuary session",
+        "anchor_phrase": "Remember this moment of connection, Jane D."
+      }
+    ],
+    "progress_markers": [],
+    "edges_of_growth": [
+      "Potential growth areas are unclear without entry responses or conversation context.",
+      "Developing strategies to pause and reflect before reacting.",
+      "Engaging in deeper conversation to express needs and feelings.",
+      "Encouraged to open up and share thoughts and feelings during sessions.",
+      "Expressing her feelings and needs more openly"
+    ]
+  },
+  "patterns": {
+    "when_activated": {},
+    "session_patterns": [
+      {
+        "date": "2026-01-29",
+        "observation": "No direct participation observed; possibly withdrawn or dealing with issues privately"
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "No patterns observed as there was no conversation recorded."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "Jane expressed her anger quickly, indicating a need to address her immediate emotional responses."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "No clear communication patterns observed yet due to limited interaction."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "No communication or behavioral patterns could be observed due to the absence of recorded messages."
+      },
+      {
+        "date": "2026-01-29",
+        "observation": "Passive communication, possibly avoiding confrontation"
+      }
+    ]
+  },
+  "therapeutic_alliance": {
+    "trust_level": "new",
+    "what_builds_trust": []
+  },
+  "unfinished_business": [
+    {
+      "topic": "John D. is experiencing intense anger related to family issues",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "Lack of entry context or participation from Jane D., which may indicate communication challenges",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "Both John and Jane expressed feelings of anger, indicating unresolved tensions.",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "John's expression of anger indicates underlying conflicts or stressors",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    },
+    {
+      "topic": "Lack of clear communication or shared understanding between family members",
+      "status": "identified in sanctuary",
+      "importance": "medium",
+      "date_identified": "2026-01-29"
+    }
+  ],
+  "corrective_experiences_needed": [],
+  "little_nate_notes": {
+    "remember_to": [],
+    "watch_for": []
+  },
+  "story_updated": "2026-01-29"
+}

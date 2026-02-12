@@ -1,0 +1,13 @@
+{
+  "customers": {
+    "CLIENT_J.BULL_ID": {
+      "stripe_customer_id": "cus_TqWCc5y2SKWKA6",
+      "email": "",
+      "name": "John Bull",
+      "created_at": "2026-01-23 13:33:16.362280",
+      "local_only": false
+    }
+  },
+  "subscriptions": {},
+  "coaching_credits": {}
+}

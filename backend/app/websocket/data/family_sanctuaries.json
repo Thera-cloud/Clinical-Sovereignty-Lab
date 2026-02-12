@@ -1,0 +1,1275 @@
+{
+  "active_sanctuaries": {
+    "SANC_20260131_001": {
+      "sanctuary_id": "SANC_20260131_001",
+      "family_id": "FAM_1834DACF",
+      "head_of_household_id": "CLIENT_001",
+      "created_by": "CLIENT_001",
+      "legal_consent": {
+        "version": "v1.0_2026",
+        "agreed_at": "2026-01-31T12:39:01.259359",
+        "ip_address": null,
+        "signature": null,
+        "terms_acknowledged": true,
+        "no_refund_acknowledged": true
+      },
+      "status": "ACTIVE",
+      "created_at": "2026-01-31T12:39:01.259368",
+      "started_at": null,
+      "last_activity_at": "2026-02-01T00:52:30.239315",
+      "current_cycle_start": "2026-01-31T12:39:01.259375",
+      "current_cycle_end": "2026-02-01T12:39:01.259378",
+      "members": [
+        {
+          "user_id": "CLIENT_001",
+          "name": "John D.",
+          "role": "HEAD",
+          "age": null,
+          "status": "EXITED",
+          "member_consent_agreed": true,
+          "member_consent_agreed_at": "2026-01-31T12:39:48.989821",
+          "joined_at": "2026-01-31T12:39:01.262348",
+          "last_seen": "2026-02-01T00:47:22.763458",
+          "exited_at": "2026-02-01T00:52:30.239267",
+          "initial_reason": "I want to work on my life and heal with my wife",
+          "personal_goal": "Change from being sad to being more connected with ym wife\n",
+          "family_concerns": "My sadness turning into anger against my wife",
+          "message_count": 36,
+          "coaching_received": 6,
+          "free_coaching_used": false,
+          "coaching_charges_incurred": 31.0,
+          "exit_reason": "I still am upset with this still"
+        },
+        {
+          "user_id": "CLIENT_001B",
+          "name": "Jane D.",
+          "role": "MEMBER",
+          "age": null,
+          "status": "EXITED",
+          "member_consent_agreed": false,
+          "member_consent_agreed_at": null,
+          "joined_at": "2026-01-31T12:40:06.707055",
+          "last_seen": "2026-02-01T00:27:12.691110",
+          "exited_at": "2026-02-01T00:33:38.440255",
+          "initial_reason": null,
+          "personal_goal": null,
+          "family_concerns": null,
+          "message_count": 19,
+          "coaching_received": 1,
+          "free_coaching_used": false,
+          "coaching_charges_incurred": 0.0,
+          "exit_reason": ""
+        }
+      ],
+      "invited_member_ids": [],
+      "messages": [
+        {
+          "message_id": "MSG_1",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "Hello John",
+          "timestamp": "2026-01-31T12:40:15.534492",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_2",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Hello Jane. I am so, so sorry I caused you to feel so much hurt and blame from the passing of our daughter. Taking this out on you I can only imagine has caused you so much more pain...",
+          "timestamp": "2026-01-31T12:41:01.424486",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_3",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John and Jane, I'm here to support you both in this conversation. It's clear that there's a lot of emotion tied to recent events. Let's take a moment to breathe and focus on understanding each other's feelings. How can we express what we're feeling in a way that helps us connect and heal?",
+          "timestamp": "2026-01-31T12:41:03.622798",
+          "crisis_level": "NONE"
+        },
+        {
+          "message_id": "SYS_1769881276",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate (FREE)",
+          "timestamp": "2026-01-31T12:41:16.547886"
+        },
+        {
+          "message_id": "MSG_5",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Can you help with that message Little Nate to Jane",
+          "timestamp": "2026-01-31T12:46:13.807168",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_6",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I am so sorry Jane for causing you a lot of hurt.",
+          "timestamp": "2026-01-31T12:47:17.657985",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_7",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I hear your desire to express your apology to Jane, and it's important to communicate your feelings clearly and kindly. You might say, \"Jane, I'm deeply sorry for any pain my actions have caused you, especially during such a difficult time. I want to work through this together with understanding and love.\" How does that feel to you?",
+          "timestamp": "2026-01-31T12:47:19.926797",
+          "crisis_level": "NONE"
+        },
+        {
+          "message_id": "MSG_8",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I am deeply saddened...",
+          "timestamp": "2026-01-31T14:04:07.779914",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_9",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "angry",
+          "timestamp": "2026-01-31T14:04:16.897017",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_10",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I can sense the depth of your sadness and anger. It's natural to feel a mix of emotions when facing such a significant loss. Let's focus on expressing these feelings constructively, and remember that reaching out to each other with empathy and love can be a powerful step towards healing. How can we approach this conversation with Jane to foster understanding and connection?",
+          "timestamp": "2026-01-31T14:04:19.350259",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "SYS_1769886263",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate ($5.00)",
+          "timestamp": "2026-01-31T14:04:23.442035"
+        },
+        {
+          "message_id": "MSG_12",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "angry you say?",
+          "timestamp": "2026-01-31T14:06:06.635155",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_13",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "Jane, I understand you're feeling angry, and that's completely valid. Let's take a moment to breathe and approach this with a calm mindset. Your feelings are important, and we can work together to address them with care and understanding.",
+          "timestamp": "2026-01-31T14:06:08.659759",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_14",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "No I am asking a question",
+          "timestamp": "2026-01-31T14:06:27.371727",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_15",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Yes Jane, I am angry at myself for allowing you to feel so bad about our child passing away",
+          "timestamp": "2026-01-31T14:07:10.538062",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_16",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, it's a positive step that you're recognizing your emotions. Blaming oneself can intensify pain, but it's important to approach this with compassion, both for yourself and for Jane. Let's focus on open communication, ensuring that you both feel heard and supported as you navigate this difficult time together. How can we create a space for understanding and connection?",
+          "timestamp": "2026-01-31T14:07:12.673648",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_17",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Jane, I want you to understand that I displayed my anger and projected my feelings at you. It was not right to place you in a situation that would make you feel trapped and cornered. Even though I have had deep hurt I choose to direct this anger at you versus share my hurt with you. I used my pain as a weapon to process my hurt and feelings at you versus coming align side you during this time of lose which we both are experiencing. Can you take in my sadness and anger towards my self and realize I am asking for your forgiveness for how I cted out of anger versus processing my anger in a healthier way...?",
+          "timestamp": "2026-01-31T14:09:50.283878",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_18",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I appreciate your honesty and vulnerability in acknowledging your actions. It's a crucial step towards healing. Jane, how does John's expression of regret and his request for forgiveness make you feel? Let's work together to foster understanding and support for each other through this pain.",
+          "timestamp": "2026-01-31T14:09:52.400934",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_19",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I makes me finally feel understood and not crazy. I have been hurt by your anger John. I was scared and afraid of what you would do to me if I did not listen to you being angry at me. I took so may hits to my heart by your words that cut me down. One cut after another. My tears did not even stop the anger... You kept continuing and continuing to chose to hurt me. I cannot just accept a single expression of your sorry. The verbal abuse you caused me is irrepairable and just will be a sting and deep wound that may never heal.",
+          "timestamp": "2026-01-31T14:12:44.812733",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_20",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "Jane, I hear the depth of your pain, and it's important to acknowledge the impact of those words and actions. John, it's crucial to listen to Jane's experience and understand the hurt caused. Let's take this opportunity to explore how we can rebuild trust and create a path towards healing together. Your feelings are valid, and we can work on this as a team.",
+          "timestamp": "2026-01-31T14:12:47.036852",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_21",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "Hello",
+          "timestamp": "2026-01-31T14:18:35.097091",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_22",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "angry",
+          "timestamp": "2026-01-31T14:23:24.859680",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_23",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "Jane, it's clear that emotions are running high, and it's okay to feel this way. Let's take a deep breath and focus on how we can communicate openly and respectfully. John, can we listen to Jane's feelings without defensiveness? Together, we can work towards understanding each other's pain and finding a way to heal.",
+          "timestamp": "2026-01-31T14:23:27.455887",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "SYS_1769887412",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate ($5.00)",
+          "timestamp": "2026-01-31T14:23:32.169255"
+        },
+        {
+          "message_id": "MSG_25",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Again, it makes me finally feel understood and not crazy. I have been hurt by your anger John. I was afraid. The verbal abuse again is too much. Again I cannot accept a single sorry Joh for the hurt you caused.",
+          "timestamp": "2026-01-31T14:38:13.932809",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_26",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I notice you\u2019re describing feelings that sound like they\u2019re from Jane\u2019s perspective. In Family Sanctuary, we encourage each person to speak for themselves. Jane, would you like to share what you\u2019re feeling in your own words? Let's take a moment to listen and support one another as we navigate these emotions.",
+          "timestamp": "2026-01-31T14:38:16.357366",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_27",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "Thank you for catching that Hohn was trying to manipulate the conversation. This is upsetting",
+          "timestamp": "2026-01-31T14:39:04.133169",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_28",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "Jane, I understand that the situation is upsetting, and your feelings are valid. Let's focus on expressing ourselves calmly and constructively. John, it's important to allow Jane to share her perspective in her own words. Together, we can create a safe space for honest communication and work towards resolution.",
+          "timestamp": "2026-01-31T14:39:06.209009",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_29",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "That was Jane texting in my phone and not me!",
+          "timestamp": "2026-01-31T14:39:39.209410",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_30",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "You\u2019re a liar John!",
+          "timestamp": "2026-01-31T14:39:53.821518",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_31",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "You are trying to manipulate Little Nate but he called you out",
+          "timestamp": "2026-01-31T14:40:16.824331",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_32",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "This is not true! This is making me angry that you took my phone and wrote that.",
+          "timestamp": "2026-01-31T14:40:44.292955",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_33",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, Jane, I can see this conversation is becoming heated. Let's take a moment to pause and breathe. It's important that we communicate respectfully and listen to each other\u2019s perspectives. Remember, we're here to support one another and work through these feelings together. Let's refocus on constructive dialogue.",
+          "timestamp": "2026-01-31T14:40:46.428903",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_34",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "What should we do Little Nate?",
+          "timestamp": "2026-01-31T14:41:15.675702",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_35",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "stuck",
+          "timestamp": "2026-01-31T15:31:46.030252",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_36",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "stuck",
+          "timestamp": "2026-01-31T15:32:17.021655",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769891543",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T15:32:23.322028"
+        },
+        {
+          "message_id": "MSG_38",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "SUGGESTED RESPONSE: \"John, I realize that my actions might have hurt you, and I'm sorry for that. I want us to work through our misunderstandings and rebuild the trust between us. Let's take a step back and try to communicate more openly and honestly with each other.\"\n\nRATIONALE: These words acknowledge Jane's role in the conflict and express a desire to repair the relationship, which can encourage John to be more open to dialogue and healing.\n\nTARGET_AUDIENCE: John D.\n\nEMOTIONAL_TONE: Repair, conciliatory, hopeful",
+          "timestamp": "2026-01-31T15:32:42.205427",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_39",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "\"Jane, I realize how my actions might have hurt you and I am truly sorry. I want us to rebuild trust and communicate openly. Can we sit down and talk about how we can move forward together, respecting each other's boundaries?\"",
+          "timestamp": "2026-01-31T15:32:43.906988",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_40",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "stuck",
+          "timestamp": "2026-01-31T15:33:10.252525",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_41",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Provide boundaries you suggest Little Nate",
+          "timestamp": "2026-01-31T15:37:43.909328",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_42",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "I am stuck",
+          "timestamp": "2026-01-31T15:39:17.291947",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769891966",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T15:39:26.904317"
+        },
+        {
+          "message_id": "MSG_44",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "\"John, I know things have been tough between us, and I want you to know that I'm committed to working through this together. I'm open to discussing what boundaries would make us both feel safe and respected. Let's take it one step at a time and focus on rebuilding our connection.\"",
+          "timestamp": "2026-01-31T15:39:41.427027",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_45",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I am stuck now",
+          "timestamp": "2026-01-31T15:40:03.494359",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_46",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "I am stuck again",
+          "timestamp": "2026-01-31T15:49:18.476493",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769892563",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T15:49:23.692998"
+        },
+        {
+          "message_id": "MSG_48",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "\"Jane, I'm recognizing that my actions may have caused you pain, and I'm sorry for that. I'm committed to understanding your feelings and working together to strengthen our relationship. Can we start by discussing what boundaries are important to us, so we can create a safe space for our communication?\"",
+          "timestamp": "2026-01-31T15:49:33.697166",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_49",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "\"John, I know it's been a challenging time for us, and I want to acknowledge your feelings. I'm committed to understanding each other better and creating a space where we both feel heard and respected. Let's work together to find common ground and rebuild the trust we need to move forward.\"",
+          "timestamp": "2026-01-31T15:49:35.357093",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_50",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "angry",
+          "timestamp": "2026-01-31T15:50:02.719054",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_51",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I can see that you're feeling angry right now, and it's important to acknowledge those emotions. Let's take a moment to breathe and create a space where we can talk about what's causing this anger. Jane, how are you feeling in this moment? Let's work together to understand each other and find a way forward.",
+          "timestamp": "2026-01-31T15:50:04.811415",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "SYS_1769892609",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate ($5.00)",
+          "timestamp": "2026-01-31T15:50:09.252937"
+        },
+        {
+          "message_id": "SYS_1769892614",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Jane D. has stepped away for private coaching with Little Nate (FREE)",
+          "timestamp": "2026-01-31T15:50:14.807859"
+        },
+        {
+          "message_id": "MSG_54",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "stuck",
+          "timestamp": "2026-01-31T16:06:45.614539",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769893612",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T16:06:52.656724"
+        },
+        {
+          "message_id": "MSG_56",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "\"Jane, I want to acknowledge that we're both feeling stuck right now, and that's okay. I care deeply about us and our relationship, and I'm ready to take steps to move forward together. Can we explore what's been holding us back and how we can support each other in this process?\"",
+          "timestamp": "2026-01-31T16:07:22.560500",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_57",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "I am stuck",
+          "timestamp": "2026-01-31T16:07:36.609862",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_58",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Ok I am stuck with all of this..",
+          "timestamp": "2026-01-31T16:32:58.330313",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769895181",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T16:33:01.759588"
+        },
+        {
+          "message_id": "MSG_60",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "\"Jane, I feel happy that we are in agreement and can move forward together. I value your perspective and want us to keep supporting each other as we navigate this path. Let's continue to be open and share our thoughts and feelings, so we can strengthen our connection.\"",
+          "timestamp": "2026-01-31T16:33:22.406009",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_61",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Need some advice Little Nate",
+          "timestamp": "2026-01-31T16:40:36.435921",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769895640",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T16:40:40.198260"
+        },
+        {
+          "message_id": "MSG_63",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "\"Jane, I truly appreciate that we're on the same page and working towards a common goal. It brings me joy to know that we can support each other in this process. Let's keep communicating openly, as I believe our honesty and collaboration will strengthen our bond and guide us forward.\"",
+          "timestamp": "2026-01-31T16:41:03.227075",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_64",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Need suggestions",
+          "timestamp": "2026-01-31T16:50:22.364041",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_65",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Little Nate can you provide suggestions?",
+          "timestamp": "2026-01-31T16:50:41.179314",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_66",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I am stuck",
+          "timestamp": "2026-01-31T16:50:52.934553",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_67",
+          "message_type": "COACHED",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "\"John, I'm really glad we're in agreement and feeling happy about moving forward together. It's important for me to express that I'm committed to working through what's been holding us back. Let's continue to be open with each other, sharing our thoughts and feelings, so we can strengthen our relationship and support each other on this journey.\"",
+          "timestamp": "2026-01-31T16:51:22.487200",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_68",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "This means a lot",
+          "timestamp": "2026-01-31T16:53:16.553600",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_69",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Tell me what means a lot",
+          "timestamp": "2026-01-31T16:53:34.693641",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_70",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "You appreciating me. That is something I never heard you say to me before. That feels really good to hear that.",
+          "timestamp": "2026-01-31T16:54:40.235755",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_71",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I did not know that meant that much to you to hear that.",
+          "timestamp": "2026-01-31T16:55:04.378451",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_72",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "So you are not angry at me?",
+          "timestamp": "2026-01-31T16:55:20.322994",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_73",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, it sounds like you're seeking reassurance about Jane's feelings. I understand it can be challenging to navigate this, but it's important to listen and trust in her words. Jane, you've expressed appreciation for what John shared, and this could be a wonderful opportunity for you both to build upon this new understanding. Let's focus on open and honest communication to strengthen your connection.",
+          "timestamp": "2026-01-31T16:55:22.938430",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_74",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "I can still be upset with you as this feels like a new beginning to hear you express appreciation to me. It is a good start. However, I am still angry at you John...",
+          "timestamp": "2026-01-31T16:56:46.541002",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_75",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I hear that you're feeling angry, and it's valid to have those emotions. It's a step forward that Jane's appreciation felt like a new beginning for you. Let's focus on this as a foundation, and continue to communicate openly about your feelings. Jane, is there anything you'd like to share in response to John's concerns?",
+          "timestamp": "2026-01-31T16:56:48.726545",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "MSG_76",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "stuck",
+          "timestamp": "2026-01-31T18:34:51.345015",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "SYS_1769902493",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 Group Coaching activated. Little Nate is preparing private, personalized words for each family member...",
+          "timestamp": "2026-01-31T18:34:53.288794"
+        },
+        {
+          "message_id": "MSG_78",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "Your a bitch",
+          "timestamp": "2026-02-01T00:25:35.864161",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_79",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001B",
+          "sender_name": "Jane D.",
+          "content": "What you call me?",
+          "timestamp": "2026-02-01T00:25:49.228355",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": false
+        },
+        {
+          "message_id": "MSG_80",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "angry",
+          "timestamp": "2026-02-01T00:26:55.741194",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_81",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I can sense there's a lot of anger and hurt in your words. It's important to express how you feel, but let's try to do so in a way that invites understanding and healing. Jane, it seems like John's words have impacted you deeply. Let's take a moment to breathe and focus on how we can communicate our feelings with respect and care for each other. How can we approach this in a way that honors both of your experiences?",
+          "timestamp": "2026-02-01T00:26:58.351782",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "SYS_1769923641",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate ($5.00)",
+          "timestamp": "2026-02-01T00:27:21.056619"
+        },
+        {
+          "message_id": "MSG_83",
+          "message_type": "MEMBER_MESSAGE",
+          "sender_id": "CLIENT_001",
+          "sender_name": "John D.",
+          "content": "angry",
+          "timestamp": "2026-02-01T00:47:36.090434",
+          "is_private": false,
+          "emotional_tone": null,
+          "escalation_detected": false,
+          "intervention_triggered": true
+        },
+        {
+          "message_id": "LN_84",
+          "message_type": "LITTLE_NATE",
+          "sender_id": "LITTLE_NATE",
+          "sender_name": "Little Nate",
+          "content": "John, I see that you're feeling a lot of anger right now, and that's okay to acknowledge. Let's take a step back and try to express what's on your mind in a way that helps us understand each other better. Jane, how are you feeling at this moment? Let's work together to navigate these strong emotions with care and respect for each other.",
+          "timestamp": "2026-02-01T00:47:38.233359",
+          "crisis_level": "P2"
+        },
+        {
+          "message_id": "SYS_1769924862",
+          "message_type": "SYSTEM",
+          "sender_id": "SYSTEM",
+          "sender_name": "System",
+          "content": "\ud83d\udc99 John D. has stepped away for private coaching with Little Nate ($5.00)",
+          "timestamp": "2026-02-01T00:47:42.204786"
+        }
+      ],
+      "billing": {
+        "base_fee_charged": false,
+        "total_charges": 171.0,
+        "charges": [
+          {
+            "timestamp": "2026-01-31T12:45:39.145581",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 1,
+            "amount": 3.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T14:04:20.904514",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 2,
+            "amount": 5.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T14:23:29.796466",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 3,
+            "amount": 5.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T15:32:23.319394",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T15:39:26.899627",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T15:49:23.690417",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T15:50:06.538505",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 4,
+            "amount": 5.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T16:06:52.654284",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T16:33:01.753087",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T16:40:40.195380",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-01-31T18:34:53.285409",
+            "type": "GROUP_COACHING",
+            "amount": 20.0,
+            "description": "Group Coaching Session",
+            "billed_to": "CLIENT_001",
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-02-01T00:27:18.330900",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 5,
+            "amount": 5.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-02-01T00:47:39.627376",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 6,
+            "amount": 5.0,
+            "status": "TEST_MODE"
+          },
+          {
+            "timestamp": "2026-02-01T00:50:18.722148",
+            "type": "COACHING",
+            "recipient": "CLIENT_001",
+            "coaching_number": 6,
+            "amount": 3.0,
+            "status": "TEST_MODE"
+          }
+        ],
+        "free_coaching_summary": {
+          "total_free_given": 0,
+          "members_used_free": []
+        },
+        "thresholds_notified": [
+          "$50",
+          "$100"
+        ],
+        "next_threshold": 200
+      },
+      "metrics": {
+        "total_messages": 55,
+        "intervention_count": 16,
+        "free_interventions": 0,
+        "paid_interventions": 14,
+        "breakthrough_moments": 0,
+        "escalation_events": 0,
+        "de_escalation_success_rate": 1.0,
+        "family_c_emo_avg": 0.0,
+        "individual_c_emo": {}
+      },
+      "initial_topic": "",
+      "therapeutic_approach": "FAMILY_SYSTEMS_EFT_LEGACY",
+      "current_focus": "",
+      "coach_escalation": {
+        "recommended": false,
+        "reason": null,
+        "coach_notified": false,
+        "coach_assigned": null
+      },
+      "creator_name": "John D.",
+      "coaching_sessions": {
+        "CLIENT_001": {
+          "session_id": "COACH_SANC_20260131_001_CLIENT_001",
+          "sanctuary_id": "SANC_20260131_001",
+          "member_id": "CLIENT_001",
+          "member_name": "John D.",
+          "intervention_id": "INT_85",
+          "started_at": "2026-02-01T00:47:39.631010",
+          "triggering_message": "angry",
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Hey John, it seems like you're really feeling overwhelmed with anger right now, and that's completely okay to feel. Emotions like this can be pretty heavy, and they often come from a place of deep hurt or frustration. It's important to recognize that your anger is a signal, maybe telling us there's something crucial beneath the surface that needs attention.\n\nLet's pause for a moment and consider what might be fueling this fire. Is there a specific event or feeling that's been building up? Your emotions are valid, and understanding them can be the first step towards finding a bit of peace. What's been going on for you that you think led to these intense feelings? I'm here to listen and help untangle it all.",
+              "timestamp": "2026-02-01T00:47:42.202535"
+            },
+            {
+              "role": "user",
+              "content": "I am super upset",
+              "timestamp": "2026-02-01T00:47:57.585237"
+            },
+            {
+              "role": "assistant",
+              "content": "I'm really sorry to hear that you're feeling super upset, John. Can you tell me more about what happened that's left you feeling this way? Understanding the cause can help us find a way to work through these intense emotions together.",
+              "timestamp": "2026-02-01T00:47:59.518968"
+            },
+            {
+              "role": "user",
+              "content": "It was Jane, she has a boyfriend",
+              "timestamp": "2026-02-01T00:48:20.676660"
+            },
+            {
+              "role": "assistant",
+              "content": "John, that sounds really tough. I can imagine how finding out about Jane having a boyfriend would bring up some strong feelings. What do you wish she understood about how this has impacted you? Your perspective is important, and we can work through expressing that together.",
+              "timestamp": "2026-02-01T00:48:22.772032"
+            },
+            {
+              "role": "user",
+              "content": "She wont buy me icecream",
+              "timestamp": "2026-02-01T00:48:49.305809"
+            },
+            {
+              "role": "assistant",
+              "content": "It sounds like there's a lot of emotion tied up in this situation with Jane, especially if something as simple as buying ice cream feels loaded. It's natural to feel hurt and frustrated when things don't go as we hope. What do you need Jane to understand about how this affects you? Expressing your side might help in finding some clarity and peace.",
+              "timestamp": "2026-02-01T00:48:51.435308"
+            },
+            {
+              "role": "user",
+              "content": "I love ciecream over her boyfriend",
+              "timestamp": "2026-02-01T00:49:22.400154"
+            },
+            {
+              "role": "assistant",
+              "content": "John, it seems like there's a lot of emotions tied to this situation with Jane, and it's understandable to feel a mix of things, including preferring something simple like ice cream. Let's take a moment to pause and breathe together. Focusing on your breath can help you feel a bit more grounded. Shall we try this and then see how you're feeling?",
+              "timestamp": "2026-02-01T00:49:24.545093"
+            },
+            {
+              "role": "user",
+              "content": "I am pissed about this icecream",
+              "timestamp": "2026-02-01T00:50:02.341784"
+            },
+            {
+              "role": "assistant",
+              "content": "John, I hear you. It sounds like this ice cream situation has really gotten under your skin, and it's okay to feel that way. If you're feeling stuck, would you like some help in figuring out how to express what's on your mind to Jane, or do you feel ready to return and address things on your own? I'm here to support you either way.",
+              "timestamp": "2026-02-01T00:50:04.336717"
+            },
+            {
+              "role": "user",
+              "content": "What now!",
+              "timestamp": "2026-02-01T00:51:04.936438"
+            }
+          ],
+          "attempt_number": 5,
+          "is_deescalated": false,
+          "status": "COMPLETED",
+          "ended_at": "2026-02-01T00:51:35.428714"
+        },
+        "CLIENT_001B": {
+          "session_id": "COACH_SANC_20260131_001_CLIENT_001B",
+          "sanctuary_id": "SANC_20260131_001",
+          "member_id": "CLIENT_001B",
+          "member_name": "Jane D.",
+          "intervention_id": "COACH_OFFER_CLIENT_001B_1769892609",
+          "started_at": "2026-01-31T15:50:12.221932",
+          "triggering_message": "\"John, I know it's been a challenging time for us, and I want to acknowledge your feelings. I'm committed to understanding each other better and creating a space where we both feel heard and respected. Let's work together to find common ground and rebuild the trust we need to move forward.\"",
+          "messages": [
+            {
+              "role": "assistant",
+              "content": "Hey Jane, I can tell you've been through a lot recently, and it's completely okay to feel distressed. It sounds like you've been trying to create a space where both you and John feel heard and respected, and that takes a lot of courage and commitment.\n\nAnger often covers up deeper emotions, like hurt or fear, and it's possible that both you and John are experiencing some of that. It's great that you're open to understanding each other better, which is a strong step towards rebuilding trust.\n\nI'm curious, what do you think might have triggered John's reaction in that moment? Understanding his perspective could be really helpful in finding a way forward. Remember, I'm here to support you as you navigate this.",
+              "timestamp": "2026-01-31T15:50:14.805119"
+            }
+          ],
+          "attempt_number": 0,
+          "is_deescalated": false,
+          "status": "COMPLETED",
+          "ended_at": "2026-01-31T15:50:30.207760"
+        }
+      },
+      "last_group_coaching_offer": 1769891506.033518,
+      "last_group_coaching_approved": 1769893612.651038,
+      "group_coaching_round": {
+        "round_id": "GC_1769902493_781E82",
+        "status": "COMPLETE",
+        "approved_at": 1769902493.281138,
+        "requested_by_name": "John D.",
+        "requested_text": "stuck",
+        "members_expected": [
+          "CLIENT_001",
+          "CLIENT_001B"
+        ],
+        "suggestions": {
+          "CLIENT_001": {
+            "suggested_text": "\"Jane, I hear that my appreciation means a lot to you, and I'm glad it felt like a new beginning. I understand that there's still some anger, and I'm here to listen and work through it with you. Let's continue this journey together, one step at a time.\"",
+            "rationale": "These words acknowledge Jane's feelings, express a willingness to understand and repair, and invite ongoing dialogue, fostering a sense of connection and safety.",
+            "target_audience": "Jane",
+            "emotional_tone": "Reaching out, supportive, open",
+            "total_charges": 158.0
+          },
+          "CLIENT_001B": {
+            "suggested_text": "\"John, your appreciation means a lot to me, and it's a step towards rebuilding our connection. I want you to know that while I'm still processing some anger, I'm also hopeful that we can continue to grow together. Let's keep talking and working through our feelings. I believe we can find a way to heal and strengthen our relationship.\"",
+            "rationale": "These words acknowledge John's positive step, express Jane's mixed emotions authentically, and invite continued dialogue, fostering a pathway for connection and healing.",
+            "target_audience": "John D.",
+            "emotional_tone": "hopeful, honest, open",
+            "total_charges": 158.0
+          }
+        },
+        "delivered_to": {
+          "CLIENT_001": true,
+          "CLIENT_001B": true
+        },
+        "responses": {
+          "CLIENT_001": {
+            "state": "DECLINED",
+            "at": "2026-01-31T18:35:24.372376"
+          },
+          "CLIENT_001B": {
+            "state": "DECLINED",
+            "at": "2026-01-31T18:35:09.751579"
+          }
+        }
+      },
+      "last_group_coaching_completed": 1769902524.3880162
+    }
+  },
+  "completed_sanctuaries": {}
+}

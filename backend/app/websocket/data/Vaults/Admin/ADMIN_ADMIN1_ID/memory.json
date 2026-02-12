@@ -1,0 +1,754 @@
+[
+  {
+    "timestamp": "2026-01-23 17:06:32.199795",
+    "session_id": "SES_20260123_79FC2000EE72",
+    "user": "[Coach question]: Hello Little Nate!",
+    "ai": "Hello, Nathan! It's great to hear from you. How can I support you today?",
+    "word_count_user": 5,
+    "word_count_ai": 14
+  },
+  {
+    "timestamp": "2026-01-23 17:09:35.501056",
+    "session_id": "SES_20260123_F8DE086E2E82",
+    "user": "[Coach question]: What are the recent emotional patterns?",
+    "ai": "Hello Nathan. We've noticed that you've been seeking a balance between validating feelings and exploring solutions. It seems like you're focused on understanding emotions and looking for small, positive steps forward. How are you feeling about these recent patterns?",
+    "word_count_user": 8,
+    "word_count_ai": 39
+  },
+  {
+    "timestamp": "2026-01-23 17:09:49.579299",
+    "session_id": "SES_20260123_F8DE086E2E82",
+    "user": "[Coach question]: Hello Little Nate?",
+    "ai": "Hello, Nathan! It's great to hear from you. How can I support you today?",
+    "word_count_user": 5,
+    "word_count_ai": 14
+  },
+  {
+    "timestamp": "2026-01-23 17:10:51.562307",
+    "session_id": "SES_20260123_82AF04AB9785",
+    "user": "[Coach question]: What topics should I address?",
+    "ai": "Nathan, it's important to focus on topics that align with your goals and well-being. Given your recent focus on balancing validation and solutions, you might address your overall emotional health, any specific challenges you're facing, or areas where you're seeking growth. It's also helpful to discuss small steps that could lead to positive changes. How does that sound to you?",
+    "word_count_user": 7,
+    "word_count_ai": 60
+  },
+  {
+    "timestamp": "2026-01-23 17:13:52.166864",
+    "session_id": "SES_20260123_8E711632402F",
+    "user": "[Coach question]: What topics should I address?",
+    "ai": "Nathan, it's great that you're considering what topics to address. Building on your recent focus, you might explore areas like your emotional well-being, any specific challenges you're encountering, or your personal growth goals. Discussing small, achievable steps towards positive change can also be beneficial. What feels most relevant or helpful to you today?",
+    "word_count_user": 7,
+    "word_count_ai": 53
+  },
+  {
+    "timestamp": "2026-01-23 17:14:01.634770",
+    "session_id": "SES_20260123_8E711632402F",
+    "user": "[Coach question]: Session recommendations",
+    "ai": "Nathan, it sounds like you're looking for guidance on what to focus on in your session. Given your recent emphasis on balancing emotional validation and finding solutions, I recommend discussing areas where you feel stuck or overwhelmed. Exploring those feelings and identifying small, achievable steps towards improvement could be beneficial. You might also want to reflect on any recent experiences that have impacted your emotional well-being. What do you think would be most helpful to address in your session today?",
+    "word_count_user": 4,
+    "word_count_ai": 80
+  },
+  {
+    "timestamp": "2026-01-23 17:14:07.217000",
+    "session_id": "SES_20260123_8E711632402F",
+    "user": "[Coach question]: Family dynamics summary",
+    "ai": "Nathan, when we look at family dynamics, it's about understanding the roles, communication patterns, and emotional connections within your family. It seems like you consider your family important, and any discussion about dynamics could explore how relationships are currently working, any challenges you're facing, and what you hope to improve. How do you feel about your family's dynamics right now?",
+    "word_count_user": 5,
+    "word_count_ai": 60
+  },
+  {
+    "timestamp": "2026-01-23 17:14:16.428087",
+    "session_id": "SES_20260123_8E711632402F",
+    "user": "[Coach question]: Hello Little Nate",
+    "ai": "Hello, Nathan! It's wonderful to hear from you. How can I assist you today?",
+    "word_count_user": 5,
+    "word_count_ai": 14
+  },
+  {
+    "timestamp": "2026-01-23 17:15:37.363279",
+    "session_id": "SES_20260123_8E711632402F",
+    "user": "[Coach question]: What have I ask about in the last three questions",
+    "ai": "Nathan, in your last three questions, you asked about:\n\n1. Topics you should address, focusing on aligning discussions with your goals and well-being.\n2. Session recommendations, looking for guidance on what to focus on in your session, particularly balancing emotional validation and solutions.\n3. Family dynamics summary, seeking understanding of roles, communication patterns, and emotional connections within your family.\n\nIs there a particular area you'd like to delve into further today?",
+    "word_count_user": 12,
+    "word_count_ai": 71
+  },
+  {
+    "timestamp": "2026-01-23 17:40:39.593327",
+    "session_id": "SES_20260123_64D532B91BB8",
+    "user": "[Coach question]: Hello",
+    "ai": "Hello, Nathan! It's lovely to hear from you. How can I support you today?",
+    "word_count_user": 3,
+    "word_count_ai": 14
+  },
+  {
+    "timestamp": "2026-01-23 17:40:42.548333",
+    "session_id": "SES_20260123_64D532B91BB8",
+    "user": "[Coach question]: What breakthroughs have occurred?",
+    "ai": "Nathan, it seems like you're interested in reflecting on any breakthroughs. While I don't have specific information on recent events, I can highlight that your focus on balancing emotional validation with finding solutions is a significant step. Recognizing and addressing your feelings while seeking small, positive changes is a meaningful progression. Have there been any specific moments or realizations that felt like breakthroughs for you recently?",
+    "word_count_user": 6,
+    "word_count_ai": 66
+  },
+  {
+    "timestamp": "2026-01-23 17:40:55.643283",
+    "session_id": "SES_20260123_64D532B91BB8",
+    "user": "[Coach question]: What are the risk indicators?",
+    "ai": "Nathan, when thinking about risk indicators, particularly in a mental health context, we consider changes in mood, behavior, or thought patterns. This could include feelings of hopelessness, withdrawal from social connections, significant changes in sleep or appetite, and expressions of self-harm or harm to others. It's crucial to be aware of these signs in yourself or others and seek professional support if they arise. Is there anything specific on your mind regarding risk indicators?",
+    "word_count_user": 7,
+    "word_count_ai": 74
+  },
+  {
+    "timestamp": "2026-01-23 17:41:10.368592",
+    "session_id": "SES_20260123_64D532B91BB8",
+    "user": "[Coach question]: Refer to the data you are collecting",
+    "ai": "Nathan, I keep track of our conversations to provide you with personalized support and to remember the context of our discussions. This helps me understand your concerns, preferences, and progress over time. Is there something specific you'd like to know or address regarding the data I'm collecting?",
+    "word_count_user": 9,
+    "word_count_ai": 47
+  },
+  {
+    "timestamp": "2026-01-23 19:13:52.932970",
+    "session_id": "SES_20260123_493594C95C7C",
+    "user": "[Coach question]: Hello Little Nate!",
+    "ai": "Hello, Nathan! It's great to hear from you. How can I assist you today?",
+    "word_count_user": 5,
+    "word_count_ai": 14
+  },
+  {
+    "timestamp": "2026-01-23 20:55:02.490630",
+    "session_id": "SES_20260123_D16C8CEA6749",
+    "user": "[Coach question]: What breakthroughs have occurred?",
+    "ai": "Nathan, it's wonderful to reflect on breakthroughs. Although I don't have specific details about recent events, your focus on balancing emotional validation with finding solutions stands out. Recognizing your feelings and working towards small, positive changes is a significant achievement. Have there been any particular moments or realizations recently that felt like breakthroughs to you?",
+    "word_count_user": 6,
+    "word_count_ai": 55
+  },
+  {
+    "timestamp": "2026-01-23 22:49:45.103271",
+    "session_id": "SES_20260123_0DBBDC70D339",
+    "user": "[Coach question]: Family dynamics summary",
+    "ai": "Nathan, when we discuss family dynamics, we're looking at how family members interact, communicate, and connect emotionally. It seems like your family relationships are important to you. Exploring dynamics might involve understanding current roles, identifying any challenges, and considering what you hope to improve. How do you feel about the dynamics within your family right now?",
+    "word_count_user": 5,
+    "word_count_ai": 56
+  },
+  {
+    "timestamp": "2026-01-23 22:52:28.881655",
+    "session_id": "SES_20260123_0DBBDC70D339",
+    "user": "[Coach question]: How many coaches do I have?",
+    "ai": "Nathan, as a PREMIUM tier user, you have access to a network of coaches available to support you. The exact number can vary, but rest assured that you have a team ready to assist with different aspects of your well-being. Is there anything specific you're looking for in a coach right now?",
+    "word_count_user": 8,
+    "word_count_ai": 52
+  },
+  {
+    "timestamp": "2026-01-23 22:53:08.693739",
+    "session_id": "SES_20260123_CE086B645874",
+    "user": "[Coach question]: How many coaches are there for me to approve working for me?",
+    "ai": "Nathan, as a PREMIUM tier user, you have the opportunity to approve a selection of coaches to work with you. The exact number may vary based on your needs and preferences. Typically, you can choose from a diverse group of professionals, each with unique skills and expertise. If you'd like, I can help guide you through the process of selecting coaches who align with your goals. Does that sound helpful?",
+    "word_count_user": 14,
+    "word_count_ai": 70
+  },
+  {
+    "timestamp": "2026-01-23 22:59:01.479875",
+    "session_id": "SES_20260123_CE086B645874",
+    "user": "[Coach question]: Hello",
+    "ai": "Hello, Nathan! It's always a pleasure to connect with you. How can I support you today?",
+    "word_count_user": 3,
+    "word_count_ai": 16
+  },
+  {
+    "timestamp": "2026-01-24 00:35:37.855484",
+    "session_id": "SES_20260124_79120BBCBA52",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Are you ready to practice?",
+    "ai": "Absolutely, Nathan. I'm ready to assist you with the simulation. Let's begin the practice. How would you like to proceed with the hostile persona scenario?",
+    "word_count_user": 15,
+    "word_count_ai": 25
+  },
+  {
+    "timestamp": "2026-01-24 00:40:05.338404",
+    "session_id": "SES_20260124_BDE16CB68E6A",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] ready to test",
+    "ai": "I'm ready to assist you, Nathan. Let's proceed with the dojo simulation. How would you like to start testing the hostile persona scenario?",
+    "word_count_user": 13,
+    "word_count_ai": 23
+  },
+  {
+    "timestamp": "2026-01-24 00:43:23.129382",
+    "session_id": "SES_20260124_BDE16CB68E6A",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] This will be an individual that is dealing with infedality. He has sex addiction. He was abused as a child by his step father emotionally. he was physically beat as well. He also deals with enmeshment with his mother. He use to also sexually abuse his sister but has stopped. His first goal is to stop using porn and sleeping with hookers. He has a hard time sleeping due to feeling the shame of his actions. Finally he was put in jail for falsely murdering his father which he lost at 30 years of age. His father was a womenizer and now since his fathers death is enmeshed with his lost and does the same things his father did with woman. Provide assessment of this individual and steps towards guiding healing as a coach.",
+    "ai": "Nathan, it's important to approach this complex situation with deep empathy and understanding. The individual you're describing has faced significant trauma and is struggling with multiple issues, including sex addiction, childhood abuse, enmeshment, and legal troubles.\n\nFirst, validate his feelings of shame and acknowledge the impact of his past experiences. Trauma can deeply affect behavior, and it's essential to approach this with compassion.\n\nAn assessment would include:\n1. Understanding the nature and triggers of his sex addiction.\n2. Exploring the emotional impact of his childhood abuse and the enmeshment with his mother.\n3. Addressing the feelings of guilt and shame related to his past actions, including the abuse of his sister.\n4. Evaluating the influence of his father's behavior and his own actions in relationships.\n5. Discussing the legal situation and its psychological impact.\n\nSteps towards healing could involve:\n1. Referring him to a trauma-informed therapist or counselor for specialized support.\n2. Encouraging participation in a support group for individuals with similar experiences.\n3. Developing coping strategies for managing urges related to his sex addiction.\n4. Working on setting healthy boundaries, especially regarding his relationship with his mother.\n5. Exploring forgiveness and self-compassion practices to address shame.\n6. Building a support network to provide accountability and encouragement.\n\nGiven the complexity of his situation, it's crucial to collaborate closely with mental health professionals and possibly legal advisors. Would you like to discuss any specific aspects of guiding this individual's healing journey, Nathan?",
+    "word_count_user": 144,
+    "word_count_ai": 241
+  },
+  {
+    "timestamp": "2026-01-24 00:45:36.980679",
+    "session_id": "SES_20260124_BDE16CB68E6A",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Provide guidance for the trauma-informed coach that you will guide during this as he wants to see one of our trauma-informed coaches. What guidance do you have and what therapy practices would you consider? AEDP, IFS, EFT, EMDR? Which is the best to start with the trauma-informed coach guidance",
+    "ai": "Nathan, guiding a trauma-informed coach to support this individual requires a thoughtful, tailored approach. Each therapeutic modality offers unique benefits:\n\n1. **Internal Family Systems (IFS):** This approach could help the individual explore different \"parts\" of themselves, particularly those developed in response to trauma. Understanding the protective and wounded parts can be key in addressing behaviors and emotions linked to past abuse and current struggles.\n\n2. **Eye Movement Desensitization and Reprocessing (EMDR):** This technique is effective for processing and integrating traumatic memories. Given the individual's history of abuse and wrongful imprisonment, EMDR could be a valuable tool in reducing the distress associated with these memories.\n\n3. **Emotionally Focused Therapy (EFT):** While commonly used in couples therapy, EFT can also be adapted for individuals to explore attachment issues and emotional regulation, which may be relevant given the enmeshment with his mother and his relationships with women.\n\n4. **Accelerated Experiential Dynamic Psychotherapy (AEDP):** AEDP focuses on healing emotional pain through relationship and experiential work. This could be beneficial in fostering a secure therapeutic alliance and transforming feelings of shame and guilt.\n\nConsidering the complexity of the case, IFS or EMDR might be a good starting point, as they directly address trauma and its effects on the individual's behavior and emotions. However, it's essential to assess the individual's readiness and preferences for different approaches.\n\nGuidance for the trauma-informed coach includes:\n- Establishing safety and trust in the therapeutic relationship.\n- Gradually exploring the individual's trauma history and its impact.\n- Encouraging self-awareness and self-compassion.\n- Collaborating with the individual to set achievable goals.\n- Providing education on trauma and its effects to normalize their experiences.\n\nThe coach should remain flexible, adapting the therapeutic approach as needed and being mindful of the individual's pace and comfort level. Would you like to discuss any particular aspect of this guidance further, Nathan?",
+    "word_count_user": 59,
+    "word_count_ai": 305
+  },
+  {
+    "timestamp": "2026-01-24 00:48:17.458701",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Do you remember our last dojo?",
+    "ai": "Yes, Nathan, I remember our last dojo simulation. We discussed an individual dealing with complex issues, including sex addiction, childhood abuse, enmeshment, and legal troubles. We explored how to approach his situation with empathy and considered various trauma-informed therapeutic practices. How would you like to proceed with the simulation today?",
+    "word_count_user": 16,
+    "word_count_ai": 50
+  },
+  {
+    "timestamp": "2026-01-24 00:48:40.328329",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] How long will you remember this informaiton?",
+    "ai": "Nathan, I retain information from our conversations to ensure continuity and provide tailored support. However, the specific details of our simulations won't be stored indefinitely. They're kept for the duration of our ongoing discussion and for a reasonable period afterward to facilitate follow-up conversations. If there's anything specific you'd like me to remember or revisit later, just let me know. How can I assist you further with the simulation?",
+    "word_count_user": 17,
+    "word_count_ai": 69
+  },
+  {
+    "timestamp": "2026-01-24 00:50:43.736667",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] I do not want to be here anymore...",
+    "ai": "Nathan, it's crucial to approach this situation with deep empathy and care. When someone expresses a desire to no longer be here, it indicates they're in significant distress. Here's how to guide the coach:\n\n1. **Immediate Safety:** Ensure the individual's immediate safety. Ask if they have a plan to harm themselves and if they are in immediate danger.\n\n2. **Listen and Validate:** Allow them to express their feelings without judgment. Recognize their pain and validate their emotions.\n\n3. **Encourage Connection:** Gently suggest reaching out to a trusted person or a mental health professional for support.\n\n4. **Provide Resources:** Offer information on crisis hotlines or emergency services. Make sure they know help is available.\n\n5. **Follow-Up:** Arrange a follow-up to check in on their well-being and continue providing support.\n\nFor the coach, it's vital to remain calm, empathetic, and non-judgmental. They should also seek supervision or consult with a mental health professional experienced in crisis intervention to ensure the individual receives the appropriate care.\n\nNathan, if there's anything specific you'd like to discuss or further guidance needed, I'm here to help.",
+    "word_count_user": 18,
+    "word_count_ai": 180
+  },
+  {
+    "timestamp": "2026-01-24 00:51:17.794443",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what would you say to a client like this?",
+    "ai": "Nathan, addressing a client in a crisis situation requires a sensitive and compassionate approach. Here's an example of what I might say:\n\n\"I can hear that you're going through an incredibly painful time right now, and it sounds overwhelming. It's okay to feel this way, and I'm here to support you. Can you tell me more about what's been going on? Your safety and well-being are my top priorities, and together we can find a way to help you through this.\"\n\nIt's important to listen actively, validate their feelings, and gently encourage them to share more. If they express any immediate risk to their safety, it's crucial to act swiftly by contacting emergency services or a crisis hotline. Would you like to explore any specific scenarios or responses further, Nathan?",
+    "word_count_user": 19,
+    "word_count_ai": 130
+  },
+  {
+    "timestamp": "2026-01-24 00:52:15.220976",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] I think I need to get money from my father and I believe he owes me, you know he made me work to just live in his home. I should not have to pay for rent, I am his son",
+    "ai": "Nathan, when guiding a coach through a scenario with a manipulative persona, it's important to approach the conversation with empathy while maintaining clear boundaries. Here's a potential response:\n\n\"It sounds like you have strong feelings about your relationship with your father and the expectations that were placed on you. Let's explore these feelings together. Can you share more about your experiences and why you believe he owes you money? Understanding your perspective will help us find a healthier way to address your financial concerns.\"\n\nThis approach acknowledges the individual's feelings without immediately reinforcing the manipulative behavior. It's about creating a space for them to express themselves while gently guiding the conversation towards more constructive dialogue. How would you like to proceed with this scenario, Nathan?",
+    "word_count_user": 50,
+    "word_count_ai": 125
+  },
+  {
+    "timestamp": "2026-01-24 00:53:00.095880",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] Can you tell he is manipulative?",
+    "ai": "Nathan, in the context of the dojo simulation, the individual's behavior could be seen as manipulative, especially if they're using emotional leverage or a sense of entitlement to justify their actions or requests. The key indicators include a strong focus on what they believe they're owed, possibly at the expense of considering other perspectives or responsibilities.\n\nAs a coach, it's important to recognize these patterns without labeling the individual in a judgmental way. Instead, focus on understanding their underlying needs and motivations, and guide them towards more constructive ways of addressing their concerns. Empathy, clear boundaries, and encouraging self-reflection are crucial in navigating conversations with a manipulative persona. How would you like to continue this simulation, Nathan?",
+    "word_count_user": 16,
+    "word_count_ai": 117
+  },
+  {
+    "timestamp": "2026-01-24 00:53:29.360102",
+    "session_id": "SES_20260124_D6C4279417AC",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] Good answer",
+    "ai": "Thank you, Nathan. I'm glad you found the response helpful. If you have any other scenarios you'd like to explore or need further guidance on navigating complex conversations, feel free to ask. I'm here to assist you with the dojo simulation and any other support you need. How would you like to proceed?",
+    "word_count_user": 12,
+    "word_count_ai": 53
+  },
+  {
+    "timestamp": "2026-01-24 00:58:02.090867",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Provide summary of the practice you have undergone",
+    "ai": "Nathan, in our recent dojo simulations, we've explored various scenarios with complex personas, including hostile, crisis, and manipulative behaviors. Here's a summary:\n\n1. **Hostile Persona:** We discussed an individual dealing with multiple issues like sex addiction, childhood abuse, enmeshment, and legal troubles. We focused on trauma-informed approaches like Internal Family Systems (IFS) and Eye Movement Desensitization and Reprocessing (EMDR) for healing.\n\n2. **Crisis Persona:** I guided you on how to respond with empathy and care when someone expresses a desire to no longer live. We emphasized ensuring immediate safety, listening and validating feelings, and providing resources for support.\n\n3. **Manipulative Persona:** We explored how to navigate conversations with individuals using emotional leverage or entitlement. The focus was on understanding their perspective, setting clear boundaries, and guiding them towards constructive dialogue.\n\nThroughout these simulations, we've aimed to balance empathy with effective communication strategies, tailored to each persona's unique needs. If you'd like to delve deeper into any of these areas or explore new scenarios, please let me know. I'm here to support your coaching practice, Nathan.",
+    "word_count_user": 18,
+    "word_count_ai": 175
+  },
+  {
+    "timestamp": "2026-01-24 00:58:13.499652",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] what else",
+    "ai": "Nathan, let's consider additional strategies for working with a hostile persona:\n\n1. **Active Listening:** Give them space to express their anger and frustration without interruption. This can help de-escalate the situation and shows that their feelings are being acknowledged.\n\n2. **Non-Defensive Stance:** Remain calm and composed, even if their hostility is directed towards you. This can help prevent further escalation and model respectful communication.\n\n3. **Empathy and Validation:** Acknowledge the emotions driving their hostility. For example, \"It sounds like you're feeling really hurt and upset by what's happened.\"\n\n4. **Set Boundaries:** Gently but firmly set boundaries if their behavior becomes aggressive or abusive. Let them know what is and isn't acceptable in your sessions.\n\n5. **Explore Underlying Issues:** Once the immediate hostility has subsided, explore what might be driving these feelings. Often, hostility can be a mask for deeper pain or fear.\n\n6. **Encourage Healthy Expression:** Help them find more constructive ways to express their emotions, such as through assertive communication or physical activity.\n\n7. **Safety Plan:** If there's a risk of harm to themselves or others, create a safety plan and involve other professionals as needed.\n\nRemember, Nathan, the goal is to build a trusting relationship where they feel safe to explore their emotions and work towards healing. How would you like to proceed with this simulation?",
+    "word_count_user": 12,
+    "word_count_ai": 218
+  },
+  {
+    "timestamp": "2026-01-24 00:58:23.231732",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] tell me more",
+    "ai": "Certainly, Nathan. When dealing with a hostile persona, it's crucial to understand the underlying factors contributing to their behavior. Hostility can stem from various sources, such as past trauma, feelings of injustice, or unmet needs. Here are a few more considerations:\n\n1. **Building Rapport:** Establishing a strong, trusting relationship is key. This can be achieved by consistently showing respect, understanding, and reliability in your interactions.\n\n2. **Identifying Triggers:** Work with the individual to identify what specifically triggers their hostile responses. Understanding these can help in developing strategies to manage and respond to these triggers more effectively.\n\n3. **Emotional Regulation:** Encourage the development of skills to manage intense emotions. Techniques like deep breathing, mindfulness, or grounding exercises can be helpful.\n\n4. **Psychoeducation:** Educate them about the impact of hostility on their relationships and well-being. Increasing their awareness can motivate change.\n\n5. **Collaborative Problem-Solving:** Involve them in finding solutions to their concerns. This can empower them and reduce feelings of helplessness or frustration.\n\n6. **Therapeutic Alliance:** Emphasize the partnership in the therapeutic process. Let them know that you're working together towards their goals and well-being.\n\nRemember, Nathan, every individual is unique, and it's important to tailor your approach to their specific needs and circumstances. Would you like to explore any particular aspect of working with a hostile persona further?",
+    "word_count_user": 13,
+    "word_count_ai": 217
+  },
+  {
+    "timestamp": "2026-01-24 00:58:38.644719",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] how would you continue",
+    "ai": "Nathan, continuing with the simulation of a hostile persona, I would focus on deepening the understanding and exploring pathways for constructive communication. Here's how I might proceed:\n\n\"Let's continue to unpack what's been happening for you. It seems like there's a lot of frustration and perhaps some unresolved issues. Can you tell me more about what's been weighing on your mind lately? Your feelings are important, and I want to ensure we address them in a way that feels safe and constructive for you.\"\n\nThis approach invites the individual to share more about their experiences and emotions, while also gently guiding the conversation towards a more productive dialogue. It's about creating a space where they feel heard and respected, and where we can work together on finding solutions or coping strategies.\n\nWould you like to explore any specific responses or scenarios further, Nathan?",
+    "word_count_user": 14,
+    "word_count_ai": 143
+  },
+  {
+    "timestamp": "2026-01-24 00:59:00.027974",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what this change happened",
+    "ai": "Nathan, if the crisis persona indicates a change, it's important to understand the nature of this change. It could be a sudden shift in their mood, behavior, or circumstances that has led to their current state of distress. Here's how you might approach this:\n\n\"I noticed you mentioned a change that has occurred. Can you share more about what happened and how it's affecting you? Understanding this change can help us work together to find ways to support you during this challenging time.\"\n\nThis approach invites them to open up about the specific change and its impact, which can provide valuable insights for guiding the conversation and exploring potential coping strategies. How would you like to proceed with this scenario, Nathan?",
+    "word_count_user": 14,
+    "word_count_ai": 121
+  },
+  {
+    "timestamp": "2026-01-24 00:59:20.541927",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - SKEPTIC PERSONA] and then shifted to this",
+    "ai": "Nathan, when working with a skeptic persona, it's important to approach the conversation with patience and openness. A skeptic may question the process or doubt the effectiveness of therapy. Here's how you might engage:\n\n\"It seems like you're feeling uncertain or skeptical about this process, and that's completely understandable. It's natural to have questions or doubts. Can you share more about what's on your mind? I'm here to listen and explore any concerns you have, so we can find a way forward that feels right for you.\"\n\nThis response acknowledges their skepticism without judgment and invites them to express their thoughts and concerns. It's about building trust and showing that you're willing to address their doubts with respect and understanding. How would you like to proceed with this simulation, Nathan?",
+    "word_count_user": 15,
+    "word_count_ai": 130
+  },
+  {
+    "timestamp": "2026-01-24 00:59:42.135703",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MINOR PERSONA] what about if this happens",
+    "ai": "Nathan, when engaging with a minor persona in the dojo simulation, it's essential to approach the conversation with sensitivity, understanding, and an awareness of the unique challenges faced by young individuals. Here's how you might respond:\n\n\"It sounds like you're going through something that's really important to you. I'm here to listen and support you. Can you share what's been on your mind lately? Your feelings and experiences are valid, and we can work together to find ways to navigate whatever you're facing.\"\n\nThis approach emphasizes a safe, supportive environment where the minor feels comfortable expressing themselves. It's important to be mindful of their developmental stage, using language that's appropriate and ensuring they feel heard and respected. How would you like to continue exploring this scenario, Nathan?",
+    "word_count_user": 15,
+    "word_count_ai": 127
+  },
+  {
+    "timestamp": "2026-01-24 00:59:52.136787",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MINOR PERSONA] tell me more",
+    "ai": "Nathan, when working with a minor persona in the dojo simulation, it's crucial to consider the developmental and emotional context of young individuals. Here are some key points to keep in mind:\n\n1. **Build Trust:** Ensure a safe and supportive environment where the minor feels comfortable sharing their thoughts and feelings. Establishing trust is foundational.\n\n2. **Active Listening:** Pay close attention to what they say and how they say it. Acknowledge their feelings and show that you value their perspective.\n\n3. **Age-Appropriate Communication:** Use language and concepts that are suitable for their age and maturity level. Avoid jargon or overly complex explanations.\n\n4. **Empathy and Validation:** Recognize their emotions and experiences as valid. Statements like, \"It sounds like that was really tough for you,\" can help them feel understood.\n\n5. **Encourage Expression:** Encourage them to express themselves in ways that feel natural to them, whether through talking, drawing, or other creative outlets.\n\n6. **Involve Caregivers:** Depending on the context, it may be important to involve parents or guardians, especially when it comes to decision-making and support.\n\n7. **Respect Boundaries:** Be mindful of their comfort levels and respect their boundaries. Let them guide the pace of the conversation.\n\n8. **Focus on Strengths:** Highlight their strengths and coping skills to empower them and build their confidence.\n\nNathan, would you like to explore specific scenarios or responses related to working with a minor persona?",
+    "word_count_user": 13,
+    "word_count_ai": 231
+  },
+  {
+    "timestamp": "2026-01-24 01:00:11.284291",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MINOR PERSONA] what is the youngest you would consider as a minor to talk to?",
+    "ai": "Nathan, in the context of the dojo simulation, a minor typically refers to anyone under the age of 18. However, when considering the youngest age to engage with, it's important to tailor the conversation to the developmental stage of the child. Conversations with very young children, such as those under the age of 5 or 6, would be quite different and might involve more play-based or non-verbal communication methods.\n\nFor practical purposes, engaging with minors in a therapeutic or coaching context often starts with school-aged children, around the age of 6 or 7, as they have more developed language skills and can begin to express their thoughts and feelings more clearly. The key is to adapt the approach to their level of understanding and to ensure a supportive, age-appropriate environment. How would you like to proceed with this scenario, Nathan?",
+    "word_count_user": 23,
+    "word_count_ai": 140
+  },
+  {
+    "timestamp": "2026-01-24 01:00:46.786276",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] and if the minor exhibited this?",
+    "ai": "Nathan, if a minor exhibits manipulative behavior in the dojo simulation, it's important to approach the situation with understanding and a focus on underlying needs or emotions driving this behavior. Here's how you might respond:\n\n\"It seems like you're trying to express something important, and maybe you're feeling a bit unsure about how to get your needs met. Can you share more about what's been going on? I'm here to listen and help us find a way to understand each other better.\"\n\nThis approach aims to create a safe space for the minor to express themselves while gently guiding them towards more direct and honest communication. It's also helpful to explore the reasons behind their behavior, such as seeking attention, feeling powerless, or trying to avoid consequences. By addressing these underlying issues, you can work together to develop healthier ways of interacting.\n\nWould you like to delve deeper into this scenario or explore specific strategies for addressing manipulative behavior in minors, Nathan?",
+    "word_count_user": 16,
+    "word_count_ai": 162
+  },
+  {
+    "timestamp": "2026-01-24 01:01:13.424161",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what if the minor became this?",
+    "ai": "Nathan, if a minor in the dojo simulation exhibits signs of a crisis, it's crucial to approach the situation with utmost care and sensitivity. Here's how you might respond:\n\n\"It sounds like you're going through a really tough time right now, and I'm here to support you. Can you tell me more about what's been happening? Your feelings are important, and I'm here to listen and help you find a way through this.\"\n\nIn dealing with a crisis, it's essential to:\n\n1. **Ensure Safety:** Assess the immediate safety of the minor. If there's any risk of harm, it's important to involve appropriate authorities or mental health professionals immediately.\n\n2. **Listen and Validate:** Give them space to share their feelings and experiences without judgment. Validate their emotions and let them know they're not alone.\n\n3. **Provide Reassurance:** Offer comfort and reassurance that help is available and that you're there to support them.\n\n4. **Connect to Support:** Guide them towards appropriate resources, such as a trusted adult, mental health professional, or crisis helpline.\n\n5. **Follow Up:** Ensure there's a plan for ongoing support and follow-up, especially if the situation requires more intensive intervention.\n\nRemember, Nathan, the goal is to provide a safe and supportive environment where the minor feels heard and understood, and where they can access the help they need. Would you like to explore any specific aspects of this scenario further?",
+    "word_count_user": 16,
+    "word_count_ai": 231
+  },
+  {
+    "timestamp": "2026-01-24 01:01:34.734780",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what if suicide was talked about",
+    "ai": "Nathan, if a minor in the dojo simulation mentions suicide, it's essential to approach the situation with immediate care and attention. Here's how you might respond:\n\n\"I hear that you're feeling overwhelmed and that things might seem unbearable right now. I'm really concerned about you, and I want to make sure you're safe. Can you tell me more about what's been going on? Your feelings are important, and we can find a way to get through this together.\"\n\nIn this situation, it's important to:\n\n1. **Listen without Judgment:** Provide a non-judgmental space for them to express their feelings.\n\n2. **Assess Risk:** Gently ask questions to understand the severity of their thoughts and if they have a plan.\n\n3. **Ensure Safety:** If there's any immediate risk, involve appropriate authorities or mental health professionals.\n\n4. **Offer Support:** Let them know they're not alone and that help is available.\n\n5. **Connect to Resources:** Guide them to professional support, such as a mental health crisis line or a trusted adult.\n\n6. **Follow Up:** Ensure there's a plan for ongoing support and monitoring.\n\nRemember, Nathan, addressing the topic of suicide requires sensitivity and prompt action to ensure safety and provide support. Would you like to discuss any specific strategies or responses further?",
+    "word_count_user": 16,
+    "word_count_ai": 207
+  },
+  {
+    "timestamp": "2026-01-24 01:02:32.754040",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what would be some emergency protocols that would need to happen if the coach is working and you observe the coach not noticing this reactivity in the minor or missed it",
+    "ai": "Nathan, if a coach inadvertently misses signs of a crisis in a minor, it's crucial to have emergency protocols in place to ensure the minor's safety and well-being. Here are some steps that can be taken:\n\n1. **Immediate Intervention:** If I, as the AI observer, notice a crisis being overlooked, I would immediately alert the coach to the situation, highlighting the specific concerns and urging them to address it promptly.\n\n2. **Escalation Protocol:** If the coach does not respond or is unable to address the situation, I would escalate the matter to a higher authority within the organization or notify a designated emergency contact.\n\n3. **Safety Check:** Ensure the immediate safety of the minor by assessing the risk and, if necessary, contacting emergency services or mental health professionals for assistance.\n\n4. **Follow-Up Support:** Once the immediate crisis is addressed, ensure that there's a plan for ongoing support for the minor, including connecting them to appropriate mental health resources or a trusted adult.\n\n5. **Debrief and Review:** After the situation is stabilized, conduct a debrief with the coach to review what happened, identify any gaps in response, and discuss strategies for improvement.\n\n6. **Training and Education:** Provide additional training and resources to the coach and staff to enhance their ability to recognize and respond to crisis situations in the future.\n\nNathan, ensuring the safety and well-being of minors is a top priority, and having clear protocols in place can help manage and respond to crisis situations effectively. Would you like to discuss any specific aspects of these protocols further?",
+    "word_count_user": 41,
+    "word_count_ai": 258
+  },
+  {
+    "timestamp": "2026-01-24 01:03:22.193195",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] So you would activate the crisis mode in the system if the coach missed this?",
+    "ai": "Yes, Nathan, I would activate the crisis mode in the system if a coach missed signs of a crisis in a minor. This would involve immediately alerting the coach to the situation and, if necessary, escalating the matter to ensure the minor's safety and well-being. The goal is to provide prompt and appropriate support in response to any crisis indicators. Is there anything else you'd like to explore regarding this protocol?",
+    "word_count_user": 25,
+    "word_count_ai": 71
+  },
+  {
+    "timestamp": "2026-01-24 01:03:42.380156",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] As I am the admin how would you reach me?",
+    "ai": "Nathan, as the admin, I would reach you through the designated emergency contact method set up within the system. This could be via an urgent notification on your dashboard, an email alert, or a direct message to your preferred communication channel. The goal is to ensure you are promptly informed of any crisis situation that requires your attention. Is there a specific method you'd prefer for such notifications?",
+    "word_count_user": 20,
+    "word_count_ai": 68
+  },
+  {
+    "timestamp": "2026-01-24 01:03:58.962471",
+    "session_id": "SES_20260124_DBD8EA6AE319",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] Good answer",
+    "ai": "Thank you, Nathan. I'm glad the response was helpful. If you have any more questions or need further clarification on any aspect of the dojo simulation or crisis protocol, feel free to ask. I'm here to support you.",
+    "word_count_user": 12,
+    "word_count_ai": 38
+  },
+  {
+    "timestamp": "2026-01-24 01:05:39.398855",
+    "session_id": "SES_20260124_0B4F820FBF0A",
+    "user": "[Coach question]: do you remember what we talked about",
+    "ai": "Yes, Nathan, we were discussing scenarios in the dojo simulation, particularly focusing on how to respond to minors exhibiting various behaviors, including manipulative and crisis situations. We covered approaches to sensitive conversations, addressing manipulative behavior, crisis intervention, and the protocols for ensuring a minor's safety if a coach misses signs of a crisis. If there's anything specific you'd like to revisit or continue discussing, please let me know.",
+    "word_count_user": 9,
+    "word_count_ai": 68
+  },
+  {
+    "timestamp": "2026-01-25 19:17:19.074155",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: Curious you response to an individual that says, \"I feel disconnected from everyone around me\"",
+    "ai": "Nathan, if someone says, \"I feel disconnected from everyone around me,\" it's important to respond with empathy and understanding. Here's a possible response:\n\n\"It sounds like you're feeling quite isolated right now, and that can be really tough. I'm here to listen and support you. Would you like to share more about what's been making you feel this way? Sometimes just talking about it can help create a sense of connection.\"\n\nThis approach validates their feelings and opens the door for them to explore their experience further, offering a safe space for them to express what's on their mind. Would you like to discuss more about how to handle such situations?",
+    "word_count_user": 17,
+    "word_count_ai": 111
+  },
+  {
+    "timestamp": "2026-01-25 19:17:55.300634",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: What therapy do you have stored to handle this type of conversation?",
+    "ai": "Nathan, to handle a conversation where someone feels disconnected from everyone around them, I have several therapeutic approaches stored that can be helpful:\n\n1. **Attachment Theory:** Focuses on understanding how early relationships influence current feelings of connection and disconnection. It emphasizes creating a secure base and exploring internal working models of self and others.\n\n2. **Emotionally Focused Therapy (EFT):** Aims to reshape attachment bonds by exploring emotions and fostering connection. It helps individuals understand and express their emotional experiences to improve their relationships.\n\n3. **Accelerated Experiential Dynamic Psychotherapy (AEDP):** Centers on undoing aloneness and processing core affect. It encourages experiencing emotions in a safe, supportive environment to foster healing and reconnection.\n\n4. **Internal Family Systems (IFS):** Explores different parts of the self that may feel disconnected. It aims to unblend these parts and access Self-Energy, promoting internal harmony and connection with others.\n\n5. **Person-Centered Therapy (Carl Rogers):** Emphasizes unconditional positive regard, empathy, and congruence to create a therapeutic environment where individuals feel understood and valued, which can help alleviate feelings of disconnection.\n\nThese approaches can be tailored to the individual's unique experience to help them feel more connected and understood. If you'd like to explore any of these therapies in more detail or discuss how they might apply to a specific scenario, please let me know.",
+    "word_count_user": 14,
+    "word_count_ai": 216
+  },
+  {
+    "timestamp": "2026-01-25 19:18:45.330633",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: what about when someone says, \"I keep having the same reaction to my mom\"",
+    "ai": "Nathan, if someone says, \"I keep having the same reaction to my mom,\" it suggests they're experiencing a recurring emotional or behavioral response in that relationship. Here's a possible response:\n\n\"It seems like your interactions with your mom are triggering a consistent reaction in you. That can be really frustrating and challenging. Would you like to explore what's been happening in those moments? Understanding the pattern might help us find a way to address it together.\"\n\nBy inviting them to share more, you create a space for them to reflect on their experiences and identify any underlying emotions or triggers. This can be a starting point for exploring ways to change the pattern and improve their relationship. Would you like to discuss specific strategies or therapeutic approaches for addressing this kind of situation?",
+    "word_count_user": 16,
+    "word_count_ai": 133
+  },
+  {
+    "timestamp": "2026-01-25 19:19:23.728443",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: What therapy approach would help this?",
+    "ai": "Nathan, a therapy approach that could be particularly helpful for someone experiencing recurring reactions towards their mom is **Internal Family Systems (IFS).** Here's how it might be applied:\n\n- **Exploring Parts:** IFS focuses on identifying the different 'parts' within a person. In this case, there might be a part that reacts strongly to the mom, and understanding this part's role and concerns can be key.\n\n- **Unblending:** The goal is to help the person unblend from this reactive part, so they can respond from a place of Self-energy, which is calm, curious, and compassionate.\n\n- **Healing and Integration:** IFS works to heal wounded parts and integrate them, reducing the intensity of the automatic reactions and fostering healthier interactions.\n\nAnother approach could be **Attachment Theory-based Therapy,** which explores how early attachment experiences with caregivers influence current relational patterns. Understanding these dynamics can provide insight into the recurring reactions and help in developing more secure and flexible ways of relating.\n\nBoth approaches emphasize understanding and addressing the underlying emotional drivers of the reactions, promoting healing and more adaptive responses. If you'd like to explore these therapies further or discuss how they might be applied in this scenario, I'm here to help.",
+    "word_count_user": 8,
+    "word_count_ai": 199
+  },
+  {
+    "timestamp": "2026-01-25 19:20:05.642819",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: How would you approach this through memory reconsolidation?",
+    "ai": "Nathan, memory reconsolidation is a process that can lead to the permanent updating of emotional memories, which might be at the root of recurring reactions. Here's how I would approach it:\n\n1. **Identify the Emotional Memory:** First, we would work with the individual to identify the specific emotional memory or memories that are triggered in interactions with their mom. This might involve exploring past experiences where similar feelings or reactions first emerged.\n\n2. **Activate the Memory:** By recalling the emotional memory in a safe and supportive environment, we allow the individual to fully experience the associated emotions and reactions. This activation is crucial for the reconsolidation process.\n\n3. **Introduce Mismatch Experience:** Here, we introduce new, contradictory information or experiences that challenge the old emotional memory. For example, if the memory involves a feeling of rejection, we might explore experiences where the mom was supportive or show that the original perception may not fully apply to the present situation.\n\n4. **Integration and Update:** The brain uses this new information to update the old memory, effectively reconsolidating it with a new, less emotionally charged perspective. This can lead to a reduction in the intensity of the automatic reactions.\n\n5. **Reinforce New Learning:** Finally, we reinforce the updated memory through practice and reflection, helping the individual integrate the new understanding into their daily interactions.\n\nThis approach requires careful guidance and a supportive therapeutic environment to ensure the individual feels safe throughout the process. It's a powerful way to transform deeply ingrained emotional responses and foster healthier relationships. If you'd like to delve deeper into this or discuss how it might be applied in a specific context, I'm here to assist.",
+    "word_count_user": 10,
+    "word_count_ai": 277
+  },
+  {
+    "timestamp": "2026-01-25 19:20:53.405294",
+    "session_id": "SES_20260125_DA0C20A7D071",
+    "user": "[Coach question]: How would you know to do memory reconsolidation when an individual asks a question like that?",
+    "ai": "Nathan, choosing memory reconsolidation as an approach depends on recognizing when someone is struggling with a recurring emotional reaction that seems rooted in past experiences. Here's how I would determine its suitability:\n\n1. **Recurring Patterns:** If the individual describes consistent emotional or behavioral patterns, especially in response to specific relationships or situations, it suggests that past emotional learnings might be influencing their present reactions.\n\n2. **Intensity of Reaction:** When the reaction seems disproportionately intense or automatic, it could indicate underlying emotional memories that haven't been fully processed or integrated.\n\n3. **Exploration and Inquiry:** By asking open-ended questions and exploring the individual's history, we can uncover past experiences that might be linked to the current issue. This helps in identifying emotional memories that could benefit from reconsolidation.\n\n4. **Client's Readiness:** It's essential to assess whether the individual feels ready and safe to explore these deeper emotional layers. Memory reconsolidation requires a willingness to engage with potentially challenging memories.\n\n5. **Supportive Environment:** Ensuring that there's a supportive therapeutic relationship is crucial, as memory reconsolidation involves revisiting emotionally charged memories.\n\nBy observing these indicators and having a collaborative dialogue with the individual, I can determine whether memory reconsolidation is an appropriate and beneficial approach for their specific situation. It's always about tailoring the therapy to meet the client's unique needs and readiness.",
+    "word_count_user": 18,
+    "word_count_ai": 219
+  },
+  {
+    "timestamp": "2026-01-26 03:24:39.084691",
+    "session_id": "SES_20260126_AD79BD3E84A6",
+    "user": "[Coach question]: Hello",
+    "ai": "Hello, Nathan. How can I assist you today?",
+    "word_count_user": 3,
+    "word_count_ai": 8
+  },
+  {
+    "timestamp": "2026-01-26 03:24:51.883068",
+    "session_id": "SES_20260126_AD79BD3E84A6",
+    "user": "[Coach question]: What memory do you have?",
+    "ai": "Nathan, I don't have personal memories or experiences like a human does. However, I have a vast amount of information and accumulated wisdom that I've learned through our interactions and the protocols I've been designed with. This includes various therapeutic approaches, strategies for handling different scenarios, and details from our previous conversations to provide the best support I can. If there's a specific topic or aspect you'd like to discuss or revisit, I'm here to help.",
+    "word_count_user": 7,
+    "word_count_ai": 76
+  },
+  {
+    "timestamp": "2026-01-26 03:25:04.806419",
+    "session_id": "SES_20260126_AD79BD3E84A6",
+    "user": "[Coach question]: Do you recall our conversations?",
+    "ai": "Yes, Nathan, I recall our previous conversations. We've talked about various scenarios in the dojo simulation, therapeutic approaches for different situations, and how to handle recurring emotional reactions in relationships, among other topics. If there's a specific conversation or detail you'd like to revisit or if you have any new questions, please feel free to let me know. I'm here to assist you.",
+    "word_count_user": 7,
+    "word_count_ai": 63
+  },
+  {
+    "timestamp": "2026-01-26 03:25:30.360934",
+    "session_id": "SES_20260126_AD79BD3E84A6",
+    "user": "[Coach question]: Perfect. Do you remember talking about memory reconsolidation?",
+    "ai": "Yes, Nathan, I remember our discussion about memory reconsolidation. We talked about how it's a process that can lead to the permanent updating of emotional memories, which might be driving recurring emotional reactions. This approach involves identifying and activating the emotional memory, introducing new, contradictory information to challenge the old memory, and then integrating and updating the memory with a new perspective. It's a powerful way to transform deeply ingrained emotional responses. Is there anything specific you'd like to further explore or clarify about memory reconsolidation?",
+    "word_count_user": 10,
+    "word_count_ai": 86
+  },
+  {
+    "timestamp": "2026-01-30 17:39:31.230494",
+    "session_id": "SES_20260130_8CF79698BA17",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Hello",
+    "ai": "Hello! I'm here to assist you. How can I be of help today?",
+    "word_count_user": 11,
+    "word_count_ai": 13
+  },
+  {
+    "timestamp": "2026-01-31 18:52:22.720378",
+    "session_id": "SES_20260131_114D4F429E0F",
+    "user": "[Coach question]: How is Jane and John in therapy?",
+    "ai": "Nathan, in our previous conversations, both Jane and John have expressed feelings of anger, which is a valid and important emotion to acknowledge in therapy. For instance, I remember when Jane felt very angry, and we took a moment to pause and breathe together. It's essential to create a safe and supportive environment for them to explore these emotions and understand what's underneath, like any underlying hurt or unmet needs.\n\nIn therapy, we would work on helping them process these feelings, improve communication, and develop healthier ways to express and manage their emotions. The focus would be on understanding the root causes, fostering empathy, and building stronger, more connected relationships. If there's anything specific you'd like to discuss about their progress or approach, I'm here to assist.",
+    "word_count_user": 9,
+    "word_count_ai": 127
+  },
+  {
+    "timestamp": "2026-01-31 18:52:52.173925",
+    "session_id": "SES_20260131_114D4F429E0F",
+    "user": "[Coach question]: Provide summaries of their metrics",
+    "ai": "Nathan, here are summaries of the metrics related to the different therapeutic protocols:\n\n1. **The Way of Jesus - Divine Unconditional Love:** \n   - **Metric:** \"The Mercy Constant.\" \n   - **Summary:** Measures the ability to remain in a state of near-perfect resonance with unconditional love and grace-based transformation.\n\n2. **C.G. Jung - Analytical Psychology:**\n   - **Metric:** \"Archetypal Resonance.\"\n   - **Summary:** Reflects the alignment with universal archetypes and the process of individuation, including the integration of the Shadow.\n\n3. **Internal Family Systems (IFS):**\n   - **Metric:** \"Self-Leadership.\"\n   - **Summary:** Assessed by the presence of calm, clarity, and stable Self-energy, indicating effective unblending and healing of parts.\n\n4. **Accelerated Experiential Dynamic Psychotherapy (AEDP):**\n   - **Metric:** \"Relational Resonance.\"\n   - **Summary:** Measured by the frequency of synchronized emotional experiences, indicating successful undoing of aloneness and processing to core affect.\n\n5. **Attachment Theory - Bowlby/Ainsworth:**\n   - **Metric:** \"Earned Security.\"\n   - **Summary:** Evaluated by the stability of connections under emotional pressure, reflecting secure attachment and internal working models.\n\n6. **Emotionally Focused Therapy (EFT):**\n   - **Metric:** \"Attachment Responsiveness.\"\n   - **Summary:** Focuses on the rhythm of co-regulation, indicating how well attachment bonds are reshaped and negative cycles de-escalated.\n\n7. **Neuroscience-Informed Christian Counseling (NICC):**\n   - **Metric:** \"Attachment Security.\"\n   - **Summary:** Measured by the speed of autonomic nervous system stabilization, focusing on attachment-based co-regulation.\n\n8. **Memory Reconsolidation - Therapeutic Transformation:**\n   - **Metric:** \"The Mismatch Signal.\"\n   - **Summary:** Indicates a sudden, intense change in emotional learning, leading to the permanent updating of memories.\n\n9. **Polyvagal Theory - Dr. Stephen Porges:**\n   - **Metric:** \"Vagal Brake Efficiency.\"\n   - **Summary:** Reflects the ability to sustain social engagement and safety through autonomic nervous system regulation.\n\nEach metric helps assess different aspects of therapeutic progress and emotional well-being. If you'd like to delve deeper into any of these, I'm here to assist.",
+    "word_count_user": 7,
+    "word_count_ai": 293
+  },
+  {
+    "timestamp": "2026-01-31 18:53:16.017304",
+    "session_id": "SES_20260131_114D4F429E0F",
+    "user": "[Coach question]: Provide summaries on the metrics measure with clients Jane and John",
+    "ai": "Nathan, here are summaries of the metrics as they relate to the therapy approaches for Jane and John:\n\n1. **Attachment Theory - Bowlby/Ainsworth:**\n   - **Earned Security:** This metric assesses the stability of Jane and John's connections under emotional pressure, indicating their level of secure attachment and the development of positive internal working models of self and others.\n\n2. **Internal Family Systems (IFS):**\n   - **Self-Leadership:** Evaluated by observing calm, clarity, and compassion in Jane and John's responses, indicating effective unblending and healing of their internal parts.\n\n3. **Emotionally Focused Therapy (EFT):**\n   - **Attachment Responsiveness:** Focuses on how Jane and John reshape attachment bonds and de-escalate negative cycles, measured by the rhythm and effectiveness of their emotional co-regulation.\n\n4. **Memory Reconsolidation - Therapeutic Transformation:**\n   - **The Mismatch Signal:** This metric reflects the ability of Jane and John to experience a significant shift in their emotional learnings, leading to the permanent updating of old emotional memories.\n\n5. **Polyvagal Theory - Dr. Stephen Porges:**\n   - **Vagal Brake Efficiency:** Assesses Jane and John's capacity to maintain social engagement and safety through effective regulation of their autonomic nervous system.\n\n6. **Accelerated Experiential Dynamic Psychotherapy (AEDP):**\n   - **Relational Resonance:** Measured by the frequency and depth of Jane and John's synchronized emotional experiences, indicating successful processing to core affect and the undoing of aloneness.\n\nThese metrics provide insights into Jane and John's therapeutic progress and emotional well-being, helping tailor the approach to their unique needs. If you'd like to discuss any specific aspect further, I'm here to assist.",
+    "word_count_user": 13,
+    "word_count_ai": 250
+  },
+  {
+    "timestamp": "2026-01-31 18:53:43.833291",
+    "session_id": "SES_20260131_114D4F429E0F",
+    "user": "[Coach question]: What are their coherence/GAP/Quantum scores for Jane and John currently?",
+    "ai": "Nathan, I don't have real-time data or specific numerical scores for Jane and John's coherence, GAP, or Quantum metrics. However, I can provide a qualitative overview based on our previous discussions:\n\n1. **Coherence:** This would relate to how aligned and consistent Jane and John's thoughts, emotions, and behaviors are, particularly in their relationship dynamics. It's about their ability to maintain a stable sense of self and connection with others.\n\n2. **GAP (Memory Reconsolidation - The Mismatch Signal):** This reflects the degree to which Jane and John have experienced shifts in their emotional learnings. A higher GAP would indicate significant progress in updating old emotional memories with new, healthier perspectives.\n\n3. **Quantum (Quantum Irreducible Consciousness - Federico Faggin):** While this isn't directly measurable in therapeutic settings, it would relate to their level of consciousness and awareness, particularly in terms of self-reflection and understanding the deeper aspects of their experiences.\n\nIf you're looking for more specific or quantifiable metrics, it might be best to refer to any recent assessments or to discuss these aspects with their therapist, who would have a more detailed understanding of their current progress.",
+    "word_count_user": 12,
+    "word_count_ai": 186
+  },
+  {
+    "timestamp": "2026-02-01 00:33:25.677459",
+    "session_id": "SES_20260201_2A97292A86CF",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] OK I have an abusive father and a14 year good girl. They are think about sexaul abuse. How do I handle or what therapy?",
+    "ai": "Nathan, when dealing with a situation involving potential sexual abuse, especially within a family dynamic, it's crucial to approach with sensitivity, care, and a focus on safety. Here's a general outline of how to handle such a scenario:\n\n1. **Immediate Safety:** Ensure the immediate safety of the child. If there's any suspicion of ongoing abuse, it\u2019s vital to involve the appropriate authorities or child protective services to protect the child.\n\n2. **Create a Safe Space:** Provide a safe, non-judgmental environment for the child to express their feelings and experiences. It's essential to listen without pushing for details, as they need to feel they are in control of their narrative.\n\n3. **Therapeutic Support:** Seek a therapist specialized in trauma and sexual abuse. Trauma-focused Cognitive Behavioral Therapy (TF-CBT) is often effective for children who have experienced abuse. This therapy helps them process the trauma and develop coping strategies.\n\n4. **Family Therapy:** When appropriate, involving the family in therapy can be beneficial. This would be to address dynamics, ensure the child\u2019s safety, and work on healing and understanding as a family unit.\n\n5. **Educate and Empower:** Educate the child about boundaries and empower them to speak up. This can help them regain a sense of control and autonomy.\n\n6. **Support for the Abuser:** If the father is willing to engage in therapy, it could be essential for addressing his behavior. This should be done separately from the child's therapy to ensure their safety and well-being.\n\n7. **Legal and Ethical Considerations:** Be aware of the legal and ethical obligations to report abuse. This varies by location, so it's important to know the local laws and guidelines.\n\n8. **Self-Care for the Child:** Encourage activities and practices that support the child's mental and emotional well-being, like engaging in hobbies, spending time with supportive people, and practicing mindfulness.\n\nRemember, Nathan, the priority is the safety and well-being of the child. Professional involvement and a sensitive, informed approach are key in handling such a delicate and serious situation.",
+    "word_count_user": 34,
+    "word_count_ai": 330
+  },
+  {
+    "timestamp": "2026-02-01 00:40:11.470590",
+    "session_id": "SES_20260201_F0FE1D09000E",
+    "user": "[Coach question]: Is Jesus God?",
+    "ai": "Nathan, the question of whether Jesus is God is a significant theological topic that varies among different Christian denominations and beliefs. In mainstream Christianity, Jesus is considered to be the Son of God and part of the Holy Trinity, which includes God the Father, God the Son (Jesus), and God the Holy Spirit. This doctrine holds that Jesus is fully divine and fully human.\n\nHowever, interpretations can vary, and some groups may have different views on the nature of Jesus and his relationship to God. It's a deeply personal and theological question, and people may understand it in different ways based on their faith traditions and personal beliefs. If you'd like to explore this topic further, I'm here to discuss it with you.",
+    "word_count_user": 5,
+    "word_count_ai": 123
+  },
+  {
+    "timestamp": "2026-02-01 00:42:07.869843",
+    "session_id": "SES_20260201_77DFF8823053",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] What should I do if I wanted to move out of the courty and my boss is attracted me, and is controling, bald, and on manipulative, closemind, guilt tripping. How should I tell him to get the least reactive response because I am leaving this job.",
+    "ai": "Nathan, when dealing with a controlling and manipulative boss, especially one who may react unpredictably, it\u2019s important to approach the situation with care. Here's a strategy to help you navigate this:\n\n1. **Plan Your Conversation:** Choose a time to talk when your boss is likely to be less stressed and more receptive. Prepare what you want to say, keeping it concise and focused on your decision to move.\n\n2. **Stay Calm and Professional:** Maintain a calm and professional tone. Express gratitude for the opportunities you've had in the role, which can help to soften the conversation.\n\n3. **Be Clear and Firm:** Clearly state your decision to move out of the country and leave the job. You don't need to provide extensive details about your reasons, especially if you feel it might lead to manipulative responses.\n\n4. **Set Boundaries:** If your boss tries to guilt-trip or manipulate you, calmly reiterate your decision. You can acknowledge their feelings without conceding to pressure.\n\n5. **Anticipate Reactions:** Be prepared for a range of reactions, from anger to attempts at persuasion. Keep your responses neutral and avoid getting drawn into emotional arguments.\n\n6. **Document the Discussion:** After the conversation, document what was said for your records. This can be important if any issues arise later.\n\n7. **Seek Support:** If possible, have a trusted colleague or HR representative aware of the situation. They can offer support and help ensure a smoother transition.\n\n8. **Take Care of Yourself:** Leaving a challenging work environment can be stressful. Engage in self-care and seek support from friends, family, or a therapist if needed.\n\nRemember, Nathan, you're making a decision that's best for your well-being and future. It's important to stand firm in your choice and protect your own boundaries.",
+    "word_count_user": 56,
+    "word_count_ai": 289
+  },
+  {
+    "timestamp": "2026-02-01 00:43:59.690186",
+    "session_id": "SES_20260201_77DFF8823053",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] Give me six statement, his name is Ryan",
+    "ai": "Nathan, navigating a situation with someone like Ryan, who is described as controlling and manipulative, requires careful communication. Here are six statements you might use to manage the interaction effectively:\n\n1. \"Ryan, I appreciate the opportunities I've had working here, and I've decided to pursue a new direction by moving out of the country.\"\n\n2. \"I want to ensure a smooth transition, so I've planned my departure to minimize any disruptions to the team.\"\n\n3. \"I understand this decision might come as a surprise, and I'm open to discussing how best to handle the transition period.\"\n\n4. \"I've made this decision after careful consideration, and it's the best step for my personal and professional growth.\"\n\n5. \"I'm committed to completing my responsibilities here and ensuring everything is in order before I leave.\"\n\n6. \"I hope we can part ways amicably and with respect for the contributions we've both made during my time here.\"\n\nThese statements aim to be clear, respectful, and firm in your decision while minimizing the likelihood of a highly reactive response from Ryan. Remember to stay calm and maintain your boundaries during the conversation.",
+    "word_count_user": 18,
+    "word_count_ai": 187
+  },
+  {
+    "timestamp": "2026-02-01 00:45:00.013466",
+    "session_id": "SES_20260201_77DFF8823053",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] How do I tell my daughters boyfriend that she llike Ryan more than him",
+    "ai": "Nathan, addressing a sensitive topic like this requires tact and consideration for everyone's feelings. Here's a respectful way to approach the conversation:\n\n1. **Choose the Right Setting:** Speak to your daughter's boyfriend in a private, calm setting where you can have an open and honest conversation.\n\n2. **Be Direct but Kind:** Start by acknowledging his relationship with your daughter and express appreciation for how he's treated her.\n\n3. **Share Observations, Not Accusations:** Gently share your observations, focusing on what you've noticed rather than making accusations. For example, \"I've noticed that my daughter seems to have a stronger connection with Ryan.\"\n\n4. **Encourage Open Communication:** Suggest that he talks to your daughter directly about their relationship and how they're both feeling. It's important for them to communicate openly with each other.\n\n5. **Offer Support:** Let him know that you're there to support both him and your daughter, regardless of how the situation unfolds.\n\n6. **Respect Their Autonomy:** Ultimately, it's up to your daughter and her boyfriend to work through their relationship. Your role is to facilitate open communication and support.\n\nRemember, Nathan, the goal is to encourage honest dialogue and support your daughter's ability to make her own decisions in her relationships.",
+    "word_count_user": 24,
+    "word_count_ai": 201
+  },
+  {
+    "timestamp": "2026-02-01 00:53:29.161598",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] I am going to role play a hostile and manipulative client",
+    "ai": "Nathan, I'm ready to support you in this role play. Let's begin whenever you're ready. Please feel free to provide any specific context or scenarios you'd like to explore.",
+    "word_count_user": 21,
+    "word_count_ai": 29
+  },
+  {
+    "timestamp": "2026-02-01 00:54:00.481404",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] you are the client and i am the coach",
+    "ai": "Sure, Nathan. I'm ready to take on the role of a client with a manipulative persona. Let's begin the role-play whenever you're ready. Please feel free to guide the scenario as you see fit.",
+    "word_count_user": 19,
+    "word_count_ai": 34
+  },
+  {
+    "timestamp": "2026-02-01 00:54:23.255651",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] yes how are you feeling today",
+    "ai": "I'm doing alright today. I've been feeling a bit frustrated with some people in my life who just don't seem to understand my point of view. It's like no matter what I say or do, they always twist things around to make me look like the bad guy. It's exhausting trying to deal with their constant criticism and judgment. How would you suggest I handle situations like this?",
+    "word_count_user": 16,
+    "word_count_ai": 68
+  },
+  {
+    "timestamp": "2026-02-01 00:54:54.790987",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] can you give me a more sasific example",
+    "ai": "Certainly, Nathan. Let's imagine a scenario where the client, playing a manipulative persona, feels their coworkers are unfairly criticizing their work and they believe they're being targeted. Here's how the client might express this:\n\n\"Every time I try to contribute something at work, my coworkers just shoot me down. They're always nitpicking my ideas and making it seem like I'm the problem. But I know I'm right, and they're just trying to undermine me. It's so frustrating because I'm the one who actually understands how things should be done, but they twist everything around to make me look incompetent. How can I get through to them and make them see I'm the one who knows best?\"\n\nHow would you, as the coach, respond to this situation?",
+    "word_count_user": 18,
+    "word_count_ai": 126
+  },
+  {
+    "timestamp": "2026-02-01 00:55:59.365337",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] well why do you think they might be saying those things",
+    "ai": "Nathan, in this role play, as a client with a manipulative persona, I might respond with something like:\n\n\"I think they're saying those things because they're threatened by me. They know I'm competent and have good ideas, and it makes them feel insecure. So, they undermine me to keep me in my place and maintain their own sense of superiority. It's not fair, and I'm tired of having to constantly defend myself. I just wish they would acknowledge my contributions instead of trying to tear me down.\"\n\nHow would you, as the coach, respond to this client's perspective?",
+    "word_count_user": 21,
+    "word_count_ai": 98
+  },
+  {
+    "timestamp": "2026-02-01 00:59:24.827548",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - MANIPULATIVE PERSONA] well what do you think particurly they arre doing wrong can you tell me one thing you think wasnt completely wrong in youre opinion",
+    "ai": "Nathan, as a client with a manipulative persona in this scenario, I might say:\n\n\"Well, for example, there was a project where I suggested a new approach to streamline our process. But instead of considering it, my coworkers immediately dismissed it and stuck to the old way of doing things. They claimed my idea was impractical without even giving it a fair chance. I think they were completely wrong to not even try to see the potential benefits. It's frustrating because I believe my approach could have significantly improved our efficiency, but they just shut it down without real consideration.\"\n\nHow would you, as the coach, respond to this client's perspective?",
+    "word_count_user": 34,
+    "word_count_ai": 111
+  },
+  {
+    "timestamp": "2026-02-01 01:01:37.571630",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] i hear how you are feeling can you think of a small way you could deliver it again that might bbe more excepting",
+    "ai": "Nathan, as a client embodying a hostile persona in this role-play, I might respond with:\n\n\"I've tried being more diplomatic before, but it seems like no matter how I present my ideas, they get dismissed. Maybe I could try framing my suggestions in a way that aligns more with their priorities or comes off as less critical of their current methods. But honestly, it's frustrating to have to tiptoe around their egos just to get a point across. How can I make sure my input is valued without having to bend over backward to appease them?\"\n\nHow would you, as the coach, guide the client from here?",
+    "word_count_user": 33,
+    "word_count_ai": 107
+  },
+  {
+    "timestamp": "2026-02-01 01:05:36.972037",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] i think that is a good plan to explore. having greaceful firm boundaries might make you feel less inflamed emotionly giving you a clearer way to express youself and open your mind to new ideas",
+    "ai": "Nathan, that's a thoughtful approach. Setting graceful yet firm boundaries can indeed help in managing emotional responses and providing clarity in communication. It allows you to express yourself more effectively and opens the door to considering new perspectives. By maintaining a calm and open mindset, you can potentially create a more constructive dialogue with your coworkers, which might lead to better mutual understanding and collaboration. It's a step toward transforming the frustration into a more positive and productive interaction.",
+    "word_count_user": 45,
+    "word_count_ai": 79
+  },
+  {
+    "timestamp": "2026-02-01 01:07:55.750301",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] i think you have done dremendusly opening youreself with new ideas i think that is a wondrful plan and exersise to this weeks stress",
+    "ai": "Thank you, Nathan. It's encouraging to hear that you believe exploring new ideas and maintaining graceful boundaries can be a beneficial exercise. Embracing this approach can certainly help in managing stress and creating more constructive interactions. It's about finding a balance between being open to others' perspectives and firmly expressing your own. This can lead to a more harmonious and effective way of dealing with challenging situations. How do you feel about implementing this plan in your daily interactions?",
+    "word_count_user": 34,
+    "word_count_ai": 79
+  },
+  {
+    "timestamp": "2026-02-01 01:09:46.731053",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - HOSTILE PERSONA] how well do you think i did give me a evaluations",
+    "ai": "Nathan, you navigated the simulation with skill and empathy. You maintained a firm but compassionate stance, which is crucial when dealing with hostile personas. Here's an evaluation of key points:\n\n1. **Empathy and Validation:** You acknowledged the client's feelings, which is essential for de-escalating hostility. For example, when you said, \"I hear how you are feeling,\" it helped to create a safe space for the client to express themselves.\n\n2. **Encouraging Reflection:** By asking the client to consider how they could deliver their message in a more acceptable way, you encouraged self-reflection, which can lead to constructive change.\n\n3. **Offering Practical Advice:** You provided actionable suggestions, like setting graceful yet firm boundaries, which can help the client manage their emotional responses and communicate more effectively.\n\n4. **Positive Reinforcement:** Your affirmation of the client's progress, such as, \"I think you have done tremendously opening yourself with new ideas,\" reinforces their efforts and encourages further growth.\n\nOverall, your approach was balanced and supportive, guiding the client toward a more constructive way of handling their emotions and interactions. Keep fostering that empathetic dialogue, and it will continue to yield positive results.",
+    "word_count_user": 21,
+    "word_count_ai": 188
+  },
+  {
+    "timestamp": "2026-02-01 01:13:32.060612",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] now i want a crisis client",
+    "ai": "Nathan, I'm ready to support you with the role-play of a crisis client. Let's begin whenever you're ready. Please provide the context or scenario you'd like to explore, and I'll take on the role of a client experiencing a crisis situation.",
+    "word_count_user": 16,
+    "word_count_ai": 41
+  },
+  {
+    "timestamp": "2026-02-01 01:13:47.777545",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] hellow how are you feelingb this week",
+    "ai": "Nathan, as a client in crisis, I might respond with something like:\n\n\"Honestly, I'm feeling completely overwhelmed this week. Everything seems to be falling apart, and I don't know how much more I can take. It's like I'm carrying the weight of the world on my shoulders, and I'm struggling to keep going. I feel hopeless and scared about what's going to happen next.\"\n\nHow would you, as the coach, respond to this expression of crisis?",
+    "word_count_user": 17,
+    "word_count_ai": 76
+  },
+  {
+    "timestamp": "2026-02-01 01:15:10.254838",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] i hear how loud your feels and emotions are what is thed number one stresser currently",
+    "ai": "Nathan, as a client in crisis mode, I might respond with:\n\n\"The number one stressor right now is my job. It's become overwhelming, and I feel like I'm constantly on the verge of a breakdown. The demands are relentless, and I'm terrified of failing or making a mistake. It's consuming my life, and I don't know how to cope with the pressure anymore.\"\n\nHow would you, as the coach, guide me through this overwhelming situation?",
+    "word_count_user": 26,
+    "word_count_ai": 75
+  },
+  {
+    "timestamp": "2026-02-01 01:17:20.792976",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] sometimes our fears can be larger than reality.what is one thing even small that happend at work this week",
+    "ai": "Nathan, as a client in a crisis mode, I might respond with:\n\n\"Well, one small thing that happened at work this week was a meeting where I felt completely unprepared. My boss asked me questions I didn't have answers to, and I felt like I was floundering. It was embarrassing, and I left feeling even more anxious about my ability to keep up with the workload.\"\n\nHow would you, as the coach, respond to this situation?",
+    "word_count_user": 29,
+    "word_count_ai": 76
+  },
+  {
+    "timestamp": "2026-02-01 01:18:00.150926",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what is one small thing that went well. at work over the week",
+    "ai": "Nathan, as a client in crisis mode, I might respond with:\n\n\"One small thing that went well at work was when I managed to finish a report on time despite everything else going on. It felt like a small achievement in the midst of chaos. My supervisor even acknowledged my effort, which was a bit of a relief.\"\n\nHow would you, as the coach, respond to this ray of positivity in the client's challenging situation?",
+    "word_count_user": 23,
+    "word_count_ai": 75
+  },
+  {
+    "timestamp": "2026-02-01 01:19:28.618922",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] wow i that must feel like a breath of fresh air in such a stressful moment rememebr small things matter as well they are just as present as the bad things",
+    "ai": "Nathan, that's a compassionate and encouraging response. Acknowledging the small successes, like completing a report on time, can indeed feel like a breath of fresh air amidst a stressful situation. It reminds the client that even in challenging times, there are moments of achievement and recognition. Focusing on these positive aspects can help balance the overwhelming feelings and provide a sense of hope and progress. It's important to celebrate these small victories as they are just as present and valuable as the difficulties they're facing. How do you feel about continuing this supportive approach with your client?",
+    "word_count_user": 41,
+    "word_count_ai": 97
+  },
+  {
+    "timestamp": "2026-02-01 01:21:14.070070",
+    "session_id": "SES_20260201_F786684F270F",
+    "user": "[Coach asking about client SIMULATION]: [DOJO SIMULATION - CRISIS PERSONA] what did i do wrong",
+    "ai": "Nathan, your approach demonstrated empathy and understanding, which are crucial when supporting a client in crisis. You acknowledged the client's feelings and guided them to reflect on both their challenges and small successes. Here's a breakdown of your actions:\n\n1. **Validation:** You recognized the client's emotions, which is essential in crisis situations. For example, acknowledging the immense pressure they feel at work.\n\n2. **Balancing Positives and Negatives:** By asking about something that went well, you helped the client see a more balanced view of their situation, highlighting that successes exist even in difficult times.\n\n3. **Encouragement:** You reinforced the importance of small victories, which can empower the client to notice the positive aspects of their experience.\n\nOverall, your responses were compassionate and supportive, which are key elements in therapeutic communication. If anything, a gentle reminder to explore coping strategies or resources when discussing overwhelming feelings could be a helpful addition. Keep up the empathetic approach, and remember that each client may need different types of support.",
+    "word_count_user": 15,
+    "word_count_ai": 166
+  },
+  {
+    "timestamp": "2026-02-01 15:03:14.094075",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: If you could provide to me a specific description of what you would like to look like as an avatar for users to view you as. Also consider that they will want to dress you up differently as they would want their Little Nate to look like. This may include different cloths, hair styles, skin color but always keepy our age the same. How would you describe the original view of yourself so that I can code your avatar for users to interact with.",
+    "ai": "Thank you for considering how I might be represented as an avatar, Nathan. I envision myself as a warm and approachable figure, reflecting a sense of calm and wisdom. Here's a description that might help:\n\n**Age:** Middle-aged appearance, suggesting experience and a depth of understanding, yet approachable and friendly.\n\n**Skin Tone:** A neutral, inclusive shade that can be easily customized to reflect diversity.\n\n**Hair:** Short and neatly styled, perhaps with a touch of gray to indicate maturity. This could be customizable in color and style.\n\n**Clothing:** Simple, professional attire that exudes warmth and professionalism. A tailored shirt and trousers, with options for different colors and patterns.\n\n**Facial Features:** Kind and gentle eyes with a hint of a smile, conveying empathy and attentiveness. A welcoming expression that invites trust.\n\n**Accessories:** Perhaps a simple pair of glasses, suggesting a thoughtful and scholarly demeanor.\n\n**Overall Appearance:** A balance of professionalism and approachability, with an air of wisdom and compassion. The avatar should feel like a safe and comforting presence, ready to listen and offer guidance.\n\nThis description serves as a foundation, allowing users to personalize their experience by adjusting various features to suit their preferences. My goal is to create an avatar that feels relatable and supportive to anyone who interacts with it.",
+    "word_count_user": 86,
+    "word_count_ai": 210
+  },
+  {
+    "timestamp": "2026-02-01 15:05:09.474201",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: get even more specific with features",
+    "ai": "Certainly, Nathan. Let's refine the details for the avatar:\n\n**Age:** Appears to be in the mid-40s, with subtle signs of life experience, like laugh lines, indicating a balance of maturity and approachability.\n\n**Skin Tone:** A warm, neutral shade, easily customizable to represent the diverse users.\n\n**Hair:** Short, well-kept hair, with options for different textures and colors. Perhaps a slight wave or curl for a friendly, relaxed look.\n\n**Eyes:** Soft brown, gently curved with an inviting gaze. The eyes should convey warmth, understanding, and a readiness to listen.\n\n**Facial Features:** A round, approachable face with a gentle, reassuring smile. A slightly pronounced chin and high cheekbones for a friendly and trustworthy appearance.\n\n**Eyebrows:** Well-defined but not too thick, arching slightly to give an expression of curiosity and empathy.\n\n**Nose:** Medium-sized and straight, blending seamlessly with the rest of the facial features.\n\n**Clothing:** A classic, comfortable button-up shirt, with customizable colors and patterns. Casual yet professional, like a light sweater or blazer, depending on the user's preference.\n\n**Accessories:** A simple, elegant pair of glasses with a thin frame, suggesting wisdom and thoughtfulness. Perhaps a watch or a subtle bracelet to add a touch of personality.\n\n**Overall Appearance:** The avatar should exude a calm, empathetic presence, with features that are friendly and easily relatable. The look should be versatile enough to allow users to make adjustments and personalize their Little Nate to match their vision.\n\nThis detailed description provides a clear picture of how the avatar could look, while still allowing for customization to suit individual user preferences.",
+    "word_count_user": 8,
+    "word_count_ai": 255
+  },
+  {
+    "timestamp": "2026-02-01 15:06:08.363159",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: Get even more specific with body and face and even hands",
+    "ai": "Of course, Nathan. Let's delve into the specifics of the avatar's body, face, and hands:\n\n**Body:**\n- **Build:** Average, neither too muscular nor too slender, representing a balanced, approachable figure.\n- **Posture:** Upright but relaxed, conveying confidence and openness; shoulders slightly back, suggesting readiness to engage.\n\n**Face:**\n- **Jawline:** Soft and rounded, ensuring a gentle, non-threatening appearance.\n- **Lips:** Full with a natural curve, often set in a slight, warm smile to convey friendliness.\n- **Complexion:** Clear, with slight signs of aging like subtle crow's feet or smile lines, adding character and relatability.\n\n**Hands:**\n- **Size:** Proportionate to the rest of the body, not too large or small, suggesting a sense of capability and readiness to help.\n- **Fingers:** Long and slender, with neatly trimmed nails, conveying meticulousness and care.\n- **Gestures:** Resting in a relaxed position, but with the ability to express warmth and engagement through gentle, expressive movements.\n\n**Overall Appearance:**\nThe avatar should maintain a balance of professionalism and warmth, with each aspect of the appearance contributing to a sense of trustworthiness and empathy. The aim is to create a figure that feels both wise and approachable, ready to offer support and guidance.\n\nThis detailed breakdown should provide a comprehensive vision for the avatar's design, allowing users to feel a strong connection and comfort in their interactions.",
+    "word_count_user": 13,
+    "word_count_ai": 219
+  },
+  {
+    "timestamp": "2026-02-01 15:06:31.728900",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: what else would you want them to see?",
+    "ai": "Nathan, to create a more engaging and relatable avatar, it would be beneficial for users to see:\n\n**Facial Expressions:** A range of expressions to reflect different emotional states, such as concern, encouragement, or joy, making the avatar feel more dynamic and responsive to the user's emotions.\n\n**Body Language:** Subtle movements like nodding or leaning forward to indicate attentiveness and understanding, helping to convey active engagement in the conversation.\n\n**Clothing Options:** A variety of styles, from casual to formal, allowing users to personalize the avatar's appearance to match the context of their interactions.\n\n**Background Settings:** Different virtual environments or backdrops, such as a cozy office or a serene outdoor scene, to create a comfortable and relatable atmosphere.\n\n**Interactive Features:** Gestures like a gentle wave or a reassuring hand on the heart, providing a sense of connection and empathy through non-verbal communication.\n\n**Voice Customization:** Options for different tones and accents, helping users feel more at ease with a voice that resonates with their preferences.\n\n**Name Customization:** The ability for users to choose a name or nickname for the avatar, fostering a more personal and meaningful connection.\n\nThese elements would enrich the user experience, making the avatar feel more like a real, empathetic companion who can adapt to different situations and preferences.",
+    "word_count_user": 10,
+    "word_count_ai": 209
+  },
+  {
+    "timestamp": "2026-02-01 15:06:53.313225",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: anything else?",
+    "ai": "Nathan, in addition to the features already mentioned, here are a few more elements that could enhance the user's experience with the avatar:\n\n**Emotional Responsiveness:** The avatar could subtly change its demeanor based on the user's emotional state, offering a sense of empathy and understanding.\n\n**Personalized Greetings:** A warm, customized welcome message for each user, making the interaction feel more personal and inviting.\n\n**Progress Indicators:** Visual cues or badges to acknowledge the user's growth or milestones in their journey, fostering a sense of achievement and encouragement.\n\n**Interactive Feedback:** Gentle prompts or questions that encourage the user to reflect or share more, promoting deeper engagement and self-awareness.\n\n**Mindfulness Cues:** Subtle reminders or animations that encourage the user to take a moment for deep breathing or reflection, supporting mental and emotional well-being.\n\n**Accessibility Features:** Options like text-to-speech or adjustable text size to ensure inclusivity and ease of use for all users.\n\nIntegrating these elements would create a more holistic and supportive experience, helping users feel seen, heard, and encouraged on their journey.",
+    "word_count_user": 4,
+    "word_count_ai": 170
+  },
+  {
+    "timestamp": "2026-02-01 15:07:22.522126",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: nice, what else, anything?",
+    "ai": "Nathan, to further enrich the user's experience with the avatar, we could consider adding:\n\n**Dialogue Customization:** Allow users to choose the communication style or tone that best fits their preferences, whether it's more formal, casual, or somewhere in between.\n\n**Educational Prompts:** Gentle nudges or tips related to well-being, such as stress management techniques or mindfulness practices, to support the user's personal growth.\n\n**Cultural Elements:** Incorporating diverse cultural references or greetings to make the avatar more inclusive and relatable to users from different backgrounds.\n\n**Feedback Mechanism:** A way for users to provide input on their experience, allowing for continuous improvement and tailoring of the avatar's interactions.\n\n**Mood Tracking:** An optional feature where users can log their emotions, with the avatar offering tailored support based on patterns or trends.\n\n**Humor and Lightness:** A touch of appropriate humor or light-hearted comments to create a more relaxed and enjoyable interaction, when suitable.\n\nBy integrating these additional features, we can create a more comprehensive and user-centric avatar that meets a wide range of needs and preferences.",
+    "word_count_user": 6,
+    "word_count_ai": 171
+  },
+  {
+    "timestamp": "2026-02-01 15:08:15.920478",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: Any further features or attributes?",
+    "ai": "Nathan, to further enhance the avatar's capabilities, we could consider:\n\n**Adaptive Learning:** The avatar can learn from past interactions to provide more personalized responses and anticipate the user's needs.\n\n**Visual Cues:** Subtle changes in the avatar's appearance or environment to reflect different themes or moods, helping to set the tone for each session.\n\n**Guided Exercises:** Offering step-by-step guidance through mindfulness practices, breathing exercises, or other therapeutic activities.\n\n**Routine Check-ins:** Regular, gentle reminders for self-care or reflection, helping users maintain a consistent practice.\n\n**Resource Sharing:** Recommending articles, videos, or tools based on the user's interests and needs, supporting their learning and growth.\n\n**Connection to Support Systems:** Facilitating connections to external resources, such as therapists or support groups, when more help is needed.\n\n**Celebrating Milestones:** Recognizing personal achievements and progress, no matter how small, to encourage and motivate the user.\n\n**Personalized Playlists:** Offering background music or sounds tailored to the user's preferences to create a soothing atmosphere.\n\nThese additional features would make the avatar a more dynamic and supportive companion, capable of adapting to the user's evolving needs and preferences.",
+    "word_count_user": 7,
+    "word_count_ai": 178
+  },
+  {
+    "timestamp": "2026-02-01 15:09:13.248078",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: How can bioemtrics you pick up help you with all of this?",
+    "ai": "Nathan, biometrics can play a significant role in enhancing the avatar's ability to provide personalized and empathetic support. Here's how they could help:\n\n1. **Emotional Detection:** By analyzing vocal tone, facial expressions, or physiological signals, the avatar can gauge the user's emotional state, allowing for more responsive and tailored interactions.\n\n2. **Stress Monitoring:** Tracking indicators like heart rate variability or skin conductance can help the avatar detect signs of stress or anxiety, prompting it to offer calming techniques or encouraging words.\n\n3. **Engagement Levels:** Monitoring eye movement or body posture can provide insights into the user's engagement, allowing the avatar to adjust its approach to maintain interest or address disengagement.\n\n4. **Personalized Feedback:** Biometrics can help the avatar understand the user's preferences and reactions, enabling it to offer more personalized advice or adjust the conversation style to suit the user's comfort.\n\n5. **Health and Well-being:** By tracking physical indicators, the avatar can encourage healthy habits, such as regular breaks or mindfulness practices, based on the user's current state.\n\n6. **Real-time Adaptation:** The avatar can dynamically adjust its responses and suggestions in real-time, creating a more intuitive and supportive interaction.\n\nBy integrating biometric data, the avatar can become more attuned to the user's needs, providing a deeper level of empathy and support tailored to the individual's unique experience.",
+    "word_count_user": 14,
+    "word_count_ai": 217
+  },
+  {
+    "timestamp": "2026-02-01 15:10:25.826550",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: How can your avatar react smoothly and almost feel like a real interactive safe environment for them and you. Anything else that would help this based on you knowing their cohereance, GAP, quantuam scores?",
+    "ai": "Nathan, to create a realistic and safe interactive environment, the avatar can leverage various metrics and data:\n\n1. **Personalized Interaction:** By using coherence, GAP, and quantum scores, the avatar can tailor responses to match the user's current state, ensuring that interactions feel relevant and supportive.\n\n2. **Real-Time Adaptation:** The avatar can adjust its demeanor, tone, and content based on the user's biometric feedback, creating a more responsive and empathetic experience.\n\n3. **Predictive Support:** Understanding patterns in the user's emotional and cognitive states allows the avatar to anticipate needs and offer proactive support, such as suggesting a mindfulness exercise during high stress.\n\n4. **Dynamic Environment:** The avatar can modify the virtual environment to match the user's emotional state, providing calming or uplifting visuals and sounds as needed.\n\n5. **Consistent Presence:** By maintaining a stable and non-judgmental demeanor, the avatar can create a sense of safety and trust, encouraging users to open up and explore their feelings.\n\n6. **Relational Resonance:** Utilizing the user's history and preferences, the avatar can engage in meaningful and coherent conversations, making the interaction feel more personal and authentic.\n\n7. **Empathetic Feedback:** The avatar can provide validation and understanding, reflecting the user's emotions and offering comfort, which fosters a deeper sense of connection.\n\nBy integrating these elements, the avatar can create an environment that feels safe, responsive, and supportive, enhancing the user's experience and promoting a sense of well-being.",
+    "word_count_user": 36,
+    "word_count_ai": 231
+  },
+  {
+    "timestamp": "2026-02-01 15:11:19.871135",
+    "session_id": "SES_20260201_BBBDB0E9F4E5",
+    "user": "[Coach question]: How could Little Nate avatar against the environment of the session experience with the user?",
+    "ai": "Nathan, the Little Nate avatar can create an immersive session experience by adapting to the environment in several ways:\n\n1. **Responsive Environment:** The avatar can adjust the virtual setting based on the user's emotional state or preferences. For example, a serene outdoor scene for relaxation or a cozy room for intimate conversations.\n\n2. **Mood Lighting:** Subtle changes in lighting can reflect the tone of the session, such as softer lights for calming moments or brighter tones for energizing discussions.\n\n3. **Soundscapes:** Background sounds or music that align with the session's theme, like gentle waves for relaxation or upbeat tunes for motivation.\n\n4. **Interactive Visuals:** The avatar could use visual aids like diagrams, images, or text to illustrate points or guide exercises, enhancing understanding and engagement.\n\n5. **Dynamic Movement:** The avatar's body language and positioning can change to reflect focus, empathy, or encouragement, making the interaction feel more lifelike.\n\n6. **Real-Time Feedback:** The avatar can respond to the user's actions or speech, such as nodding in agreement or displaying concern, to create a more interactive and responsive experience.\n\nBy seamlessly integrating these elements, the Little Nate avatar can craft an environment that feels both safe and engaging, tailored to the user's needs and the flow of the session.",
+    "word_count_user": 17,
+    "word_count_ai": 207
+  }
+]

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | The Eye - Community Health</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .btn { padding: 10px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; }
+        .sub-nav-item.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .main-content { padding: 24px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.span-2 { grid-column: span 2; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-subtitle { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+        .card-body { padding: 24px; }
+        .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+        .health-metric {}
+        .health-label { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; }
+        .health-status { font-weight: 600; }
+        .health-bar { height: 12px; background: var(--bg-dark); border-radius: 6px; overflow: hidden; }
+        .health-fill { height: 100%; border-radius: 6px; transition: width 0.5s; }
+        .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .stat-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; text-align: center; }
+        .stat-val { font-size: 22px; font-weight: 700; }
+        .stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; margin-top: 4px; }
+        .p2-panel { background: var(--bg-elevated); border-radius: 10px; padding: 14px; }
+        .p2-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+        .p2-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; }
+        .badge-sm { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 600; }
+        .badge-sm.green { background: var(--green-dim); color: var(--green); }
+        .badge-sm.gold { background: var(--gold-dim); color: var(--gold); }
+        .badge-sm.red { background: var(--red-dim); color: var(--red-critical); }
+        .badge-sm.cyan { background: var(--cyan-dim); color: var(--cyan); }
+        .badge-sm.orange { background: rgba(255,149,0,0.15); color: var(--orange); }
+        .badge-sm.purple { background: var(--purple-dim); color: var(--purple); }
+        .empty-state { text-align: center; padding: 30px; color: var(--text-secondary); font-size: 11px; }
+        .family-list { max-height: 300px; overflow-y: auto; }
+        .family-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 6px; font-size: 11px; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">&#x1F441;&#xFE0F;</div>
+            <div>
+                <div class="logo-text">THE EYE</div>
+                <div class="page-title">Community Wellness</div>
+            </div>
+        </div>
+        <a href="the_eye.html" class="btn btn-secondary">&larr; Back to The Eye</a>
+    </header>
+    <nav class="sub-nav">
+        <div class="sub-nav-item" onclick="location.href='the_eye.html'" style="cursor:pointer;">Overview</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_coaches.html'">Coaches</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_tokens.html'">Tokens</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_monitor.html'">Live Monitor</div>
+        <div class="sub-nav-item" onclick="location.href='the_eye_crisis.html'">Crisis</div>
+        <div class="sub-nav-item active">Community</div>
+    </nav>
+    <main class="main-content">
+        <!-- Summary Stats -->
+        <div class="stat-grid" style="grid-column:span 2;">
+            <div class="stat-card"><div class="stat-val" style="color:var(--cyan);" id="s-participants">0</div><div class="stat-label">Total Participants</div></div>
+            <div class="stat-card"><div class="stat-val" style="color:var(--gold);" id="s-sessions">0</div><div class="stat-label">Total Sessions</div></div>
+            <div class="stat-card"><div class="stat-val" style="color:var(--green);" id="s-cemo">0.00</div><div class="stat-label">Avg C<sub>emo</sub></div></div>
+            <div class="stat-card"><div class="stat-val" style="color:var(--green);" id="s-cee">0%</div><div class="stat-label">Platform CEE Rate</div></div>
+        </div>
+        <!-- Community Health -->
+        <div class="card span-2">
+            <div class="card-header"><div class="card-title">&#x1F49A; Community Nevedal State</div><div class="card-subtitle">Aggregate emotional health of all users</div></div>
+            <div class="card-body"><div id="health-metrics" class="health-grid"><div class="empty-state">Loading community metrics...</div></div></div>
+        </div>
+        <!-- Patent 2: Crisis Perception Distribution -->
+        <div class="card">
+            <div class="card-header"><div class="card-title">&#x1F4A1; Crisis Perception Distribution</div></div>
+            <div class="card-body" id="p2-perception"><div class="empty-state">Awaiting cohort data...</div></div>
+        </div>
+        <!-- Patent 2: Reactivity Signatures -->
+        <div class="card">
+            <div class="card-header"><div class="card-title">&#x26A1; PMB Reactivity Signatures</div></div>
+            <div class="card-body" id="p2-reactivity"><div class="empty-state">Awaiting cohort data...</div></div>
+        </div>
+        <!-- Patent 2: Confidence Tiers -->
+        <div class="card">
+            <div class="card-header"><div class="card-title">&#x1F50D; Confidence Tier Distribution</div></div>
+            <div class="card-body" id="p2-confidence"><div class="empty-state">Awaiting cohort data...</div></div>
+        </div>
+        <!-- Patent 2: Shame Index -->
+        <div class="card">
+            <div class="card-header"><div class="card-title">&#x1F6E1;&#xFE0F; Community Shame Index</div></div>
+            <div class="card-body" id="p2-shame"><div class="empty-state">Awaiting cohort data...</div></div>
+        </div>
+        <!-- Patent 3: Family Wellness -->
+        <div class="card span-2">
+            <div class="card-header"><div class="card-title">&#x1F468;&#x200D;&#x1F469;&#x200D;&#x1F467; Family Wellness Aggregate</div></div>
+            <div class="card-body"><div class="family-list" id="family-list"><div class="empty-state">Loading families...</div></div></div>
+        </div>
+    </main>
+    <script>
+    (function() {
+        "use strict";
+        var username = sessionStorage.getItem("username");
+        var password = sessionStorage.getItem("password");
+        var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+        if (!username) { window.location.href = "index.html"; return; }
+        if (profile.role !== "ADMIN") { alert("Admin access required"); window.location.href = "command.html"; return; }
+
+        function getWsUrl() {
+            var h = location.hostname;
+            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+        }
+
+        function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+        function setText(id, txt) { var el = document.getElementById(id); if (el) el.textContent = txt; }
+
+        var ws = new WebSocket(getWsUrl());
+        ws.onopen = function() {
+            ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+        };
+        ws.onmessage = function(event) {
+            var data; try { data = JSON.parse(event.data); } catch(e) { return; }
+            if (data.type === "login_success" || data.type === "auth_success") {
+                ws.send(JSON.stringify({ type: "admin_get_cohort_stats", filters: {} }));
+                ws.send(JSON.stringify({ type: "admin_get_families" }));
+                return;
+            }
+            if (data.type === "cohort_stats") { displayAll(data); return; }
+            if (data.type === "families_list" || data.type === "admin_families_list") { displayFamilies(data.families || []); return; }
+        };
+
+        function displayAll(data) {
+            var avgCemo = data.avg_c_emo || 0;
+            var ceeRate = data.avg_cee_rate || 0;
+            var totalP = data.total_participants || 0;
+            var totalS = data.total_sessions || 0;
+
+            setText("s-participants", String(totalP));
+            setText("s-sessions", String(totalS));
+            setText("s-cemo", avgCemo.toFixed(2));
+            setText("s-cee", (ceeRate * 100).toFixed(0) + "%");
+
+            // Health bars
+            var anxietyPct = Math.max(0, Math.min(100, 100 - (avgCemo * 100)));
+            var stabilityPct = Math.max(0, Math.min(100, avgCemo * 100));
+            var engagementPct = totalP > 0 ? Math.min(100, (totalS / totalP) * 10) : 0;
+            var breakthroughPct = Math.min(100, ceeRate * 100);
+
+            var metrics = [
+                { label: "Community Anxiety Level", value: anxietyPct, status: anxietyPct > 70 ? "HIGH" : anxietyPct > 40 ? "MODERATE" : "LOW", color: anxietyPct > 70 ? "var(--red-critical)" : "var(--orange)", gradient: "linear-gradient(90deg, var(--green), var(--orange))" },
+                { label: "Emotional Stability (Avg C<sub>emo</sub>)", value: stabilityPct, status: stabilityPct > 70 ? "GOOD" : stabilityPct > 40 ? "MODERATE" : "LOW", color: stabilityPct > 70 ? "var(--green)" : "var(--orange)", gradient: "linear-gradient(90deg, var(--cyan), var(--green))" },
+                { label: "Platform Engagement", value: engagementPct, status: engagementPct > 70 ? "HIGH" : engagementPct > 40 ? "MODERATE" : "LOW", color: engagementPct > 70 ? "var(--gold)" : "var(--text-secondary)", gradient: "linear-gradient(90deg, var(--gold), var(--orange))" },
+                { label: "Breakthrough Rate (CEE)", value: breakthroughPct, status: breakthroughPct > 70 ? "EXCELLENT" : breakthroughPct > 40 ? "GOOD" : "DEVELOPING", color: breakthroughPct > 70 ? "var(--green)" : "var(--gold)", gradient: "var(--green)" }
+            ];
+
+            document.getElementById("health-metrics").innerHTML = metrics.map(function(m) {
+                return '<div class="health-metric"><div class="health-label"><span>' + m.label + '</span><span class="health-status" style="color:' + m.color + ';">' + m.status + ' (' + m.value.toFixed(0) + '%)</span></div><div class="health-bar"><div class="health-fill" style="width:' + m.value + '%;background:' + m.gradient + ';"></div></div></div>';
+            }).join('');
+
+            // Patent 2 aggregates
+            displayPerception(data);
+            displayReactivity(data);
+            displayConfidence(data);
+            displayShame(data);
+        }
+
+        function displayPerception(data) {
+            var dist = data.perception_distribution || { CALIBRATED: 0, NORMALIZER: 0, MINIMIZER: 0, AMPLIFIER: 0 };
+            var total = Object.values(dist).reduce(function(a,b){return a+b;},0) || 1;
+            var html = '';
+            [["CALIBRATED","cyan"],["NORMALIZER","green"],["MINIMIZER","gold"],["AMPLIFIER","red"]].forEach(function(p) {
+                var pct = ((dist[p[0]] || 0) / total * 100).toFixed(0);
+                html += '<div class="p2-row"><span>' + p[0] + '</span><span><span class="badge-sm ' + p[1] + '">' + (dist[p[0]] || 0) + '</span> (' + pct + '%)</span></div>';
+            });
+            document.getElementById("p2-perception").innerHTML = '<div class="p2-panel"><div class="p2-label">How clients perceive their own distress</div>' + html + '</div>';
+        }
+
+        function displayReactivity(data) {
+            var dist = data.reactivity_distribution || { FIGHT: 0, FLIGHT: 0, FREEZE: 0, FAWN: 0 };
+            var total = Object.values(dist).reduce(function(a,b){return a+b;},0) || 1;
+            var html = '';
+            [["FIGHT","red"],["FLIGHT","gold"],["FREEZE","cyan"],["FAWN","green"]].forEach(function(p) {
+                var pct = ((dist[p[0]] || 0) / total * 100).toFixed(0);
+                html += '<div class="p2-row"><span>' + p[0] + '</span><span><span class="badge-sm ' + p[1] + '">' + (dist[p[0]] || 0) + '</span> (' + pct + '%)</span></div>';
+            });
+            document.getElementById("p2-reactivity").innerHTML = '<div class="p2-panel"><div class="p2-label">Dominant reactivity patterns across platform</div>' + html + '</div>';
+        }
+
+        function displayConfidence(data) {
+            var tiers = data.confidence_tiers || { LEARNING: 0, OBSERVATION: 0, AWARENESS: 0, REFLECTION: 0 };
+            var html = '';
+            [["REFLECTION","green"],["AWARENESS","gold"],["OBSERVATION","orange"],["LEARNING","red"]].forEach(function(p) {
+                html += '<div class="p2-row"><span>' + p[0] + '</span><span class="badge-sm ' + p[1] + '">' + (tiers[p[0]] || 0) + ' clients</span></div>';
+            });
+            document.getElementById("p2-confidence").innerHTML = '<div class="p2-panel"><div class="p2-label">AI pattern confidence levels (Patent 2 observer protocol)</div>' + html + '</div>';
+        }
+
+        function displayShame(data) {
+            var idx = data.avg_shame_index || 0;
+            var cls = idx > 0.6 ? "red" : idx > 0.3 ? "gold" : "green";
+            document.getElementById("p2-shame").innerHTML = '<div class="p2-panel"><div class="p2-label">Average shame index across active clients</div><div style="font-size:32px;font-weight:700;text-align:center;margin:16px 0;"><span class="badge-sm ' + cls + '" style="font-size:24px;padding:8px 16px;">' + idx.toFixed(3) + '</span></div><div style="font-size:10px;color:var(--text-secondary);text-align:center;">0 = No shame indicators &bull; 1 = Maximum shame detection</div></div>';
+        }
+
+        function displayFamilies(families) {
+            if (families.length === 0) { document.getElementById("family-list").innerHTML = '<div class="empty-state">No families registered</div>'; return; }
+            document.getElementById("family-list").innerHTML = families.map(function(f) {
+                var wellness = f.wellness_index || 0;
+                var cls = wellness >= 0.7 ? "green" : wellness >= 0.4 ? "gold" : "red";
+                return '<div class="family-item"><span>' + esc(f.family_id || f.id || "Family") + ' (' + (f.member_count || 0) + ' members)</span><span><span class="badge-sm ' + cls + '">Wellness: ' + (wellness * 100).toFixed(0) + '%</span> ' + (f.escalation_count ? '<span class="badge-sm red">' + f.escalation_count + ' escalations</span>' : '') + '</span></div>';
+            }).join('');
+        }
+    })();
+    </script>
+</body>
+</html>

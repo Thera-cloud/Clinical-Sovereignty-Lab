@@ -1,0 +1,2091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Control Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-dark: #0A0A0A;
+            --bg-card: #111111;
+            --bg-elevated: #1A1A1A;
+            --border: #252525;
+            --border-active: #333333;
+            --gold: #FFD700;
+            --gold-dim: rgba(255, 215, 0, 0.2);
+            --gold-text: #C9A962;
+            --cyan: #00D4FF;
+            --cyan-dim: rgba(0, 212, 255, 0.1);
+            --red: #FF3B3B;
+            --red-dim: rgba(255, 59, 59, 0.15);
+            --green: #00FF88;
+            --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500;
+            --purple: #9D4EDD;
+            --text-primary: #FFFFFF;
+            --text-secondary: #888888;
+            --text-muted: #555555;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            background: linear-gradient(180deg, #1A1A10 0%, var(--bg-dark) 100%);
+            border-bottom: 1px solid var(--gold-dim);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .logo-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 2px;
+        }
+
+        .header-center {
+            display: flex;
+            gap: 12px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 11px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.green { background: var(--green); box-shadow: 0 0 8px var(--green); }
+        .status-dot.red { background: var(--red); box-shadow: 0 0 8px var(--red); }
+        .status-dot.orange { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .alert-btn {
+            position: relative;
+            padding: 10px;
+            background: var(--red-dim);
+            border: 1px solid rgba(255, 59, 59, 0.3);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .alert-btn:hover {
+            background: rgba(255, 59, 59, 0.25);
+        }
+
+        .alert-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 18px;
+            height: 18px;
+            background: var(--red);
+            border-radius: 9px;
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 14px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .user-info {
+            text-align: left;
+        }
+
+        .user-name {
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .user-role {
+            font-size: 10px;
+            color: var(--gold-text);
+        }
+
+        /* ===== NAVIGATION ===== */
+        .nav-tabs {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            padding: 0 24px;
+            gap: 4px;
+        }
+
+        .nav-tab {
+            padding: 14px 20px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .nav-tab:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .nav-tab.active {
+            color: var(--gold);
+            border-bottom-color: var(--gold);
+        }
+
+        .nav-tab .badge {
+            padding: 2px 6px;
+            background: var(--red);
+            border-radius: 10px;
+            font-size: 10px;
+            color: white;
+        }
+
+        .nav-tab .badge.warning { background: var(--orange); }
+        .nav-tab .badge.info { background: var(--cyan); }
+
+        /* ===== MAIN CONTENT ===== */
+        .main-content {
+            flex: 1;
+            padding: 24px;
+            display: none;
+        }
+
+        .main-content.active {
+            display: block;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        /* ===== CARDS ===== */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .card-title .icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .card-title .icon.gold { background: var(--gold-dim); }
+        .card-title .icon.red { background: var(--red-dim); }
+        .card-title .icon.cyan { background: var(--cyan-dim); }
+        .card-title .icon.green { background: var(--green-dim); }
+
+        .card-action {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .card-action:hover {
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* ===== STATS GRID ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        .stat-box {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-family: var(--font-mono);
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .stat-value.gold { color: var(--gold); }
+        .stat-value.cyan { color: var(--cyan); }
+        .stat-value.green { color: var(--green); }
+        .stat-value.red { color: var(--red); }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .stat-change {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .stat-change.up { color: var(--green); }
+        .stat-change.down { color: var(--red); }
+
+        /* ===== CLIENT LIST ===== */
+        .client-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .client-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .client-item:hover {
+            border-color: var(--border-active);
+            transform: translateX(4px);
+        }
+
+        .client-item.top-tier {
+            border-color: rgba(255, 215, 0, 0.3);
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.05) 0%, var(--bg-elevated) 100%);
+        }
+
+        .client-avatar {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #2196F3, #1565C0);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .client-avatar.gold {
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+        }
+
+        .client-info {
+            flex: 1;
+        }
+
+        .client-name {
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tier-badge {
+            padding: 2px 8px;
+            background: linear-gradient(135deg, var(--gold), #FF8C00);
+            color: #000;
+            font-size: 9px;
+            font-weight: 700;
+            border-radius: 10px;
+        }
+
+        .client-meta {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .client-session {
+            padding: 6px 12px;
+            background: var(--green-dim);
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            border-radius: 6px;
+            font-size: 10px;
+            color: var(--green);
+        }
+
+        .risk-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .risk-badge.low { background: var(--green-dim); color: var(--green); }
+        .risk-badge.medium { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .risk-badge.high { background: var(--red-dim); color: var(--red); }
+
+        /* ===== CRISIS WATCHLIST ===== */
+        .crisis-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 16px;
+            background: var(--red-dim);
+            border: 1px solid rgba(255, 59, 59, 0.3);
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+
+        .crisis-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 59, 59, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            animation: crisisPulse 1.5s infinite;
+        }
+
+        @keyframes crisisPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .crisis-info {
+            flex: 1;
+        }
+
+        .crisis-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--red);
+        }
+
+        .crisis-trigger {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 4px 0;
+        }
+
+        .crisis-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .crisis-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .crisis-btn {
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .crisis-btn.primary {
+            background: var(--red);
+            color: white;
+        }
+
+        .crisis-btn.secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        /* ===== ACTIVITY FEED ===== */
+        .activity-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .activity-icon.alert { background: var(--red-dim); }
+        .activity-icon.session { background: var(--cyan-dim); }
+        .activity-icon.system { background: var(--gold-dim); }
+        .activity-icon.login { background: var(--green-dim); }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-text {
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .activity-time {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* ===== QUICK ACTIONS ===== */
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .quick-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            padding: 20px 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quick-action:hover {
+            border-color: var(--gold);
+            transform: translateY(-2px);
+        }
+
+        .quick-action .icon {
+            font-size: 24px;
+        }
+
+        .quick-action .label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        /* ===== CALENDAR ===== */
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .calendar-nav {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .calendar-nav button {
+            background: none;
+            border: none;
+            color: var(--gold);
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .calendar-month {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+
+        .calendar-day-header {
+            text-align: center;
+            font-size: 10px;
+            color: var(--text-muted);
+            padding: 8px 0;
+        }
+
+        .calendar-day {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-elevated);
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .calendar-day:hover {
+            background: var(--border);
+        }
+
+        .calendar-day.today {
+            background: var(--gold-dim);
+            border: 1px solid var(--gold);
+        }
+
+        .calendar-day.has-session::after {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+        }
+
+        .calendar-day.other-month {
+            color: var(--text-muted);
+            background: transparent;
+        }
+
+        /* ===== SESSION CARDS ===== */
+        .session-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .session-time {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--gold);
+        }
+
+        .session-date {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .session-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .session-status.confirmed { background: var(--green-dim); color: var(--green); }
+        .session-status.pending { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+
+        .session-client {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .session-btn {
+            flex: 1;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-width: 140px;
+        }
+
+        .session-btn.primary {
+            background: linear-gradient(135deg, #4CAF50, #388E3C);
+            color: white;
+        }
+
+        .session-btn.secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .session-btn.danger {
+            background: transparent;
+            border: 1px solid rgba(255, 59, 59, 0.3);
+            color: var(--red);
+        }
+
+        /* ===== EMPTY STATE ===== */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        /* ===== LOADING ===== */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border);
+            border-top-color: var(--gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .quick-actions {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .header-center {
+                display: none;
+            }
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===== MODAL: COACH BRIEFING ===== */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.72);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+            z-index: 9999;
+        }
+
+        .modal {
+            width: min(980px, 100%);
+            max-height: min(84vh, 900px);
+            overflow: hidden;
+            background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg-dark) 100%);
+            border: 1px solid var(--border-active);
+            border-radius: 14px;
+            box-shadow: 0 22px 80px rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .modal-title {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .modal-title h3 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 0.2px;
+        }
+
+        .modal-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .modal-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-btn {
+            padding: 8px 10px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .modal-btn:hover {
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+
+        .modal-close {
+            padding: 8px 10px;
+            background: transparent;
+            border: 1px solid rgba(255, 59, 59, 0.3);
+            border-radius: 8px;
+            color: var(--red);
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .modal-body {
+            padding: 16px;
+            overflow: auto;
+        }
+
+        .brief-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .brief-card {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .brief-card h4 {
+            font-size: 11px;
+            color: var(--gold-text);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .brief-row {
+            display: grid;
+            grid-template-columns: 140px 1fr;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 12px;
+        }
+
+        .brief-row:last-child {
+            border-bottom: none;
+        }
+
+        .brief-key {
+            color: var(--text-muted);
+        }
+
+        .brief-value {
+            color: rgba(255, 255, 255, 0.92);
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .pill.green { border-color: rgba(0, 255, 136, 0.3); color: var(--green); background: rgba(0, 255, 136, 0.08); }
+        .pill.yellow { border-color: rgba(255, 149, 0, 0.3); color: var(--orange); background: rgba(255, 149, 0, 0.10); }
+        .pill.red { border-color: rgba(255, 59, 59, 0.35); color: var(--red); background: rgba(255, 59, 59, 0.10); }
+
+        .brief-section {
+            margin-top: 12px;
+        }
+
+        .brief-section details {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }
+
+        .brief-section summary {
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-secondary);
+            user-select: none;
+        }
+
+        .mono {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.85);
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 920px) {
+            .brief-grid { grid-template-columns: 1fr; }
+            .brief-row { grid-template-columns: 120px 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- HEADER -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <div class="logo-icon">👑</div>
+                <div>
+                    <div class="logo-text">SOVEREIGN</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="header-center">
+            <div class="status-pill">
+                <div class="status-dot green" id="serverStatus"></div>
+                <span id="serverStatusText">Bridge Online</span>
+            </div>
+            <div class="status-pill">
+                <div class="status-dot" id="nateStatus"></div>
+                <span>Nate AI: <span id="nateStatusText">Idle</span></span>
+            </div>
+        </div>
+
+        <div class="header-right">
+            <div class="alert-btn" onclick="showCrisisPanel()">
+                <span>🚨</span>
+                <div class="alert-badge" id="crisisCount">0</div>
+            </div>
+            <div class="user-menu">
+                <div class="user-avatar" id="userAvatar">👑</div>
+                <div class="user-info">
+                    <div class="user-name" id="userName">Loading...</div>
+                    <div class="user-role" id="userRole">ADMIN</div>
+                </div>
+            </div>
+            <button onclick="logout()" style="background:none;border:1px solid var(--border);padding:8px 12px;border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:11px;">Logout</button>
+        </div>
+    </header>
+
+    <!-- NAVIGATION -->
+    <nav class="nav-tabs">
+        <div class="nav-tab active" data-tab="command" onclick="switchTab('command')">
+            <span>📊</span> Command
+        </div>
+        <div class="nav-tab" data-tab="clients" onclick="window.location.href='my_clients.html'">
+            <span>👥</span> My Clients
+            <span class="badge info" id="clientCount">0</span>
+        </div>
+        <div class="nav-tab" data-tab="calendar" onclick="window.location.href='calendar.html'">
+            <span>📅</span> Calendar
+        </div>
+        <div class="nav-tab" data-tab="crisis" onclick="window.location.href='crisis_center.html'">
+            <span>🚨</span> Crisis Center
+            <span class="badge" id="crisisBadge" style="display:none;">0</span>
+        </div>
+        <div class="nav-tab" data-tab="users" onclick="window.location.href='users.html'">
+            <span>👤</span> Users
+        </div>
+        <div class="nav-tab" data-tab="system" onclick="window.location.href='system.html'">
+            <span>⚙️</span> System
+        </div>
+    </nav>
+
+    <!-- COMMAND TAB -->
+    <main class="main-content active" id="tab-command">
+        <div class="dashboard-grid">
+            <!-- STATS -->
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">📈</div>
+                        System Overview
+                    </div>
+                    <button class="card-action" onclick="refreshStats()">Refresh</button>
+                </div>
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value gold" id="statUsers">--</div>
+                            <div class="stat-label">Total Users</div>
+                            <div class="stat-change up">Active today</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value cyan" id="statSessions">--</div>
+                            <div class="stat-label">Live Sessions</div>
+                            <div class="stat-change">Currently</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value green" id="statCoaches">--</div>
+                            <div class="stat-label">Coaches Online</div>
+                            <div class="stat-change">Available</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value red" id="statCrisis">0</div>
+                            <div class="stat-label">Crisis Alerts</div>
+                            <div class="stat-change down" id="crisisUrgency">Monitoring</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MY CLIENTS -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">👥</div>
+                        My Clients
+                    </div>
+                    <button class="card-action" onclick="window.location.href='my_clients.html'">View All</button>
+                </div>
+                <div class="card-body">
+                    <div class="client-list" id="clientList">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TODAY'S SESSIONS -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon cyan">📅</div>
+                        Today's Sessions
+                    </div>
+                    <button class="card-action" onclick="window.location.href='calendar.html'">Calendar</button>
+                </div>
+                <div class="card-body" id="todaySessions">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+
+            <!-- CRISIS WATCHLIST -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon red">🚨</div>
+                        Crisis Watchlist
+                    </div>
+                    <button class="card-action" onclick="window.location.href='crisis_center.html'">View All</button>
+                </div>
+                <div class="card-body" id="crisisWatchlist">
+                    <div class="empty-state">
+                        <div class="icon">✅</div>
+                        <p>No active crisis alerts</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- QUICK ACTIONS -->
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">⚡</div>
+                        Quick Actions
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="quick-actions">
+                        <div class="quick-action" onclick="window.location.href='presession_brief.html'">
+                            <div class="icon">📋</div>
+                            <div class="label">Pre-Session Brief</div>
+                        </div>
+                        <div class="quick-action" onclick="promptLiveSanctuaryBriefing()">
+                            <div class="icon">🧭</div>
+                            <div class="label">Live Sanctuary Brief</div>
+                        </div>
+                        <div class="quick-action" onclick="window.location.href='ask_nate.html'">
+                            <div class="icon">🧠</div>
+                            <div class="label">Ask Little Nate</div>
+                        </div>
+                        <div class="quick-action" onclick="window.location.href='users.html'">
+                            <div class="icon">👤</div>
+                            <div class="label">User Management</div>
+                        </div>
+                        <div class="quick-action" id="coachApprovalsBtn" onclick="window.location.href='coach_approvals.html'">
+                            <div class="icon">✅</div>
+                            <div class="label">Coach Approvals</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ACTIVITY FEED -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon cyan">📜</div>
+                        Recent Activity
+                    </div>
+                    <button class="card-action">Full Log</button>
+                </div>
+                <div class="card-body" id="activityFeed"><div class="activity-item"><div class="activity-icon system">⚙️</div><div class="activity-content"><div class="activity-text">Dashboard initialized</div><div class="activity-time">Just now</div></div></div><!-- 
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- CLIENTS TAB -->
+    <main class="main-content" id="tab-clients">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">👥</div>
+                        Assigned Clients
+                    </div>
+                    <input type="text" placeholder="Search clients..." style="padding:8px 14px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                </div>
+                <div class="card-body">
+                    <div class="client-list" id="fullClientList">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- CALENDAR TAB -->
+    <main class="main-content" id="tab-calendar">
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">📅</div>
+                        January 2026
+                    </div>
+                    <button class="card-action">+ Add Availability</button>
+                </div>
+                <div class="card-body">
+                    <div class="calendar-grid">
+                        <div class="calendar-day-header">Sun</div>
+                        <div class="calendar-day-header">Mon</div>
+                        <div class="calendar-day-header">Tue</div>
+                        <div class="calendar-day-header">Wed</div>
+                        <div class="calendar-day-header">Thu</div>
+                        <div class="calendar-day-header">Fri</div>
+                        <div class="calendar-day-header">Sat</div>
+                        <!-- Week 1 -->
+                        <div class="calendar-day other-month">29</div>
+                        <div class="calendar-day other-month">30</div>
+                        <div class="calendar-day other-month">31</div>
+                        <div class="calendar-day">1</div>
+                        <div class="calendar-day">2</div>
+                        <div class="calendar-day has-session">3</div>
+                        <div class="calendar-day">4</div>
+                        <!-- Week 2 -->
+                        <div class="calendar-day">5</div>
+                        <div class="calendar-day has-session">6</div>
+                        <div class="calendar-day">7</div>
+                        <div class="calendar-day has-session">8</div>
+                        <div class="calendar-day">9</div>
+                        <div class="calendar-day">10</div>
+                        <div class="calendar-day">11</div>
+                        <!-- Week 3 -->
+                        <div class="calendar-day">12</div>
+                        <div class="calendar-day">13</div>
+                        <div class="calendar-day has-session">14</div>
+                        <div class="calendar-day">15</div>
+                        <div class="calendar-day">16</div>
+                        <div class="calendar-day">17</div>
+                        <div class="calendar-day">18</div>
+                        <!-- Week 4 -->
+                        <div class="calendar-day">19</div>
+                        <div class="calendar-day has-session">20</div>
+                        <div class="calendar-day">21</div>
+                        <div class="calendar-day">22</div>
+                        <div class="calendar-day today has-session">23</div>
+                        <div class="calendar-day">24</div>
+                        <div class="calendar-day">25</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon cyan">🎥</div>
+                        Today's Sessions
+                    </div>
+                </div>
+                <div class="card-body" id="calendarSessions">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- CRISIS TAB -->
+    <main class="main-content" id="tab-crisis">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon red">🚨</div>
+                        Crisis Center
+                    </div>
+                    <button class="card-action" onclick="refreshCrisis()">Refresh</button>
+                </div>
+                <div class="card-body" id="fullCrisisWatchlist">
+                    <div class="empty-state">
+                        <div class="icon">✅</div>
+                        <p>No active crisis alerts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- USERS TAB -->
+    <main class="main-content" id="tab-users">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">👤</div>
+                        User Management
+                    </div>
+                    <input type="text" id="userSearch" placeholder="Search users..." onkeyup="searchUsers()" style="padding:8px 14px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:200px;">
+                </div>
+                <div class="card-body">
+                    <div class="client-list" id="userList">
+                        <div class="loading"><div class="spinner"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- SYSTEM TAB -->
+    <main class="main-content" id="tab-system">
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon gold">⚙️</div>
+                        System Status
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="stat-box" style="margin-bottom:12px;">
+                        <div class="stat-value green">ONLINE</div>
+                        <div class="stat-label">Sovereign Bridge</div>
+                    </div>
+                    <div class="stat-box" style="margin-bottom:12px;">
+                        <div class="stat-value cyan">ACTIVE</div>
+                        <div class="stat-label">Little Nate AI</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value gold">CONNECTED</div>
+                        <div class="stat-label">Azure OpenAI</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon cyan">📊</div>
+                        Token Economics
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="stat-box" style="margin-bottom:12px;">
+                        <div class="stat-value" style="color:var(--orange);" id="tokenSpend">$0.00</div>
+                        <div class="stat-label">Today's Azure Spend</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon green">✅</div>
+                        Pending Approvals
+                    </div>
+                </div>
+                <div class="card-body" id="pendingApprovals">
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>No pending approvals</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- COACH BRIEFING MODAL -->
+    <div class="modal-backdrop" id="briefingBackdrop" onclick="closeBriefingModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <h3 id="briefingTitle">Coach Briefing</h3>
+                    <div class="modal-subtitle" id="briefingSubtitle">—</div>
+                </div>
+                <div class="modal-actions">
+                    <button class="modal-btn" id="briefingRefreshBtn" onclick="refreshBriefing()" style="display:none;">Refresh</button>
+                    <button class="modal-btn" onclick="copyBriefingJson()">Copy JSON</button>
+                    <button class="modal-close" onclick="closeBriefingModal()">Close</button>
+                </div>
+            </div>
+            <div class="modal-body" id="briefingBody">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =============================================================================
+        // WEBSOCKET & STATE
+        // =============================================================================
+        function getWsUrl() {
+            const proto = (location.protocol === "https:") ? "wss" : "ws";
+            const host = location.hostname || "10.0.0.81";
+            return `${proto}://${host}:8765`;
+        }
+        let socket = null;
+        let profile = null;
+        let token = null;
+        let clientNameById = {};
+        let lastSchedule = [];
+        let lastBriefingPayload = null;
+        let lastBriefingRequest = null; // { kind: "client"|"sanctuary", client_id?, sanctuary_id? }
+
+        // =============================================================================
+        // INITIALIZATION
+        // =============================================================================
+        function init() {
+            // Check for session
+            const storedProfile = sessionStorage.getItem('profile');
+            const storedToken = sessionStorage.getItem('token');
+
+            if (!storedProfile || !storedToken) {
+                window.location.href = 'index.html';
+                return;
+            }
+
+            profile = JSON.parse(storedProfile);
+            token = storedToken;
+
+            // Update UI
+            document.getElementById('userName').textContent = profile.name || 'Admin';
+            document.getElementById('userRole').textContent = profile.role || 'ADMIN';
+            if (profile.role !== 'ADMIN') { var cab = document.getElementById('coachApprovalsBtn'); if (cab) cab.style.display = 'none'; }
+
+            // Connect to server
+            connect();
+        }
+
+        function connect() {
+            try {
+                socket = new WebSocket(getWsUrl());
+
+                socket.onopen = () => {
+                    document.getElementById('serverStatus').classList.add('green');
+                    document.getElementById('serverStatusText').textContent = 'Bridge Online';
+                    
+                    // Authenticate
+                    socket.send(JSON.stringify({
+                        type: 'login_request',
+                        username: sessionStorage.getItem("username") || profile.name,
+                        password: sessionStorage.getItem('password'),
+                        expected_role: profile.role || 'ADMIN'
+                    }));
+                };
+
+                socket.onclose = () => {
+                    document.getElementById('serverStatus').classList.remove('green');
+                    document.getElementById('serverStatusText').textContent = 'Reconnecting...';
+                    setTimeout(connect, 3000);
+                };
+
+                socket.onmessage = handleMessage;
+
+            } catch (e) {
+                console.error('Connection failed:', e);
+            }
+        }
+
+        function handleMessage(event) {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+
+                switch(data.type) {
+                    case 'login_success':
+                        loadDashboard();
+                        break;
+                    case 'admin_stats':
+                        updateStats(data.stats);
+                        if (data.crisis_watchlist) updateCrisisWatchlist(data.crisis_watchlist);
+                        break;
+                    case 'coach_clients':
+                        updateClients(data.clients);
+                        break;
+                    case 'coach_calendar_data':
+                        updateCalendar(data.data);
+                        break;
+                    case 'coach_briefing':
+                        lastBriefingPayload = data;
+                        renderCoachBriefing(data);
+                        break;
+                    case 'error':
+                        handleError(data);
+                        break;
+                    case 'admin_users':
+                        updateUsers(data.users);
+                        break;
+                    case 'crisis_watchlist':
+                        updateCrisisWatchlist(data.watchlist);
+                        break;
+                    case 'pending_coaches':
+                        updatePendingApprovals(data.coaches);
+                        break;
+                }
+            } catch (e) {
+                console.error('Message parse error:', e);
+            }
+        }
+
+        // =============================================================================
+        // DATA LOADING
+        // =============================================================================
+        function loadDashboard() {
+            socket.send(JSON.stringify({ type: 'coach_get_clients' }));
+            socket.send(JSON.stringify({ type: 'fetch_coach_calendar' }));
+            if (profile && profile.role === 'ADMIN') {
+                socket.send(JSON.stringify({ type: 'admin_get_stats' }));
+                socket.send(JSON.stringify({ type: 'admin_get_users' }));
+                socket.send(JSON.stringify({ type: 'admin_get_crisis_watchlist' }));
+                socket.send(JSON.stringify({ type: 'admin_get_pending_coaches' }));
+            }
+        }
+
+        function refreshStats() {
+            if (!profile || profile.role !== 'ADMIN') {
+                alert('Stats refresh is ADMIN only.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'admin_get_stats' }));
+        }
+
+        function refreshCrisis() {
+            if (!profile || profile.role !== 'ADMIN') {
+                alert('Crisis data is ADMIN only.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'admin_get_crisis_watchlist' }));
+        }
+
+        // =============================================================================
+        // UI UPDATES
+        // =============================================================================
+        function updateStats(stats) {
+            document.getElementById('statUsers').textContent = stats.total_users || 0;
+            document.getElementById('statSessions').textContent = stats.active_sessions || 0;
+            document.getElementById('statCoaches').textContent = stats.total_coaches || 0;
+            document.getElementById('statCrisis').textContent = stats.crisis_count || 0;
+            
+            if (stats.crisis_count > 0) {
+                document.getElementById('crisisBadge').style.display = 'inline';
+                document.getElementById('crisisBadge').textContent = stats.crisis_count;
+                document.getElementById('crisisCount').textContent = stats.crisis_count;
+                document.getElementById('crisisUrgency').textContent = 'Requires attention';
+                document.getElementById('crisisUrgency').classList.add('down');
+            }
+        }
+
+        function updateClients(clients) {
+            const clientList = document.getElementById('clientList');
+            const fullClientList = document.getElementById('fullClientList');
+            document.getElementById('clientCount').textContent = clients.length;
+            clientNameById = {};
+            (clients || []).forEach(c => { if (c && c.id) clientNameById[c.id] = c.name || c.id; });
+
+            const renderClient = (client, showActions = false) => {
+                const isTopTier = client.tier === 'PREMIUM' || client.tier === 'TOP_TIER';
+                const riskLevel = client.metrics?.risk_level || 'LOW';
+                
+                return `
+                    <div class="client-item ${isTopTier ? 'top-tier' : ''}" onclick="viewClient('${client.id}')">
+                        <div class="client-avatar ${isTopTier ? 'gold' : ''}">👤</div>
+                        <div class="client-info">
+                            <div class="client-name">
+                                ${client.name}
+                                ${isTopTier ? '<span class="tier-badge">⭐ TOP TIER</span>' : ''}
+                            </div>
+                            <div class="client-meta">ID: ${client.id?.slice(0, 12) || 'N/A'} • Last: ${client.last_login?.slice(0, 10) || 'Never'}</div>
+                        </div>
+                        <div class="risk-badge ${riskLevel.toLowerCase()}">${riskLevel}</div>
+                    </div>
+                `;
+            };
+
+            if (clients.length === 0) {
+                clientList.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No clients assigned</p></div>';
+                fullClientList.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No clients assigned</p></div>';
+            } else {
+                clientList.innerHTML = clients.slice(0, 5).map(c => renderClient(c)).join('');
+                fullClientList.innerHTML = clients.map(c => renderClient(c, true)).join('');
+            }
+        }
+
+        function updateCalendar(data) {
+            const sessions = data?.schedule || [];
+            lastSchedule = Array.isArray(sessions) ? sessions : [];
+            const todaySessions = document.getElementById('todaySessions');
+            const calendarSessions = document.getElementById('calendarSessions');
+
+            if (sessions.length === 0) {
+                const empty = '<div class="empty-state"><div class="icon">📅</div><p>No sessions scheduled</p></div>';
+                todaySessions.innerHTML = empty;
+                calendarSessions.innerHTML = empty;
+            } else {
+                const sessionHtml = sessions.map((s, idx) => `
+                    <div class="session-card">
+                        <div class="session-header">
+                            <div>
+                                <div class="session-time">${s.time || '2:30 PM'}</div>
+                                <div class="session-date">${(s.date || 'Today').toString().slice(0, 10)}</div>
+                            </div>
+                            <span class="session-status ${((s.status || 'confirmed') + '').toLowerCase()}">${(s.status || 'Confirmed')}</span>
+                        </div>
+                        <div class="session-client">
+                            <div class="client-avatar gold">👤</div>
+                            <div class="client-info">
+                                <div class="client-name">${clientNameById[s.client_id] || s.client_name || s.client_id || s.client || 'Client'}</div>
+                                <div class="client-meta">Individual • 50 min</div>
+                            </div>
+                        </div>
+                        <div class="session-actions">
+                            <button class="session-btn primary" onclick="joinSession('${s.zoom_link || ''}')">🎥 Join Zoom</button>
+                            <button class="session-btn secondary" onclick="openCoachBriefingForSession(${idx})">🧭 Coach Brief</button>
+                            <button class="session-btn secondary" onclick="openPreSessionBrief('${s.client_id}')">📋 Pre-Session</button>
+                        </div>
+                    </div>
+                `).join('');
+                todaySessions.innerHTML = sessionHtml;
+                calendarSessions.innerHTML = sessionHtml;
+            }
+        }
+
+        function updateCrisisWatchlist(watchlist) {
+            const crisisDiv = document.getElementById('crisisWatchlist');
+            const fullCrisisDiv = document.getElementById('fullCrisisWatchlist');
+            
+            const unresolved = watchlist.filter(c => !c.resolved);
+            
+            if (unresolved.length === 0) {
+                const empty = '<div class="empty-state"><div class="icon">✅</div><p>No active crisis alerts</p></div>';
+                crisisDiv.innerHTML = empty;
+                fullCrisisDiv.innerHTML = empty;
+            } else {
+                const html = unresolved.map(alert => `
+                    <div class="crisis-item">
+                        <div class="crisis-icon">⚠️</div>
+                        <div class="crisis-info">
+                            <div class="crisis-name">${alert.name || alert.user_id || 'Unknown User'}</div>
+                            <div class="crisis-trigger">"${alert.trigger || alert.message || 'Risk detected'}"</div>
+                            <div class="crisis-time">${alert.timestamp || 'Recently'}</div>
+                        </div>
+                        <div class="crisis-actions">
+                            <button class="crisis-btn primary" onclick="viewCrisis('${alert.id}')">Review</button>
+                            <button class="crisis-btn secondary" onclick="resolveCrisis('${alert.id}')">Resolve</button>
+                        </div>
+                    </div>
+                `).join('');
+                crisisDiv.innerHTML = html;
+                fullCrisisDiv.innerHTML = html;
+            }
+        }
+
+        function updateUsers(users) {
+            const userList = document.getElementById('userList');
+            
+            if (!users || users.length === 0) {
+                userList.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No users found</p></div>';
+                return;
+            }
+
+            userList.innerHTML = users.map(user => `
+                <div class="client-item" onclick="viewUser('${user.id}')">
+                    <div class="client-avatar ${user.role === 'ADMIN' ? 'gold' : ''}">${user.role === 'ADMIN' ? '👑' : user.role === 'COACH' ? '🎯' : '👤'}</div>
+                    <div class="client-info">
+                        <div class="client-name">${user.name || user.username}</div>
+                        <div class="client-meta">${user.role} • ${user.subscription_status || 'Active'}</div>
+                    </div>
+                    <div class="risk-badge ${user.risk_level?.toLowerCase() || 'low'}">${user.risk_level || 'LOW'}</div>
+                </div>
+            `).join('');
+        }
+
+        function updatePendingApprovals(coaches) {
+            const div = document.getElementById('pendingApprovals');
+            
+            if (!coaches || coaches.length === 0) {
+                div.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No pending approvals</p></div>';
+                return;
+            }
+
+            div.innerHTML = coaches.map(coach => `
+                <div class="client-item">
+                    <div class="client-avatar">🎯</div>
+                    <div class="client-info">
+                        <div class="client-name">${coach.name}</div>
+                        <div class="client-meta">Applied: ${coach.applied_date || 'Recently'}</div>
+                    </div>
+                    <div class="crisis-actions">
+                        <button class="crisis-btn primary" onclick="approveCoach('${coach.id}')">✓ Approve</button>
+                        <button class="crisis-btn secondary" onclick="rejectCoach('${coach.id}')">✗</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // =============================================================================
+        // TAB NAVIGATION
+        // =============================================================================
+        function switchTab(tabName) {
+            // Update nav tabs
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+
+            // Update content
+            document.querySelectorAll('.main-content').forEach(content => {
+                content.classList.toggle('active', content.id === `tab-${tabName}`);
+            });
+        }
+
+        // =============================================================================
+        // ACTIONS
+        // =============================================================================
+        function viewClient(clientId) {
+            if (!clientId) return;
+            openClientBriefing(clientId);
+        }
+
+        function viewUser(userId) {
+            console.log('View user:', userId);
+        }
+
+        function joinSession(zoomLink) {
+            if (zoomLink) {
+                window.open(zoomLink, '_blank');
+            } else {
+                alert('No Zoom link available');
+            }
+        }
+
+        function openPreSessionBrief(clientId) {
+            window.open('presession_brief.html?client=' + (clientId || ''), '_blank');
+        }
+
+        function openAskNate() {
+            window.open('ask_nate.html', '_blank');
+        }
+
+        function openCoachApprovals() {
+            switchTab('system');
+        }
+
+        function viewCrisis(alertId) {
+            console.log('View crisis:', alertId);
+        }
+
+        function resolveCrisis(alertId) {
+            if (!profile || profile.role !== 'ADMIN') {
+                alert('Resolve is ADMIN only.');
+                return;
+            }
+            if (confirm('Mark this crisis alert as resolved?')) {
+                socket.send(JSON.stringify({
+                    type: 'admin_resolve_crisis',
+                    alert_id: alertId
+                }));
+            }
+        }
+
+        function approveCoach(coachId) {
+            if (!profile || profile.role !== 'ADMIN') {
+                alert('Coach approvals are ADMIN only.');
+                return;
+            }
+            if (confirm('Approve this coach?')) {
+                socket.send(JSON.stringify({
+                    type: 'admin_approve_coach',
+                    coach_id: coachId
+                }));
+            }
+        }
+
+        function rejectCoach(coachId) {
+            if (!profile || profile.role !== 'ADMIN') {
+                alert('Coach approvals are ADMIN only.');
+                return;
+            }
+            if (confirm('Reject this coach application?')) {
+                socket.send(JSON.stringify({
+                    type: 'admin_reject_coach',
+                    coach_id: coachId
+                }));
+            }
+        }
+
+        function searchUsers() {
+            const query = document.getElementById('userSearch').value.toLowerCase();
+            document.querySelectorAll('#userList .client-item').forEach(item => {
+                const name = item.querySelector('.client-name').textContent.toLowerCase();
+                item.style.display = name.includes(query) ? 'flex' : 'none';
+            });
+        }
+
+        function showCrisisPanel() {
+            switchTab('crisis');
+        }
+
+        function logout() {
+            sessionStorage.clear();
+            window.location.href = 'index.html';
+        }
+
+        // =============================================================================
+        // COACH BRIEFING (IN-PAGE)
+        // =============================================================================
+        function escapeHtml(s) {
+            return (s == null ? '' : String(s))
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function pillForRisk(riskLevel) {
+            const r = String(riskLevel || 'LOW').toUpperCase();
+            if (['CRITICAL', 'RED', 'P0', 'P1', 'HIGH'].includes(r)) return '<span class="pill red">RISK: ' + escapeHtml(r) + '</span>';
+            if (['MEDIUM', 'MODERATE', 'YELLOW', 'P2'].includes(r)) return '<span class="pill yellow">RISK: ' + escapeHtml(r) + '</span>';
+            return '<span class="pill green">RISK: ' + escapeHtml(r) + '</span>';
+        }
+
+        function openBriefingModal(title, subtitle, allowRefresh) {
+            document.getElementById('briefingTitle').textContent = title || 'Coach Briefing';
+            document.getElementById('briefingSubtitle').textContent = subtitle || '—';
+            document.getElementById('briefingBody').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            document.getElementById('briefingRefreshBtn').style.display = allowRefresh ? 'inline-flex' : 'none';
+            document.getElementById('briefingBackdrop').style.display = 'flex';
+        }
+
+        function closeBriefingModal() {
+            document.getElementById('briefingBackdrop').style.display = 'none';
+        }
+
+        function openClientBriefing(clientId) {
+            lastBriefingRequest = { kind: 'client', client_id: clientId };
+            lastBriefingPayload = null;
+            openBriefingModal('Client Briefing', (clientNameById[clientId] || clientId), true);
+            requestClientBriefing(clientId);
+        }
+
+        function requestClientBriefing(clientId) {
+            if (!socket || socket.readyState !== 1) return;
+            socket.send(JSON.stringify({
+                type: 'coach_get_client_briefing',
+                client_id: clientId
+            }));
+        }
+
+        function requestSanctuaryBriefing(sanctuaryId) {
+            if (!socket || socket.readyState !== 1) return;
+            socket.send(JSON.stringify({
+                type: 'coach_get_briefing',
+                sanctuary_id: sanctuaryId,
+                include_transcripts: true,
+                max_transcript_messages: 60
+            }));
+        }
+
+        function openCoachBriefingForSession(idx) {
+            const s = (lastSchedule || [])[idx] || {};
+            const clientId = s.client_id || s.clientId || s.client;
+            const sanctuaryId = s.sanctuary_id || s.sanctuaryId;
+
+            // If schedule entries include a sanctuary_id, treat as a live sanctuary session briefing.
+            if (sanctuaryId) {
+                lastBriefingRequest = { kind: 'sanctuary', sanctuary_id: sanctuaryId };
+                lastBriefingPayload = null;
+                openBriefingModal('Live Sanctuary Briefing', 'Sanctuary ' + sanctuaryId, true);
+                requestSanctuaryBriefing(sanctuaryId);
+                return;
+            }
+
+            // Fallback: client-level briefing for the scheduled client.
+            if (clientId) {
+                openClientBriefing(clientId);
+                return;
+            }
+
+            openBriefingModal('Coach Briefing', 'No client/sanctuary id available for this session.', false);
+            document.getElementById('briefingBody').innerHTML =
+                '<div class="empty-state"><div class="icon">⚠️</div><p>Cannot request briefing for this schedule entry.</p></div>';
+        }
+
+        function promptLiveSanctuaryBriefing() {
+            const sid = prompt('Enter sanctuary_id for live briefing:');
+            if (!sid) return;
+            lastBriefingRequest = { kind: 'sanctuary', sanctuary_id: sid };
+            lastBriefingPayload = null;
+            openBriefingModal('Live Sanctuary Briefing', 'Sanctuary ' + sid, true);
+            requestSanctuaryBriefing(sid);
+        }
+
+        function refreshBriefing() {
+            if (!lastBriefingRequest) return;
+            if (lastBriefingRequest.kind === 'client') requestClientBriefing(lastBriefingRequest.client_id);
+            if (lastBriefingRequest.kind === 'sanctuary') requestSanctuaryBriefing(lastBriefingRequest.sanctuary_id);
+        }
+
+        function copyBriefingJson() {
+            if (!lastBriefingPayload) {
+                alert('No briefing loaded yet.');
+                return;
+            }
+            try {
+                navigator.clipboard.writeText(JSON.stringify(lastBriefingPayload, null, 2));
+            } catch (e) {
+                alert('Copy failed. See console for details.');
+                console.error(e);
+            }
+        }
+
+        function handleError(err) {
+            // If the briefing modal is open, show errors there; otherwise let it be silent (or console).
+            const isOpen = document.getElementById('briefingBackdrop').style.display === 'flex';
+            if (!isOpen) return;
+            const msg = err?.message || 'Unknown error';
+            document.getElementById('briefingBody').innerHTML =
+                '<div class="empty-state"><div class="icon">⚠️</div><p>' + escapeHtml(msg) + '</p></div>';
+        }
+
+        function renderCoachBriefing(payload) {
+            const b = payload?.briefing || {};
+            const isClientScope = (b.scope === 'client') || !!payload.client_id;
+
+            if (isClientScope) {
+                const ns = b.nevedal_state || {};
+                const subtitle = (b.client_name ? b.client_name : (payload.client_id || 'Client')) + (b.family_id ? (' • Family ' + b.family_id) : '');
+                document.getElementById('briefingTitle').textContent = 'Client Briefing';
+                document.getElementById('briefingSubtitle').textContent = subtitle;
+
+                const memory = Array.isArray(b.recent_memory) ? b.recent_memory : [];
+                document.getElementById('briefingBody').innerHTML = `
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                        ${pillForRisk(b.risk_level || ns.risk_level || 'LOW')}
+                        <span class="pill">Generated: ${escapeHtml((b.generated_at || '').slice(0, 19) || '—')}</span>
+                        <span class="pill">Client ID: ${escapeHtml(b.client_id || payload.client_id || '—')}</span>
+                    </div>
+                    <div class="brief-grid">
+                        <div class="brief-card">
+                            <h4>Nevedal State</h4>
+                            <div class="brief-row"><div class="brief-key">C_emo</div><div class="brief-value">${escapeHtml(ns.C_emo ?? '—')}</div></div>
+                            <div class="brief-row"><div class="brief-key">GAP</div><div class="brief-value">${escapeHtml(ns.GAP ?? '—')}</div></div>
+                            <div class="brief-row"><div class="brief-key">Quantum</div><div class="brief-value">${escapeHtml(ns.Quantum ?? '—')}</div></div>
+                            <div class="brief-row"><div class="brief-key">Mood</div><div class="brief-value">${escapeHtml(ns.mood_current ?? '—')}</div></div>
+                        </div>
+                        <div class="brief-card">
+                            <h4>Context</h4>
+                            <div class="brief-row"><div class="brief-key">Family</div><div class="brief-value">${escapeHtml(b.family_id || '—')}</div></div>
+                            <div class="brief-row"><div class="brief-key">Risk</div><div class="brief-value">${escapeHtml(b.risk_level || ns.risk_level || 'LOW')}</div></div>
+                            <div class="brief-row"><div class="brief-key">Scope</div><div class="brief-value">Client (non-sanctuary)</div></div>
+                        </div>
+                    </div>
+                    <div class="brief-section">
+                        <details>
+                            <summary>Recent memory (last ${memory.length})</summary>
+                            <div class="mono">${escapeHtml(memory.map(m => JSON.stringify(m)).join('\n')) || '—'}</div>
+                        </details>
+                    </div>
+                `;
+                return;
+            }
+
+            const exec = b.executive_summary || {};
+            const risk = exec.risk_level || 'GREEN';
+            const subtitle = (b.family_id ? ('Family ' + b.family_id) : 'Live Sanctuary') + (payload.sanctuary_id ? (' • ' + payload.sanctuary_id) : '');
+
+            document.getElementById('briefingTitle').textContent = 'Live Sanctuary Briefing';
+            document.getElementById('briefingSubtitle').textContent = subtitle;
+
+            const members = Array.isArray(exec.members_present) ? exec.members_present : [];
+            const stuck = Array.isArray(exec.stuckness_indicators) ? exec.stuckness_indicators : [];
+            const transcripts = Array.isArray(b.key_transcripts) ? b.key_transcripts : [];
+            const relationship = b.relationship_dynamics || {};
+            const rec = b.recommendations || {};
+
+            // Individual profiles (object keyed by member_id)
+            const profiles = b.individual_profiles || {};
+            const profileKeys = Object.keys(profiles || {});
+            const profilesHtml = profileKeys.length === 0 ? '<div class="empty-state"><div class="icon">👤</div><p>No member profiles available.</p></div>' : profileKeys.map(mid => {
+                const p = profiles[mid] || {};
+                const longings = Array.isArray(p.longings) ? p.longings : [];
+                const bio = p.biometrics || {};
+                const m = p.metrics || {};
+                return `
+                    <div class="brief-card">
+                        <h4>${escapeHtml(p.name || mid)} • ${escapeHtml(p.role || 'MEMBER')}</h4>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                            ${pillForRisk(p.risk_level || 'LOW')}
+                            ${bio.escalation && bio.escalation.elevated ? '<span class="pill yellow">Physiology: Elevated</span>' : '<span class="pill">Physiology: OK</span>'}
+                        </div>
+                        <div class="brief-row"><div class="brief-key">C_emo</div><div class="brief-value">${escapeHtml(m.C_emo ?? '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">GAP</div><div class="brief-value">${escapeHtml(m.GAP ?? '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Quantum</div><div class="brief-value">${escapeHtml(m.Quantum ?? '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Mood</div><div class="brief-value">${escapeHtml(m.mood_current ?? '—')}</div></div>
+                        <div class="brief-section">
+                            <details>
+                                <summary>Longings (last ${longings.length})</summary>
+                                <div class="mono">${escapeHtml(longings.map(l => JSON.stringify(l)).join('\n')) || '—'}</div>
+                            </details>
+                        </div>
+                        ${p.recent_memory ? `
+                            <div class="brief-section">
+                                <details>
+                                    <summary>Recent memory snapshot</summary>
+                                    <div class="mono">${escapeHtml(p.recent_memory)}</div>
+                                </details>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('briefingBody').innerHTML = `
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                    ${pillForRisk(risk)}
+                    <span class="pill">Generated: ${escapeHtml((b.generated_at || '').slice(0, 19) || '—')}</span>
+                    <span class="pill">Status: ${escapeHtml(exec.status || b.status || '—')}</span>
+                    <span class="pill">Members: ${escapeHtml(members.join(', ') || '—')}</span>
+                </div>
+                <div class="brief-grid">
+                    <div class="brief-card">
+                        <h4>Executive Summary</h4>
+                        <div class="brief-row"><div class="brief-key">Referral</div><div class="brief-value">${escapeHtml(exec.referral_reason || '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Primary focus</div><div class="brief-value">${escapeHtml(exec.primary_focus || '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Stuckness</div><div class="brief-value">${escapeHtml(stuck.join(' • ') || '—')}</div></div>
+                    </div>
+                    <div class="brief-card">
+                        <h4>Relationship Dynamics</h4>
+                        <div class="brief-row"><div class="brief-key">Pattern</div><div class="brief-value">${escapeHtml(relationship.pattern || '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Roles</div><div class="brief-value">${escapeHtml(relationship.roles || '—')}</div></div>
+                        <div class="brief-row"><div class="brief-key">Notes</div><div class="brief-value">${escapeHtml(relationship.description || '—')}</div></div>
+                    </div>
+                </div>
+
+                <div class="brief-section">
+                    <div class="brief-card">
+                        <h4>Individual Profiles</h4>
+                        <div class="brief-grid">
+                            ${profilesHtml}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="brief-section">
+                    <div class="brief-card">
+                        <h4>Recommendations</h4>
+                        <div class="brief-row"><div class="brief-key">Primary focus</div><div class="brief-value">${escapeHtml(rec.primary_focus || exec.primary_focus || '—')}</div></div>
+                        <div class="brief-section">
+                            <details>
+                                <summary>Questions to ask</summary>
+                                <div class="mono">${escapeHtml((rec.questions_to_ask || []).map(q => '- ' + q).join('\n')) || '—'}</div>
+                            </details>
+                        </div>
+                        <div class="brief-section">
+                            <details>
+                                <summary>What to avoid</summary>
+                                <div class="mono">${escapeHtml((rec.what_to_avoid || []).map(q => '- ' + q).join('\n')) || '—'}</div>
+                            </details>
+                        </div>
+                        <div class="brief-section">
+                            <details>
+                                <summary>Watch for</summary>
+                                <div class="mono">${escapeHtml((rec.watch_for || []).map(q => '- ' + q).join('\n')) || '—'}</div>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="brief-section">
+                    <details>
+                        <summary>Key transcripts (last ${transcripts.length})</summary>
+                        <div class="mono">${escapeHtml(transcripts.map(t => `[${t.timestamp || ''}] ${t.sender_name || t.sender_id || 'Unknown'}: ${t.content || ''}`).join('\n\n')) || '—'}</div>
+                    </details>
+                </div>
+            `;
+        }
+
+        // Initialize
+        init();
+    </script>
+</body>
+</html>

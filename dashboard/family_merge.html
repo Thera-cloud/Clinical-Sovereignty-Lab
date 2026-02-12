@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Management | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --purple: #9D4EDD; --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; cursor: pointer; }
+        .container { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+        .section-title { font-size: 22px; font-weight: 700; color: var(--gold); margin-bottom: 8px; }
+        .section-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 28px; line-height: 1.6; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .card-title { font-size: 14px; font-weight: 700; color: var(--gold); margin-bottom: 16px; letter-spacing: 1px; }
+        .form-row { display: grid; grid-template-columns: 1fr 80px 1fr; gap: 16px; align-items: end; margin-bottom: 20px; }
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        .form-label { font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+        .form-select { width: 100%; padding: 16px 18px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 20px; cursor: pointer; }
+        .form-select:focus { border-color: var(--gold); outline: none; }
+        .arrow-cell { display: flex; justify-content: center; align-items: center; font-size: 28px; color: var(--gold); padding-bottom: 6px; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; letter-spacing: 1px; }
+        .btn-preview { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan); }
+        .btn-preview:hover { background: rgba(0, 212, 255, 0.2); }
+        .btn-merge { background: var(--gold); color: #000; }
+        .btn-merge:hover { background: #FFE44D; }
+        .btn-merge:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-unmerge { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+        .btn-unmerge:hover { background: rgba(255, 59, 59, 0.25); }
+        .btn-row { display: flex; gap: 12px; margin-top: 16px; }
+        .preview-box { margin-top: 20px; display: none; }
+        .preview-box.visible { display: block; }
+        .preview-card { background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+        .preview-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .preview-value { font-size: 14px; font-weight: 600; }
+        .preview-members { margin-top: 8px; }
+        .preview-member { display: flex; justify-content: space-between; padding: 6px 0; font-size: 12px; border-bottom: 1px solid var(--border); }
+        .preview-member:last-child { border-bottom: none; }
+        .badge { padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 600; }
+        .badge-head { background: var(--gold-dim); color: var(--gold); }
+        .badge-spouse { background: var(--green-dim); color: var(--green); }
+        .badge-dep { background: var(--cyan-dim); color: var(--cyan); }
+        .badge-plan { background: var(--bg-elevated); color: var(--text-secondary); }
+        .billing-box { background: rgba(255, 215, 0, 0.05); border: 1px solid var(--gold-dim); border-radius: 8px; padding: 16px; margin-top: 12px; }
+        .billing-title { font-size: 11px; color: var(--gold); font-weight: 700; margin-bottom: 8px; }
+        .billing-line { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .result-box { margin-top: 20px; padding: 20px; border-radius: 8px; display: none; }
+        .result-box.visible { display: block; }
+        .result-box.success { background: var(--green-dim); border: 1px solid var(--green); }
+        .result-box.error { background: var(--red-dim); border: 1px solid var(--red); }
+        .result-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+        .result-detail { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .status-bar { padding: 8px 24px; font-size: 11px; display: flex; justify-content: space-between; border-top: 1px solid var(--border); color: var(--text-secondary); }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-dot.online { background: var(--green); }
+        .status-dot.offline { background: var(--red); }
+        .unmerge-section { margin-top: 32px; }
+        .merged-users-list { margin-top: 12px; }
+        .merged-user-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+        .merged-user-info { display: flex; flex-direction: column; gap: 4px; }
+        .merged-user-name { font-size: 13px; font-weight: 600; }
+        .merged-user-meta { font-size: 10px; color: var(--text-secondary); }
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+        .sep-divider { border: none; border-top: 2px solid var(--gold-dim); margin: 48px 0 32px; }
+        .badge-separated { background: var(--orange); color: #000; }
+        .dep-checkbox-list { margin-top: 12px; max-height: 300px; overflow-y: auto; }
+        .dep-checkbox-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.2s; }
+        .dep-checkbox-row:hover { border-color: var(--gold-dim); }
+        .dep-checkbox-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--gold); cursor: pointer; }
+        .dep-checkbox-name { font-size: 14px; font-weight: 600; }
+        .dep-checkbox-meta { font-size: 11px; color: var(--text-secondary); }
+        .name-change-row { display: flex; gap: 12px; align-items: end; margin-top: 16px; }
+        .form-input { width: 100%; padding: 12px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 15px; }
+        .form-input:focus { border-color: var(--gold); outline: none; }
+        .form-input::placeholder { color: var(--text-secondary); }
+        .btn-separate { background: var(--orange); color: #000; font-weight: 700; }
+        .btn-separate:hover { background: #FFB340; }
+        .btn-separate:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-preview-sep { background: rgba(255, 149, 0, 0.15); color: var(--orange); border: 1px solid var(--orange); }
+        .btn-preview-sep:hover { background: rgba(255, 149, 0, 0.25); }
+        .sep-result-box { margin-top: 20px; padding: 20px; border-radius: 8px; display: none; }
+        .sep-result-box.visible { display: block; }
+        .sep-result-box.success { background: var(--green-dim); border: 1px solid var(--green); }
+        .sep-result-box.error { background: var(--red-dim); border: 1px solid var(--red); }
+        .warning-box { background: rgba(255, 149, 0, 0.08); border: 1px solid rgba(255, 149, 0, 0.3); border-radius: 8px; padding: 14px 16px; margin-top: 12px; }
+        .warning-title { font-size: 12px; color: var(--orange); font-weight: 700; margin-bottom: 6px; }
+        .warning-line { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+        .separated-users-list { margin-top: 12px; }
+        .separated-user-row { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+        .separated-user-info { display: flex; flex-direction: column; gap: 4px; }
+        .separated-user-name { font-size: 13px; font-weight: 600; }
+        .separated-user-meta { font-size: 10px; color: var(--text-secondary); }
+        .tab-bar { display: flex; gap: 0; margin-bottom: 28px; border-bottom: 2px solid var(--border); }
+        .tab-btn { padding: 12px 24px; font-size: 14px; font-weight: 600; color: var(--text-secondary); background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; cursor: pointer; letter-spacing: 1px; transition: color 0.2s, border-color 0.2s; }
+        .tab-btn:hover { color: var(--text-primary); }
+        .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">👑</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Family Management</div>
+            </div>
+        </div>
+        <a href="command.html" class="back-btn">← Back to Command</a>
+    </header>
+
+    <div class="container">
+        <h1 class="section-title">Family Management</h1>
+        <p class="section-desc">
+            Merge families (marriage), separate members (divorce/leave), and manage family transitions.
+            All individual conversation history, metrics, and progress are preserved — data is keyed by hardware ID, not family ID.
+        </p>
+
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="loading">Connecting to bridge...</div>
+
+        <!-- Main content with tabs -->
+        <div id="mergeForm" style="display:none;">
+
+            <!-- Tab Bar -->
+            <div class="tab-bar">
+                <button class="tab-btn active" onclick="switchTab('merge')">MERGE</button>
+                <button class="tab-btn" onclick="switchTab('separate')">SEPARATE</button>
+                <button class="tab-btn" onclick="switchTab('history')">HISTORY</button>
+            </div>
+
+            <!-- ==================== TAB: MERGE ==================== -->
+            <div id="tab-merge" class="tab-content active">
+                <div class="card">
+                    <div class="card-title">SELECT ACCOUNTS TO MERGE</div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Head of Household (keeps headship)</label>
+                            <select class="form-select" id="headSelect" onchange="clearPreview()">
+                                <option value="">-- Select user --</option>
+                            </select>
+                        </div>
+                        <div class="arrow-cell">→</div>
+                        <div class="form-group">
+                            <label class="form-label">Joining as Spouse (transfers in)</label>
+                            <select class="form-select" id="spouseSelect" onchange="clearPreview()">
+                                <option value="">-- Select user --</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="btn-row">
+                        <button class="btn btn-preview" onclick="previewMerge()">Preview Merge</button>
+                        <button class="btn btn-merge" id="mergeBtn" onclick="executeMerge()" disabled>Execute Merge</button>
+                    </div>
+                </div>
+
+                <!-- Merge Preview -->
+                <div id="previewBox" class="preview-box">
+                    <div class="card">
+                        <div class="card-title">MERGE PREVIEW</div>
+                        <div id="previewContent"></div>
+                    </div>
+                </div>
+
+                <!-- Merge Result -->
+                <div id="resultBox" class="result-box"></div>
+            </div>
+
+            <!-- ==================== TAB: SEPARATE ==================== -->
+            <div id="tab-separate" class="tab-content">
+                <div class="card">
+                    <div class="card-title">SEPARATE A FAMILY MEMBER</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6;">
+                        Remove a spouse or member from a family (divorce, separation, or account independence).
+                        The departing member gets a new family and a 14-day trial to upgrade their subscription.
+                        Select which dependents go with them.
+                    </p>
+
+                    <div class="form-group" style="margin-bottom:20px;">
+                        <label class="form-label">Member to Separate</label>
+                        <select class="form-select" id="separateSelect" onchange="previewSeparation()">
+                            <option value="">-- Select family member --</option>
+                        </select>
+                    </div>
+
+                    <!-- Separation Preview (loaded dynamically) -->
+                    <div id="sepPreviewBox" style="display:none;">
+                        <div id="sepPreviewContent"></div>
+
+                        <!-- Dependent Assignment -->
+                        <div id="sepDepsSection" style="display:none; margin-top:20px;">
+                            <div class="card-title" style="font-size:13px;">ASSIGN DEPENDENTS TO DEPARTING MEMBER</div>
+                            <p style="font-size:11px; color:var(--text-secondary); margin-bottom:8px;">
+                                Check the dependents who should leave with this member. Unchecked dependents stay with the original family HEAD.
+                            </p>
+                            <div id="sepDepsList" class="dep-checkbox-list"></div>
+                        </div>
+
+                        <!-- Optional Name Change -->
+                        <div class="name-change-row">
+                            <div class="form-group" style="flex:1;">
+                                <label class="form-label">New Name (optional — e.g. maiden name after divorce)</label>
+                                <input type="text" class="form-input" id="sepNewName" placeholder="Leave blank to keep current name">
+                            </div>
+                        </div>
+
+                        <!-- Billing Warning -->
+                        <div id="sepBillingWarning" class="warning-box" style="display:none;"></div>
+
+                        <div class="btn-row" style="margin-top:20px;">
+                            <button class="btn btn-preview-sep" onclick="previewSeparation()">Refresh Preview</button>
+                            <button class="btn btn-separate" id="separateBtn" onclick="executeSeparation()" disabled>Execute Separation</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Separation Result -->
+                <div id="sepResultBox" class="sep-result-box"></div>
+            </div>
+
+            <!-- ==================== TAB: HISTORY ==================== -->
+            <div id="tab-history" class="tab-content">
+                <!-- Unmerge Section -->
+                <div class="card">
+                    <div class="card-title">REVERSE A MERGE</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">
+                        Users who were previously merged have a "merged_from_family" field.
+                        Unmerging restores their original family, HEAD role, and subscription plan.
+                    </p>
+                    <div id="mergedUsersList" class="merged-users-list">
+                        <div style="font-size:12px; color:var(--text-secondary);">Loading merged users...</div>
+                    </div>
+                </div>
+
+                <!-- Separated Users Section -->
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-title">PREVIOUSLY SEPARATED MEMBERS</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">
+                        Users who were separated from a family. They now have their own independent family and must upgrade from TRIAL.
+                    </p>
+                    <div id="separatedUsersList" class="separated-users-list">
+                        <div style="font-size:12px; color:var(--text-secondary);">Loading separated users...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <div><span class="status-dot" id="statusDot"></span><span id="statusText">Disconnected</span></div>
+        <div id="userCount">0 users loaded</div>
+    </div>
+
+    <script>
+        var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
+        var socket = null;
+        var allUsers = [];
+        var previewData = null;
+        var sepPreviewData = null;
+
+        function init() { connect(); }
+
+        function connect() {
+            var uname = sessionStorage.getItem("username");
+            var pwd = sessionStorage.getItem("password");
+            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            document.getElementById("connectionStatus").textContent = "Connecting...";
+            socket = new WebSocket(SERVER_URL);
+            socket.onopen = function() {
+                var profileStr = sessionStorage.getItem("profile");
+                var profile = profileStr ? JSON.parse(profileStr) : {};
+                socket.send(JSON.stringify({ type: "login_request", username: uname, password: pwd, expected_role: profile.role }));
+            };
+            socket.onmessage = handleMessage;
+            socket.onclose = function() { setStatus(false); setTimeout(connect, 3000); };
+        }
+
+        function setStatus(online) {
+            document.getElementById("statusDot").className = "status-dot " + (online ? "online" : "offline");
+            document.getElementById("statusText").textContent = online ? "Connected" : "Disconnected";
+        }
+
+        /* ==================== TAB SWITCHING ==================== */
+        function switchTab(tab) {
+            document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
+            document.querySelectorAll(".tab-content").forEach(function(c) { c.classList.remove("active"); });
+            document.getElementById("tab-" + tab).classList.add("active");
+            // highlight the matching button
+            document.querySelectorAll(".tab-btn").forEach(function(b) {
+                if (b.textContent.trim().toLowerCase() === tab) b.classList.add("active");
+            });
+        }
+
+        /* ==================== MESSAGE HANDLER ==================== */
+        function handleMessage(event) {
+            var data = JSON.parse(event.data);
+            console.log("Received:", data.type, data);
+
+            if (data.type === "login_success") {
+                setStatus(true);
+                socket.send(JSON.stringify({ type: "admin_get_users" }));
+            }
+            else if (data.type === "admin_users") {
+                allUsers = (data.users || []).filter(function(u) { return u.role === "CLIENT"; });
+                document.getElementById("connectionStatus").style.display = "none";
+                document.getElementById("mergeForm").style.display = "block";
+                document.getElementById("userCount").textContent = allUsers.length + " clients loaded";
+                populateDropdowns();
+                populateSeparateDropdown();
+                renderMergedUsers();
+                renderSeparatedUsers();
+            }
+            else if (data.type === "merge_preview") { handlePreview(data); }
+            else if (data.type === "merge_families_success") { handleMergeSuccess(data); }
+            else if (data.type === "merge_families_error") { showResult("resultBox", "error", "Merge Failed", data.message); }
+            else if (data.type === "unmerge_success") { handleUnmergeSuccess(data); }
+            else if (data.type === "unmerge_error") { showResult("resultBox", "error", "Unmerge Failed", data.message); }
+            else if (data.type === "separation_preview") { handleSepPreview(data); }
+            else if (data.type === "separate_success") { handleSeparateSuccess(data); }
+            else if (data.type === "separate_error") { showResult("sepResultBox", "error", "Separation Failed", data.message); }
+            else if (data.type === "error") { showResult("resultBox", "error", "Error", data.message || "Unknown error"); }
+        }
+
+        /* ==================== MERGE TAB ==================== */
+        function populateDropdowns() {
+            var headSel = document.getElementById("headSelect");
+            var spouseSel = document.getElementById("spouseSelect");
+            headSel.innerHTML = '<option value="">-- Select user --</option>';
+            spouseSel.innerHTML = '<option value="">-- Select user --</option>';
+            allUsers.sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); });
+            allUsers.forEach(function(u) {
+                var tier = u.plan || u.subscription_plan || u.tier || "?";
+                var label = (u.name || u.username || u.id) + " (" + tier + ")";
+                if (u.family_role) label += " [" + u.family_role + "]";
+                var ukey = u.username || "";
+                var opt1 = document.createElement("option"); opt1.value = ukey; opt1.textContent = label; headSel.appendChild(opt1);
+                var opt2 = document.createElement("option"); opt2.value = ukey; opt2.textContent = label; spouseSel.appendChild(opt2);
+            });
+        }
+
+        function clearPreview() {
+            document.getElementById("previewBox").classList.remove("visible");
+            document.getElementById("mergeBtn").disabled = true;
+            document.getElementById("resultBox").classList.remove("visible");
+            previewData = null;
+        }
+
+        function previewMerge() {
+            var head = document.getElementById("headSelect").value;
+            var spouse = document.getElementById("spouseSelect").value;
+            if (!head || !spouse) { alert("Please select both users."); return; }
+            if (head === spouse) { alert("Cannot merge a user with themselves."); return; }
+            socket.send(JSON.stringify({ type: "admin_preview_merge", head_username: head, spouse_username: spouse }));
+        }
+
+        function handlePreview(data) {
+            var box = document.getElementById("previewBox");
+            var content = document.getElementById("previewContent");
+            if (!data.valid) {
+                content.innerHTML = '<div style="color:var(--red);">' + esc(data.message || "Invalid selection") + '</div>';
+                box.classList.add("visible"); document.getElementById("mergeBtn").disabled = true; return;
+            }
+            if (data.same_family) {
+                content.innerHTML = '<div style="color:var(--orange);">These users are already in the same family.</div>';
+                box.classList.add("visible"); document.getElementById("mergeBtn").disabled = true; return;
+            }
+            previewData = data;
+            var h = data.head, s = data.spouse, after = data.after_merge;
+            var html = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
+            // HEAD
+            html += '<div class="preview-card"><div class="preview-label">HEAD (stays)</div>';
+            html += '<div class="preview-value" style="color:var(--gold);">' + esc(h.name) + '</div>';
+            html += '<div style="font-size:11px; color:var(--text-secondary); margin-top:4px;"><span class="badge badge-plan">' + esc(h.plan) + '</span> ' + (h.family_id ? esc(h.family_id) : '<span style="color:var(--orange);">No family yet</span>') + '</div>';
+            if (h.dependents && h.dependents.length > 0) {
+                html += '<div class="preview-members">'; h.dependents.forEach(function(dep) { html += '<div class="preview-member"><span>' + esc(dep.name || dep.username) + '</span><span class="badge badge-dep">' + esc(dep.role || "DEP") + '</span></div>'; }); html += '</div>';
+            } else { html += '<div style="font-size:11px; color:var(--text-secondary); margin-top:8px;">No dependents</div>'; }
+            html += '</div>';
+            // SPOUSE
+            html += '<div class="preview-card"><div class="preview-label">SPOUSE (transfers in)</div>';
+            html += '<div class="preview-value" style="color:var(--green);">' + esc(s.name) + '</div>';
+            html += '<div style="font-size:11px; color:var(--text-secondary); margin-top:4px;"><span class="badge badge-plan">' + esc(s.plan) + '</span> ' + (s.family_id ? esc(s.family_id) : '<span style="color:var(--orange);">No family yet</span>') + '</div>';
+            if (s.dependents && s.dependents.length > 0) {
+                html += '<div class="preview-members">'; s.dependents.forEach(function(dep) { html += '<div class="preview-member"><span>' + esc(dep.name || dep.username) + '</span><span class="badge badge-dep">' + esc(dep.role || "DEP") + '</span></div>'; }); html += '</div>';
+            } else { html += '<div style="font-size:11px; color:var(--text-secondary); margin-top:8px;">No dependents</div>'; }
+            html += '</div></div>';
+            // Billing
+            html += '<div class="billing-box"><div class="billing-title">AFTER MERGE — BILLING IMPACT</div>';
+            html += '<div class="billing-line"><strong style="color:var(--gold);">' + esc(h.name) + '</strong> — HEAD (keeps TOP_TIER)</div>';
+            html += '<div class="billing-line"><strong style="color:var(--green);">' + esc(s.name) + '</strong> — SPOUSE (free)</div>';
+            html += '<div class="billing-line">Total dependents: <strong>' + after.total_dependents + '</strong> (' + after.free_dependents + ' free + ' + after.paid_dependents + ' x $75/mo)</div>';
+            html += '<div class="billing-line" style="font-size:14px; color:var(--gold); margin-top:8px;">Additional monthly cost for dependents: <strong>$' + after.monthly_dependent_cost + '/mo</strong></div>';
+            html += '<div class="billing-line" style="color:var(--orange); margin-top:8px;">Note: ' + esc(s.name) + '\'s individual ' + esc(s.plan) + ' subscription should be cancelled after merge.</div>';
+            html += '</div>';
+            content.innerHTML = html; box.classList.add("visible"); document.getElementById("mergeBtn").disabled = false;
+        }
+
+        function executeMerge() {
+            if (!previewData) return;
+            var head = document.getElementById("headSelect").value;
+            var spouse = document.getElementById("spouseSelect").value;
+            if (!confirm("Are you sure you want to merge " + spouse + " into " + head + "'s family?\n\nThis will:\n• Change " + spouse + "'s role to SPOUSE\n• Move all dependents to " + head + "'s family\n• A backup will be saved before changes.\n\nContinue?")) return;
+            document.getElementById("mergeBtn").disabled = true;
+            document.getElementById("mergeBtn").textContent = "Merging...";
+            socket.send(JSON.stringify({ type: "admin_merge_families", head_username: head, spouse_username: spouse }));
+        }
+
+        function handleMergeSuccess(data) {
+            var html = '<div class="result-title" style="color:var(--green);">Merge Successful</div>';
+            html += '<div class="result-detail"><strong>Family:</strong> ' + esc(data.surviving_family_id) + ' (dissolved: ' + esc(data.dissolved_family_id) + ')</div>';
+            html += '<div class="result-detail"><strong>HEAD:</strong> ' + esc(data.head.name) + ' (' + esc(data.head.username) + ')</div>';
+            html += '<div class="result-detail"><strong>SPOUSE:</strong> ' + esc(data.spouse.name) + ' (' + esc(data.spouse.username) + ') — was ' + esc(data.spouse.previous_plan) + '</div>';
+            if (data.moved_dependents && data.moved_dependents.length > 0) {
+                html += '<div class="result-detail"><strong>Dependents moved:</strong></div>';
+                data.moved_dependents.forEach(function(dep) { html += '<div class="result-detail" style="margin-left:16px;">• ' + esc(dep.name || dep.username) + ' (guardian: ' + esc(dep.guardian_id || "N/A") + ')</div>'; });
+            }
+            html += '<div class="result-detail"><strong>Coach notes migrated:</strong> ' + data.notes_migrated + '</div>';
+            html += '<div class="result-detail"><strong>Old invite tokens cleaned:</strong> ' + data.tokens_cleaned + '</div>';
+            html += '<div class="result-detail"><strong>Billing:</strong> ' + esc(data.billing_summary) + '</div>';
+            html += '<div class="result-detail" style="margin-top:8px; color:var(--text-secondary);">Backup: ' + esc(data.backup_file) + '</div>';
+            showResult("resultBox", "success", "", html);
+            document.getElementById("mergeBtn").textContent = "Execute Merge";
+            socket.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        /* ==================== SEPARATE TAB ==================== */
+        function populateSeparateDropdown() {
+            var sel = document.getElementById("separateSelect");
+            sel.innerHTML = '<option value="">-- Select family member --</option>';
+            // Show users who are in a family and are SPOUSE or MEMBER (not HEAD, not standalone)
+            var eligible = allUsers.filter(function(u) {
+                return u.family_id && (u.family_role === "SPOUSE" || u.family_role === "MEMBER" || u.family_role === "HEAD");
+            });
+            eligible.sort(function(a, b) { return (a.name || "").localeCompare(b.name || ""); });
+            eligible.forEach(function(u) {
+                var tier = u.plan || u.subscription_plan || u.tier || "?";
+                var label = (u.name || u.username) + " (" + tier + ") [" + (u.family_role || "?") + "] — " + (u.family_id || "no family");
+                var opt = document.createElement("option"); opt.value = u.username || ""; opt.textContent = label;
+                sel.appendChild(opt);
+            });
+        }
+
+        function previewSeparation() {
+            var username = document.getElementById("separateSelect").value;
+            if (!username) {
+                document.getElementById("sepPreviewBox").style.display = "none";
+                document.getElementById("separateBtn").disabled = true;
+                sepPreviewData = null;
+                return;
+            }
+            socket.send(JSON.stringify({ type: "admin_preview_separation", username: username }));
+        }
+
+        function handleSepPreview(data) {
+            var box = document.getElementById("sepPreviewBox");
+            var content = document.getElementById("sepPreviewContent");
+            var depsSection = document.getElementById("sepDepsSection");
+            var depsList = document.getElementById("sepDepsList");
+            var warningBox = document.getElementById("sepBillingWarning");
+
+            if (!data.valid) {
+                content.innerHTML = '<div style="color:var(--red); padding:12px;">' + esc(data.message || "Invalid selection") + '</div>';
+                box.style.display = "block";
+                depsSection.style.display = "none";
+                warningBox.style.display = "none";
+                document.getElementById("separateBtn").disabled = true;
+                return;
+            }
+
+            sepPreviewData = data;
+            var t = data.target;
+            var html = '';
+
+            // Target info card
+            html += '<div class="preview-card" style="border-color:var(--orange);">';
+            html += '<div class="preview-label" style="color:var(--orange);">DEPARTING MEMBER</div>';
+            html += '<div class="preview-value" style="color:var(--orange);">' + esc(t.name) + '</div>';
+            html += '<div style="font-size:12px; color:var(--text-secondary); margin-top:6px;">';
+            html += 'Current role: <span class="badge badge-spouse">' + esc(t.current_role) + '</span> ';
+            html += 'Current plan: <span class="badge badge-plan">' + esc(t.current_plan) + '</span> ';
+            html += 'Family: <strong>' + esc(data.family_id) + '</strong>';
+            html += '</div>';
+            if (t.is_head) {
+                html += '<div style="color:var(--red); font-size:12px; margin-top:8px; font-weight:600;">This user is the HEAD. You can only separate them if all other members are being moved with them, or you should separate the spouse instead.</div>';
+            }
+            html += '<div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">';
+            html += 'After separation: <span class="badge badge-head">HEAD</span> of new family, <span class="badge" style="background:rgba(255,149,0,0.15); color:var(--orange);">TRIAL (14 days)</span>';
+            html += '</div>';
+            html += '</div>';
+
+            // Family HEAD info
+            if (data.head && !t.is_head) {
+                html += '<div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">Remaining HEAD: <strong style="color:var(--gold);">' + esc(data.head.name) + '</strong> (' + esc(data.head.username) + ')</div>';
+            }
+
+            content.innerHTML = html;
+            box.style.display = "block";
+
+            // Dependents checkboxes
+            var otherMembers = (data.other_members || []).filter(function(m) {
+                return m.family_role !== "HEAD" || t.is_head;
+            });
+            // Exclude the head from the movable list unless the target IS the head
+            var movable = otherMembers.filter(function(m) { return m.family_role !== "HEAD"; });
+
+            if (movable.length > 0) {
+                depsSection.style.display = "block";
+                var dhtml = '';
+                movable.forEach(function(m) {
+                    var mkey = m.username || m.registry_key || "";
+                    dhtml += '<label class="dep-checkbox-row">';
+                    dhtml += '<input type="checkbox" value="' + esc(mkey) + '" class="sep-dep-cb">';
+                    dhtml += '<div><div class="dep-checkbox-name">' + esc(m.name || mkey) + '</div>';
+                    dhtml += '<div class="dep-checkbox-meta">' + esc(m.family_role || "MEMBER") + ' — ' + esc(m.subscription_plan || "?") + (m.is_minor ? ' (minor)' : '') + '</div>';
+                    dhtml += '</div></label>';
+                });
+                depsList.innerHTML = dhtml;
+            } else {
+                depsSection.style.display = "none";
+            }
+
+            // Billing warning
+            var whtml = '<div class="warning-title">BILLING IMPACT</div>';
+            whtml += '<div class="warning-line"><strong style="color:var(--orange);">' + esc(t.name) + '</strong> will be placed on a 14-day TRIAL and must upgrade to continue access.</div>';
+            whtml += '<div class="warning-line">Original family (' + esc(data.family_id) + ') will have ' + (data.total_family_size - 1) + ' members remaining (minus any dependents moved).</div>';
+            whtml += '<div class="warning-line" style="margin-top:6px; color:var(--cyan);">All conversation history, metrics, and progress are preserved automatically.</div>';
+            warningBox.innerHTML = whtml;
+            warningBox.style.display = "block";
+
+            document.getElementById("separateBtn").disabled = false;
+        }
+
+        function executeSeparation() {
+            if (!sepPreviewData) return;
+            var username = document.getElementById("separateSelect").value;
+            var newName = document.getElementById("sepNewName").value.trim();
+            var deps = [];
+            document.querySelectorAll(".sep-dep-cb:checked").forEach(function(cb) { deps.push(cb.value); });
+            var target = sepPreviewData.target;
+
+            var msg = "Separate " + (target.name || username) + " from family " + sepPreviewData.family_id + "?\n\n";
+            msg += "This will:\n";
+            msg += "• Create a new independent family for " + (target.name || username) + "\n";
+            msg += "• Set their plan to TRIAL (14-day upgrade window)\n";
+            if (deps.length > 0) msg += "• Move " + deps.length + " dependent(s) with them\n";
+            if (newName) msg += "• Change their name to: " + newName + "\n";
+            msg += "\nA backup will be saved before changes.\n\nContinue?";
+
+            if (!confirm(msg)) return;
+
+            document.getElementById("separateBtn").disabled = true;
+            document.getElementById("separateBtn").textContent = "Separating...";
+            socket.send(JSON.stringify({
+                type: "admin_separate_family_member",
+                username: username,
+                dependents_to_move: deps,
+                new_name: newName,
+                grace_period_days: 14
+            }));
+        }
+
+        function handleSeparateSuccess(data) {
+            var html = '<div class="result-title" style="color:var(--green);">Separation Successful</div>';
+            html += '<div class="result-detail"><strong>User:</strong> ' + esc(data.username) + (data.name_changed ? ' (renamed to: ' + esc(data.new_name) + ')' : '') + '</div>';
+            html += '<div class="result-detail"><strong>New family:</strong> ' + esc(data.new_family_id) + ' (separated from: ' + esc(data.old_family_id) + ')</div>';
+            html += '<div class="result-detail"><strong>New role:</strong> HEAD</div>';
+            html += '<div class="result-detail"><strong>New plan:</strong> TRIAL (upgrade by ' + esc(data.trial_end) + ')</div>';
+            if (data.moved_dependents && data.moved_dependents.length > 0) {
+                html += '<div class="result-detail"><strong>Dependents moved with them:</strong></div>';
+                data.moved_dependents.forEach(function(dep) { html += '<div class="result-detail" style="margin-left:16px;">• ' + esc(dep.name || dep.username) + '</div>'; });
+            }
+            html += '<div class="result-detail" style="margin-top:8px;"><strong>Original family billing:</strong> ' + esc(data.billing_original) + '</div>';
+            html += '<div class="result-detail"><strong>New family billing:</strong> ' + esc(data.billing_new) + '</div>';
+            html += '<div class="result-detail" style="margin-top:8px; color:var(--text-secondary);">Backup: ' + esc(data.backup_file) + '</div>';
+
+            showResult("sepResultBox", "success", "", html);
+            document.getElementById("separateBtn").textContent = "Execute Separation";
+            // Reset and refresh
+            document.getElementById("sepPreviewBox").style.display = "none";
+            document.getElementById("sepNewName").value = "";
+            sepPreviewData = null;
+            socket.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        /* ==================== HISTORY TAB ==================== */
+        function renderMergedUsers() {
+            var container = document.getElementById("mergedUsersList");
+            var merged = allUsers.filter(function(u) { return u.merged_from_family; });
+            if (merged.length === 0) {
+                container.innerHTML = '<div style="font-size:12px; color:var(--text-secondary);">No previously merged users found.</div>';
+                return;
+            }
+            var html = "";
+            merged.forEach(function(u) {
+                html += '<div class="merged-user-row"><div class="merged-user-info">';
+                html += '<div class="merged-user-name">' + esc(u.name || u.username) + '</div>';
+                html += '<div class="merged-user-meta">Merged from ' + esc(u.merged_from_family) + ' on ' + esc((u.merged_at || "").substring(0, 10)) + '</div>';
+                html += '</div><button class="btn btn-unmerge" onclick="unmergeUser(\'' + esc(u.username) + '\')">Unmerge</button></div>';
+            });
+            container.innerHTML = html;
+        }
+
+        function renderSeparatedUsers() {
+            var container = document.getElementById("separatedUsersList");
+            var separated = allUsers.filter(function(u) { return u.separated_from_family; });
+            if (separated.length === 0) {
+                container.innerHTML = '<div style="font-size:12px; color:var(--text-secondary);">No previously separated users found.</div>';
+                return;
+            }
+            var html = "";
+            separated.forEach(function(u) {
+                var tier = u.plan || u.subscription_plan || u.tier || "?";
+                html += '<div class="separated-user-row"><div class="separated-user-info">';
+                html += '<div class="separated-user-name">' + esc(u.name || u.username) + '</div>';
+                html += '<div class="separated-user-meta">Separated from ' + esc(u.separated_from_family) + ' on ' + esc((u.separated_at || "").substring(0, 10)) + ' — Current plan: <strong>' + esc(tier) + '</strong></div>';
+                html += '</div><span class="badge badge-separated">SEPARATED</span></div>';
+            });
+            container.innerHTML = html;
+        }
+
+        function unmergeUser(username) {
+            if (!confirm("Unmerge " + username + "?\n\nThis will restore their original family, HEAD role, and subscription plan.\n\nContinue?")) return;
+            socket.send(JSON.stringify({ type: "admin_unmerge_family_member", username: username }));
+        }
+
+        function handleUnmergeSuccess(data) {
+            var html = '<div class="result-title" style="color:var(--green);">Unmerge Successful</div>';
+            html += '<div class="result-detail"><strong>User:</strong> ' + esc(data.username) + '</div>';
+            html += '<div class="result-detail"><strong>Restored family:</strong> ' + esc(data.restored_family_id) + '</div>';
+            html += '<div class="result-detail"><strong>Restored role:</strong> ' + esc(data.restored_role) + '</div>';
+            html += '<div class="result-detail"><strong>Restored plan:</strong> ' + esc(data.restored_plan) + '</div>';
+            if (data.restored_dependents && data.restored_dependents.length > 0) {
+                html += '<div class="result-detail"><strong>Dependents moved back:</strong> ' + data.restored_dependents.join(", ") + '</div>';
+            }
+            html += '<div class="result-detail" style="margin-top:8px; color:var(--text-secondary);">Backup: ' + esc(data.backup_file) + '</div>';
+            showResult("resultBox", "success", "", html);
+            socket.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        /* ==================== SHARED UTILITIES ==================== */
+        function showResult(boxId, type, title, htmlOrMessage) {
+            var box = document.getElementById(boxId);
+            box.className = box.className.replace(/\bvisible\b/, "").replace(/\bsuccess\b/, "").replace(/\berror\b/, "").trim();
+            box.classList.add("visible", type);
+            if (title) {
+                box.innerHTML = '<div class="result-title" style="color:var(--' + (type === "success" ? "green" : "red") + ');">' + esc(title) + '</div><div class="result-detail">' + esc(htmlOrMessage) + '</div>';
+            } else {
+                box.innerHTML = htmlOrMessage;
+            }
+        }
+
+        function esc(str) {
+            if (!str) return "";
+            var div = document.createElement("div");
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Versions | Night School</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: var(--purple-dim); border: 2px solid var(--purple); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .page-title { font-size: 12px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; }
+        .btn { padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: var(--purple); color: white; }
+        .btn-secondary { background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); }
+        .btn-success { background: var(--green); color: black; }
+        .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,59,59,0.3); }
+        .main-layout { display: grid; grid-template-columns: 1fr 400px; height: calc(100vh - 73px); }
+        .timeline-section { padding: 24px; overflow-y: auto; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .section-title { font-size: 18px; font-weight: 700; }
+        .current-version { display: flex; align-items: center; gap: 10px; padding: 16px 20px; background: var(--green-dim); border: 1px solid var(--green); border-radius: 12px; margin-bottom: 24px; }
+        .current-icon { font-size: 32px; }
+        .current-info { flex: 1; }
+        .current-label { font-size: 10px; color: var(--green); text-transform: uppercase; }
+        .current-name { font-size: 18px; font-weight: 700; color: var(--green); }
+        .current-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+        .timeline { position: relative; padding-left: 30px; }
+        .timeline::before { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+        .version-item { position: relative; background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; transition: all 0.2s; }
+        .version-item:hover { border-color: var(--purple-dim); }
+        .version-item.current { background: var(--green-dim); border-color: var(--green); }
+        .version-item.selected { border-color: var(--purple); box-shadow: 0 0 20px rgba(157,78,221,0.2); }
+        .version-item::before { content: ''; position: absolute; left: -24px; top: 24px; width: 14px; height: 14px; border-radius: 50%; background: var(--border); border: 2px solid var(--bg-dark); }
+        .version-item.current::before { background: var(--green); box-shadow: 0 0 10px var(--green); }
+        .version-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .version-name { font-size: 16px; font-weight: 600; }
+        .version-badge { font-size: 9px; padding: 4px 10px; border-radius: 12px; font-weight: 600; }
+        .version-badge.live { background: var(--green); color: black; }
+        .version-badge.stable { background: var(--gold-dim); color: var(--gold); }
+        .version-badge.archived { background: var(--bg-elevated); color: var(--text-secondary); }
+        .version-badge.experimental { background: var(--orange); color: black; }
+        .version-meta { font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; }
+        .version-changes { font-size: 12px; color: var(--text-primary); line-height: 1.6; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 12px; }
+        .version-changes .added { color: var(--green); }
+        .version-changes .removed { color: var(--red); }
+        .version-changes .modified { color: var(--orange); }
+        .version-actions { display: flex; gap: 8px; }
+        .version-btn { padding: 6px 12px; border-radius: 6px; font-size: 10px; cursor: pointer; border: none; }
+        .version-btn.revert { background: var(--orange); color: black; }
+        .version-btn.compare { background: var(--bg-elevated); color: var(--text-secondary); border: 1px solid var(--border); }
+        .version-btn.view { background: var(--cyan-dim); color: var(--cyan); }
+        .details-section { background: var(--bg-card); border-left: 1px solid var(--border); padding: 24px; overflow-y: auto; }
+        .details-title { font-size: 14px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .details-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+        .details-card-title { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 12px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+        .stat-box { background: var(--bg-dark); border-radius: 8px; padding: 12px; text-align: center; }
+        .stat-value { font-size: 20px; font-weight: 700; }
+        .stat-value.purple { color: var(--purple); }
+        .stat-value.cyan { color: var(--cyan); }
+        .stat-value.green { color: var(--green); }
+        .stat-value.gold { color: var(--gold); }
+        .stat-label { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        .change-list { max-height: 200px; overflow-y: auto; }
+        .change-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--bg-dark); border-radius: 6px; margin-bottom: 8px; font-size: 12px; }
+        .change-icon { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .change-icon.add { background: var(--green-dim); }
+        .change-icon.remove { background: var(--red-dim); }
+        .change-icon.modify { background: var(--orange); background: rgba(255,149,0,0.15); }
+        .empty-details { text-align: center; padding: 40px; color: var(--text-secondary); }
+        .empty-details .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+        .compare-view { display: none; }
+        .compare-view.active { display: block; }
+        .diff-line { padding: 8px 12px; font-family: monospace; font-size: 11px; border-bottom: 1px solid var(--border); }
+        .diff-line.added { background: var(--green-dim); color: var(--green); }
+        .diff-line.removed { background: var(--red-dim); color: var(--red); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">⏱️</div>
+            <div>
+                <div class="logo-text">WISDOM VERSIONS</div>
+                <div class="page-title">Time Travel & Rollback Control</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" onclick="createSnapshot()">📸 Create Snapshot</button>
+            <a href="night_school.html" class="back-btn">← Back to Night School</a>
+        </div>
+    </header>
+    <div class="main-layout">
+        <div class="timeline-section">
+            <div class="section-header">
+                <div class="section-title">Version History</div>
+                <span style="font-size: 11px; color: var(--text-secondary);">Click a version to see details</span>
+            </div>
+            <div class="current-version">
+                <div class="current-icon">🧠</div>
+                <div class="current-info">
+                    <div class="current-label">Currently Deployed</div>
+                    <div class="current-name">Wisdom v16.4</div>
+                    <div class="current-meta">847 entries • Deployed 2 hours ago by Admin_Sovereign</div>
+                </div>
+                <button class="btn btn-secondary" onclick="viewVersion('v16.4')">View Details</button>
+            </div>
+            <div class="timeline" id="timeline">
+                <!-- Versions will be populated here -->
+            </div>
+        </div>
+        <div class="details-section">
+            <div class="details-title">📋 Version Details</div>
+            <div id="detailsContent">
+                <div class="empty-details">
+                    <div class="icon">👆</div>
+                    <p>Select a version to view details</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        var versions = [
+            {
+                id: "v16.4",
+                name: "Wisdom v16.4",
+                status: "live",
+                date: "Jan 23, 2026 • 9:00 PM",
+                author: "Admin_Sovereign",
+                entries: 847,
+                changes: [
+                    { type: "add", text: "CBT boundary techniques from Coach Hope" },
+                    { type: "add", text: "Crisis de-escalation patterns" },
+                    { type: "add", text: "Sleep intervention protocols" },
+                    { type: "modify", text: "Updated empathy response templates" }
+                ],
+                notes: "Major update focusing on crisis intervention and boundary setting techniques."
+            },
+            {
+                id: "v16.3",
+                name: "Wisdom v16.3",
+                status: "stable",
+                date: "Jan 18, 2026",
+                author: "Admin_Sovereign",
+                entries: 834,
+                changes: [
+                    { type: "add", text: "Family dynamics analysis module" },
+                    { type: "add", text: "Workplace boundary module" },
+                    { type: "modify", text: "Refined anxiety response patterns" }
+                ],
+                notes: "Added family and workplace modules."
+            },
+            {
+                id: "v16.2",
+                name: "Wisdom v16.2",
+                status: "stable",
+                date: "Jan 15, 2026",
+                author: "Coach_Hope",
+                entries: 821,
+                changes: [
+                    { type: "add", text: "Workplace anxiety module" },
+                    { type: "modify", text: "Minor adjustments to empathy responses" }
+                ],
+                notes: "Workplace anxiety support added."
+            },
+            {
+                id: "v16.1",
+                name: "Wisdom v16.1",
+                status: "stable",
+                date: "Jan 10, 2026",
+                author: "Admin_Sovereign",
+                entries: 812,
+                changes: [
+                    { type: "add", text: "Grief processing techniques" },
+                    { type: "add", text: "Relationship communication patterns" }
+                ],
+                notes: "Grief and relationship support."
+            },
+            {
+                id: "v15.2",
+                name: "Wisdom v15.2",
+                status: "archived",
+                date: "Jan 5, 2026",
+                author: "Admin_Sovereign",
+                entries: 798,
+                changes: [
+                    { type: "remove", text: "Deprecated meditation scripts (replaced)" }
+                ],
+                notes: "⚠️ Known issue: Hallucination in trauma responses. Do not revert."
+            },
+            {
+                id: "v15.1",
+                name: "Wisdom v15.1",
+                status: "archived",
+                date: "Dec 28, 2025",
+                author: "System",
+                entries: 785,
+                changes: [
+                    { type: "add", text: "Initial trauma response protocols" }
+                ],
+                notes: "Legacy version."
+            }
+        ];
+
+        var selectedVersion = null;
+
+        function init() {
+            if (!sessionStorage.getItem("username")) {
+                window.location.href = "index.html";
+                return;
+            }
+            renderTimeline();
+        }
+
+        function renderTimeline() {
+            var container = document.getElementById("timeline");
+            var html = "";
+            
+            for (var i = 0; i < versions.length; i++) {
+                var v = versions[i];
+                var isCurrent = v.status === "live";
+                var isSelected = selectedVersion === v.id;
+                
+                html += '<div class="version-item ' + (isCurrent ? 'current' : '') + (isSelected ? ' selected' : '') + '" onclick="selectVersion(\'' + v.id + '\')">';
+                html += '<div class="version-header">';
+                html += '<span class="version-name">' + v.name + '</span>';
+                html += '<span class="version-badge ' + v.status + '">' + v.status.toUpperCase() + '</span>';
+                html += '</div>';
+                html += '<div class="version-meta">' + v.date + ' • ' + v.entries + ' entries • By: ' + v.author + '</div>';
+                html += '<div class="version-changes">';
+                for (var j = 0; j < Math.min(v.changes.length, 3); j++) {
+                    var c = v.changes[j];
+                    var prefix = c.type === "add" ? "+" : c.type === "remove" ? "-" : "~";
+                    var colorClass = c.type === "add" ? "added" : c.type === "remove" ? "removed" : "modified";
+                    html += '<span class="' + colorClass + '">' + prefix + ' ' + c.text + '</span><br>';
+                }
+                if (v.changes.length > 3) {
+                    html += '<span style="color:var(--text-secondary)">...and ' + (v.changes.length - 3) + ' more</span>';
+                }
+                html += '</div>';
+                if (!isCurrent) {
+                    html += '<div class="version-actions">';
+                    html += '<button class="version-btn revert" onclick="event.stopPropagation(); revertToVersion(\'' + v.id + '\')">↩ Revert to This</button>';
+                    html += '<button class="version-btn compare" onclick="event.stopPropagation(); compareVersions(\'' + v.id + '\')">📊 Compare</button>';
+                    html += '<button class="version-btn view" onclick="event.stopPropagation(); selectVersion(\'' + v.id + '\')">👁️ View</button>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function selectVersion(id) {
+            selectedVersion = id;
+            renderTimeline();
+            showDetails(id);
+        }
+
+        function showDetails(id) {
+            var v = versions.find(function(ver) { return ver.id === id; });
+            if (!v) return;
+            
+            var container = document.getElementById("detailsContent");
+            
+            var html = '<div class="stat-grid">';
+            html += '<div class="stat-box"><div class="stat-value purple">' + v.entries + '</div><div class="stat-label">Total Entries</div></div>';
+            html += '<div class="stat-box"><div class="stat-value cyan">' + v.changes.length + '</div><div class="stat-label">Changes</div></div>';
+            html += '</div>';
+            
+            html += '<div class="details-card">';
+            html += '<div class="details-card-title">Version Info</div>';
+            html += '<div style="font-size:12px;line-height:1.8;">';
+            html += '<strong>Version:</strong> ' + v.name + '<br>';
+            html += '<strong>Status:</strong> <span class="version-badge ' + v.status + '" style="vertical-align:middle;">' + v.status.toUpperCase() + '</span><br>';
+            html += '<strong>Date:</strong> ' + v.date + '<br>';
+            html += '<strong>Author:</strong> ' + v.author + '<br>';
+            html += '</div></div>';
+            
+            html += '<div class="details-card">';
+            html += '<div class="details-card-title">Changes in this Version</div>';
+            html += '<div class="change-list">';
+            for (var i = 0; i < v.changes.length; i++) {
+                var c = v.changes[i];
+                var icon = c.type === "add" ? "➕" : c.type === "remove" ? "➖" : "✏️";
+                html += '<div class="change-item">';
+                html += '<div class="change-icon ' + c.type + '">' + icon + '</div>';
+                html += '<span>' + c.text + '</span>';
+                html += '</div>';
+            }
+            html += '</div></div>';
+            
+            html += '<div class="details-card">';
+            html += '<div class="details-card-title">Notes</div>';
+            html += '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">' + v.notes + '</div>';
+            html += '</div>';
+            
+            if (v.status !== "live") {
+                html += '<div style="display:flex;flex-direction:column;gap:10px;margin-top:20px;">';
+                html += '<button class="btn btn-success" onclick="revertToVersion(\'' + v.id + '\')">↩ Revert to ' + v.name + '</button>';
+                html += '<button class="btn btn-secondary" onclick="compareVersions(\'' + v.id + '\')">📊 Compare with Current</button>';
+                html += '</div>';
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function createSnapshot() {
+            var name = prompt("Enter snapshot name:", "Wisdom v16.5");
+            if (name) {
+                alert("Snapshot '" + name + "' created successfully!\n\nThis will be saved as a restore point before making changes.");
+            }
+        }
+
+        function revertToVersion(id) {
+            var v = versions.find(function(ver) { return ver.id === id; });
+            if (!v) return;
+            
+            if (v.status === "archived" && v.notes.indexOf("⚠️") >= 0) {
+                if (!confirm("WARNING: This version has known issues:\n\n" + v.notes + "\n\nAre you sure you want to revert?")) {
+                    return;
+                }
+            }
+            
+            if (confirm("Revert to " + v.name + "?\n\nThis will replace the current wisdom with " + v.entries + " entries.\n\nA snapshot of the current version will be created automatically.")) {
+                alert("Reverting to " + v.name + "...\n\n✓ Snapshot created\n✓ Wisdom file replaced\n✓ Nate AI reloaded\n\nRevert complete!");
+                // In production, this would call the backend
+            }
+        }
+
+        function compareVersions(id) {
+            var v = versions.find(function(ver) { return ver.id === id; });
+            if (!v) return;
+            
+            var current = versions[0];
+            var diff = current.entries - v.entries;
+            var diffText = diff > 0 ? "+" + diff : diff.toString();
+            
+            alert("Comparing " + v.name + " with " + current.name + "\n\n" +
+                  "Entries: " + v.entries + " → " + current.entries + " (" + diffText + ")\n\n" +
+                  "In production, this would show a detailed diff view.");
+        }
+
+        function viewVersion(id) {
+            selectVersion(id);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

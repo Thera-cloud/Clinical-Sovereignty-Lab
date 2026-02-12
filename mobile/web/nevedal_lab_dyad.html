@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nevedal Lab | Dyad Comparisons</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red-critical: #FF3B3B; --blue: #4A90D9;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        
+        /* Header */
+        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .logo-text { display: flex; flex-direction: column; }
+        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
+        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
+        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
+        .back-btn:hover { border-color: var(--purple); }
+        
+        /* Navigation */
+        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
+        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
+        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
+        .sub-nav-item:hover { color: var(--purple); }
+        
+        /* Main Layout */
+        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; min-height: calc(100vh - 140px); }
+        
+        /* Cards */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .card.research { border-color: var(--purple-dim); }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
+        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .icon.purple { background: var(--purple-dim); }
+        .icon.cyan { background: var(--cyan-dim); }
+        .icon.green { background: var(--green-dim); }
+        .icon.gold { background: var(--gold-dim); }
+        .card-body { padding: 20px; }
+        
+        /* Dyad Selection */
+        .dyad-pair { background: var(--bg-elevated); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+        .dyad-title { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+        .dyad-members { display: flex; align-items: center; gap: 16px; }
+        .dyad-member { flex: 1; text-align: center; padding: 16px; background: var(--bg-dark); border-radius: 8px; }
+        .dyad-member.client { border: 2px solid var(--purple); }
+        .dyad-member.coach { border: 2px solid var(--cyan); }
+        .dyad-avatar { width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; }
+        .dyad-avatar.client { background: var(--purple-dim); border: 2px solid var(--purple); color: var(--purple); }
+        .dyad-avatar.coach { background: var(--cyan-dim); border: 2px solid var(--cyan); color: var(--cyan); }
+        .dyad-name { font-size: 13px; font-weight: 600; }
+        .dyad-role { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .dyad-connector { font-size: 24px; color: var(--purple); }
+        
+        /* Dyad List */
+        .dyad-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+        .dyad-item:hover { border-color: var(--purple); }
+        .dyad-item.active { background: var(--purple-dim); border-color: var(--purple); }
+        .dyad-mini-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; }
+        .dyad-mini-avatar.client { background: var(--purple-dim); border: 1px solid var(--purple); }
+        .dyad-mini-avatar.coach { background: var(--cyan-dim); border: 1px solid var(--cyan); }
+        .dyad-item-info { flex: 1; }
+        .dyad-item-names { font-size: 11px; font-weight: 600; }
+        .dyad-item-meta { font-size: 9px; color: var(--text-secondary); margin-top: 2px; }
+        
+        /* Session Info */
+        .session-badge { padding: 6px 12px; background: var(--bg-elevated); border-radius: 6px; font-size: 10px; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        
+        /* Side-by-Side Gauges */
+        .dual-gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px; }
+        .gauge-wrapper { text-align: center; }
+        .gauge-circle { width: 160px; height: 160px; margin: 0 auto 12px; position: relative; }
+        .gauge-bg-mini { width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 225deg, var(--red-critical) 0deg, var(--orange) 60deg, var(--gold) 120deg, var(--green) 180deg, var(--cyan) 240deg, var(--purple) 300deg, transparent 300deg); }
+        .gauge-inner-mini { position: absolute; top: 16px; left: 16px; right: 16px; bottom: 16px; background: var(--bg-dark); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .gauge-value-mini { font-size: 36px; font-weight: 700; font-family: 'Times New Roman', serif; }
+        .gauge-value-mini.client-color { color: var(--purple); }
+        .gauge-value-mini.coach-color { color: var(--cyan); }
+        .gauge-label-mini { font-size: 10px; color: var(--text-secondary); margin-top: 4px; }
+        .gauge-subject-name { font-size: 12px; font-weight: 600; margin-top: 8px; }
+        
+        /* Synchrony Score */
+        .sync-score-display { text-align: center; padding: 32px; background: linear-gradient(135deg, var(--purple-dim), var(--cyan-dim)); border-radius: 12px; margin-bottom: 20px; }
+        .sync-score-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; }
+        .sync-score-value { font-size: 56px; font-weight: 700; color: var(--purple); margin: 8px 0; }
+        .sync-score-grade { font-size: 14px; font-weight: 600; color: var(--green); }
+        
+        /* Correlation Graph */
+        .correlation-graph { height: 280px; background: var(--bg-elevated); border-radius: 10px; padding: 20px; }
+        .graph-placeholder { text-align: center; padding: 100px 20px; color: var(--text-secondary); font-size: 11px; }
+        
+        /* Shared CEE List */
+        .shared-cee { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--green); }
+        .shared-cee-time { font-size: 10px; color: var(--text-secondary); }
+        .shared-cee-scores { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; }
+        .shared-cee-score { display: flex; align-items: center; gap: 4px; }
+        .shared-cee-score.client { color: var(--purple); }
+        .shared-cee-score.coach { color: var(--cyan); }
+        
+        /* Cross-Correlation */
+        .corr-stat { display: flex; justify-content: space-between; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
+        .corr-label { font-size: 11px; color: var(--text-secondary); }
+        .corr-value { font-size: 14px; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">🧬</div>
+            <div class="logo-text">
+                <div class="logo-title">NEVEDAL LAB</div>
+                <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
+            </div>
+        </div>
+        <a href="nevedal_lab.html" class="back-btn">← Back to Lab</a>
+    </div>
+
+    <!-- Sub Navigation -->
+    <nav class="sub-nav">
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
+        <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
+        <a href="nevedal_lab_dyad.html" class="sub-nav-item active"><span>👥</span> Dyad Comparisons</a>
+        <a href="nevedal_lab_family.html" class="sub-nav-item"><span>👨‍👩‍👧</span> Family Dynamics</a>
+        <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- LEFT PANEL: Dyad Selection -->
+        <aside>
+            <!-- Current Dyad -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">👥</div> Current Dyad</div>
+                </div>
+                <div class="card-body">
+                    <div class="dyad-pair">
+                        <div class="dyad-title">Selected Pairing</div>
+                        <div class="dyad-members">
+                            <div class="dyad-member client">
+                                <div class="dyad-avatar client">ET</div>
+                                <div class="dyad-name">Emma T.</div>
+                                <div class="dyad-role">Client</div>
+                            </div>
+                            <div class="dyad-connector">⟷</div>
+                            <div class="dyad-member coach">
+                                <div class="dyad-avatar coach">HS</div>
+                                <div class="dyad-name">Hope S.</div>
+                                <div class="dyad-role">Coach</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="session-badge">
+                        📅 Session: Jan 25, 2026 • 2:00 PM
+                    </div>
+                    <div class="session-badge">
+                        ⏱️ Duration: 45 minutes
+                    </div>
+                </div>
+            </div>
+
+            <!-- Other Dyads -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">🔗</div> Other Dyads</div>
+                </div>
+                <div class="card-body">
+                    <div class="dyad-item active">
+                        <div class="dyad-mini-avatar client">ET</div>
+                        <div class="dyad-connector" style="font-size: 14px;">⟷</div>
+                        <div class="dyad-mini-avatar coach">HS</div>
+                        <div class="dyad-item-info">
+                            <div class="dyad-item-names">Emma + Hope</div>
+                            <div class="dyad-item-meta">14 sessions • Sync: 0.83</div>
+                        </div>
+                    </div>
+                    <div class="dyad-item">
+                        <div class="dyad-mini-avatar client">JD</div>
+                        <div class="dyad-connector" style="font-size: 14px;">⟷</div>
+                        <div class="dyad-mini-avatar coach">AT</div>
+                        <div class="dyad-item-info">
+                            <div class="dyad-item-names">John + Alex</div>
+                            <div class="dyad-item-meta">8 sessions • Sync: 0.76</div>
+                        </div>
+                    </div>
+                    <div class="dyad-item">
+                        <div class="dyad-mini-avatar client">SM</div>
+                        <div class="dyad-connector" style="font-size: 14px;">⟷</div>
+                        <div class="dyad-mini-avatar coach">MR</div>
+                        <div class="dyad-item-info">
+                            <div class="dyad-item-names">Sarah + Mia</div>
+                            <div class="dyad-item-meta">23 sessions • Sync: 0.91</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CENTER PANEL: Comparison -->
+        <section>
+            <!-- Side-by-Side Gauges -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">📊</div> Side-by-Side C<sub>emo</sub> Comparison</div>
+                </div>
+                <div class="card-body">
+                    <div class="dual-gauges">
+                        <div class="gauge-wrapper">
+                            <div class="gauge-circle">
+                                <div class="gauge-bg-mini"></div>
+                                <div class="gauge-inner-mini">
+                                    <div class="gauge-value-mini client-color" id="client-c-emo">0.78</div>
+                                    <div class="gauge-label-mini">C<sub>emo</sub></div>
+                                </div>
+                            </div>
+                            <div class="gauge-subject-name" style="color: var(--purple);">Emma T. (Client)</div>
+                        </div>
+                        <div class="gauge-wrapper">
+                            <div class="gauge-circle">
+                                <div class="gauge-bg-mini"></div>
+                                <div class="gauge-inner-mini">
+                                    <div class="gauge-value-mini coach-color" id="coach-c-emo">0.81</div>
+                                    <div class="gauge-label-mini">C<sub>emo</sub></div>
+                                </div>
+                            </div>
+                            <div class="gauge-subject-name" style="color: var(--cyan);">Hope S. (Coach)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Correlation Graph -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">📈</div> Temporal Correlation</div>
+                </div>
+                <div class="card-body">
+                    <div class="correlation-graph">
+                        <div class="graph-placeholder">
+                            Overlaid C<sub>emo</sub> timeline graph<br>
+                            <span style="font-size: 10px; margin-top: 8px; display: block;">Client (purple) vs Coach (cyan) coherence patterns</span>
+                            <span style="font-size: 10px; margin-top: 4px; display: block;">Requires admin_get_dyad_sync handler</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shared CEE Moments -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">🤝</div> Shared CEE Moments</div>
+                    <span style="font-size: 10px; color: var(--green);">3 synchronized events</span>
+                </div>
+                <div class="card-body">
+                    <div class="shared-cee">
+                        <div style="flex: 1;">
+                            <div class="shared-cee-time">00:15:30 into session</div>
+                            <div class="shared-cee-scores">
+                                <div class="shared-cee-score client">Emma: 0.88</div>
+                                <div class="shared-cee-score coach">Hope: 0.86</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="shared-cee">
+                        <div style="flex: 1;">
+                            <div class="shared-cee-time">00:32:18 into session</div>
+                            <div class="shared-cee-scores">
+                                <div class="shared-cee-score client">Emma: 0.91</div>
+                                <div class="shared-cee-score coach">Hope: 0.89</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="shared-cee">
+                        <div style="flex: 1;">
+                            <div class="shared-cee-time">00:41:05 into session</div>
+                            <div class="shared-cee-scores">
+                                <div class="shared-cee-score client">Emma: 0.85</div>
+                                <div class="shared-cee-score coach">Hope: 0.87</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- RIGHT PANEL: Analytics -->
+        <aside>
+            <!-- Synchrony Score -->
+            <div class="card research">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon purple">⚡</div> Synchrony</div>
+                </div>
+                <div class="card-body">
+                    <div class="sync-score-display">
+                        <div class="sync-score-label">Dyad Synchrony Score</div>
+                        <div class="sync-score-value" id="sync-score">0.83</div>
+                        <div class="sync-score-grade" id="sync-grade">EXCELLENT</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cross-Correlation Analysis -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon cyan">📐</div> Cross-Correlation</div>
+                </div>
+                <div class="card-body">
+                    <div class="corr-stat">
+                        <span class="corr-label">Correlation Coefficient</span>
+                        <span class="corr-value" id="corr-coef">0.78</span>
+                    </div>
+                    <div class="corr-stat">
+                        <span class="corr-label">Lag Time</span>
+                        <span class="corr-value" id="lag-time">-2.3s</span>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-top: 8px; padding: 8px; background: var(--bg-elevated); border-radius: 6px;">
+                        Negative lag indicates coach's coherence leads by 2.3 seconds on average
+                    </div>
+                </div>
+            </div>
+
+            <!-- Moment Analysis -->
+            <div class="card research" style="margin-top: 20px;">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🔍</div> Analysis</div>
+                </div>
+                <div class="card-body">
+                    <div class="corr-stat">
+                        <span class="corr-label">High Sync Moments</span>
+                        <span class="corr-value" style="color: var(--green);">78%</span>
+                    </div>
+                    <div class="corr-stat">
+                        <span class="corr-label">Avg Difference</span>
+                        <span class="corr-value">0.03</span>
+                    </div>
+                    <div class="corr-stat">
+                        <span class="corr-label">Peak Sync</span>
+                        <span class="corr-value" style="color: var(--cyan);">0.94</span>
+                    </div>
+                    <div style="font-size: 10px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4;">
+                        This dyad demonstrates exceptional coherence synchrony, with the coach consistently maintaining slightly elevated coherence that appears to guide client breakthrough moments.
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // Authentication check
+        const username = sessionStorage.getItem("username");
+        const password = sessionStorage.getItem("password");
+        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+
+        if (!username) {
+            window.location.href = "index.html";
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let authenticated = false;
+        let currentClient = "CLIENT_EMMA_ID";
+        let currentCoach = "COACH_HOPE_ID";
+
+        function connectWebSocket() {
+            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            
+            ws.onopen = function() {
+                console.log("✅ WebSocket connected");
+                ws.send(JSON.stringify({
+                    type: "login_request",
+                    username: username,
+                    password: password,
+                    expected_role: profile.role || "ADMIN",
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log("📩 Received:", data.type);
+                
+                if (data.type === "login_success" || data.type === "auth_success") {
+                    authenticated = true;
+                    console.log("🔓 Authenticated! Requesting dyad sync...");
+                    requestDyadSync();
+                }
+                
+                if (data.type === "dyad_sync_data") {
+                    displayDyadSync(data);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error("❌ WebSocket error:", error);
+            };
+        }
+
+        function requestDyadSync() {
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({
+                    type: "admin_get_dyad_sync",
+                    client_id: currentClient,
+                    coach_id: currentCoach
+                }));
+                console.log("📡 Requested dyad sync for:", currentClient, currentCoach);
+            }
+        }
+
+        function displayDyadSync(data) {
+            console.log("👥 Displaying dyad sync:", data);
+            
+            // Update synchrony score
+            if (data.synchrony_score !== undefined) {
+                document.getElementById("sync-score").textContent = data.synchrony_score.toFixed(2);
+                
+                // Update grade
+                const score = data.synchrony_score;
+                const gradeEl = document.getElementById("sync-grade");
+                if (score >= 0.85) {
+                    gradeEl.textContent = "EXCELLENT";
+                    gradeEl.style.color = "var(--green)";
+                } else if (score >= 0.70) {
+                    gradeEl.textContent = "GOOD";
+                    gradeEl.style.color = "var(--cyan)";
+                } else if (score >= 0.55) {
+                    gradeEl.textContent = "MODERATE";
+                    gradeEl.style.color = "var(--gold)";
+                } else {
+                    gradeEl.textContent = "DEVELOPING";
+                    gradeEl.style.color = "var(--orange)";
+                }
+            }
+            
+            // Update correlation stats
+            if (data.correlation_coefficient !== undefined) {
+                document.getElementById("corr-coef").textContent = data.correlation_coefficient.toFixed(2);
+            }
+            if (data.lag_time !== undefined) {
+                const lag = data.lag_time;
+                document.getElementById("lag-time").textContent = lag.toFixed(1) + "s";
+            }
+        }
+
+        // Dyad selection
+        document.querySelectorAll(".dyad-item").forEach(item => {
+            item.addEventListener("click", function() {
+                document.querySelectorAll(".dyad-item").forEach(i => i.classList.remove("active"));
+                this.classList.add("active");
+                console.log("👥 Selected dyad");
+                // Would update currentClient and currentCoach here
+                // requestDyadSync();
+            });
+        });
+
+        // Initialize
+        connectWebSocket();
+        
+        console.log("👥 Nevedal Lab Dyad Comparisons initialized");
+    </script>
+</body>
+</html>
