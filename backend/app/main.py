@@ -106,10 +106,27 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"   ⚠️  Drip scheduler failed to start: {e}")
     
+    # Start SkyEye autonomous session engine
+    skyeye_engine = None
+    if getattr(settings, "ENABLE_SKYEYE_SESSIONS", False):
+        try:
+            from app.services.skyeye_session_engine import SkyEyeSessionEngine
+            skyeye_engine = SkyEyeSessionEngine(db_pool)
+            await skyeye_engine.start()
+            app.state.skyeye_engine = skyeye_engine
+            print(f"   ✅ SkyEye session engine started")
+        except Exception as e:
+            print(f"   ⚠️  SkyEye session engine failed to start: {e}")
+    
     yield
     
     # Shutdown
     print("👋 Shutting down...")
+    if skyeye_engine:
+        try:
+            await skyeye_engine.stop()
+        except Exception:
+            pass
     if drip_scheduler:
         drip_scheduler.shutdown()
     if db_pool:

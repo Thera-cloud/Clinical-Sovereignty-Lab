@@ -155,6 +155,39 @@ class Settings(BaseSettings):
     ENABLE_ZOOM: bool = False
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
+    ENABLE_SKYEYE_SESSIONS: bool = False  # Auto session engine (set True when platform APIs connected)
+
+    # -------------------------------------------------------------------------
+    # SkyEye — Social Media Platform Credentials (all optional)
+    # -------------------------------------------------------------------------
+    # TikTok (Content Posting API)
+    TIKTOK_CLIENT_KEY: str = ""
+    TIKTOK_CLIENT_SECRET: str = ""
+
+    # Instagram / Facebook (Meta Graph API — shared credentials)
+    INSTAGRAM_APP_ID: str = ""
+    INSTAGRAM_APP_SECRET: str = ""
+    FACEBOOK_APP_ID: str = ""
+    FACEBOOK_APP_SECRET: str = ""
+
+    # YouTube (Data API v3)
+    YOUTUBE_CLIENT_ID: str = ""
+    YOUTUBE_CLIENT_SECRET: str = ""
+    YOUTUBE_API_KEY: str = ""
+
+    # Reddit
+    REDDIT_CLIENT_ID: str = ""
+    REDDIT_CLIENT_SECRET: str = ""
+    REDDIT_USERNAME: str = ""
+    REDDIT_PASSWORD: str = ""
+
+    # LinkedIn
+    LINKEDIN_CLIENT_ID: str = ""
+    LINKEDIN_CLIENT_SECRET: str = ""
+
+    # Pinterest
+    PINTEREST_APP_ID: str = ""
+    PINTEREST_APP_SECRET: str = ""
 
     # -------------------------------------------------------------------------
     # Zoom (Server-to-Server OAuth + Webhooks)

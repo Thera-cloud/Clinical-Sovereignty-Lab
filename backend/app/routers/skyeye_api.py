@@ -1,13 +1,15 @@
 """
 LITTLE NATE — SkyEye Social Media Hub API
 All endpoints for the social media autonomy dashboard.
-27 endpoints covering: overview, platforms, activity, approvals,
+37+ endpoints covering: overview, platforms, activity, approvals,
 compliance, drip suggestions, history, sessions, pulse, chat,
-live expressions, social interactions, and social memory.
+live expressions, social interactions, social memory,
+content queue, platform connections, moderation, and content generation.
 """
 
 import json
 from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -58,6 +60,23 @@ class SocialMemoryMatch(BaseModel):
     platform_handle: str
     platform: str
     user_id: str
+
+class ContentQueueEntry(BaseModel):
+    platform: str
+    content_text: str
+    content_type: Optional[str] = "post"
+    media_url: Optional[str] = None
+    emotion_context: Optional[str] = None
+    priority: Optional[str] = "normal"
+    scheduled_for: Optional[str] = None  # ISO datetime string
+
+class ContentQueueSchedule(BaseModel):
+    scheduled_for: str  # ISO datetime string
+
+class GeneratePostRequest(BaseModel):
+    platform: str
+    topic: str
+    context: Optional[dict] = None
 
 
 # =============================================================================
@@ -568,11 +587,39 @@ async def post_expression(expression_id: int, body: ExpressionPost, request: Req
     if "error" in formatted:
         raise HTTPException(status_code=404, detail=formatted["error"])
 
-    # Mark as posted (actual social media API call would go here when connected)
+    # Try to post via real platform adapter (Phase 2)
+    post_result = None
+    try:
+        from app.services.platforms import get_adapter
+        adapter = get_adapter(body.platform, request.app.state.db_pool)
+        if adapter:
+            auth_ok = await adapter.authenticate()
+            if auth_ok:
+                post_result = await adapter.post_content(
+                    text=formatted["formatted_post"]
+                )
+    except Exception as e:
+        # Graceful degradation — log but don't fail the request
+        import logging
+        logging.getLogger("skyeye").warning(
+            f"Platform post failed for {body.platform}: {e}"
+        )
+
+    # Mark as posted in DB
     result = await service.mark_as_posted(
         expression_id, body.platform, formatted["formatted_post"]
     )
     result["formatted_post"] = formatted["formatted_post"]
+
+    # Include platform post result if available
+    if post_result:
+        result["platform_post"] = {
+            "success": post_result.success,
+            "post_id": post_result.post_id,
+            "post_url": post_result.post_url,
+            "error": post_result.error,
+        }
+
     return result
 
 
@@ -770,3 +817,250 @@ async def get_unmatched_profiles(
             min_interactions, limit
         )
     return [dict(r) for r in rows]
+
+
+# =============================================================================
+# PHASE 2: CONTENT QUEUE
+# =============================================================================
+
+@router.get("/content-queue")
+async def get_content_queue(
+    request: Request,
+    status: Optional[str] = Query(default=None),
+    platform: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, le=200)
+):
+    """List content queue items with optional filters."""
+    from app.services.skyeye_content_generator import SkyEyeContentGenerator
+    generator = SkyEyeContentGenerator(request.app.state.db_pool)
+    return await generator.get_queue(status=status, platform=platform, limit=limit)
+
+
+@router.post("/content-queue")
+async def add_to_content_queue(body: ContentQueueEntry, request: Request):
+    """Manually add content to the queue."""
+    from app.services.skyeye_content_generator import SkyEyeContentGenerator
+    from app.services.skyeye_expressions import check_content_safety
+
+    # Safety check
+    if not check_content_safety(body.content_text):
+        raise HTTPException(status_code=400, detail="Content failed safety filter")
+
+    generator = SkyEyeContentGenerator(request.app.state.db_pool)
+
+    scheduled = None
+    if body.scheduled_for:
+        try:
+            scheduled = datetime.fromisoformat(body.scheduled_for)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid scheduled_for datetime")
+
+    queue_id = await generator.queue_content(
+        platform=body.platform,
+        content=body.content_text,
+        content_type=body.content_type or "post",
+        emotion_context=body.emotion_context,
+        scheduled_for=scheduled,
+        generated_by="admin",
+        priority=body.priority or "normal",
+    )
+
+    if queue_id is None:
+        raise HTTPException(status_code=500, detail="Failed to queue content")
+
+    return {"id": queue_id, "status": "draft" if not scheduled else "scheduled"}
+
+
+@router.post("/content-queue/{queue_id}/approve")
+async def approve_queue_item(queue_id: int, request: Request):
+    """Approve a content queue item for posting."""
+    from app.services.skyeye_content_generator import SkyEyeContentGenerator
+    generator = SkyEyeContentGenerator(request.app.state.db_pool)
+    success = await generator.update_queue_status(
+        queue_id, "approved", approved_by="admin"
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to approve item")
+    return {"id": queue_id, "status": "approved"}
+
+
+@router.post("/content-queue/{queue_id}/schedule")
+async def schedule_queue_item(queue_id: int, body: ContentQueueSchedule, request: Request):
+    """Schedule a content queue item for a specific time."""
+    try:
+        scheduled = datetime.fromisoformat(body.scheduled_for)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid datetime format")
+
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE skyeye_content_queue
+               SET status = 'scheduled', scheduled_for = $2, updated_at = NOW()
+               WHERE id = $1""",
+            queue_id, scheduled
+        )
+    return {"id": queue_id, "status": "scheduled", "scheduled_for": body.scheduled_for}
+
+
+@router.delete("/content-queue/{queue_id}")
+async def delete_queue_item(queue_id: int, request: Request):
+    """Remove a content queue item."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM skyeye_content_queue WHERE id = $1", queue_id
+        )
+    return {"deleted": True, "id": queue_id}
+
+
+# =============================================================================
+# PHASE 2: PLATFORM CONNECTION STATUS
+# =============================================================================
+
+@router.get("/platform-status")
+async def get_platform_status(request: Request):
+    """Get real-time connection status for all platforms."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        # Get platform configs
+        platforms = await conn.fetch(
+            "SELECT name, display_name, enabled FROM skyeye_platforms ORDER BY tier, name"
+        )
+        # Get token statuses
+        tokens = await conn.fetch(
+            "SELECT platform, status, account_name, last_used, error_message FROM skyeye_platform_tokens"
+        )
+
+    token_map = {t["platform"]: dict(t) for t in tokens}
+    result = []
+    for p in platforms:
+        name = p["name"]
+        tok = token_map.get(name, {})
+        result.append({
+            "platform": name,
+            "display_name": p["display_name"],
+            "enabled": p["enabled"],
+            "connection_status": tok.get("status", "disconnected"),
+            "account_name": tok.get("account_name"),
+            "last_used": tok.get("last_used"),
+            "error": tok.get("error_message"),
+        })
+    return result
+
+
+@router.post("/platforms/{platform}/connect")
+async def initiate_platform_connect(platform: str, request: Request):
+    """
+    Initiate OAuth connection flow for a platform.
+    Returns the OAuth authorization URL to redirect the admin to.
+    """
+    from app.services.platforms import get_adapter
+    adapter = get_adapter(platform, request.app.state.db_pool)
+    if not adapter:
+        raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+    # Build redirect URI
+    base_url = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
+
+    try:
+        oauth_url = await adapter.get_oauth_url(redirect_uri)
+        return {"oauth_url": oauth_url, "redirect_uri": redirect_uri}
+    except NotImplementedError:
+        raise HTTPException(
+            status_code=501,
+            detail=f"OAuth flow not yet implemented for {platform}"
+        )
+
+
+@router.get("/platforms/{platform}/callback")
+async def platform_oauth_callback(
+    platform: str,
+    request: Request,
+    code: str = Query(...),
+    state: Optional[str] = Query(default=None),
+):
+    """
+    OAuth callback handler. Called by the platform after admin authorizes.
+    Exchanges the code for tokens and stores them.
+    """
+    from app.services.platforms import get_adapter
+    adapter = get_adapter(platform, request.app.state.db_pool)
+    if not adapter:
+        raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+    base_url = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
+
+    success = await adapter.handle_oauth_callback(code, redirect_uri)
+    if success:
+        # Redirect back to SkyEye dashboard
+        return RedirectResponse(url="/dashboard/skyeye.html?connected=" + platform)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"OAuth callback failed for {platform}: {adapter.last_error}"
+        )
+
+
+# =============================================================================
+# PHASE 2: MODERATION SUMMARY
+# =============================================================================
+
+@router.get("/moderation-summary")
+async def get_moderation_summary(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168)
+):
+    """Get moderation summary for the last N hours."""
+    from app.services.skyeye_monitor import SkyEyeMonitor
+    monitor = SkyEyeMonitor(request.app.state.db_pool)
+    return await monitor.get_moderation_summary(hours=hours)
+
+
+# =============================================================================
+# PHASE 2: CONTENT GENERATION
+# =============================================================================
+
+@router.post("/generate-post")
+async def generate_post(body: GeneratePostRequest, request: Request):
+    """
+    Manually trigger AI content generation for a topic/platform.
+    Returns the generated content (not yet queued — admin can review first).
+    """
+    from app.services.skyeye_content_generator import SkyEyeContentGenerator
+    generator = SkyEyeContentGenerator(request.app.state.db_pool)
+
+    result = await generator.generate_post(
+        platform=body.platform,
+        topic=body.topic,
+        context=body.context,
+    )
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+
+# =============================================================================
+# PHASE 2: SESSION ENGINE CONTROLS
+# =============================================================================
+
+@router.get("/engine-status")
+async def get_engine_status(request: Request):
+    """Get the session engine's current status."""
+    engine = getattr(request.app.state, "skyeye_engine", None)
+    if not engine:
+        return {
+            "engine_running": False,
+            "state": "disabled",
+            "message": "Session engine not enabled (ENABLE_SKYEYE_SESSIONS=false)",
+        }
+
+    pulse = await engine.get_pulse()
+    return {
+        "engine_running": True,
+        **pulse,
+    }
