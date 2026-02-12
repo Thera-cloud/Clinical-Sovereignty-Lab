@@ -933,15 +933,36 @@ async def get_platform_status(request: Request):
         )
 
     token_map = {t["platform"]: dict(t) for t in tokens}
+
+    # Check which platforms have credentials configured
+    from app.config import settings
+    CREDENTIAL_CHECK = {
+        "tiktok":    ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
+        "instagram": ("INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"),
+        "facebook":  ("FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET"),
+        "youtube":   ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"),
+        "reddit":    ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
+        "linkedin":  ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
+        "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
+    }
+
     result = []
     for p in platforms:
         name = p["name"]
         tok = token_map.get(name, {})
+
+        # Check if API credentials are configured in .env
+        cred_fields = CREDENTIAL_CHECK.get(name, ())
+        has_credentials = all(
+            bool(getattr(settings, f, "")) for f in cred_fields
+        ) if cred_fields else False
+
         result.append({
             "platform": name,
             "display_name": p["display_name"],
             "enabled": p["enabled"],
             "connection_status": tok.get("status", "disconnected"),
+            "has_credentials": has_credentials,
             "account_name": tok.get("account_name"),
             "last_used": tok.get("last_used"),
             "error": tok.get("error_message"),
@@ -953,25 +974,76 @@ async def get_platform_status(request: Request):
 async def initiate_platform_connect(platform: str, request: Request):
     """
     Initiate OAuth connection flow for a platform.
-    Returns the OAuth authorization URL to redirect the admin to.
+    If credentials are configured, returns the OAuth authorization URL.
+    If not, returns the developer portal URL so admin can create an app first.
     """
+    # Developer portal URLs for each platform
+    DEVELOPER_PORTALS = {
+        "tiktok":    "https://developers.tiktok.com/apps/",
+        "instagram": "https://developers.facebook.com/apps/",
+        "facebook":  "https://developers.facebook.com/apps/",
+        "youtube":   "https://console.cloud.google.com/apis/credentials",
+        "reddit":    "https://www.reddit.com/prefs/apps",
+        "linkedin":  "https://www.linkedin.com/developers/apps",
+        "pinterest": "https://developers.pinterest.com/manage/",
+    }
+
+    # Credential requirements per platform
+    CREDENTIAL_FIELDS = {
+        "tiktok":    ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
+        "instagram": ("INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"),
+        "facebook":  ("FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET"),
+        "youtube":   ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"),
+        "reddit":    ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
+        "linkedin":  ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
+        "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
+    }
+
+    portal_url = DEVELOPER_PORTALS.get(platform)
+    if not portal_url:
+        raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+    # Check if credentials are configured
+    from app.config import settings
+    cred_fields = CREDENTIAL_FIELDS.get(platform, ())
+    missing_creds = [f for f in cred_fields if not getattr(settings, f, "")]
+
+    if missing_creds:
+        # Credentials not configured — send admin to developer portal
+        return {
+            "needs_setup": True,
+            "platform": platform,
+            "developer_portal_url": portal_url,
+            "missing_credentials": missing_creds,
+            "message": (
+                f"No API credentials configured for {platform}. "
+                f"Create a developer app first, then add the credentials to .env on the server."
+            ),
+        }
+
+    # Credentials exist — generate real OAuth URL
     from app.services.platforms import get_adapter
     adapter = get_adapter(platform, request.app.state.db_pool)
     if not adapter:
-        raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+        raise HTTPException(status_code=500, detail=f"Failed to load adapter for {platform}")
 
-    # Build redirect URI
     base_url = str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
 
     try:
         oauth_url = await adapter.get_oauth_url(redirect_uri)
-        return {"oauth_url": oauth_url, "redirect_uri": redirect_uri}
+        return {
+            "needs_setup": False,
+            "oauth_url": oauth_url,
+            "redirect_uri": redirect_uri,
+        }
     except NotImplementedError:
-        raise HTTPException(
-            status_code=501,
-            detail=f"OAuth flow not yet implemented for {platform}"
-        )
+        return {
+            "needs_setup": True,
+            "platform": platform,
+            "developer_portal_url": portal_url,
+            "message": f"OAuth flow not yet implemented for {platform}. Visit the developer portal to manage your app.",
+        }
 
 
 @router.get("/platforms/{platform}/callback")

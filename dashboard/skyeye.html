@@ -1640,19 +1640,28 @@ async function loadPlatformConnections() {
 
   el.innerHTML = data.map(p => {
     const connected = p.connection_status === 'connected';
-    const statusDot = connected
-      ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 6px var(--green)"></span>'
-      : '<span style="width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;opacity:0.5"></span>';
-    const connectBtn = !connected && p.enabled
-      ? `<button class="btn btn-ghost" style="font-size:10px;padding:2px 6px;margin-left:auto" onclick="connectPlatform('${p.platform}')">Connect</button>`
-      : (connected ? '<span style="font-size:10px;color:var(--green);margin-left:auto">Connected</span>' : '');
+    const hasCreds = p.has_credentials;
+
+    // Three states: connected (green), has credentials but not connected (amber), no credentials (red)
+    let statusDot, actionArea;
+
+    if (connected) {
+      statusDot = '<span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 6px var(--green)"></span>';
+      actionArea = `<span style="font-size:10px;color:var(--green);margin-left:auto">${p.account_name || 'Connected'}</span>`;
+    } else if (hasCreds) {
+      statusDot = '<span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;box-shadow:0 0 4px var(--amber)"></span>';
+      actionArea = `<button class="btn btn-ghost" style="font-size:10px;padding:2px 6px;margin-left:auto;color:var(--amber);border-color:rgba(255,179,0,0.3)" onclick="connectPlatform('${p.platform}')">Authorize</button>`;
+    } else {
+      statusDot = '<span style="width:8px;height:8px;border-radius:50%;background:var(--t3);display:inline-block;opacity:0.4"></span>';
+      actionArea = `<button class="btn btn-ghost" style="font-size:10px;padding:2px 6px;margin-left:auto" onclick="connectPlatform('${p.platform}')">Setup</button>`;
+    }
 
     return `
       <div class="plat-status-item" style="padding:10px 12px">
         ${statusDot}
         <span class="plat-s-icon">${platIcon(p.platform)}</span>
         <span style="font-size:12px">${p.display_name}</span>
-        ${connectBtn}
+        ${actionArea}
       </div>
     `;
   }).join('');
@@ -1660,7 +1669,22 @@ async function loadPlatformConnections() {
 
 async function connectPlatform(platform) {
   const data = await apiPost(`/api/skyeye/platforms/${platform}/connect`, {});
-  if (data && data.oauth_url) {
+  if (!data) {
+    alert(`Failed to connect ${platform}. Check the server logs.`);
+    return;
+  }
+
+  if (data.needs_setup) {
+    // No credentials configured — open the developer portal
+    const go = confirm(
+      `${data.message || 'API credentials not configured for ' + platform + '.'}\n\n` +
+      `Open the ${platform} developer portal to create an app?`
+    );
+    if (go && data.developer_portal_url) {
+      window.open(data.developer_portal_url, '_blank');
+    }
+  } else if (data.oauth_url) {
+    // Credentials exist — open OAuth authorization page
     window.open(data.oauth_url, '_blank', 'width=600,height=700');
   }
 }
