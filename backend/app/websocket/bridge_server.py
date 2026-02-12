@@ -1629,7 +1629,12 @@ def register_new_user(data: dict) -> Tuple[bool, str]:
         "updated_at": str(datetime.datetime.now()),
         
         # Onboarding tutorial
-        "onboarding_completed": False
+        "onboarding_completed": False,
+        
+        # Social media handle (SkyEye social-to-platform funnel)
+        # If provided, matched against skyeye_social_memory on signup
+        "social_handle": data.get("social_handle", ""),
+        "social_platform": data.get("social_platform", ""),
     }
     
     # Check if this is a beta registration (valid invite code)
@@ -1737,6 +1742,23 @@ def register_new_user(data: dict) -> Tuple[bool, str]:
         # Initialize metrics for new user
         metrics_engine = MetricsEngine(VAULT_ROOT)
         metrics_engine.initialize_metrics(new_profile)
+        
+        # SkyEye social-to-platform funnel: match social handle to social memory
+        # If the user provided a social media handle, attempt to match it so
+        # Little Nate can recall prior social interactions in the first session
+        social_handle = data.get("social_handle", "").strip()
+        social_platform = data.get("social_platform", "").strip()
+        if social_handle:
+            try:
+                import asyncio
+                from app.services.skyeye_session_engine import SkyEyeSessionEngine  # noqa: F401
+                # Fire-and-forget: non-blocking match attempt
+                # The actual match happens when the DB pool is available via the API
+                # Store the intent in the profile for the first session to pick up
+                new_profile["social_memory_pending_match"] = True
+                print(f">>> [REG] Social handle provided: @{social_handle} on {social_platform} — pending match")
+            except Exception as e:
+                print(f">>> [REG] Social memory match setup note: {e}")
         
         return True, "REGISTRATION_SUCCESS"
     

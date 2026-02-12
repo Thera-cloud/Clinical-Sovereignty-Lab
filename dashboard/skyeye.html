@@ -329,6 +329,11 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="nav-item" data-tab="expressions-wall" onclick="switchTab('expressions-wall',this)">
       <span class="nav-icon">✨</span><span class="nav-label">Expressions Wall</span>
     </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" data-tab="content-queue" onclick="switchTab('content-queue',this)">
+      <span class="nav-icon">📝</span><span class="nav-label">Content Queue</span>
+      <span class="nav-badge" id="queue-count" style="display:none">0</span>
+    </div>
   </aside>
 
   <!-- MAIN CONTENT -->
@@ -548,7 +553,115 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </div>
     </section>
 
+    <!-- TAB 10: CONTENT QUEUE -->
+    <section class="tab-content" id="tab-content-queue">
+      <!-- Queue Stats Banner -->
+      <div class="status-banner active-state mb-24" id="queue-banner">
+        <div style="display:flex;align-items:center;gap:20px;flex:1;flex-wrap:wrap">
+          <div>
+            <div class="metric-label">Drafts</div>
+            <div style="font-family:var(--mono);font-size:24px" id="queue-draft-count">--</div>
+          </div>
+          <div>
+            <div class="metric-label">Scheduled</div>
+            <div style="font-family:var(--mono);font-size:24px" id="queue-scheduled-count">--</div>
+          </div>
+          <div>
+            <div class="metric-label">Posted Today</div>
+            <div style="font-family:var(--mono);font-size:24px" id="queue-posted-count">--</div>
+          </div>
+          <div style="margin-left:auto">
+            <button class="btn btn-primary btn-sm" onclick="openGeneratePost()">Generate Post</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Platform Connection Status -->
+      <div class="glass mb-24">
+        <div class="glass-header">
+          <div class="glass-title">🔗 Platform Connections</div>
+        </div>
+        <div class="glass-body">
+          <div class="plat-status-grid" id="queue-platform-status">
+            <div class="loader"><div class="spinner"></div> Loading...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Queue Items -->
+      <div class="glass mb-24">
+        <div class="glass-header">
+          <div class="glass-title">📋 Content Queue</div>
+          <div style="display:flex;gap:8px">
+            <select id="queue-filter-status" onchange="loadContentQueue()" style="background:var(--bg2);border:1px solid var(--bdr);color:var(--t1);padding:4px 8px;border-radius:6px;font-size:12px">
+              <option value="">All Status</option>
+              <option value="draft">Drafts</option>
+              <option value="approved">Approved</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="posted">Posted</option>
+              <option value="failed">Failed</option>
+            </select>
+            <select id="queue-filter-platform" onchange="loadContentQueue()" style="background:var(--bg2);border:1px solid var(--bdr);color:var(--t1);padding:4px 8px;border-radius:6px;font-size:12px">
+              <option value="">All Platforms</option>
+              <option value="tiktok">TikTok</option>
+              <option value="instagram">Instagram</option>
+              <option value="youtube">YouTube</option>
+              <option value="reddit">Reddit</option>
+              <option value="linkedin">LinkedIn</option>
+              <option value="facebook">Facebook</option>
+              <option value="pinterest">Pinterest</option>
+            </select>
+          </div>
+        </div>
+        <div class="glass-body" id="queue-items" style="padding:0">
+          <div class="loader"><div class="spinner"></div> Loading content queue...</div>
+        </div>
+      </div>
+
+      <!-- Moderation Summary -->
+      <div class="glass">
+        <div class="glass-header">
+          <div class="glass-title">🛡️ Moderation Summary (24h)</div>
+        </div>
+        <div class="glass-body" id="queue-moderation">
+          <div class="loader"><div class="spinner"></div> Loading...</div>
+        </div>
+      </div>
+    </section>
+
   </main>
+</div>
+
+<!-- Generate Post Modal -->
+<div id="generate-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center">
+  <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:16px;padding:28px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto">
+    <div style="font-family:var(--serif);font-size:20px;color:var(--t1);margin-bottom:16px">Generate Post</div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--t2);display:block;margin-bottom:4px">Platform</label>
+      <select id="gen-platform" style="width:100%;background:var(--bg1);border:1px solid var(--bdr);color:var(--t1);padding:8px 12px;border-radius:8px;font-size:13px">
+        <option value="tiktok">TikTok</option>
+        <option value="instagram">Instagram</option>
+        <option value="youtube">YouTube</option>
+        <option value="reddit">Reddit</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="facebook">Facebook</option>
+        <option value="pinterest">Pinterest</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--t2);display:block;margin-bottom:4px">Topic / Inspiration</label>
+      <textarea id="gen-topic" rows="3" style="width:100%;background:var(--bg1);border:1px solid var(--bdr);color:var(--t1);padding:8px 12px;border-radius:8px;font-size:13px;resize:vertical" placeholder="Something meaningful from today..."></textarea>
+    </div>
+    <div id="gen-result" style="display:none;margin-bottom:12px">
+      <label style="font-size:12px;color:var(--t2);display:block;margin-bottom:4px">Generated Content</label>
+      <div id="gen-content" style="background:var(--bg1);border:1px solid var(--bdr);padding:12px;border-radius:8px;font-size:13px;color:var(--t1);white-space:pre-wrap;max-height:200px;overflow-y:auto"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="closeGeneratePost()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="gen-btn" onclick="doGeneratePost()">Generate</button>
+      <button class="btn btn-sm" id="gen-queue-btn" style="display:none;background:rgba(0,229,160,0.15);color:var(--green);border:1px solid rgba(0,229,160,0.2)" onclick="queueGeneratedPost()">Add to Queue</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -722,6 +835,7 @@ function switchTab(tabId, el) {
     case 'history': loadHistory(); break;
     case 'big-nate-chat': loadChat(); break;
     case 'expressions-wall': loadExpressions(); break;
+    case 'content-queue': loadContentQueueTab(); break;
   }
 }
 
@@ -855,6 +969,7 @@ async function loadRecentActivity() {
 
 async function loadPlatformStatus() {
   const data = await apiFetch('/api/skyeye/platforms');
+  const connData = await apiFetch('/api/skyeye/platform-status');
   const el = document.getElementById('cc-platforms');
   if (!el) return;
 
@@ -863,14 +978,24 @@ async function loadPlatformStatus() {
     return;
   }
 
+  // Build connection lookup
+  const connMap = {};
+  if (connData) connData.forEach(c => connMap[c.platform] = c.connection_status);
+
   el.innerHTML = data.map(p => {
-    const mode = (p.mode || 'observation').toLowerCase();
+    const name = p.name || p.platform;
+    const mode = (p.mode || p.control_mode || 'observation').toLowerCase();
     const modeLabel = mode.includes('full') ? 'Full Auto' : mode.includes('approval') ? 'Approval' : 'Observe';
     const modeColor = mode.includes('full') ? 'var(--green)' : mode.includes('approval') ? 'var(--amber)' : 'var(--t3)';
+    const connected = connMap[name] === 'connected';
+    const connDot = connected
+      ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 4px var(--green)"></span>'
+      : '<span style="width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block;opacity:0.4"></span>';
     return `
       <div class="plat-status-item">
-        <span class="plat-s-icon">${platIcon(p.name || p.platform)}</span>
-        <span style="font-size:12px">${p.name || p.platform}</span>
+        ${connDot}
+        <span class="plat-s-icon">${platIcon(name)}</span>
+        <span style="font-size:12px">${name}</span>
         <span class="plat-s-mode" style="color:${modeColor}">${modeLabel}</span>
       </div>
     `;
@@ -1410,6 +1535,237 @@ function togglePublicPreview() {
     feedWrap.classList.remove('public-preview');
     pendingSection.style.display = '';
   }
+}
+
+// =============================================================================
+// TAB 10: CONTENT QUEUE
+// =============================================================================
+
+async function loadContentQueueTab() {
+  loadContentQueue();
+  loadPlatformConnections();
+  loadModerationSummary();
+}
+
+async function loadContentQueue() {
+  const statusFilter = document.getElementById('queue-filter-status')?.value || '';
+  const platformFilter = document.getElementById('queue-filter-platform')?.value || '';
+
+  let url = '/api/skyeye/content-queue?limit=50';
+  if (statusFilter) url += `&status=${statusFilter}`;
+  if (platformFilter) url += `&platform=${platformFilter}`;
+
+  const data = await apiFetch(url);
+  const el = document.getElementById('queue-items');
+  if (!el) return;
+
+  if (!data || !data.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">📝</div><div class="empty-text">Content queue is empty</div></div>';
+    // Update counts
+    document.getElementById('queue-draft-count').textContent = '0';
+    document.getElementById('queue-scheduled-count').textContent = '0';
+    document.getElementById('queue-posted-count').textContent = '0';
+    return;
+  }
+
+  // Count by status
+  const drafts = data.filter(i => i.status === 'draft').length;
+  const scheduled = data.filter(i => i.status === 'scheduled').length;
+  const posted = data.filter(i => i.status === 'posted').length;
+  document.getElementById('queue-draft-count').textContent = drafts;
+  document.getElementById('queue-scheduled-count').textContent = scheduled;
+  document.getElementById('queue-posted-count').textContent = posted;
+
+  // Update badge
+  const badge = document.getElementById('queue-count');
+  if (badge && drafts > 0) { badge.textContent = drafts; badge.style.display = ''; }
+  else if (badge) { badge.style.display = 'none'; }
+
+  el.innerHTML = data.map(item => {
+    const statusColor = {
+      draft: 'var(--t3)', approved: 'var(--green)', scheduled: 'var(--blue)',
+      posted: 'var(--green)', failed: 'var(--red)', rejected: 'var(--red)'
+    }[item.status] || 'var(--t3)';
+
+    const actions = [];
+    if (item.status === 'draft') {
+      actions.push(`<button class="btn btn-sm" style="background:rgba(0,229,160,0.1);color:var(--green);border:1px solid rgba(0,229,160,0.2)" onclick="approveQueueItem(${item.id})">Approve</button>`);
+      actions.push(`<button class="btn btn-ghost btn-sm" onclick="deleteQueueItem(${item.id})">Delete</button>`);
+    }
+    if (item.status === 'approved') {
+      actions.push(`<span style="font-size:11px;color:var(--green)">Ready to post</span>`);
+    }
+    if (item.post_url) {
+      actions.push(`<a href="${item.post_url}" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:none">View Post ↗</a>`);
+    }
+
+    return `
+      <div style="padding:14px 16px;border-bottom:1px solid var(--bdr);display:flex;gap:12px;align-items:flex-start">
+        <span style="font-size:18px;flex-shrink:0">${platIcon(item.platform)}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:12px;font-weight:600;color:var(--t1)">${item.platform}</span>
+            <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.05);color:${statusColor};border:1px solid ${statusColor}33">${item.status}</span>
+            ${item.content_type !== 'post' ? `<span style="font-size:10px;color:var(--t3)">${item.content_type}</span>` : ''}
+            ${item.priority === 'high' || item.priority === 'urgent' ? `<span style="font-size:10px;color:var(--red)">● ${item.priority}</span>` : ''}
+          </div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.5;white-space:pre-wrap;max-height:80px;overflow:hidden">${(item.content_text || '').substring(0, 200)}${(item.content_text || '').length > 200 ? '...' : ''}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <span style="font-size:10px;color:var(--t3)">${timeAgo(item.created_at)}</span>
+            ${item.scheduled_for ? `<span style="font-size:10px;color:var(--blue)">Scheduled: ${new Date(item.scheduled_for).toLocaleString()}</span>` : ''}
+            ${actions.join(' ')}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function approveQueueItem(id) {
+  await apiPost(`/api/skyeye/content-queue/${id}/approve`, {});
+  loadContentQueue();
+}
+
+async function deleteQueueItem(id) {
+  try {
+    await fetch(`${API}/api/skyeye/content-queue/${id}`, { method: 'DELETE' });
+    loadContentQueue();
+  } catch (e) { console.warn('Delete failed:', e); }
+}
+
+async function loadPlatformConnections() {
+  const data = await apiFetch('/api/skyeye/platform-status');
+  const el = document.getElementById('queue-platform-status');
+  if (!el || !data) return;
+
+  el.innerHTML = data.map(p => {
+    const connected = p.connection_status === 'connected';
+    const statusDot = connected
+      ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 6px var(--green)"></span>'
+      : '<span style="width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;opacity:0.5"></span>';
+    const connectBtn = !connected && p.enabled
+      ? `<button class="btn btn-ghost" style="font-size:10px;padding:2px 6px;margin-left:auto" onclick="connectPlatform('${p.platform}')">Connect</button>`
+      : (connected ? '<span style="font-size:10px;color:var(--green);margin-left:auto">Connected</span>' : '');
+
+    return `
+      <div class="plat-status-item" style="padding:10px 12px">
+        ${statusDot}
+        <span class="plat-s-icon">${platIcon(p.platform)}</span>
+        <span style="font-size:12px">${p.display_name}</span>
+        ${connectBtn}
+      </div>
+    `;
+  }).join('');
+}
+
+async function connectPlatform(platform) {
+  const data = await apiPost(`/api/skyeye/platforms/${platform}/connect`, {});
+  if (data && data.oauth_url) {
+    window.open(data.oauth_url, '_blank', 'width=600,height=700');
+  }
+}
+
+async function loadModerationSummary() {
+  const data = await apiFetch('/api/skyeye/moderation-summary?hours=24');
+  const el = document.getElementById('queue-moderation');
+  if (!el) return;
+
+  if (!data || data.total_actions === 0) {
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--t3);font-size:13px">No moderation actions in the last 24 hours</div>';
+    return;
+  }
+
+  const types = data.by_type || {};
+  const items = Object.entries(types).map(([type, count]) => {
+    const label = type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const isRed = ['content_deleted', 'content_escalated', 'safety_violation', 'bot_swarm', 'coordinated_abuse'].includes(type);
+    const color = isRed ? 'var(--red)' : 'var(--amber)';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr)">
+      <span style="font-size:12px;color:var(--t2)">${label}</span>
+      <span style="font-size:13px;font-family:var(--mono);color:${color}">${count}</span>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:16px">
+      <div style="text-align:center;flex:1">
+        <div style="font-size:24px;font-family:var(--mono);color:var(--t1)">${data.total_actions}</div>
+        <div style="font-size:11px;color:var(--t3)">Total Actions</div>
+      </div>
+      <div style="text-align:center;flex:1">
+        <div style="font-size:24px;font-family:var(--mono);color:var(--red)">${data.deletions || 0}</div>
+        <div style="font-size:11px;color:var(--t3)">Deletions</div>
+      </div>
+      <div style="text-align:center;flex:1">
+        <div style="font-size:24px;font-family:var(--mono);color:var(--amber)">${data.bots_detected || 0}</div>
+        <div style="font-size:11px;color:var(--t3)">Bots Detected</div>
+      </div>
+      <div style="text-align:center;flex:1">
+        <div style="font-size:24px;font-family:var(--mono);color:var(--purple)">${data.escalations || 0}</div>
+        <div style="font-size:11px;color:var(--t3)">Escalations</div>
+      </div>
+    </div>
+    ${items}
+  `;
+}
+
+// =============================================================================
+// GENERATE POST MODAL
+// =============================================================================
+
+let lastGeneratedContent = null;
+let lastGeneratedPlatform = null;
+
+function openGeneratePost() {
+  const modal = document.getElementById('generate-modal');
+  if (modal) modal.style.display = 'flex';
+  document.getElementById('gen-result').style.display = 'none';
+  document.getElementById('gen-queue-btn').style.display = 'none';
+  document.getElementById('gen-btn').disabled = false;
+  document.getElementById('gen-btn').textContent = 'Generate';
+}
+
+function closeGeneratePost() {
+  const modal = document.getElementById('generate-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function doGeneratePost() {
+  const platform = document.getElementById('gen-platform').value;
+  const topic = document.getElementById('gen-topic').value.trim();
+  if (!topic) return;
+
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+
+  const result = await apiPost('/api/skyeye/generate-post', { platform, topic });
+
+  if (result && result.content) {
+    document.getElementById('gen-content').textContent = result.content;
+    document.getElementById('gen-result').style.display = 'block';
+    document.getElementById('gen-queue-btn').style.display = '';
+    lastGeneratedContent = result.content;
+    lastGeneratedPlatform = platform;
+    btn.textContent = 'Regenerate';
+    btn.disabled = false;
+  } else {
+    btn.textContent = 'Failed — Try Again';
+    btn.disabled = false;
+  }
+}
+
+async function queueGeneratedPost() {
+  if (!lastGeneratedContent || !lastGeneratedPlatform) return;
+
+  await apiPost('/api/skyeye/content-queue', {
+    platform: lastGeneratedPlatform,
+    content_text: lastGeneratedContent,
+    content_type: 'post',
+  });
+
+  closeGeneratePost();
+  if (currentTab === 'content-queue') loadContentQueue();
 }
 
 // =============================================================================
