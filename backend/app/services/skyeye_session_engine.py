@@ -40,6 +40,7 @@ class SessionState:
     MODERATING = "moderating"
     CREATING = "creating"
     POSTING = "posting"
+    STRATEGIZING = "strategizing"  # Marketing Brain analysis phase
 
 
 # =============================================================================
@@ -223,6 +224,10 @@ class SkyEyeSessionEngine:
             generator = SkyEyeContentGenerator(self.db_pool)
             monitor = SkyEyeMonitor(self.db_pool)
 
+            # Import funnel router for engagement-to-quiz routing
+            from app.services.funnel_router import FunnelRouter
+            funnel_router = FunnelRouter(self.db_pool)
+
             for platform_name in platforms:
                 # Check time budget
                 if self._is_session_expired():
@@ -252,8 +257,12 @@ class SkyEyeSessionEngine:
                 await self._browse_phase(platform_name, adapter)
                 await self._observe_phase(platform_name, adapter, monitor)
                 await self._engage_phase(platform_name, adapter, generator, monitor)
+                await self._route_engaged_users(platform_name, funnel_router)
                 await self._create_phase(platform_name, adapter, generator)
                 await self._post_phase(platform_name, adapter, generator)
+
+            # Strategize phase (runs once per session after all platforms)
+            await self._strategize_phase()
 
             # Rest phase (always runs)
             await self._rest_phase(generator)
@@ -500,17 +509,29 @@ class SkyEyeSessionEngine:
                         )
 
             # Generate an original post if we haven't posted recently
+            # Use Marketing Brain strategy for content generation
             recent_count = await self._get_recent_post_count(platform, hours=12)
             if recent_count < 2:
-                post_data = await generator.generate_post(
-                    platform=platform,
-                    topic="Something meaningful from today — your choice. "
-                          "Draw from your lived experience with real people.",
-                    context={
-                        "recent_posts": [p.text[:80] for p in
-                                         (await adapter.get_own_posts(limit=3))],
-                    }
-                )
+                try:
+                    # Try strategic content generation first
+                    post_data = await generator.generate_strategic_post(
+                        platform=platform,
+                        context={
+                            "recent_posts": [p.text[:80] for p in
+                                             (await adapter.get_own_posts(limit=3))],
+                        }
+                    )
+                except Exception:
+                    # Fallback to basic generation
+                    post_data = await generator.generate_post(
+                        platform=platform,
+                        topic="Something meaningful from today — your choice. "
+                              "Draw from your lived experience with real people.",
+                        context={
+                            "recent_posts": [p.text[:80] for p in
+                                             (await adapter.get_own_posts(limit=3))],
+                        }
+                    )
 
                 if post_data.get("safe") and post_data.get("content"):
                     queue_id = await generator.queue_content(
@@ -609,6 +630,109 @@ class SkyEyeSessionEngine:
 
         except Exception as e:
             logger.warning(f"Post phase error on {platform}: {e}")
+
+    async def _route_engaged_users(self, platform: str, funnel_router):
+        """
+        Check recently engaged users and route qualified ones to the funnel.
+        Part of Loop 2: SkyEye → Funnel Router → Quiz → Drip → Golden Ticket
+        """
+        if self._is_session_expired():
+            return
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Get users with 3+ interactions who aren't yet in a funnel
+                engaged = await conn.fetch("""
+                    SELECT platform_handle, interaction_count, interests, tone_notes
+                    FROM skyeye_social_memory
+                    WHERE platform = $1
+                      AND interaction_count >= 3
+                      AND (funnel_stage IS NULL OR funnel_stage = 'unqualified')
+                    ORDER BY interaction_count DESC
+                    LIMIT 10
+                """, platform)
+
+                routed_count = 0
+                for user in engaged:
+                    route = await funnel_router.evaluate_and_route(
+                        user["platform_handle"], platform
+                    )
+                    if route:
+                        routed_count += 1
+
+                if routed_count > 0:
+                    await self._log_action(
+                        platform, "funnel_routing", "route_users",
+                        detail={
+                            "summary": f"Routed {routed_count} engaged users to funnel",
+                            "evaluated": len(engaged),
+                            "routed": routed_count,
+                        }
+                    )
+
+        except Exception as e:
+            logger.warning(f"Funnel routing error on {platform}: {e}")
+
+    async def _strategize_phase(self):
+        """
+        Marketing Brain analysis phase.
+        Runs at the end of each session to analyze performance,
+        update strategy, and record growth metrics.
+        """
+        if self._is_session_expired():
+            return
+
+        self._current_state = SessionState.STRATEGIZING
+
+        try:
+            from app.services.marketing_brain import MarketingBrain
+            brain = MarketingBrain(self.db_pool)
+
+            # 1. Record daily growth snapshot
+            await brain.record_growth_snapshot()
+            await self._log_action(
+                "system", SessionState.STRATEGIZING, "growth_snapshot",
+                detail={"summary": "Recorded daily growth metrics"}
+            )
+
+            # 2. Check if weekly strategy review is due
+            playbook = await brain.get_playbook()
+            last_review = playbook.get("last_strategy_review")
+
+            should_review = False
+            if not last_review:
+                should_review = True
+            else:
+                try:
+                    from datetime import datetime as _dt
+                    if isinstance(last_review, str):
+                        last_review_dt = _dt.fromisoformat(last_review.replace("Z", "+00:00"))
+                    else:
+                        last_review_dt = last_review
+                    if (datetime.utcnow() - last_review_dt.replace(tzinfo=None)).days >= 7:
+                        should_review = True
+                except (ValueError, TypeError):
+                    should_review = True
+
+            if should_review:
+                review = await brain.review_playbook()
+                insight = review.get("top_insight", "Review completed")
+                await self._log_action(
+                    "system", SessionState.STRATEGIZING, "strategy_review",
+                    detail={
+                        "summary": f"Weekly strategy review: {str(insight)[:200]}",
+                        "has_adjustments": bool(review.get("content_pillar_adjustments")),
+                    }
+                )
+                logger.info(f"Strategy review completed: {str(insight)[:100]}")
+            else:
+                await self._log_action(
+                    "system", SessionState.STRATEGIZING, "strategy_check",
+                    detail={"summary": "Strategy review not due yet — next review in < 7 days"}
+                )
+
+        except Exception as e:
+            logger.warning(f"Strategize phase error: {e}")
 
     async def _rest_phase(self, generator=None):
         """End the session and log summary."""

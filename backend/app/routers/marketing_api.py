@@ -1,0 +1,262 @@
+"""
+LITTLE NATE — Marketing Brain API
+Endpoints for the marketing playbook, funnel stats, actions, growth, and quiz factory.
+"""
+
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
+
+router = APIRouter(prefix="/api/marketing", tags=["marketing"])
+
+
+# =============================================================================
+# REQUEST MODELS
+# =============================================================================
+
+class PlaybookUpdate(BaseModel):
+    content_pillars: Optional[list] = None
+    target_audiences: Optional[dict] = None
+    content_mix: Optional[dict] = None
+    posting_schedule: Optional[dict] = None
+    regional_focus: Optional[dict] = None
+    collaboration_targets: Optional[list] = None
+
+
+class CampaignProposal(BaseModel):
+    target_audience: str
+    objective: str
+    platform: str = "all"
+
+
+class ActionDecision(BaseModel):
+    decision: str  # approved, rejected, deferred
+    reason: Optional[str] = None
+
+
+class QuizGenRequest(BaseModel):
+    audience: str  # individual, coach, family, custom
+    topic: str
+    question_count: int = 8
+    objective: Optional[str] = None
+
+
+class ShowcaseRequest(BaseModel):
+    scenario: str  # session, coach_demo, family, platform_overview
+    format: str = "html"  # html, data
+
+
+# =============================================================================
+# PLAYBOOK ENDPOINTS
+# =============================================================================
+
+@router.get("/playbook")
+async def get_playbook(request: Request):
+    """Get the current marketing playbook."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+    return await brain.get_playbook()
+
+
+@router.put("/playbook")
+async def update_playbook(updates: PlaybookUpdate, request: Request):
+    """Update the marketing playbook."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+    data = {k: v for k, v in updates.dict().items() if v is not None}
+    success = await brain.update_playbook(data)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update playbook")
+    return {"status": "updated"}
+
+
+@router.post("/playbook/review")
+async def review_playbook(request: Request):
+    """Run a full strategy review (AI-powered)."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+    return await brain.review_playbook()
+
+
+# =============================================================================
+# PERFORMANCE & ANALYTICS
+# =============================================================================
+
+@router.get("/results")
+async def get_results(request: Request):
+    """Get performance evaluation across all channels."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+    return await brain.evaluate_results()
+
+
+@router.get("/funnel-stats")
+async def get_funnel_stats(request: Request, days: int = Query(default=7, ge=1, le=90)):
+    """Get funnel conversion statistics."""
+    from app.services.funnel_router import FunnelRouter
+    router_svc = FunnelRouter(request.app.state.db_pool)
+    return await router_svc.get_funnel_stats(days=days)
+
+
+@router.get("/growth")
+async def get_growth_snapshots(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    snapshot_type: str = Query(default="daily")
+):
+    """Get growth snapshots for trend analysis."""
+    try:
+        async with request.app.state.db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM growth_snapshots
+                WHERE snapshot_type = $1
+                  AND snapshot_date > CURRENT_DATE - $2
+                ORDER BY snapshot_date DESC
+            """, snapshot_type, days)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ACTION MANAGEMENT (Command Protocol)
+# =============================================================================
+
+@router.get("/actions")
+async def get_actions(
+    request: Request,
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100)
+):
+    """Get marketing actions with optional status filter."""
+    try:
+        async with request.app.state.db_pool.acquire() as conn:
+            if status:
+                rows = await conn.fetch("""
+                    SELECT * FROM marketing_actions
+                    WHERE status = $1
+                    ORDER BY proposed_at DESC LIMIT $2
+                """, status, limit)
+            else:
+                rows = await conn.fetch("""
+                    SELECT * FROM marketing_actions
+                    ORDER BY proposed_at DESC LIMIT $1
+                """, limit)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/actions/{action_id}/decide")
+async def decide_action(action_id: int, decision: ActionDecision, request: Request):
+    """Approve or reject a marketing action."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+
+    if decision.decision == "approved":
+        success = await brain.approve_action(action_id)
+    elif decision.decision == "rejected":
+        success = await brain.reject_action(action_id, reason=decision.reason or "")
+    elif decision.decision == "deferred":
+        try:
+            async with request.app.state.db_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE marketing_actions SET status = 'proposed'
+                    WHERE id = $1
+                """, action_id)
+            success = True
+        except Exception:
+            success = False
+    else:
+        raise HTTPException(status_code=400, detail="Invalid decision")
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Action update failed")
+    return {"status": decision.decision, "action_id": action_id}
+
+
+@router.post("/actions/propose-campaign")
+async def propose_campaign(proposal: CampaignProposal, request: Request):
+    """Manually propose a new campaign."""
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(request.app.state.db_pool)
+    return await brain.propose_campaign(
+        target_audience=proposal.target_audience,
+        objective=proposal.objective,
+        platform=proposal.platform,
+    )
+
+
+# =============================================================================
+# QUIZ FACTORY
+# =============================================================================
+
+@router.post("/quiz-factory/generate")
+async def generate_quiz(gen_request: QuizGenRequest, request: Request):
+    """Generate a new quiz using AI."""
+    from app.services.quiz_factory import QuizFactory
+    factory = QuizFactory(request.app.state.db_pool)
+    return await factory.create_quiz(
+        audience=gen_request.audience,
+        topic=gen_request.topic,
+        question_count=gen_request.question_count,
+        objective=gen_request.objective,
+    )
+
+
+@router.post("/quiz-factory/clone/{quiz_id}")
+async def clone_quiz(quiz_id: int, request: Request, audience: str = Query(...)):
+    """Clone an existing quiz and adapt it for a new audience."""
+    from app.services.quiz_factory import QuizFactory
+    factory = QuizFactory(request.app.state.db_pool)
+    return await factory.clone_and_adapt(quiz_id, audience)
+
+
+@router.get("/quiz-factory/performance/{quiz_id}")
+async def quiz_performance(quiz_id: int, request: Request):
+    """Get quiz performance analytics."""
+    from app.services.quiz_factory import QuizFactory
+    factory = QuizFactory(request.app.state.db_pool)
+    return await factory.analyze_quiz_performance(quiz_id)
+
+
+# =============================================================================
+# SHOWCASE GENERATOR
+# =============================================================================
+
+@router.post("/showcase/generate")
+async def generate_showcase(showcase_req: ShowcaseRequest, request: Request):
+    """Generate a demo showcase for platform marketing."""
+    from app.services.showcase_generator import ShowcaseGenerator
+    gen = ShowcaseGenerator(request.app.state.db_pool)
+
+    if showcase_req.scenario == "session":
+        return await gen.generate_session_showcase()
+    elif showcase_req.scenario == "coach_demo":
+        return await gen.generate_coach_demo()
+    elif showcase_req.scenario == "family":
+        return await gen.generate_family_showcase()
+    elif showcase_req.scenario == "platform_overview":
+        return await gen.generate_platform_overview()
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown scenario: {showcase_req.scenario}")
+
+
+# =============================================================================
+# A/B TESTING
+# =============================================================================
+
+@router.get("/ab-tests")
+async def get_ab_tests(request: Request, status: str = Query(default="running")):
+    """Get A/B tests."""
+    try:
+        async with request.app.state.db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM content_ab_tests
+                WHERE status = $1
+                ORDER BY started_at DESC
+            """, status)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

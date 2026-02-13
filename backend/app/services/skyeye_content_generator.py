@@ -367,6 +367,62 @@ class SkyEyeContentGenerator:
 
     # ── Private Methods ─────────────────────────────────────────────
 
+    async def generate_strategic_post(self, platform: str,
+                                      context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Generate a post driven by the Marketing Brain's strategy.
+        Automatically selects topic from playbook pillars and injects CTAs.
+        """
+        try:
+            from app.services.marketing_brain import MarketingBrain
+            brain = MarketingBrain(self.db_pool)
+            strategy = await brain.get_content_strategy(platform)
+        except Exception as e:
+            logger.warning(f"Marketing Brain unavailable: {e}, using default strategy")
+            strategy = {"pillar": "daily_wins", "include_cta": False}
+
+        pillar = strategy.get("pillar", "daily_wins")
+        pillar_desc = strategy.get("pillar_description", "")
+        topic = f"{pillar}: {pillar_desc}" if pillar_desc else pillar
+
+        # Generate the post
+        result = await self.generate_post(platform, topic, context)
+
+        # Inject CTA if strategy says so
+        if result.get("safe") and strategy.get("include_cta"):
+            cta_type = strategy.get("cta_type", "natural_mention")
+            cta_url = strategy.get("cta_url", "https://app.sovereignsanctuary.net")
+            result["content"] = self._inject_cta(
+                result["content"], platform, cta_type, cta_url
+            )
+            result["cta_type"] = cta_type
+            result["cta_target_url"] = cta_url
+            result["content_pillar"] = pillar
+
+        return result
+
+    def _inject_cta(self, content: str, platform: str,
+                    cta_type: str, cta_url: str) -> str:
+        """Inject a CTA into post content based on platform format."""
+        cta_templates = {
+            "bio_link": "\n\nLink in bio if you want to go deeper.",
+            "description_link": f"\n\nFree self-discovery quiz: {cta_url}",
+            "natural_mention": "\n\nIf this resonates, I'm at Sovereign Sanctuary.",
+            "article_cta": f"\n\nExplore further: {cta_url}",
+            "post_link": f"\n\nFree quiz: {cta_url}",
+            "pin_link": f"\n\n{cta_url}",
+        }
+        cta_text = cta_templates.get(cta_type, "")
+
+        # Respect platform max length
+        voice = PLATFORM_VOICE.get(platform, {})
+        max_len = voice.get("max_length", 2000)
+        if len(content) + len(cta_text) > max_len:
+            # Trim content to fit CTA
+            content = content[:max_len - len(cta_text) - 3] + "..."
+
+        return content + cta_text
+
     def _build_post_prompt(self, platform: str, topic: str,
                            voice: Dict, context: Optional[Dict] = None) -> str:
         """Build the user prompt for post generation."""
@@ -383,6 +439,10 @@ class SkyEyeContentGenerator:
                 context_section += (
                     f"\nYour recent posts (avoid repeating): "
                     f"{context['recent_posts']}"
+                )
+            if context.get("strategy_pillar"):
+                context_section += (
+                    f"\nContent pillar focus: {context['strategy_pillar']}"
                 )
 
         return (

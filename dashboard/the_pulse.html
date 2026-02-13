@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Pulse — Sovereign Coherence Dashboard</title>
+    <style>
+        :root {
+            --void: #050505;
+            --chamber: #0A0A0A;
+            --elevated: #111111;
+            --border: #1a1a1a;
+            --gold: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: #8B7355;
+            --cyan: #4ECDC4;
+            --purple: #9D4EDD;
+            --red: #EF4444;
+            --green: #22C55E;
+            --text: #E8D5A3;
+            --text-dim: #8B7355;
+            --font-display: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+        }
+
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--void);
+            color: var(--text);
+            font-family: var(--font-body);
+            min-height: 100vh;
+        }
+
+        /* ─── Header ─── */
+        .header {
+            background: var(--chamber);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-family: var(--font-display);
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--gold);
+            letter-spacing: 2px;
+        }
+
+        .header-subtitle {
+            font-size: 12px;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .last-updated {
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        /* ─── Main Grid ─── */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 16px;
+            padding: 24px 32px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        /* ─── Global Index (spans full width) ─── */
+        .global-index {
+            grid-column: 1 / -1;
+            background: var(--chamber);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .global-index::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--gold-dim), var(--gold), var(--gold-dim));
+        }
+
+        .global-index h2 {
+            font-family: var(--font-display);
+            font-size: 14px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-bottom: 12px;
+        }
+
+        .global-score {
+            font-family: var(--font-display);
+            font-size: 72px;
+            font-weight: 700;
+            color: var(--gold-bright);
+            line-height: 1;
+        }
+
+        .global-label {
+            font-size: 13px;
+            color: var(--text-dim);
+            margin-top: 8px;
+        }
+
+        /* ─── Cards ─── */
+        .card {
+            background: var(--chamber);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px;
+            transition: border-color 0.3s;
+        }
+
+        .card:hover {
+            border-color: var(--gold-dim);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-family: var(--font-display);
+            font-size: 15px;
+            color: var(--gold);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .card-badge {
+            font-size: 10px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .badge-active { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+        .badge-pending { background: rgba(201, 169, 98, 0.15); color: var(--gold); }
+        .badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+        .score-display {
+            font-size: 36px;
+            font-weight: 700;
+            font-family: var(--font-display);
+            margin-bottom: 8px;
+        }
+
+        .score-delta {
+            font-size: 12px;
+            display: inline-block;
+            margin-left: 8px;
+        }
+
+        .delta-up { color: var(--green); }
+        .delta-down { color: var(--red); }
+        .delta-flat { color: var(--text-dim); }
+
+        .score-bar {
+            height: 4px;
+            background: var(--elevated);
+            border-radius: 2px;
+            margin: 12px 0;
+            overflow: hidden;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 1s ease;
+        }
+
+        .fill-gold { background: linear-gradient(90deg, var(--gold-dim), var(--gold)); }
+        .fill-cyan { background: linear-gradient(90deg, #2D8B83, var(--cyan)); }
+        .fill-purple { background: linear-gradient(90deg, #6B2FA0, var(--purple)); }
+
+        .card-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-metric:last-child { border-bottom: none; }
+        .metric-label { color: var(--text-dim); }
+        .metric-value { color: var(--text); font-weight: 500; }
+
+        /* ─── Gap Analysis (spans 2 columns) ─── */
+        .gap-card {
+            grid-column: span 2;
+        }
+
+        .gap-visualization {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+            margin: 20px 0;
+        }
+
+        .gap-bar {
+            flex: 1;
+            height: 32px;
+            background: var(--elevated);
+            border-radius: 6px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .gap-fill-internal {
+            height: 100%;
+            background: linear-gradient(90deg, var(--cyan), rgba(78, 205, 196, 0.6));
+            border-radius: 6px;
+            transition: width 1s ease;
+        }
+
+        .gap-fill-external {
+            height: 100%;
+            background: linear-gradient(90deg, var(--purple), rgba(157, 78, 221, 0.6));
+            border-radius: 6px;
+            transition: width 1s ease;
+        }
+
+        .gap-label {
+            font-size: 11px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            min-width: 60px;
+        }
+
+        .gap-score {
+            font-size: 18px;
+            font-weight: 600;
+            min-width: 48px;
+            text-align: right;
+        }
+
+        /* ─── Themes ─── */
+        .theme-tag {
+            display: inline-block;
+            background: var(--elevated);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 11px;
+            color: var(--text-dim);
+            margin: 3px 4px 3px 0;
+        }
+
+        /* ─── Notable Changes ─── */
+        .change-item {
+            padding: 8px 0;
+            font-size: 12px;
+            color: var(--text);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .change-item:last-child { border-bottom: none; }
+
+        /* ─── Footer ─── */
+        .footer {
+            text-align: center;
+            padding: 24px;
+            font-size: 11px;
+            color: var(--text-dim);
+            border-top: 1px solid var(--border);
+        }
+
+        .footer a { color: var(--gold-dim); text-decoration: none; }
+        .footer a:hover { color: var(--gold); }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div>
+            <h1>THE PULSE</h1>
+            <div class="header-subtitle">Sovereign Coherence Intelligence</div>
+        </div>
+        <div class="header-status">
+            <div class="status-dot"></div>
+            <span class="last-updated" id="lastUpdated">Loading...</span>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard-grid">
+        <!-- Global Coherence Index -->
+        <div class="global-index">
+            <h2>Global Coherence Index</h2>
+            <div class="global-score" id="globalScore">--</div>
+            <div class="global-label" id="globalLabel">Measuring coherence across all layers...</div>
+        </div>
+
+        <!-- Layer 1: Individual -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Individual</span>
+                <span class="card-badge badge-active">Layer 1</span>
+            </div>
+            <div class="score-display" id="individualScore" style="color: var(--cyan);">--</div>
+            <span class="score-delta" id="individualDelta"></span>
+            <div class="score-bar"><div class="score-bar-fill fill-cyan" id="individualBar" style="width: 0%"></div></div>
+            <div class="card-metric"><span class="metric-label">CEE Aggregate</span><span class="metric-value" id="individualCEE">--</span></div>
+            <div class="card-metric"><span class="metric-label">Quiz Signal</span><span class="metric-value" id="individualQuiz">--</span></div>
+            <div class="card-metric"><span class="metric-label">Behavioral</span><span class="metric-value" id="individualBehavioral">--</span></div>
+        </div>
+
+        <!-- Layer 2: Family -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Family System</span>
+                <span class="card-badge badge-active">Layer 2</span>
+            </div>
+            <div class="score-display" id="familyScore" style="color: var(--cyan);">--</div>
+            <span class="score-delta" id="familyDelta"></span>
+            <div class="score-bar"><div class="score-bar-fill fill-cyan" id="familyBar" style="width: 0%"></div></div>
+            <div class="card-metric"><span class="metric-label">Resonance</span><span class="metric-value" id="familyResonance">--</span></div>
+            <div class="card-metric"><span class="metric-label">Transmission</span><span class="metric-value" id="familyTransmission">--</span></div>
+            <div class="card-metric"><span class="metric-label">Efficacy</span><span class="metric-value" id="familyEfficacy">--</span></div>
+        </div>
+
+        <!-- Layer 3: Community -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Community</span>
+                <span class="card-badge badge-pending">Layer 3</span>
+            </div>
+            <div class="score-display" id="communityScore" style="color: var(--purple);">--</div>
+            <span class="score-delta" id="communityDelta"></span>
+            <div class="score-bar"><div class="score-bar-fill fill-purple" id="communityBar" style="width: 0%"></div></div>
+            <div class="card-metric"><span class="metric-label">Families</span><span class="metric-value" id="communityFamilies">--</span></div>
+            <div class="card-metric"><span class="metric-label">Cohesion</span><span class="metric-value" id="communityCohesion">--</span></div>
+            <div class="card-metric"><span class="metric-label">Threshold</span><span class="metric-value">50 families</span></div>
+        </div>
+
+        <!-- Gap Analysis (spans 2 cols) -->
+        <div class="card gap-card">
+            <div class="card-header">
+                <span class="card-title">Inside / Outside Gap</span>
+                <span class="card-badge badge-active">Cultural Coherence</span>
+            </div>
+            <div class="gap-visualization">
+                <span class="gap-label">Internal</span>
+                <span class="gap-score" id="gapInternal" style="color: var(--cyan);">--</span>
+                <div class="gap-bar"><div class="gap-fill-internal" id="gapInternalBar" style="width: 50%"></div></div>
+            </div>
+            <div class="gap-visualization">
+                <span class="gap-label">External</span>
+                <span class="gap-score" id="gapExternal" style="color: var(--purple);">--</span>
+                <div class="gap-bar"><div class="gap-fill-external" id="gapExternalBar" style="width: 50%"></div></div>
+            </div>
+            <div style="text-align: center; margin-top: 12px;">
+                <span style="font-size: 12px; color: var(--text-dim);">Gap Magnitude: </span>
+                <span style="font-size: 16px; font-weight: 600;" id="gapMagnitude">--</span>
+            </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Foresight Alerts</span>
+                <span class="card-badge badge-alert" id="alertBadge">0</span>
+            </div>
+            <div id="alertsList">
+                <div style="color: var(--text-dim); font-size: 12px; text-align: center; padding: 20px;">
+                    No active alerts
+                </div>
+            </div>
+        </div>
+
+        <!-- Trending Themes (spans 2 cols) -->
+        <div class="card" style="grid-column: span 2;">
+            <div class="card-header">
+                <span class="card-title">Trending Themes</span>
+            </div>
+            <div id="themesList">
+                <span class="theme-tag">Loading...</span>
+            </div>
+        </div>
+
+        <!-- Notable Changes -->
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Notable Changes</span>
+            </div>
+            <div id="changesList">
+                <div class="change-item" style="color: var(--text-dim);">Monitoring for changes...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        <a href="/dashboard/skyeye.html">SkyEye</a> &nbsp;|&nbsp;
+        <a href="/dashboard/command.html">Sovereign Command</a> &nbsp;|&nbsp;
+        The Pulse v1.0 — Sovereign Swarm Intelligence
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const POLL_INTERVAL = 30000; // 30 seconds
+
+        function formatScore(val) {
+            if (val === null || val === undefined || isNaN(val)) return '--';
+            return (val * 100).toFixed(1);
+        }
+
+        function formatDelta(delta) {
+            if (delta === null || delta === undefined) return '';
+            const pct = (delta * 100).toFixed(1);
+            if (delta > 0) return `<span class="delta-up">+${pct}%</span>`;
+            if (delta < 0) return `<span class="delta-down">${pct}%</span>`;
+            return `<span class="delta-flat">0.0%</span>`;
+        }
+
+        async function fetchPulse() {
+            try {
+                const res = await fetch(`${API_BASE}/api/coherence/pulse`);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                updateDashboard(data);
+            } catch (err) {
+                console.warn('Pulse fetch error:', err);
+                document.getElementById('lastUpdated').textContent = 'Connection error — retrying...';
+            }
+        }
+
+        function updateDashboard(data) {
+            // Last updated
+            document.getElementById('lastUpdated').textContent =
+                `Updated ${new Date(data.generated_at || Date.now()).toLocaleTimeString()}`;
+
+            // Global index
+            const gi = data.global_coherence_index || 0;
+            document.getElementById('globalScore').textContent = formatScore(gi);
+            document.getElementById('globalLabel').textContent =
+                gi >= 0.7 ? 'Coherence is strong across all layers' :
+                gi >= 0.4 ? 'Moderate coherence — room for growth' :
+                'Low coherence — attention needed';
+
+            // Layer scores
+            const layers = data.layer_scores || {};
+            updateLayer('individual', layers.individual);
+            updateLayer('family', layers.family);
+            updateLayer('community', layers.community);
+
+            // Gap analysis
+            if (data.gap_analysis) {
+                const gap = data.gap_analysis;
+                document.getElementById('gapInternal').textContent = formatScore(gap.internal_score);
+                document.getElementById('gapExternal').textContent = formatScore(gap.external_score);
+                document.getElementById('gapInternalBar').style.width = `${(gap.internal_score || 0) * 100}%`;
+                document.getElementById('gapExternalBar').style.width = `${(gap.external_score || 0) * 100}%`;
+                const mag = gap.gap_magnitude || 0;
+                const magEl = document.getElementById('gapMagnitude');
+                magEl.textContent = (mag >= 0 ? '+' : '') + (mag * 100).toFixed(1) + '%';
+                magEl.style.color = Math.abs(mag) > 0.2 ? 'var(--red)' : 'var(--green)';
+            }
+
+            // Alerts
+            const alertCount = data.active_alerts || 0;
+            document.getElementById('alertBadge').textContent = alertCount;
+            document.getElementById('alertBadge').className =
+                `card-badge ${alertCount > 0 ? 'badge-alert' : 'badge-active'}`;
+
+            // Themes
+            const themes = data.trending_themes || [];
+            document.getElementById('themesList').innerHTML = themes.length > 0
+                ? themes.map(t => `<span class="theme-tag">${t}</span>`).join('')
+                : '<span class="theme-tag">No themes detected</span>';
+
+            // Notable changes
+            const changes = data.notable_changes || [];
+            document.getElementById('changesList').innerHTML = changes.length > 0
+                ? changes.map(c => `<div class="change-item">${c}</div>`).join('')
+                : '<div class="change-item" style="color: var(--text-dim);">No notable changes</div>';
+        }
+
+        function updateLayer(name, score) {
+            const el = document.getElementById(`${name}Score`);
+            const bar = document.getElementById(`${name}Bar`);
+            if (el) el.textContent = formatScore(score);
+            if (bar) bar.style.width = `${(score || 0) * 100}%`;
+        }
+
+        // Initial load + polling
+        fetchPulse();
+        setInterval(fetchPulse, POLL_INTERVAL);
+    </script>
+</body>
+</html>

@@ -78,6 +78,12 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .glass-title{font-family:var(--serif);font-size:16px;display:flex;align-items:center;gap:8px}
 .glass-body{padding:20px}
 
+/* FUNNEL BARS */
+.funnel-bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+.funnel-bar .bar-fill{width:100%;max-width:60px;background:linear-gradient(180deg,var(--green),rgba(0,229,160,0.3));border-radius:6px 6px 0 0;transition:height 0.8s ease;min-height:4px}
+.funnel-bar .bar-label{font-size:11px;color:var(--t3);text-align:center}
+.funnel-bar .bar-value{font-size:16px;font-weight:700;color:var(--t1)}
+
 /* METRIC CARDS */
 .metrics-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
 .metric-card{background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--bdr);border-radius:var(--r);padding:20px;transition:all .3s;position:relative;overflow:hidden}
@@ -334,6 +340,25 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       <span class="nav-icon">📝</span><span class="nav-label">Content Queue</span>
       <span class="nav-badge" id="queue-count" style="display:none">0</span>
     </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" data-tab="growth-dashboard" onclick="switchTab('growth-dashboard',this)">
+      <span class="nav-icon">📈</span><span class="nav-label">Growth Dashboard</span>
+    </div>
+    <div class="nav-item" data-tab="marketing-brain" onclick="switchTab('marketing-brain',this)">
+      <span class="nav-icon">🧠</span><span class="nav-label">Marketing Brain</span>
+    </div>
+    <div class="nav-item" data-tab="funnel-pipeline" onclick="switchTab('funnel-pipeline',this)">
+      <span class="nav-icon">🎯</span><span class="nav-label">Funnel Pipeline</span>
+    </div>
+    <div class="nav-item" data-tab="quiz-factory" onclick="switchTab('quiz-factory',this)">
+      <span class="nav-icon">🎲</span><span class="nav-label">Quiz Factory</span>
+    </div>
+    <div class="nav-item" data-tab="showcase" onclick="switchTab('showcase',this)">
+      <span class="nav-icon">🎬</span><span class="nav-label">Showcase Gen</span>
+    </div>
+    <div class="nav-item" data-tab="swarm" onclick="switchTab('swarm',this)">
+      <span class="nav-icon">🐝</span><span class="nav-label">Swarm</span>
+    </div>
   </aside>
 
   <!-- MAIN CONTENT -->
@@ -588,6 +613,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         </div>
       </div>
 
+      <!-- DNS Security Status -->
+      <div class="glass mb-24">
+        <div class="glass-header">
+          <div class="glass-title">🔒 DNS Security</div>
+          <button class="btn btn-sm" onclick="loadDnsCheck()" style="font-size:11px;padding:4px 10px">Refresh</button>
+        </div>
+        <div class="glass-body">
+          <div id="dns-status" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+            <div class="loader"><div class="spinner"></div> Loading...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Content Queue Items -->
       <div class="glass mb-24">
         <div class="glass-header">
@@ -619,12 +657,258 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </div>
 
       <!-- Moderation Summary -->
-      <div class="glass">
+      <div class="glass mb-24">
         <div class="glass-header">
           <div class="glass-title">🛡️ Moderation Summary (24h)</div>
         </div>
         <div class="glass-body" id="queue-moderation">
           <div class="loader"><div class="spinner"></div> Loading...</div>
+        </div>
+      </div>
+
+      <!-- Emergency Revoke -->
+      <div class="glass" style="border:1px solid #EF4444">
+        <div class="glass-header">
+          <div class="glass-title" style="color:#EF4444">⚠️ Emergency Controls</div>
+        </div>
+        <div class="glass-body" style="text-align:center;padding:20px">
+          <p style="color:var(--t2);font-size:13px;margin-bottom:16px">
+            Immediately revokes ALL platform tokens, stops the session engine, and rejects all pending content.
+            This action cannot be undone.
+          </p>
+          <button onclick="emergencyRevoke()"
+            style="background:#EF4444;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;letter-spacing:0.5px;transition:all 0.2s">
+            🚨 Emergency Revoke All
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: GROWTH DASHBOARD -->
+    <section class="tab-content" id="tab-growth-dashboard">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">Growth Dashboard</h2>
+        <button onclick="refreshGrowthData()" style="background:var(--greeng);color:var(--green);border:1px solid rgba(0,229,160,0.2);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500">Refresh Data</button>
+      </div>
+
+      <!-- KPI Cards -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px" id="growth-kpis">
+        <div class="glass" style="padding:20px;text-align:center">
+          <div style="color:var(--t3);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Total Prospects</div>
+          <div id="kpi-prospects" style="font-size:32px;font-weight:700;color:var(--green)">—</div>
+        </div>
+        <div class="glass" style="padding:20px;text-align:center">
+          <div style="color:var(--t3);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Active Clients</div>
+          <div id="kpi-clients" style="font-size:32px;font-weight:700;color:var(--blue)">—</div>
+        </div>
+        <div class="glass" style="padding:20px;text-align:center">
+          <div style="color:var(--t3);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Active Coaches</div>
+          <div id="kpi-coaches" style="font-size:32px;font-weight:700;color:var(--purple)">—</div>
+        </div>
+        <div class="glass" style="padding:20px;text-align:center">
+          <div style="color:var(--t3);font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Funnel Conversions (7d)</div>
+          <div id="kpi-conversions" style="font-size:32px;font-weight:700;color:var(--gold)">—</div>
+        </div>
+      </div>
+
+      <!-- Funnel Visualization -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">🎯 Conversion Funnel (7 Days)</span></div>
+        <div class="glass-body" id="funnel-viz">
+          <div style="display:flex;align-items:flex-end;gap:24px;height:200px;padding:20px 0" id="funnel-bars">
+            <div class="funnel-bar" data-stage="routed"><div class="bar-fill" style="height:0%"></div><div class="bar-label">Routed</div><div class="bar-value">0</div></div>
+            <div class="funnel-bar" data-stage="cta"><div class="bar-fill" style="height:0%"></div><div class="bar-label">CTA Sent</div><div class="bar-value">0</div></div>
+            <div class="funnel-bar" data-stage="quiz_start"><div class="bar-fill" style="height:0%"></div><div class="bar-label">Quiz Start</div><div class="bar-value">0</div></div>
+            <div class="funnel-bar" data-stage="quiz_complete"><div class="bar-fill" style="height:0%"></div><div class="bar-label">Quiz Done</div><div class="bar-value">0</div></div>
+            <div class="funnel-bar" data-stage="ticket"><div class="bar-fill" style="height:0%"></div><div class="bar-label">Tickets</div><div class="bar-value">0</div></div>
+            <div class="funnel-bar" data-stage="converted"><div class="bar-fill" style="height:0%"></div><div class="bar-label">Converted</div><div class="bar-value">0</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Log -->
+      <div class="glass">
+        <div class="glass-header"><span class="glass-title">📋 Recent Marketing Actions</span></div>
+        <div class="glass-body" id="action-log" style="max-height:400px;overflow-y:auto">
+          <div style="color:var(--t3);text-align:center;padding:30px">Loading actions...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: MARKETING BRAIN -->
+    <section class="tab-content" id="tab-marketing-brain">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">Marketing Brain</h2>
+        <div style="display:flex;gap:8px">
+          <button onclick="runStrategyReview()" style="background:var(--purpleg);color:var(--purple);border:1px solid rgba(167,139,250,0.2);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500">Run Strategy Review</button>
+          <button onclick="refreshPlaybook()" style="background:var(--greeng);color:var(--green);border:1px solid rgba(0,229,160,0.2);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500">Refresh</button>
+        </div>
+      </div>
+
+      <!-- Content Pillars -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">📊 Content Pillars</span></div>
+        <div class="glass-body" id="pillar-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading pillars...</div>
+        </div>
+      </div>
+
+      <!-- Content Mix by Platform -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">🎨 Content Mix by Platform</span></div>
+        <div class="glass-body" id="content-mix-grid">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading content mix...</div>
+        </div>
+      </div>
+
+      <!-- Pending Proposals -->
+      <div class="glass">
+        <div class="glass-header"><span class="glass-title">💡 Pending Proposals</span></div>
+        <div class="glass-body" id="proposals-list">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading proposals...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: FUNNEL PIPELINE -->
+    <section class="tab-content" id="tab-funnel-pipeline">
+      <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">Funnel Pipeline</h2>
+
+      <!-- Funnel Stats -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">📊 Funnel Stats (7 Days)</span></div>
+        <div class="glass-body" id="funnel-stats-detail">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading funnel stats...</div>
+        </div>
+      </div>
+
+      <!-- By Platform -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">🌐 By Platform</span></div>
+        <div class="glass-body" id="funnel-by-platform">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading platform breakdown...</div>
+        </div>
+      </div>
+
+      <!-- By Audience -->
+      <div class="glass">
+        <div class="glass-header"><span class="glass-title">👥 By Audience Type</span></div>
+        <div class="glass-body" id="funnel-by-audience">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading audience breakdown...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: QUIZ FACTORY -->
+    <section class="tab-content" id="tab-quiz-factory">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">Quiz Factory</h2>
+        <button onclick="showQuizGenModal()" style="background:var(--greeng);color:var(--green);border:1px solid rgba(0,229,160,0.2);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:500">+ Generate Quiz</button>
+      </div>
+
+      <div class="glass">
+        <div class="glass-header"><span class="glass-title">🎲 Generate New Quiz with AI</span></div>
+        <div class="glass-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div>
+              <label style="color:var(--t3);font-size:12px;text-transform:uppercase;display:block;margin-bottom:6px">Audience</label>
+              <select id="quiz-audience" style="width:100%;background:var(--panel);color:var(--t1);border:1px solid var(--bdr2);border-radius:8px;padding:10px;font-family:var(--sans)">
+                <option value="individual">Individual (Clients)</option>
+                <option value="coach">Coach / Therapist</option>
+                <option value="family">Family</option>
+              </select>
+            </div>
+            <div>
+              <label style="color:var(--t3);font-size:12px;text-transform:uppercase;display:block;margin-bottom:6px">Question Count</label>
+              <input id="quiz-count" type="number" value="8" min="4" max="20" style="width:100%;background:var(--panel);color:var(--t1);border:1px solid var(--bdr2);border-radius:8px;padding:10px;font-family:var(--sans)">
+            </div>
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="color:var(--t3);font-size:12px;text-transform:uppercase;display:block;margin-bottom:6px">Topic</label>
+            <input id="quiz-topic" type="text" placeholder="e.g. Burnout prevention for therapists" style="width:100%;background:var(--panel);color:var(--t1);border:1px solid var(--bdr2);border-radius:8px;padding:10px;font-family:var(--sans)">
+          </div>
+          <button onclick="generateQuiz()" style="background:var(--green);color:#000;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-weight:600;font-size:14px">Generate with AI</button>
+          <div id="quiz-gen-result" style="margin-top:16px;display:none" class="glass" style="padding:16px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: SHOWCASE GENERATOR -->
+    <section class="tab-content" id="tab-showcase">
+      <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">Showcase Generator</h2>
+
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:24px">
+        <div class="glass" style="padding:24px;cursor:pointer;transition:all 0.2s" onclick="generateShowcase('session')" onmouseenter="this.style.borderColor='rgba(0,229,160,0.3)'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:8px">💬</div>
+          <div style="font-weight:600;margin-bottom:4px">Session Showcase</div>
+          <div style="color:var(--t3);font-size:13px">Demo of a therapy session with Jane — shows CEE scores, conversational flow, and emotional insights</div>
+        </div>
+        <div class="glass" style="padding:24px;cursor:pointer;transition:all 0.2s" onclick="generateShowcase('coach_demo')" onmouseenter="this.style.borderColor='rgba(167,139,250,0.3)'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:8px">🥋</div>
+          <div style="font-weight:600;margin-bottom:4px">Coach DOJO Demo</div>
+          <div style="color:var(--t3);font-size:13px">How coaches sharpen their skills — adversarial testing, scoring, and practice feedback</div>
+        </div>
+        <div class="glass" style="padding:24px;cursor:pointer;transition:all 0.2s" onclick="generateShowcase('family')" onmouseenter="this.style.borderColor='rgba(56,189,248,0.3)'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:8px">👨‍👩‍👧</div>
+          <div style="font-weight:600;margin-bottom:4px">Family Sanctuary</div>
+          <div style="color:var(--t3);font-size:13px">Connected family care with individual privacy — parent/teen/coach collaboration</div>
+        </div>
+        <div class="glass" style="padding:24px;cursor:pointer;transition:all 0.2s" onclick="generateShowcase('platform_overview')" onmouseenter="this.style.borderColor='rgba(201,169,98,0.3)'" onmouseleave="this.style.borderColor=''">
+          <div style="font-size:24px;margin-bottom:8px">🏛️</div>
+          <div style="font-weight:600;margin-bottom:4px">Platform Overview</div>
+          <div style="color:var(--t3);font-size:13px">Full platform capabilities — all features, tiers, and what makes Sovereign Sanctuary unique</div>
+        </div>
+      </div>
+
+      <div class="glass" id="showcase-result" style="display:none">
+        <div class="glass-header"><span class="glass-title">🎬 Generated Showcase</span></div>
+        <div class="glass-body" id="showcase-content"></div>
+      </div>
+    </section>
+
+    <!-- TAB: SWARM OVERVIEW -->
+    <section class="tab-content" id="tab-swarm">
+      <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">Sovereign Swarm</h2>
+
+      <!-- Coherence Pulse -->
+      <div class="glass" id="swarm-pulse-card">
+        <div class="glass-header"><span class="glass-title">Global Coherence Pulse</span></div>
+        <div class="glass-body" style="text-align:center">
+          <div id="swarm-global-score" style="font-size:48px;font-family:var(--serif);color:var(--gold)">--</div>
+          <div style="color:var(--muted);margin-top:4px">Global Coherence Index</div>
+          <div id="swarm-layer-scores" style="display:flex;gap:16px;justify-content:center;margin-top:16px;flex-wrap:wrap"></div>
+        </div>
+      </div>
+
+      <!-- Active Fibres -->
+      <div class="glass" style="margin-top:16px">
+        <div class="glass-header"><span class="glass-title">Active Fibres</span></div>
+        <div class="glass-body">
+          <div id="swarm-fibre-list" style="color:var(--muted)">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Mesh Health -->
+      <div class="glass" style="margin-top:16px">
+        <div class="glass-header"><span class="glass-title">Wisdom Mesh Health</span></div>
+        <div class="glass-body">
+          <div id="swarm-mesh-health" style="color:var(--muted)">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Foresight Alerts -->
+      <div class="glass" style="margin-top:16px">
+        <div class="glass-header"><span class="glass-title">Foresight Alerts</span></div>
+        <div class="glass-body">
+          <div id="swarm-foresight-alerts" style="color:var(--muted)">No active alerts</div>
+        </div>
+      </div>
+
+      <!-- Notable Changes -->
+      <div class="glass" style="margin-top:16px">
+        <div class="glass-header"><span class="glass-title">Notable Changes (24h)</span></div>
+        <div class="glass-body">
+          <div id="swarm-notable-changes" style="color:var(--muted)">No notable changes</div>
         </div>
       </div>
     </section>
@@ -836,6 +1120,7 @@ function switchTab(tabId, el) {
     case 'big-nate-chat': loadChat(); break;
     case 'expressions-wall': loadExpressions(); break;
     case 'content-queue': loadContentQueueTab(); break;
+    case 'swarm': loadSwarmOverview(); break;
   }
 }
 
@@ -982,15 +1267,32 @@ async function loadPlatformStatus() {
   const connMap = {};
   if (connData) connData.forEach(c => connMap[c.platform] = c.connection_status);
 
+  // Build credential lookup from platform-status endpoint
+  const credMap = {};
+  if (connData) connData.forEach(c => { credMap[c.platform] = c.has_credentials; });
+
   el.innerHTML = data.map(p => {
     const name = p.name || p.platform;
     const mode = (p.mode || p.control_mode || 'observation').toLowerCase();
-    const modeLabel = mode.includes('full') ? 'Full Auto' : mode.includes('approval') ? 'Approval' : 'Observe';
-    const modeColor = mode.includes('full') ? 'var(--green)' : mode.includes('approval') ? 'var(--amber)' : 'var(--t3)';
     const connected = connMap[name] === 'connected';
-    const connDot = connected
-      ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 4px var(--green)"></span>'
-      : '<span style="width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block;opacity:0.4"></span>';
+    const hasCreds = credMap[name] === true;
+
+    // Three states: connected (green), has credentials (amber), no setup (gray)
+    let connDot, modeLabel, modeColor;
+    if (connected) {
+      connDot = '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 4px var(--green)"></span>';
+      modeLabel = mode.includes('full') ? 'Full Auto' : mode.includes('approval') ? 'Approval' : 'Observe';
+      modeColor = mode.includes('full') ? 'var(--green)' : mode.includes('approval') ? 'var(--amber)' : 'var(--t3)';
+    } else if (hasCreds) {
+      connDot = '<span style="width:6px;height:6px;border-radius:50%;background:var(--amber);display:inline-block;box-shadow:0 0 4px var(--amber)"></span>';
+      modeLabel = 'Authorize';
+      modeColor = 'var(--amber)';
+    } else {
+      connDot = '<span style="width:6px;height:6px;border-radius:50%;background:var(--t3);display:inline-block;opacity:0.4"></span>';
+      modeLabel = 'Setup';
+      modeColor = 'var(--t3)';
+    }
+
     return `
       <div class="plat-status-item">
         ${connDot}
@@ -1545,6 +1847,7 @@ async function loadContentQueueTab() {
   loadContentQueue();
   loadPlatformConnections();
   loadModerationSummary();
+  loadDnsCheck();
 }
 
 async function loadContentQueue() {
@@ -1793,11 +2096,484 @@ async function queueGeneratedPost() {
 }
 
 // =============================================================================
+// DNS SECURITY CHECK
+// =============================================================================
+async function loadDnsCheck() {
+  const container = document.getElementById('dns-status');
+  if (!container) return;
+  container.innerHTML = '<div class="loader"><div class="spinner"></div> Checking DNS records...</div>';
+
+  try {
+    const data = await apiGet('/api/skyeye/dns-check');
+    const statusIcon = (s) => s === 'pass' ? '✅' : s === 'warn' ? '⚠️' : '❌';
+    const statusColor = (s) => s === 'pass' ? '#4ECDC4' : s === 'warn' ? '#C9A962' : '#EF4444';
+
+    container.innerHTML = ['spf', 'dkim', 'dmarc'].map(key => {
+      const r = data[key];
+      return `
+        <div style="background:var(--bg1);border:1px solid var(--bdr);border-radius:10px;padding:14px;text-align:center">
+          <div style="font-size:22px;margin-bottom:6px">${statusIcon(r.status)}</div>
+          <div style="font-size:14px;font-weight:600;color:${statusColor(r.status)};margin-bottom:4px">${key.toUpperCase()}</div>
+          <div style="font-size:11px;color:var(--t2)">${r.detail}</div>
+          ${r.record ? `<div style="font-size:10px;color:var(--t3);margin-top:6px;word-break:break-all;max-height:40px;overflow:hidden">${r.record}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<div style="color:var(--t2);font-size:13px">DNS check failed: ${err.message || 'unknown error'}</div>`;
+  }
+}
+
+// =============================================================================
+// EMERGENCY REVOKE
+// =============================================================================
+async function emergencyRevoke() {
+  // Double-confirm dialog
+  const first = confirm(
+    '⚠️ EMERGENCY REVOKE ⚠️\n\n' +
+    'This will:\n' +
+    '• Revoke ALL platform OAuth tokens\n' +
+    '• Stop the session engine\n' +
+    '• Reject all pending content queue items\n\n' +
+    'This action CANNOT be undone. Continue?'
+  );
+  if (!first) return;
+
+  const code = prompt(
+    'Type REVOKE_ALL to confirm emergency revoke:'
+  );
+  if (code !== 'REVOKE_ALL') {
+    alert('Revoke cancelled — confirmation code did not match.');
+    return;
+  }
+
+  try {
+    const data = await apiPost('/api/skyeye/emergency-revoke', { confirm: 'REVOKE_ALL' });
+    alert(
+      '🚨 Emergency Revoke Complete\n\n' +
+      `Tokens revoked: ${data.tokens_revoked}\n` +
+      `Queue items rejected: ${data.queue_rejected}\n` +
+      `Engine stopped: ${data.engine_stopped}\n` +
+      (data.errors?.length ? `\nErrors: ${data.errors.join(', ')}` : '')
+    );
+    // Refresh the content queue tab to reflect new state
+    if (currentTab === 'content-queue') loadContentQueueTab();
+  } catch (err) {
+    alert('Emergency revoke failed: ' + (err.message || 'unknown error'));
+  }
+}
+
+// =============================================================================
 // PULSE AUTO-REFRESH (top bar)
 // =============================================================================
 setInterval(() => {
   loadPulse();
 }, 30000);
+
+// =============================================================================
+// MARKETING BRAIN — Growth Dashboard Functions
+// =============================================================================
+
+async function refreshGrowthData() {
+  try {
+    const [results, funnel, actions] = await Promise.all([
+      fetch(`${API}/marketing/results`).then(r => r.json()),
+      fetch(`${API}/marketing/funnel-stats?days=7`).then(r => r.json()),
+      fetch(`${API}/marketing/actions?limit=15`).then(r => r.json())
+    ]);
+
+    // KPI cards
+    const p = results.prospects || {};
+    const f = results.funnel || {};
+    document.getElementById('kpi-prospects').textContent = p.total_prospects || 0;
+    document.getElementById('kpi-clients').textContent = results.platforms ? results.platforms.length : 0;
+    document.getElementById('kpi-coaches').textContent = p.total_coaches || 0;
+    document.getElementById('kpi-conversions').textContent = f.conversions || 0;
+
+    // Funnel bars
+    const overall = funnel.overall || {};
+    const stages = {
+      routed: overall.total_routed || 0,
+      cta: overall.ctas_sent || 0,
+      quiz_start: overall.quiz_starts || 0,
+      quiz_complete: overall.quiz_completes || 0,
+      ticket: overall.tickets_issued || 0,
+      converted: overall.conversions || 0
+    };
+    const maxVal = Math.max(...Object.values(stages), 1);
+    document.querySelectorAll('.funnel-bar').forEach(bar => {
+      const stage = bar.dataset.stage;
+      const val = stages[stage] || 0;
+      const pct = (val / maxVal * 100).toFixed(0);
+      bar.querySelector('.bar-fill').style.height = pct + '%';
+      bar.querySelector('.bar-value').textContent = val;
+    });
+
+    // Action log
+    const logEl = document.getElementById('action-log');
+    if (Array.isArray(actions) && actions.length > 0) {
+      logEl.innerHTML = actions.map(a => {
+        const statusColor = {proposed:'var(--amber)', approved:'var(--blue)', executing:'var(--purple)', completed:'var(--green)', rejected:'var(--red)'}[a.status] || 'var(--t3)';
+        const time = a.proposed_at ? new Date(a.proposed_at).toLocaleDateString() : '';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid var(--bdr)">
+          <div><span style="color:${statusColor};font-weight:600;text-transform:uppercase;font-size:11px;margin-right:8px">${a.status}</span>
+          <span style="font-size:13px">${a.title || a.action_type}</span></div>
+          <div style="color:var(--t3);font-size:12px">${time}</div>
+        </div>`;
+      }).join('');
+    } else {
+      logEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:30px">No marketing actions yet</div>';
+    }
+  } catch(e) {
+    console.error('Growth data error:', e);
+  }
+}
+
+async function refreshPlaybook() {
+  try {
+    const pb = await fetch(`${API}/marketing/playbook`).then(r => r.json());
+
+    // Render pillars
+    const pillarGrid = document.getElementById('pillar-grid');
+    const pillars = pb.content_pillars || [];
+    if (pillars.length > 0) {
+      pillarGrid.innerHTML = pillars.map(p => `
+        <div style="background:var(--panel);border:1px solid var(--bdr);border-radius:12px;padding:16px">
+          <div style="font-weight:600;margin-bottom:4px;text-transform:capitalize">${(p.name||'').replace(/_/g,' ')}</div>
+          <div style="color:var(--t3);font-size:12px;margin-bottom:8px">${p.description || ''}</div>
+          <div style="display:flex;justify-content:space-between">
+            <span style="color:var(--green);font-size:13px">Weight: ${((p.weight||0)*100).toFixed(0)}%</span>
+            <span style="color:var(--blue);font-size:13px">Eng: ${(p.avg_engagement||0).toFixed(2)}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Render content mix
+    const mixGrid = document.getElementById('content-mix-grid');
+    const mix = pb.content_mix || {};
+    const platforms = Object.keys(mix);
+    if (platforms.length > 0) {
+      mixGrid.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">' +
+        platforms.map(plat => {
+          const m = mix[plat];
+          const bars = Object.entries(m).map(([pillar, weight]) =>
+            `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div style="width:80px;font-size:11px;color:var(--t3);text-transform:capitalize">${pillar.replace(/_/g,' ').substring(0,15)}</div>
+              <div style="flex:1;height:8px;background:var(--panel);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${(weight*100).toFixed(0)}%;background:var(--green);border-radius:4px"></div>
+              </div>
+              <div style="font-size:11px;color:var(--t2);width:30px;text-align:right">${(weight*100).toFixed(0)}%</div>
+            </div>`
+          ).join('');
+          return `<div style="background:var(--panel);border:1px solid var(--bdr);border-radius:12px;padding:14px">
+            <div style="font-weight:600;margin-bottom:8px;text-transform:capitalize">${plat}</div>
+            ${bars}
+          </div>`;
+        }).join('') + '</div>';
+    }
+
+    // Render pending proposals
+    const proposals = await fetch(`${API}/marketing/actions?status=proposed`).then(r => r.json());
+    const proposalsList = document.getElementById('proposals-list');
+    if (Array.isArray(proposals) && proposals.length > 0) {
+      proposalsList.innerHTML = proposals.map(p => `
+        <div style="background:var(--panel);border:1px solid var(--bdr);border-radius:12px;padding:16px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:600;margin-bottom:4px">${p.title}</div>
+            <div style="color:var(--t3);font-size:13px">${p.description || ''}</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button onclick="approveAction(${p.id})" style="background:var(--greeng);color:var(--green);border:1px solid rgba(0,229,160,0.2);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px">Approve</button>
+            <button onclick="rejectAction(${p.id})" style="background:var(--redg);color:var(--red);border:1px solid rgba(255,59,92,0.2);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px">Reject</button>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      proposalsList.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No pending proposals</div>';
+    }
+  } catch(e) {
+    console.error('Playbook error:', e);
+  }
+}
+
+async function approveAction(id) {
+  try {
+    await fetch(`${API}/marketing/actions/${id}/decide`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({decision:'approved'})
+    });
+    refreshPlaybook();
+    refreshGrowthData();
+  } catch(e) { console.error(e); }
+}
+
+async function rejectAction(id) {
+  const reason = prompt('Rejection reason (optional):') || '';
+  try {
+    await fetch(`${API}/marketing/actions/${id}/decide`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({decision:'rejected', reason})
+    });
+    refreshPlaybook();
+  } catch(e) { console.error(e); }
+}
+
+async function runStrategyReview() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Analyzing...';
+  try {
+    const result = await fetch(`${API}/marketing/playbook/review`, {method:'POST'}).then(r => r.json());
+    alert('Strategy Review Complete!\n\nTop Insight: ' + (result.top_insight || 'Review completed'));
+    refreshPlaybook();
+  } catch(e) {
+    alert('Review failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run Strategy Review';
+  }
+}
+
+async function refreshFunnelPipeline() {
+  try {
+    const data = await fetch(`${API}/marketing/funnel-stats?days=7`).then(r => r.json());
+
+    // Overall stats
+    const overall = data.overall || {};
+    document.getElementById('funnel-stats-detail').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        <div style="text-align:center"><div style="color:var(--t3);font-size:12px;margin-bottom:4px">Total Routed</div><div style="font-size:24px;font-weight:600;color:var(--green)">${overall.total_routed||0}</div></div>
+        <div style="text-align:center"><div style="color:var(--t3);font-size:12px;margin-bottom:4px">Quiz Starts</div><div style="font-size:24px;font-weight:600;color:var(--blue)">${overall.quiz_starts||0}</div></div>
+        <div style="text-align:center"><div style="color:var(--t3);font-size:12px;margin-bottom:4px">Conversions</div><div style="font-size:24px;font-weight:600;color:var(--gold)">${overall.conversions||0}</div></div>
+      </div>`;
+
+    // By platform
+    const byPlatform = data.by_platform || [];
+    const platEl = document.getElementById('funnel-by-platform');
+    if (byPlatform.length > 0) {
+      platEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">' +
+        byPlatform.map(p => `
+          <div style="background:var(--panel);border:1px solid var(--bdr);border-radius:10px;padding:14px">
+            <div style="font-weight:600;text-transform:capitalize;margin-bottom:6px">${p.platform}</div>
+            <div style="color:var(--t3);font-size:12px">Total: ${p.total} | Conv: ${p.conversions}</div>
+            <div style="color:var(--green);font-size:12px">Avg Score: ${(p.avg_score||0).toFixed(2)}</div>
+          </div>
+        `).join('') + '</div>';
+    }
+
+    // By audience
+    const byAudience = data.by_audience || [];
+    const audEl = document.getElementById('funnel-by-audience');
+    if (byAudience.length > 0) {
+      audEl.innerHTML = byAudience.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--bdr)">
+          <div style="font-weight:600;text-transform:capitalize">${a.audience_type}</div>
+          <div style="color:var(--t3)">Total: ${a.total} | Converted: ${a.conversions}</div>
+        </div>
+      `).join('');
+    }
+  } catch(e) {
+    console.error('Funnel pipeline error:', e);
+  }
+}
+
+async function generateQuiz() {
+  const audience = document.getElementById('quiz-audience').value;
+  const topic = document.getElementById('quiz-topic').value;
+  const count = parseInt(document.getElementById('quiz-count').value) || 8;
+
+  if (!topic) { alert('Please enter a topic'); return; }
+
+  const resultEl = document.getElementById('quiz-gen-result');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<div style="padding:16px;color:var(--amber)">Generating quiz with AI...</div>';
+
+  try {
+    const data = await fetch(`${API}/marketing/quiz-factory/generate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({audience, topic, question_count: count})
+    }).then(r => r.json());
+
+    if (data.error) {
+      resultEl.innerHTML = `<div style="padding:16px;color:var(--red)">Error: ${data.error}</div>`;
+    } else {
+      resultEl.innerHTML = `
+        <div style="padding:16px">
+          <div style="color:var(--green);font-weight:600;margin-bottom:8px">Quiz Generated!</div>
+          <div style="margin-bottom:4px"><strong>Title:</strong> ${data.title}</div>
+          <div style="margin-bottom:4px"><strong>Questions:</strong> ${data.question_count}</div>
+          <div style="margin-bottom:4px"><strong>Status:</strong> <span style="color:var(--amber)">Draft (requires approval)</span></div>
+          <div style="color:var(--t3);font-size:12px;margin-top:8px">Quiz ID: ${data.quiz_id}</div>
+        </div>`;
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<div style="padding:16px;color:var(--red)">Failed: ${e.message}</div>`;
+  }
+}
+
+async function generateShowcase(scenario) {
+  const resultEl = document.getElementById('showcase-result');
+  const contentEl = document.getElementById('showcase-content');
+  resultEl.style.display = 'block';
+  contentEl.innerHTML = '<div style="padding:20px;color:var(--amber)">Generating showcase...</div>';
+
+  try {
+    const data = await fetch(`${API}/marketing/showcase/generate`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({scenario, format:'html'})
+    }).then(r => r.json());
+
+    let html = `<div style="margin-bottom:16px"><h3 style="font-family:var(--serif)">${data.title || scenario}</h3>
+      <p style="color:var(--t3)">${data.description || data.narration || ''}</p></div>`;
+
+    // Render exchanges if present
+    if (data.exchanges) {
+      html += '<div style="max-width:600px;margin:0 auto">';
+      data.exchanges.forEach(ex => {
+        const isNate = ex.sender === 'nate' || ex.sender === 'coach';
+        html += `<div style="display:flex;justify-content:${isNate ? 'flex-end' : 'flex-start'};margin-bottom:12px">
+          <div style="max-width:80%;padding:12px 16px;border-radius:16px;background:${isNate ? 'rgba(0,229,160,0.1)' : 'rgba(56,189,248,0.08)'};border:1px solid ${isNate ? 'rgba(0,229,160,0.15)' : 'rgba(56,189,248,0.12)'}">
+            <div style="font-size:10px;color:var(--t3);margin-bottom:4px;text-transform:uppercase">${ex.sender}</div>
+            <div style="font-size:14px">${ex.text}</div>
+          </div></div>`;
+      });
+      html += '</div>';
+    }
+
+    // Render metrics if present
+    if (data.metrics) {
+      html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:16px">';
+      Object.entries(data.metrics).forEach(([k,v]) => {
+        html += `<div style="background:var(--panel);border:1px solid var(--bdr);border-radius:8px;padding:12px;text-align:center">
+          <div style="color:var(--t3);font-size:11px;text-transform:uppercase">${k.replace(/_/g,' ')}</div>
+          <div style="font-size:18px;font-weight:600;color:var(--green);margin-top:4px">${v}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+
+    // Social snippet
+    if (data.social_snippet) {
+      html += `<div style="margin-top:20px;background:var(--panel);border:1px solid var(--bdr);border-radius:12px;padding:16px">
+        <div style="font-weight:600;margin-bottom:8px;font-size:13px">Social Media Snippet</div>
+        <div style="color:var(--t2);font-style:italic;font-size:14px">"${data.social_snippet.text}"</div>
+      </div>`;
+    }
+
+    contentEl.innerHTML = html;
+  } catch(e) {
+    contentEl.innerHTML = `<div style="padding:20px;color:var(--red)">Showcase generation failed: ${e.message}</div>`;
+  }
+}
+
+// =============================================================================
+// TAB: SWARM OVERVIEW
+// =============================================================================
+
+async function loadSwarmOverview() {
+  try {
+    const res = await fetch(`${API}/coherence/pulse`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    // Global score
+    const scoreEl = document.getElementById('swarm-global-score');
+    if (scoreEl) scoreEl.textContent = (data.global_coherence_index ?? 0).toFixed(4);
+
+    // Layer scores
+    const layerEl = document.getElementById('swarm-layer-scores');
+    if (layerEl && data.layer_scores) {
+      layerEl.innerHTML = Object.entries(data.layer_scores).map(([k, v]) =>
+        `<div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;padding:8px 14px;text-align:center">
+          <div style="font-size:18px;font-family:var(--serif);color:var(--gold)">${typeof v === 'number' ? v.toFixed(3) : v}</div>
+          <div style="font-size:11px;color:var(--muted);text-transform:capitalize">${k}</div>
+        </div>`
+      ).join('');
+    }
+
+    // Notable changes
+    const changesEl = document.getElementById('swarm-notable-changes');
+    if (changesEl && data.notable_changes && data.notable_changes.length) {
+      changesEl.innerHTML = data.notable_changes.map(c =>
+        `<div style="padding:6px 0;border-bottom:1px solid var(--bdr);color:var(--text)">${c}</div>`
+      ).join('');
+    }
+
+    // Foresight alerts count
+    const alertsEl = document.getElementById('swarm-foresight-alerts');
+    if (alertsEl) {
+      const count = data.active_alerts ?? 0;
+      alertsEl.innerHTML = count > 0
+        ? `<span style="color:var(--red)">${count} active alert${count > 1 ? 's' : ''}</span>`
+        : '<span style="color:var(--muted)">No active alerts</span>';
+    }
+
+    // Trending themes
+    if (data.trending_themes && data.trending_themes.length) {
+      const changesEl2 = document.getElementById('swarm-notable-changes');
+      if (changesEl2) {
+        changesEl2.innerHTML += '<div style="margin-top:12px;color:var(--cyan);font-size:12px">Trending: ' +
+          data.trending_themes.join(', ') + '</div>';
+      }
+    }
+
+  } catch (e) {
+    console.warn('Swarm data unavailable:', e);
+    const scoreEl = document.getElementById('swarm-global-score');
+    if (scoreEl) scoreEl.textContent = '--';
+    document.getElementById('swarm-fibre-list').innerHTML = '<span style="color:var(--muted)">Swarm data unavailable. Ensure ENABLE_SOVEREIGN_SWARM is active.</span>';
+  }
+
+  // Load fibre list from fibre API
+  try {
+    const res = await fetch(`${API}/fibres`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const listEl = document.getElementById('swarm-fibre-list');
+    if (listEl && data.fibres && data.fibres.length) {
+      listEl.innerHTML = data.fibres.map(f =>
+        `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bdr)">
+          <span style="color:var(--text)">${f.name || f.fibre_type} <span style="color:var(--muted);font-size:12px">(${f.fibre_type})</span></span>
+          <span style="color:${f.status === 'active' ? 'var(--green)' : 'var(--muted)'}">${f.status}</span>
+        </div>`
+      ).join('');
+    } else if (listEl) {
+      listEl.innerHTML = '<span style="color:var(--muted)">No active Fibres</span>';
+    }
+  } catch (e) {
+    console.warn('Fibre list unavailable:', e);
+  }
+
+  // Load mesh health
+  try {
+    const res = await fetch(`${API}/mesh/health`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const meshEl = document.getElementById('swarm-mesh-health');
+    if (meshEl) {
+      meshEl.innerHTML = `
+        <div style="display:flex;gap:24px;flex-wrap:wrap">
+          <div><span style="color:var(--gold);font-size:20px">${data.total_messages ?? 0}</span><br><span style="color:var(--muted);font-size:11px">Total Messages</span></div>
+          <div><span style="color:var(--gold);font-size:20px">${data.active_topics ?? 0}</span><br><span style="color:var(--muted);font-size:11px">Active Topics</span></div>
+          <div><span style="color:var(--gold);font-size:20px">${data.subscribers ?? 0}</span><br><span style="color:var(--muted);font-size:11px">Subscribers</span></div>
+          <div><span style="color:var(--gold);font-size:20px">${data.convergence_alerts ?? 0}</span><br><span style="color:var(--muted);font-size:11px">Convergence Alerts</span></div>
+        </div>`;
+    }
+  } catch (e) {
+    console.warn('Mesh health unavailable:', e);
+  }
+}
+
+// Auto-load data when switching to these tabs
+const _origSwitchTab = switchTab;
+switchTab = function(tabId, el) {
+  _origSwitchTab(tabId, el);
+  if (tabId === 'growth-dashboard') refreshGrowthData();
+  else if (tabId === 'marketing-brain') refreshPlaybook();
+  else if (tabId === 'funnel-pipeline') refreshFunnelPipeline();
+  else if (tabId === 'swarm') loadSwarmOverview();
+};
 
 // =============================================================================
 // INIT

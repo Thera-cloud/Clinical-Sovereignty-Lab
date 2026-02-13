@@ -28,6 +28,10 @@ OPT_OUT_FILE = DATA_DIR / "sms_opt_out.json"
 STOP_KEYWORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
 START_KEYWORDS = {"START", "UNSTOP", "YES"}
 
+# Approval protocol keywords (Sovereign Swarm strategy proposals)
+APPROVAL_PREFIXES = ("APPROVE", "REJECT", "HOLD", "MODIFY")
+APPROVAL_SYNONYMS = {"YES", "GO", "DO IT", "SHIP IT", "WAIT", "DEFER", "LATER", "NO", "NOPE"}
+
 
 def _normalize_phone(phone: str) -> str:
     """Normalize to E.164 format."""
@@ -102,6 +106,33 @@ async def handle_incoming_sms(
         )
         print(f">>> [TWILIO_WEBHOOK] HELP from {phone}")
         return Response(content=twiml, media_type="application/xml")
+
+    # Check for approval protocol keywords (Sovereign Swarm strategy proposals)
+    if keyword.startswith(APPROVAL_PREFIXES) or keyword in APPROVAL_SYNONYMS:
+        try:
+            from app.services.approval_protocol import ApprovalProtocolService
+            from app.config import settings
+            import asyncpg
+
+            # Get db_pool from app state if available, otherwise create a brief connection
+            db_pool = getattr(router, "_db_pool", None)
+            if db_pool:
+                protocol = ApprovalProtocolService(db_pool)
+                result = await protocol.handle_inbound_reply(
+                    raw_message=Body.strip(),
+                    channel="sms",
+                )
+                print(f">>> [TWILIO_WEBHOOK] Approval reply from {phone}: {result.get('decision', '?')}")
+                twiml_body = f"Received: {result.get('decision', 'UNKNOWN')}"
+                if result.get("proposal_id"):
+                    twiml_body += f" for proposal {result['proposal_id'][:8]}..."
+                twiml = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<Response><Message>{twiml_body}</Message></Response>'
+                )
+                return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f">>> [TWILIO_WEBHOOK] Approval handling error: {e}")
 
     # Unknown keyword — acknowledge silently
     print(f">>> [TWILIO_WEBHOOK] Unhandled message from {phone}: {Body[:50]}")

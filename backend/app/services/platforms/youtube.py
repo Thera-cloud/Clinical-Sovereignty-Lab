@@ -168,6 +168,7 @@ class YouTubeAdapter(SocialPlatformAdapter):
     async def handle_oauth_callback(self, code: str, redirect_uri: str) -> bool:
         """Exchange Google OAuth code for tokens."""
         try:
+            logger.info(f"YouTube OAuth: exchanging code (len={len(code)}) with redirect_uri={redirect_uri}")
             async with httpx.AsyncClient() as client:
                 resp = await client.post(GOOGLE_TOKEN_URL, data={
                     "code": code,
@@ -179,7 +180,10 @@ class YouTubeAdapter(SocialPlatformAdapter):
                 data = resp.json()
 
                 if "access_token" not in data:
-                    self._last_error = data.get("error_description", "Token exchange failed")
+                    error_msg = data.get("error_description", "Token exchange failed")
+                    error_code = data.get("error", "unknown")
+                    logger.error(f"YouTube OAuth token exchange failed: {error_code} — {error_msg} (redirect_uri={redirect_uri})")
+                    self._last_error = f"{error_msg} (error={error_code})"
                     return False
 
                 self._access_token = data["access_token"]

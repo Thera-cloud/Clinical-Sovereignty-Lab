@@ -1027,7 +1027,7 @@ async def initiate_platform_connect(platform: str, request: Request):
     if not adapter:
         raise HTTPException(status_code=500, detail=f"Failed to load adapter for {platform}")
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
 
     try:
@@ -1057,23 +1057,63 @@ async def platform_oauth_callback(
     OAuth callback handler. Called by the platform after admin authorizes.
     Exchanges the code for tokens and stores them.
     """
+    import logging as _logging
+    _log = _logging.getLogger("skyeye.oauth")
     from app.services.platforms import get_adapter
+    from app.config import settings as _settings
     adapter = get_adapter(platform, request.app.state.db_pool)
     if not adapter:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = _settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
+
+    _log.info(f"OAuth callback for {platform}: code_len={len(code)}, state={state}, redirect_uri={redirect_uri}")
 
     success = await adapter.handle_oauth_callback(code, redirect_uri)
     if success:
-        # Redirect back to SkyEye dashboard
-        return RedirectResponse(url="/dashboard/skyeye.html?connected=" + platform)
+        # Redirect back to SkyEye dashboard (on the app subdomain, not the API)
+        return RedirectResponse(url="https://app.sovereignsanctuary.net/dashboard/skyeye.html?connected=" + platform)
     else:
         raise HTTPException(
             status_code=400,
             detail=f"OAuth callback failed for {platform}: {adapter.last_error}"
         )
+
+
+# =============================================================================
+# TIKTOK WEBHOOK (handles POST from TikTok for event notifications)
+# =============================================================================
+
+@router.post("/platforms/tiktok/callback")
+async def tiktok_webhook(request: Request):
+    """
+    TikTok webhook endpoint. Handles:
+    1. URL verification challenge (TikTok sends a challenge, we echo it back)
+    2. Event notifications (video status, comments, etc.)
+    """
+    import logging as _logging
+    _log = _logging.getLogger("skyeye.tiktok.webhook")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    _log.info(f"TikTok webhook received: {body}")
+
+    # --- URL Verification Challenge ---
+    # TikTok sends: {"challenge": "<string>"} and expects it echoed back
+    if "challenge" in body:
+        _log.info("TikTok webhook verification challenge received")
+        return {"challenge": body["challenge"]}
+
+    # --- Event Notifications ---
+    event_type = body.get("event", "unknown")
+    _log.info(f"TikTok webhook event: {event_type}")
+
+    # Acknowledge receipt -- TikTok expects 200 OK
+    return {"status": "ok", "event": event_type}
 
 
 # =============================================================================
@@ -1135,4 +1175,249 @@ async def get_engine_status(request: Request):
     return {
         "engine_running": True,
         **pulse,
+    }
+
+
+# =============================================================================
+# SECURITY HARDENING
+# =============================================================================
+
+@router.get("/dns-check")
+async def dns_check():
+    """
+    Verify SPF, DKIM, and DMARC DNS records for sovereignsanctuary.net.
+    Returns pass/fail per record so the admin dashboard can show DNS health.
+    """
+    import asyncio
+    domain = "sovereignsanctuary.net"
+    results = {
+        "domain": domain,
+        "spf": {"status": "fail", "record": None, "detail": "No SPF record found"},
+        "dkim": {"status": "fail", "record": None, "detail": "No DKIM record found"},
+        "dmarc": {"status": "fail", "record": None, "detail": "No DMARC record found"},
+        "overall": "fail",
+    }
+
+    try:
+        import dns.resolver
+        resolver = dns.resolver.Resolver()
+        resolver.timeout = 5
+        resolver.lifetime = 5
+    except ImportError:
+        # Fallback: use subprocess dig
+        import subprocess
+
+        def _dig(qname: str, rtype: str = "TXT") -> list:
+            try:
+                proc = subprocess.run(
+                    ["dig", "+short", rtype, qname],
+                    capture_output=True, text=True, timeout=5,
+                )
+                return [line.strip().strip('"') for line in proc.stdout.strip().split("\n") if line.strip()]
+            except Exception:
+                return []
+
+        # SPF
+        for txt in _dig(domain, "TXT"):
+            if "v=spf1" in txt:
+                results["spf"]["record"] = txt
+                if "-all" in txt:
+                    results["spf"]["status"] = "pass"
+                    results["spf"]["detail"] = "SPF with hard fail (-all) found"
+                elif "~all" in txt:
+                    results["spf"]["status"] = "warn"
+                    results["spf"]["detail"] = "SPF uses soft fail (~all) — recommend -all"
+                else:
+                    results["spf"]["status"] = "warn"
+                    results["spf"]["detail"] = "SPF found but missing -all"
+                break
+
+        # DKIM — try common selectors
+        for selector in ["google", "default", "selector1", "selector2", "s1", "s2"]:
+            dkim_name = f"{selector}._domainkey.{domain}"
+            records = _dig(dkim_name, "TXT")
+            for txt in records:
+                if "v=DKIM1" in txt or "p=" in txt:
+                    results["dkim"]["status"] = "pass"
+                    results["dkim"]["record"] = f"{selector}._domainkey → {txt[:80]}..."
+                    results["dkim"]["detail"] = f"DKIM record found (selector: {selector})"
+                    break
+            if results["dkim"]["status"] == "pass":
+                break
+
+        # DMARC
+        for txt in _dig(f"_dmarc.{domain}", "TXT"):
+            if "v=DMARC1" in txt:
+                results["dmarc"]["record"] = txt
+                if "p=reject" in txt:
+                    results["dmarc"]["status"] = "pass"
+                    results["dmarc"]["detail"] = "DMARC with p=reject found"
+                elif "p=quarantine" in txt:
+                    results["dmarc"]["status"] = "warn"
+                    results["dmarc"]["detail"] = "DMARC with p=quarantine — recommend p=reject"
+                elif "p=none" in txt:
+                    results["dmarc"]["status"] = "warn"
+                    results["dmarc"]["detail"] = "DMARC with p=none — recommend p=reject"
+                else:
+                    results["dmarc"]["status"] = "warn"
+                    results["dmarc"]["detail"] = "DMARC found but policy unclear"
+                break
+
+        # Overall
+        statuses = [results["spf"]["status"], results["dkim"]["status"], results["dmarc"]["status"]]
+        if all(s == "pass" for s in statuses):
+            results["overall"] = "pass"
+        elif any(s == "fail" for s in statuses):
+            results["overall"] = "fail"
+        else:
+            results["overall"] = "warn"
+
+        return results
+
+    # If dnspython is available, use it
+    def _resolve_txt(qname: str) -> list:
+        try:
+            answers = resolver.resolve(qname, "TXT")
+            return ["".join(s.decode() if isinstance(s, bytes) else s for s in rdata.strings) for rdata in answers]
+        except Exception:
+            return []
+
+    # SPF
+    for txt in _resolve_txt(domain):
+        if "v=spf1" in txt:
+            results["spf"]["record"] = txt
+            if "-all" in txt:
+                results["spf"]["status"] = "pass"
+                results["spf"]["detail"] = "SPF with hard fail (-all) found"
+            elif "~all" in txt:
+                results["spf"]["status"] = "warn"
+                results["spf"]["detail"] = "SPF uses soft fail (~all) — recommend -all"
+            else:
+                results["spf"]["status"] = "warn"
+                results["spf"]["detail"] = "SPF found but missing -all"
+            break
+
+    # DKIM — try common selectors
+    for selector in ["google", "default", "selector1", "selector2", "s1", "s2"]:
+        dkim_name = f"{selector}._domainkey.{domain}"
+        for txt in _resolve_txt(dkim_name):
+            if "v=DKIM1" in txt or "p=" in txt:
+                results["dkim"]["status"] = "pass"
+                results["dkim"]["record"] = f"{selector}._domainkey → {txt[:80]}..."
+                results["dkim"]["detail"] = f"DKIM record found (selector: {selector})"
+                break
+        if results["dkim"]["status"] == "pass":
+            break
+
+    # DMARC
+    for txt in _resolve_txt(f"_dmarc.{domain}"):
+        if "v=DMARC1" in txt:
+            results["dmarc"]["record"] = txt
+            if "p=reject" in txt:
+                results["dmarc"]["status"] = "pass"
+                results["dmarc"]["detail"] = "DMARC with p=reject found"
+            elif "p=quarantine" in txt:
+                results["dmarc"]["status"] = "warn"
+                results["dmarc"]["detail"] = "DMARC with p=quarantine — recommend p=reject"
+            elif "p=none" in txt:
+                results["dmarc"]["status"] = "warn"
+                results["dmarc"]["detail"] = "DMARC with p=none — recommend p=reject"
+            else:
+                results["dmarc"]["status"] = "warn"
+                results["dmarc"]["detail"] = "DMARC found but policy unclear"
+            break
+
+    # Overall
+    statuses = [results["spf"]["status"], results["dkim"]["status"], results["dmarc"]["status"]]
+    if all(s == "pass" for s in statuses):
+        results["overall"] = "pass"
+    elif any(s == "fail" for s in statuses):
+        results["overall"] = "fail"
+    else:
+        results["overall"] = "warn"
+
+    return results
+
+
+class EmergencyRevokeRequest(BaseModel):
+    confirm: str  # Must be "REVOKE_ALL"
+
+
+@router.post("/emergency-revoke")
+async def emergency_revoke(body: EmergencyRevokeRequest, request: Request):
+    """
+    Emergency kill switch — revokes ALL platform tokens, stops the session
+    engine, and rejects all pending content queue items.
+
+    Requires body: {"confirm": "REVOKE_ALL"} to prevent accidental triggers.
+    """
+    if body.confirm != "REVOKE_ALL":
+        raise HTTPException(
+            status_code=400,
+            detail="Confirmation required. Send {\"confirm\": \"REVOKE_ALL\"} to proceed."
+        )
+
+    db_pool = request.app.state.db_pool
+    summary = {
+        "tokens_revoked": 0,
+        "queue_rejected": 0,
+        "engine_stopped": False,
+        "errors": [],
+    }
+
+    # 1. Revoke all platform tokens — NULL out credentials, set status='revoked'
+    try:
+        async with db_pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE skyeye_platform_tokens
+                SET access_token = NULL,
+                    refresh_token = NULL,
+                    status = 'revoked',
+                    error_message = 'Emergency revoke triggered',
+                    updated_at = NOW()
+                WHERE status != 'revoked'
+            """)
+            # result is e.g. "UPDATE 5"
+            summary["tokens_revoked"] = int(result.split()[-1]) if result else 0
+    except Exception as e:
+        summary["errors"].append(f"Token revocation failed: {e}")
+
+    # 2. Reject all pending content queue items
+    try:
+        async with db_pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE skyeye_content_queue
+                SET status = 'rejected',
+                    reviewed_at = NOW()
+                WHERE status IN ('pending', 'approved', 'scheduled')
+            """)
+            summary["queue_rejected"] = int(result.split()[-1]) if result else 0
+    except Exception as e:
+        summary["errors"].append(f"Queue rejection failed: {e}")
+
+    # 3. Stop the session engine if running
+    engine = getattr(request.app.state, "skyeye_engine", None)
+    if engine:
+        try:
+            await engine.stop()
+            summary["engine_stopped"] = True
+        except Exception as e:
+            summary["errors"].append(f"Engine stop failed: {e}")
+
+    # 4. Log the emergency action to skyeye_activity
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO skyeye_activity (platform, type, content, sentiment, created_at)
+                VALUES ('system', 'emergency_revoke',
+                        $1,
+                        'critical', NOW())
+            """, json.dumps(summary))
+    except Exception as e:
+        summary["errors"].append(f"Activity log failed: {e}")
+
+    return {
+        "status": "revoked",
+        "message": "Emergency revoke completed.",
+        **summary,
     }

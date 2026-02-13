@@ -82,3 +82,9 @@ apscheduler>=3.10
 google-api-python-client>=2.100
 google-auth>=2.25
 asyncpraw>=7.7
+
+# SkyEye — DNS verification for security hardening
+dnspython>=2.4
+
+# Foresight Engine — Time-series forecasting
+statsmodels>=0.14.0

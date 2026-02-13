@@ -17,6 +17,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import ThePulse from './components/ThePulse';
 
 // =============================================================================
 // DESIGN SYSTEM
@@ -247,6 +248,7 @@ const navItems = [
   { id: 'audit', icon: '📜', label: 'Audit Log' },
   { id: 'nate', icon: '🧠', label: 'Nate Features' },
   { id: 'nevedal', icon: '🔬', label: 'Nevedal Lab' },
+  { id: 'the-pulse', icon: '💓', label: 'The Pulse' },
 ];
 
 const Sidebar = ({ activeScreen, setActiveScreen }) => (
@@ -1195,6 +1197,7 @@ export default function SovereignCommand() {
       case 'audit': return <AuditLogScreen />;
       case 'nate': return <NateFeaturesScreen />;
       case 'nevedal': return <NevedalLabScreen />;
+      case 'the-pulse': return <ThePulse />;
       default: return <DashboardScreen />;
     }
   };

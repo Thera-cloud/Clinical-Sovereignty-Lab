@@ -32,6 +32,9 @@ import app.routers.golden_ticket_api as golden_ticket_api
 import app.routers.analytics_api as analytics_api
 import app.routers.webhook_api as webhook_api
 import app.routers.skyeye_api as skyeye_api
+import app.routers.marketing_api as marketing_api
+import app.routers.coherence_api as coherence_api
+import app.routers.fibre_api as fibre_api
 
 
 # =============================================================================
@@ -93,6 +96,9 @@ async def lifespan(app: FastAPI):
     
     # Store pool in app state
     app.state.db_pool = db_pool
+
+    # Share db_pool with twilio_webhook router for approval protocol
+    twilio_webhook.router._db_pool = db_pool
     
     # Start drip campaign scheduler
     drip_scheduler = None
@@ -118,6 +124,78 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"   ⚠️  SkyEye session engine failed to start: {e}")
     
+    # Initialize Sovereign Swarm services
+    if getattr(settings, "ENABLE_SOVEREIGN_SWARM", False):
+        try:
+            from app.services.identity_chain import IdentityChainService
+            from app.services.wisdom_mesh import WisdomMeshService
+            from app.services.sovereign_immunity import SovereignImmunityService
+            from app.services.fibre_manager import FibreManager
+            from app.fibres import FIBRE_REGISTRY
+            from app.models.fibre import FibreType
+
+            # Identity Chain
+            identity_service = IdentityChainService()
+            master_key = getattr(settings, "SOVEREIGN_MIND_MASTER_KEY", "")
+
+            # Key persistence: env var > file > generate new
+            master_key_file = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "data", "sovereign_master_key.pem"
+            )
+            if master_key:
+                identity_service.load_master_key(master_key)
+                print("   ✅ Master key loaded from env var")
+            elif os.path.isfile(master_key_file):
+                with open(master_key_file, "r") as f:
+                    identity_service.load_master_key(f.read())
+                print(f"   ✅ Master key loaded from {master_key_file}")
+            else:
+                new_pem = identity_service.initialize_master_key()
+                # Persist for next restart
+                try:
+                    os.makedirs(os.path.dirname(master_key_file), exist_ok=True)
+                    with open(master_key_file, "w") as f:
+                        f.write(new_pem)
+                    os.chmod(master_key_file, 0o600)
+                    print(f"   ✅ Master key generated and saved to {master_key_file}")
+                except Exception as kf_err:
+                    print(f"   ⚠️  Master key generated but could not persist: {kf_err}")
+            app.state.identity_service = identity_service
+
+            # Wisdom Mesh
+            wisdom_mesh = WisdomMeshService(db_pool=db_pool)
+            try:
+                await wisdom_mesh.connect(settings.redis_url)
+            except Exception as e:
+                print(f"   ⚠️  Wisdom Mesh Redis connection failed: {e}")
+            app.state.wisdom_mesh = wisdom_mesh
+
+            # Sovereign Immunity
+            immunity = SovereignImmunityService(
+                db_pool=db_pool, identity_service=identity_service
+            )
+            app.state.sovereign_immunity = immunity
+
+            # Fibre Manager
+            fibre_manager = FibreManager(
+                db_pool=db_pool,
+                identity_service=identity_service,
+                wisdom_mesh=wisdom_mesh,
+            )
+            # Register all Fibre types
+            for type_name, fibre_cls in FIBRE_REGISTRY.items():
+                try:
+                    fibre_type = FibreType(type_name)
+                    fibre_manager.register_fibre_type(fibre_type, fibre_cls)
+                except ValueError:
+                    pass
+            app.state.fibre_manager = fibre_manager
+
+            print(f"   ✅ Sovereign Swarm initialized "
+                  f"({len(FIBRE_REGISTRY)} Fibre types registered)")
+        except Exception as e:
+            print(f"   ⚠️  Sovereign Swarm failed to start: {e}")
+    
     yield
     
     # Shutdown
@@ -129,6 +207,14 @@ async def lifespan(app: FastAPI):
             pass
     if drip_scheduler:
         drip_scheduler.shutdown()
+    # Disconnect Wisdom Mesh (Redis cleanup)
+    wisdom_mesh = getattr(app.state, "wisdom_mesh", None)
+    if wisdom_mesh:
+        try:
+            await wisdom_mesh.disconnect()
+            print("   ✅ Wisdom Mesh disconnected")
+        except Exception:
+            pass
     if db_pool:
         await db_pool.close()
     print("   ✅ Database disconnected")
@@ -204,6 +290,16 @@ if settings.ENABLE_ZOOM:
 # SkyEye Social Media Hub
 if settings.ENABLE_SKYEYE:
     app.include_router(skyeye_api.router)
+
+# Marketing Brain (always enabled when SkyEye is enabled)
+if settings.ENABLE_SKYEYE:
+    app.include_router(marketing_api.router)
+
+# Coherence Engine (Sovereign Swarm)
+app.include_router(coherence_api.router)
+
+# Fibre & Mesh API (Sovereign Swarm)
+app.include_router(fibre_api.router)
 
 
 # =============================================================================

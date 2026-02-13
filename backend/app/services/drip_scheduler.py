@@ -109,8 +109,17 @@ class DripScheduler:
             replace_existing=True
         )
 
+        # Check auto-execute strategy proposals every 10 minutes
+        self.scheduler.add_job(
+            self.check_approval_auto_executions,
+            IntervalTrigger(minutes=10),
+            id="check_approval_auto_exec",
+            name="Auto-execute approved strategy proposals",
+            replace_existing=True
+        )
+
         self.scheduler.start()
-        print(">>> [DRIP] Scheduler started with 5 jobs")
+        print(">>> [DRIP] Scheduler started with 6 jobs")
 
     def shutdown(self):
         """Gracefully shut down the scheduler."""
@@ -408,6 +417,21 @@ class DripScheduler:
 
         except Exception as e:
             print(f">>> [DRIP] update_campaign_analytics error: {e}")
+
+    # =========================================================================
+    # JOB: Approval Protocol Auto-Execute
+    # =========================================================================
+
+    async def check_approval_auto_executions(self):
+        """Auto-execute low-risk strategy proposals past their window."""
+        try:
+            from app.services.approval_protocol import ApprovalProtocolService
+            protocol = ApprovalProtocolService(self.db_pool)
+            results = await protocol.check_auto_executions()
+            if results:
+                print(f">>> [DRIP] Auto-executed {len(results)} strategy proposals")
+        except Exception as e:
+            print(f">>> [DRIP] check_approval_auto_executions error: {e}")
 
     # =========================================================================
     # EMAIL HELPERS

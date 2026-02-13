@@ -1,0 +1,62 @@
+---
+description: Verify all client and coach UX services are running at premium connection after any build, rebuild, or deployment
+alwaysApply: true
+---
+
+# Build & Deploy UX Verification
+
+After ANY build, rebuild, or deployment to production (68.183.168.75), **always verify that client and coach UX services are running at premium connection** before considering the task complete.
+
+## Required Checks
+
+Run these checks after every deployment:
+
+### 1. Container Health (all 5 must be running)
+```bash
+ssh root@68.183.168.75 "docker ps --format 'table {{.Names}}\t{{.Status}}'"
+```
+- `nate_backend` -- must show `(healthy)`
+- `nate_bridge` -- must show `Up`
+- `nate_admin` -- must show `Up`
+- `nate_postgres` -- must show `(healthy)`
+- `nate_redis` -- must show `(healthy)`
+
+### 2. API Health
+```bash
+ssh root@68.183.168.75 "curl -s http://localhost:8000/health"
+```
+- Must return `{"status": "healthy"}`
+
+### 3. WebSocket Bridge (client + coach connections)
+```bash
+ssh root@68.183.168.75 "docker logs nate_bridge --tail 10 2>&1"
+```
+- Must show NO errors, crashes, exceptions, or tracebacks
+- Active client metrics loading confirms bridge is processing connections
+
+### 4. Redis + PostgreSQL Connectivity
+```bash
+ssh root@68.183.168.75 "docker exec nate_redis redis-cli ping"
+ssh root@68.183.168.75 "docker exec nate_postgres pg_isready -U nate_admin"
+```
+- Redis must return `PONG`
+- PostgreSQL must return `accepting connections`
+
+### 5. Nginx / HTTPS (public-facing)
+```bash
+ssh root@68.183.168.75 "systemctl is-active nginx"
+```
+- Must return `active`
+
+### 6. SkyEye Pulse (if SkyEye features were changed)
+```bash
+ssh root@68.183.168.75 "curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/skyeye/pulse"
+```
+- Must return `200`
+
+## If Any Check Fails
+
+1. Check container logs: `docker logs <container_name> --tail 30`
+2. Do NOT leave the deployment in a broken state
+3. Roll back the specific change that caused the failure
+4. Report the failure and root cause to the user before proceeding

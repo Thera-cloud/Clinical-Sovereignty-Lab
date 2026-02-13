@@ -19,6 +19,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+except ImportError:
+    Fernet = None  # type: ignore
+    InvalidToken = Exception  # type: ignore
+
 logger = logging.getLogger("skyeye.platforms")
 
 
@@ -184,6 +190,102 @@ class ModerateResult:
     action_taken: str = ""   # deleted/hidden/blocked/reported
     error: Optional[str] = None
     action: ActionResult = ActionResult.SUCCESS
+
+
+# =============================================================================
+# TOKEN ENCRYPTION (Fernet symmetric — AES-128-CBC + HMAC-SHA256)
+# =============================================================================
+
+class TokenCipher:
+    """
+    Encrypt / decrypt OAuth tokens at rest using Fernet.
+
+    Behaviour:
+    - If SKYEYE_TOKEN_ENCRYPTION_KEY is set → full encryption.
+    - If the key is empty → logs a warning and passes tokens through in
+      plaintext (allows dev/test without a key).
+    - decrypt() auto-detects legacy plaintext tokens (they won't start
+      with 'gAAAAA') and returns them unchanged, so existing DB rows
+      don't break after enabling encryption.
+    """
+
+    _instance: Optional["TokenCipher"] = None
+    _fernet: Optional[Any] = None
+    _warned: bool = False
+
+    @classmethod
+    def get(cls) -> "TokenCipher":
+        """Singleton accessor — lazy-inits on first call."""
+        if cls._instance is None:
+            cls._instance = cls()
+            cls._instance._init_cipher()
+        return cls._instance
+
+    def _init_cipher(self):
+        try:
+            from app.config import settings  # Docker / production
+        except ImportError:
+            from backend.app.config import settings  # local dev fallback
+        key = getattr(settings, "SKYEYE_TOKEN_ENCRYPTION_KEY", "")
+        if key and Fernet is not None:
+            try:
+                self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
+                logger.info("TokenCipher: Fernet encryption enabled for platform tokens")
+            except Exception as exc:
+                logger.error(f"TokenCipher: Invalid encryption key — {exc}")
+                self._fernet = None
+        else:
+            if not self._warned:
+                if Fernet is None:
+                    logger.warning(
+                        "TokenCipher: cryptography package not installed — "
+                        "tokens will be stored in PLAINTEXT"
+                    )
+                else:
+                    logger.warning(
+                        "TokenCipher: SKYEYE_TOKEN_ENCRYPTION_KEY is empty — "
+                        "tokens will be stored in PLAINTEXT"
+                    )
+                self._warned = True
+            self._fernet = None
+
+    # ── public API ──────────────────────────────────────────────────
+
+    def encrypt(self, plaintext: str) -> str:
+        """Encrypt a token string. Returns ciphertext (base64) or plaintext fallback."""
+        if not plaintext:
+            return plaintext
+        if self._fernet is None:
+            return plaintext
+        try:
+            return self._fernet.encrypt(plaintext.encode()).decode()
+        except Exception as exc:
+            logger.error(f"TokenCipher.encrypt failed: {exc}")
+            return plaintext  # fallback to plaintext rather than crash
+
+    def decrypt(self, ciphertext: str) -> str:
+        """
+        Decrypt a token string.
+        Gracefully handles legacy plaintext values (they won't start with 'gAAAAA').
+        """
+        if not ciphertext:
+            return ciphertext
+        if self._fernet is None:
+            return ciphertext
+        # Fernet tokens always start with 'gAAAAA'
+        if not ciphertext.startswith("gAAAAA"):
+            return ciphertext  # legacy plaintext — pass through
+        try:
+            return self._fernet.decrypt(ciphertext.encode()).decode()
+        except InvalidToken:
+            logger.warning(
+                "TokenCipher.decrypt: InvalidToken — returning raw value "
+                "(may be legacy plaintext or wrong key)"
+            )
+            return ciphertext
+        except Exception as exc:
+            logger.error(f"TokenCipher.decrypt failed: {exc}")
+            return ciphertext
 
 
 # =============================================================================
@@ -547,7 +649,8 @@ class SocialPlatformAdapter(ABC):
     # ── Token Storage Helpers ───────────────────────────────────────
 
     async def _load_tokens(self) -> Optional[Dict[str, Any]]:
-        """Load stored tokens from skyeye_platform_tokens table."""
+        """Load stored tokens from skyeye_platform_tokens table.
+        Decrypts access_token and refresh_token transparently."""
         if not self.db_pool:
             return None
         try:
@@ -556,7 +659,15 @@ class SocialPlatformAdapter(ABC):
                     "SELECT * FROM skyeye_platform_tokens WHERE platform = $1",
                     self.platform_name
                 )
-                return dict(row) if row else None
+                if not row:
+                    return None
+                data = dict(row)
+                cipher = TokenCipher.get()
+                if data.get("access_token"):
+                    data["access_token"] = cipher.decrypt(data["access_token"])
+                if data.get("refresh_token"):
+                    data["refresh_token"] = cipher.decrypt(data["refresh_token"])
+                return data
         except Exception as e:
             logger.error(f"Failed to load tokens for {self.platform_name}: {e}")
             return None
@@ -567,10 +678,14 @@ class SocialPlatformAdapter(ABC):
                            scopes: Optional[str] = None,
                            account_id: Optional[str] = None,
                            account_name: Optional[str] = None):
-        """Save tokens to skyeye_platform_tokens table."""
+        """Save tokens to skyeye_platform_tokens table.
+        Encrypts access_token and refresh_token before writing."""
         if not self.db_pool:
             return
         try:
+            cipher = TokenCipher.get()
+            enc_access = cipher.encrypt(access_token)
+            enc_refresh = cipher.encrypt(refresh_token) if refresh_token else refresh_token
             async with self.db_pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO skyeye_platform_tokens
@@ -588,7 +703,7 @@ class SocialPlatformAdapter(ABC):
                         status = 'connected',
                         last_refreshed = NOW(),
                         updated_at = NOW()
-                """, self.platform_name, access_token, refresh_token,
+                """, self.platform_name, enc_access, enc_refresh,
                      token_expiry, scopes, account_id, account_name)
         except Exception as e:
             logger.error(f"Failed to save tokens for {self.platform_name}: {e}")

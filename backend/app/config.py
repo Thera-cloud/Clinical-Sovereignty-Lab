@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     BASE_URL: str = "http://10.0.0.81:8000"
     WS_URL: str = "ws://10.0.0.81:8765"
     DOMAIN: Optional[str] = None
+    PUBLIC_BASE_URL: str = ""  # Public-facing API URL (e.g. https://api.sovereignsanctuary.net) for OAuth redirects
     
     # -------------------------------------------------------------------------
     # Azure OpenAI
@@ -156,6 +157,19 @@ class Settings(BaseSettings):
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
     ENABLE_SKYEYE_SESSIONS: bool = False  # Auto session engine (set True when platform APIs connected)
+    ENABLE_SOVEREIGN_SWARM: bool = True   # Sovereign Swarm Intelligence Framework
+
+    # -------------------------------------------------------------------------
+    # Sovereign Swarm Identity Chain (Ed25519 master key PEM)
+    # Generate with: python3 -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; from cryptography.hazmat.primitives import serialization; k=Ed25519PrivateKey.generate(); print(k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode())"
+    # -------------------------------------------------------------------------
+    SOVEREIGN_MIND_MASTER_KEY: str = ""
+
+    # -------------------------------------------------------------------------
+    # SkyEye — Token Encryption
+    # Generate with: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # -------------------------------------------------------------------------
+    SKYEYE_TOKEN_ENCRYPTION_KEY: str = ""
 
     # -------------------------------------------------------------------------
     # SkyEye — Social Media Platform Credentials (all optional)
