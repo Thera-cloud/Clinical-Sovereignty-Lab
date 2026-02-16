@@ -408,61 +408,135 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     }
   }
 
-  // ---- Family Invite (Sovereign Circle) ----
+  // ---- Family Invite (Sovereign Circle) — Batch ----
   void _showFamilyInviteDialog() {
-    final nameCtrl = TextEditingController();
-    final contactCtrl = TextEditingController();
-    String role = 'SPOUSE';
+    final members = <Map<String, dynamic>>[
+      {'name': TextEditingController(), 'contact': TextEditingController(), 'role': 'SPOUSE'},
+    ];
+
+    String _billingSummary(List<Map<String, dynamic>> m) {
+      int free = 0;
+      int paid = 0;
+      bool hasSpouse = false;
+      bool hasFirstDep = false;
+      for (final entry in m) {
+        final r = entry['role'] as String;
+        if (r == 'SPOUSE' && !hasSpouse) { free++; hasSpouse = true; }
+        else if (r == 'SPOUSE') { paid++; }
+        else if (r == 'DEPENDENT' && !hasFirstDep) { free++; hasFirstDep = true; }
+        else { paid++; }
+      }
+      if (paid == 0) return 'Estimated: Free';
+      return 'Estimated: $free free + $paid x \$75/mo = \$${paid * 75}/mo';
+    }
+
+    bool _validate(List<Map<String, dynamic>> m) {
+      int spouseCount = 0;
+      for (final entry in m) {
+        if (entry['role'] == 'SPOUSE') spouseCount++;
+      }
+      return spouseCount <= 1;
+    }
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: _Design.bgCard,
-          title: const Text('Invite Family Member', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildDialogField('Name', nameCtrl),
-                const SizedBox(height: 12),
-                _buildDialogField('Phone or Email', contactCtrl),
-                const SizedBox(height: 12),
-                const Text('Role', style: TextStyle(color: _Design.textSecondary, fontSize: 12)),
-                const SizedBox(height: 6),
-                DropdownButton<String>(
-                  value: role,
-                  dropdownColor: _Design.bgElevated,
-                  style: const TextStyle(color: _Design.textPrimary),
-                  items: const [
-                    DropdownMenuItem(value: 'SPOUSE', child: Text('Spouse (Free)')),
-                    DropdownMenuItem(value: 'DEPENDENT', child: Text('Dependent (1st Free, then \$75/mo)')),
-                    DropdownMenuItem(value: 'ADDITIONAL', child: Text('Additional Member (\$75/mo)')),
-                  ],
-                  onChanged: (v) => setDialogState(() => role = v!),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: _Design.bgVoid,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _Design.border),
+          title: const Text('Invite Family Members', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Add each family member below. Assign a role and provide their phone or email so they receive the invitation.',
+                    style: TextStyle(color: _Design.textSecondary, fontSize: 11)),
+                  const SizedBox(height: 16),
+                  ...List.generate(members.length, (i) {
+                    final entry = members[i];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _Design.bgVoid,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: _Design.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text('Member ${i + 1}', style: const TextStyle(color: _Design.gold, fontSize: 12, fontWeight: FontWeight.w600)),
+                              const Spacer(),
+                              if (members.length > 1)
+                                GestureDetector(
+                                  onTap: () => setDialogState(() => members.removeAt(i)),
+                                  child: const Icon(Icons.close, color: _Design.red, size: 18),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _buildDialogField('Name', entry['name'] as TextEditingController),
+                          const SizedBox(height: 8),
+                          _buildDialogField('Phone or Email', entry['contact'] as TextEditingController),
+                          const SizedBox(height: 8),
+                          DropdownButton<String>(
+                            value: entry['role'] as String,
+                            dropdownColor: _Design.bgElevated,
+                            isExpanded: true,
+                            style: const TextStyle(color: _Design.textPrimary, fontSize: 13),
+                            items: const [
+                              DropdownMenuItem(value: 'SPOUSE', child: Text('Spouse (Free)')),
+                              DropdownMenuItem(value: 'DEPENDENT', child: Text('Dependent (1st Free, then \$75/mo)')),
+                              DropdownMenuItem(value: 'ADDITIONAL', child: Text('Additional Member (\$75/mo)')),
+                            ],
+                            onChanged: (v) => setDialogState(() => entry['role'] = v!),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  if (members.length < 10)
+                    TextButton.icon(
+                      onPressed: () => setDialogState(() {
+                        members.add({'name': TextEditingController(), 'contact': TextEditingController(), 'role': 'DEPENDENT'});
+                      }),
+                      icon: const Icon(Icons.add_circle_outline, color: _Design.gold, size: 18),
+                      label: const Text('Add Another Member', style: TextStyle(color: _Design.gold, fontSize: 12)),
+                    ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _Design.bgElevated,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _Design.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Billing Summary', style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        const Text('\u2022 Spouse: Free (first one)', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                        const Text('\u2022 First Dependent: Free', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                        const Text('\u2022 Additional members: \$75/month each', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                        const Text('\u2022 All charges billed to Head of Household', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                        const SizedBox(height: 8),
+                        Text(_billingSummary(members), style: const TextStyle(color: _Design.gold, fontSize: 12, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Billing Info', style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 4),
-                      Text('• Spouse: Free (first one)', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
-                      Text('• First Dependent: Free', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
-                      Text('• Additional members: \$75/month', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
-                      Text('• All charges billed to Head of Household', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
-                    ],
-                  ),
-                ),
-              ],
+                  if (!_validate(members))
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text('Only one Spouse is allowed per family.', style: TextStyle(color: _Design.red, fontSize: 11)),
+                    ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -472,8 +546,11 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
-              onPressed: () => _sendFamilyInvite(ctx, nameCtrl, contactCtrl, role),
-              child: const Text('Send Invite', style: TextStyle(color: Colors.black)),
+              onPressed: !_validate(members) ? null : () => _sendFamilyInviteBatch(ctx, members),
+              child: Text(
+                members.length == 1 ? 'Send Invite' : 'Send All ${members.length} Invites',
+                style: const TextStyle(color: Colors.black),
+              ),
             ),
           ],
         ),
@@ -481,18 +558,24 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
-  Future<void> _sendFamilyInvite(BuildContext dialogCtx, TextEditingController nameCtrl,
-      TextEditingController contactCtrl, String role) async {
-    final name = nameCtrl.text.trim();
-    final contact = contactCtrl.text.trim();
-    if (name.isEmpty || contact.isEmpty) return;
+  Future<void> _sendFamilyInviteBatch(BuildContext dialogCtx, List<Map<String, dynamic>> members) async {
+    final validMembers = <Map<String, String>>[];
+    for (final m in members) {
+      final name = (m['name'] as TextEditingController).text.trim();
+      final contact = (m['contact'] as TextEditingController).text.trim();
+      final role = m['role'] as String;
+      if (name.isNotEmpty && contact.isNotEmpty) {
+        validMembers.add({'name': name, 'contact': contact, 'role': role});
+      }
+    }
+    if (validMembers.isEmpty) return;
 
     Navigator.pop(dialogCtx);
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('Generating invite...'),
-      duration: Duration(seconds: 2),
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Sending ${validMembers.length} invite${validMembers.length > 1 ? 's' : ''}...'),
+      duration: const Duration(seconds: 3),
     ));
 
     WebSocketChannel? inviteSocket;
@@ -508,10 +591,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         try {
           final data = jsonDecode(raw) as Map<String, dynamic>;
           final type = (data['type'] ?? '').toString();
-          if (type == 'family_invite_token_generated') {
+          if (type == 'family_invite_batch_result') {
             completer.complete(data);
           } else if (type == 'family_invite_error') {
-            completer.completeError(data['message'] ?? 'Invite failed');
+            completer.completeError(data['message'] ?? 'Batch invite failed');
           } else if (type == 'connected') {
             inviteSocket?.sink.add(jsonEncode({
               'type': 'auth',
@@ -520,10 +603,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             }));
           } else if (type == 'auth_success' || type == 'login_success') {
             inviteSocket?.sink.add(jsonEncode({
-              'type': 'generate_family_invite_token',
-              'invitee_name': name,
-              'invitee_contact': contact,
-              'role': role,
+              'type': 'generate_family_invite_tokens_batch',
+              'members': validMembers,
             }));
           }
         } catch (_) {}
@@ -533,10 +614,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         if (!completer.isCompleted) completer.completeError('Connection closed');
       });
 
-      // Auth is sent when we receive 'connected' from the stream listener
-
       final result = await completer.future.timeout(
-        const Duration(seconds: 15),
+        const Duration(seconds: 30),
         onTimeout: () => throw TimeoutException('Request timed out'),
       );
 
@@ -544,23 +623,35 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       try { await inviteSocket.sink.close(); } catch (_) {}
 
       if (!mounted) return;
-      final token = (result?['token'] ?? '').toString();
-      final notifSent = result?['notification_sent'] == true;
-      final notifMethod = (result?['notification_method'] ?? '').toString();
+      final results = (result?['results'] as List<dynamic>?) ?? [];
+      final sentCount = results.where((r) => r['notification_sent'] == true).length;
+      final totalCount = results.length;
       final inviterName = _profile['name'] ?? 'Your family';
-      final inviteUrl = 'https://app.sovereignsanctuary.net/family-invite?code=$token';
-      final shareMsg =
-          "$inviterName has invited you to join their Family Circle on Sovereign Sanctuary.\n\n"
-          "Accept here: $inviteUrl\n\n"
-          "Invite code: $token";
-      await _safeShare(shareMsg, subject: 'Sovereign Sanctuary Family Invite');
+
+      final shareLines = <String>[];
+      shareLines.add('$inviterName has invited you to join their Family Circle on Sovereign Sanctuary.\n');
+      for (final r in results) {
+        final token = (r['token'] ?? '').toString();
+        final name = (r['name'] ?? '').toString();
+        final url = 'https://app.sovereignsanctuary.net/family-invite?code=$token';
+        shareLines.add('$name: $url (code: $token)');
+      }
+      shareLines.add('\nDownload: https://app.sovereignsanctuary.net');
+      await _safeShare(shareLines.join('\n'), subject: 'Sovereign Sanctuary Family Invites');
+
       if (mounted) {
-        final statusMsg = notifSent
-            ? 'Invite sent via ${notifMethod == "sms" ? "text message" : "email"}! Code: $token'
-            : 'Invite code generated: $token (message could not be delivered — share manually)';
+        final emailCount = results.where((r) => r['notification_method'] == 'email').length;
+        final smsCount = results.where((r) => r['notification_method'] == 'sms').length;
+        final parts = <String>[];
+        if (emailCount > 0) parts.add('$emailCount email');
+        if (smsCount > 0) parts.add('$smsCount SMS');
+        final method = parts.isNotEmpty ? ' (${parts.join(', ')})' : '';
+        final statusMsg = sentCount > 0
+            ? '$sentCount of $totalCount invite${totalCount > 1 ? 's' : ''} sent$method'
+            : '$totalCount invite code${totalCount > 1 ? 's' : ''} generated (share manually)';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(statusMsg),
-          backgroundColor: notifSent ? _Design.green : Colors.orange,
+          backgroundColor: sentCount > 0 ? _Design.green : Colors.orange,
           duration: const Duration(seconds: 5),
         ));
       }
@@ -569,7 +660,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       try { inviteSocket?.sink.close(); } catch (_) {}
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not generate invite: ${e.toString().replaceAll('TimeoutException:', '').trim()}'),
+          content: Text('Could not send invites: ${e.toString().replaceAll('TimeoutException:', '').trim()}'),
           backgroundColor: _Design.red,
           duration: const Duration(seconds: 5),
         ));
@@ -771,7 +862,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           if (_isSovereignCircle) ...[
             _sectionHeader('FAMILY', Icons.family_restroom),
             _settingsCard([
-              _actionRow(Icons.group_add, 'Invite Family Member', 'Add spouse or dependent to your plan', _showFamilyInviteDialog),
+              _actionRow(Icons.group_add, 'Invite Family Members', 'Add spouse and dependents to your plan', _showFamilyInviteDialog),
               _infoRow('Plan', 'Sovereign Circle — Head of Household'),
             ]),
             const SizedBox(height: 20),

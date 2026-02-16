@@ -13177,6 +13177,148 @@ Coach Reflection on Session {session_id}:
                             "message": "Sovereign Circle subscription required for family invitations."
                         }))
 
+            # === GENERATE FAMILY INVITE TOKENS — BATCH ===
+            elif t == "generate_family_invite_tokens_batch":
+                if current_profile:
+                    import uuid as _uuid
+                    members_list = d.get("members", [])
+                    if not isinstance(members_list, list) or len(members_list) == 0:
+                        await websocket.send(json.dumps({
+                            "type": "family_invite_error",
+                            "message": "No members provided."
+                        }))
+                        continue
+                    if len(members_list) > 10:
+                        await websocket.send(json.dumps({
+                            "type": "family_invite_error",
+                            "message": "Maximum 10 members per batch."
+                        }))
+                        continue
+
+                    # Validate max 1 Spouse in batch + existing family
+                    spouse_in_batch = sum(1 for m in members_list if (m.get("role") or "").upper() == "SPOUSE")
+                    family_id = current_profile.get("family_id")
+
+                    # Check existing family for a spouse
+                    existing_spouse = False
+                    if family_id:
+                        registry_check = load_registry()
+                        for _rk, _rv in registry_check.items():
+                            if _rk.startswith("_"):
+                                continue
+                            _rp = _rv.get("profile", {})
+                            if _rp.get("family_id") == family_id and (_rp.get("family_role") or "").upper() == "SPOUSE":
+                                existing_spouse = True
+                                break
+
+                    if spouse_in_batch > 1 or (spouse_in_batch == 1 and existing_spouse):
+                        await websocket.send(json.dumps({
+                            "type": "family_invite_error",
+                            "message": "Only one Spouse is allowed per family."
+                        }))
+                        continue
+
+                    # Check for duplicate contacts in batch
+                    contacts_seen = set()
+                    has_dupes = False
+                    for m in members_list:
+                        c = (m.get("contact") or "").strip().lower()
+                        if c in contacts_seen:
+                            has_dupes = True
+                            break
+                        contacts_seen.add(c)
+                    if has_dupes:
+                        await websocket.send(json.dumps({
+                            "type": "family_invite_error",
+                            "message": "Duplicate contacts found. Each member must have a unique phone or email."
+                        }))
+                        continue
+
+                    # Auto-create family if needed
+                    if not family_id:
+                        plan = (current_profile.get("subscription_plan") or current_profile.get("tier") or "").upper()
+                        if "TOP" in plan or "SOVEREIGN" in plan or "STANDARD" in plan:
+                            family_id = f"FAM_{str(_uuid.uuid4())[:8].upper()}"
+                            registry = load_registry()
+                            for k, v in registry.items():
+                                if v.get("profile", {}).get("hardware_id") == uid:
+                                    v["profile"]["family_id"] = family_id
+                                    v["profile"]["family_role"] = "HEAD"
+                                    save_registry(registry)
+                                    break
+
+                    if not family_id:
+                        await websocket.send(json.dumps({
+                            "type": "family_invite_error",
+                            "message": "Sovereign Circle subscription required for family invitations."
+                        }))
+                        continue
+
+                    results = []
+                    registry = load_registry()
+                    if "_family_invites" not in registry:
+                        registry["_family_invites"] = {}
+
+                    inviter_name = (current_profile.get("name") or "Your family") or "Your family"
+
+                    for member in members_list:
+                        m_name = (member.get("name") or "").strip()
+                        m_contact = (member.get("contact") or "").strip()
+                        m_role = (member.get("role") or "DEPENDENT").upper()
+                        if not m_name or not m_contact:
+                            results.append({
+                                "name": m_name or "(empty)",
+                                "token": None,
+                                "notification_sent": False,
+                                "notification_method": None,
+                                "error": "Missing name or contact"
+                            })
+                            continue
+
+                        invite_token = str(_uuid.uuid4())[:12].upper()
+                        registry["_family_invites"][invite_token] = {
+                            "family_id": family_id,
+                            "invited_by": uid,
+                            "inviter_name": inviter_name,
+                            "invitee_name": m_name,
+                            "invitee_contact": m_contact,
+                            "role": m_role,
+                            "created_at": str(datetime.datetime.now()),
+                            "expires_at": str(datetime.datetime.now() + datetime.timedelta(days=7))
+                        }
+
+                        notif_sent = False
+                        notif_method = None
+                        try:
+                            notif_sent = await notification_system.send_family_invitation(
+                                m_contact, inviter_name, invite_token, m_name
+                            )
+                            notif_method = "email" if "@" in m_contact else "sms"
+                            if notif_sent:
+                                print(f">>> [FAMILY_INVITE_BATCH] Sent {notif_method} to {m_contact}")
+                            else:
+                                print(f">>> [FAMILY_INVITE_BATCH] {notif_method} send returned False for {m_contact}")
+                        except Exception as ex:
+                            print(f">>> [FAMILY_INVITE_BATCH] Could not send to {m_contact}: {ex}")
+
+                        results.append({
+                            "name": m_name,
+                            "token": invite_token,
+                            "notification_sent": notif_sent,
+                            "notification_method": notif_method
+                        })
+
+                    save_registry(registry)
+                    sent_count = sum(1 for r in results if r.get("notification_sent"))
+                    print(f">>> [FAMILY_INVITE_BATCH] {len(results)} invites created, {sent_count} notifications sent for family {family_id}")
+                    await websocket.send(json.dumps({
+                        "type": "family_invite_batch_result",
+                        "family_id": family_id,
+                        "results": results,
+                        "total": len(results),
+                        "sent": sent_count
+                    }))
+
             # === LOOKUP FAMILY INVITE (no auth required) ===
             elif t == "lookup_family_invite":
                 token = (d.get("token") or "").strip().upper()
