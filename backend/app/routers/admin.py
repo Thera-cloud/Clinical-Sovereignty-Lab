@@ -3,20 +3,28 @@ Analytics & Admin API Routes
 Platform-wide analytics, crisis monitoring, and admin functions
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta
 import os
 import json
+import secrets
+import hashlib
 from pathlib import Path
 from typing import Any, Dict
 
 from app.services.blob_storage import upload_bytes
+from app.services.api_server import require_admin
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin)],
+)
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
+from app.config import settings as _settings
+DATA_DIR = Path(_settings.DATA_DIR)
 VAULT_ROOT = DATA_DIR / "Vaults"
 
 # Models
@@ -33,6 +41,20 @@ class ResolveCrisisRequest(BaseModel):
     crisis_id: int
     resolution_notes: str
     resolved_by: str
+
+class ResetPasswordRequest(BaseModel):
+    user_id: str
+    new_password: str
+
+class ResetBiometricsRequest(BaseModel):
+    user_id: str
+
+class BanUserRequest(BaseModel):
+    user_id: str
+    reason: str = ""
+
+class WipeMemoryRequest(BaseModel):
+    user_id: str
 
 # Helpers
 def load_json(filepath: Path, default=None):
@@ -133,7 +155,8 @@ async def get_dashboard_stats():
                 login_dt = datetime.fromisoformat(last_login.split(".")[0])
                 if login_dt >= week_ago:
                     active_users += 1
-            except: pass
+            except Exception:
+                pass  # malformed date — skip silently
         
         # New this week
         joined = p.get("joined_date", "")
@@ -142,7 +165,8 @@ async def get_dashboard_stats():
                 joined_dt = datetime.fromisoformat(joined)
                 if joined_dt >= week_ago.date():
                     new_this_week += 1
-            except: pass
+            except Exception:
+                pass  # malformed date — skip silently
     
     # Session stats
     live_sessions = len([s for s in sessions if s.get("status") == "active"])
@@ -257,6 +281,169 @@ async def get_user_details(user_id: str):
             }
     
     raise HTTPException(404, "User not found")
+
+
+# =============================================================================
+# ADMIN IDENTITY RESOLUTION — Password, Biometrics, Ban, Memory Wipe
+# =============================================================================
+
+def _hash_password(password: str) -> str:
+    """Hash password with PBKDF2 (matches bridge_server and api_server)."""
+    salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}:{hashed.hex()}"
+
+
+def _audit_log_append(action: str, **kwargs):
+    """Append an entry to the audit log."""
+    audit_path = DATA_DIR / "audit_log.json"
+    audit = load_json(audit_path, [])
+    if not isinstance(audit, list):
+        audit = []
+    audit.append({"action": action, "timestamp": str(datetime.now()), **kwargs})
+    save_json(audit_path, audit)
+
+
+@router.post("/reset-password")
+async def admin_reset_password(req: ResetPasswordRequest):
+    """Reset a user's password. Audit-logged."""
+    if len(req.new_password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            creds = v.get("credentials", {}) or {}
+            creds["password"] = _hash_password(req.new_password)
+            v["credentials"] = creds
+            save_json(DATA_DIR / "user_registry.json", registry)
+            _audit_log_append("ADMIN_RESET_PASSWORD", user_id=req.user_id, user_name=p.get("name", ""))
+            return {"status": "password_reset", "user_id": req.user_id, "message": "Password updated. User must log in with new credentials."}
+
+    raise HTTPException(404, "User not found")
+
+
+@router.post("/reset-biometrics")
+async def admin_reset_biometrics(req: ResetBiometricsRequest):
+    """Reset a user's voice biometric baselines. Audit-logged."""
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    found = False
+    hw_id = ""
+    user_name = ""
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            hw_id = p.get("hardware_id", req.user_id)
+            user_name = p.get("name", "")
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, "User not found")
+
+    # Clear biometric baselines from user metrics
+    metrics_file = VAULT_ROOT / "Clients" / hw_id / "metrics.json"
+    if metrics_file.exists():
+        metrics = load_json(metrics_file, {})
+        ns = metrics.get("nevedal_state", {})
+        # Remove voice biometric baseline fields
+        for field in ["voice_baseline", "voice_signature", "pitch_baseline", "energy_baseline",
+                       "speech_rate_baseline", "pause_ratio_baseline", "baseline_established",
+                       "biometric_enrolled"]:
+            ns.pop(field, None)
+        metrics["nevedal_state"] = ns
+        save_json(metrics_file, metrics)
+
+    # Also clear from user profile
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == hw_id:
+            for field in ["voice_enrolled", "biometric_enrolled", "voice_baseline_date"]:
+                p.pop(field, None)
+            save_json(DATA_DIR / "user_registry.json", registry)
+            break
+
+    _audit_log_append("ADMIN_RESET_BIOMETRICS", user_id=req.user_id, user_name=user_name)
+    return {"status": "biometrics_reset", "user_id": req.user_id, "message": "Biometrics cleared. User must re-enroll."}
+
+
+@router.post("/ban-user")
+async def admin_ban_user(req: BanUserRequest):
+    """Ban a user account (sets status to BANNED). Audit-logged."""
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            old_status = p.get("subscription_status", "")
+            p["subscription_status"] = "BANNED"
+            p["ban_reason"] = req.reason
+            p["banned_at"] = str(datetime.now())
+            save_json(DATA_DIR / "user_registry.json", registry)
+            _audit_log_append(
+                "ADMIN_BAN_USER",
+                user_id=req.user_id,
+                user_name=p.get("name", ""),
+                reason=req.reason,
+                old_status=old_status,
+            )
+            return {"status": "banned", "user_id": req.user_id, "message": f"User banned. Reason: {req.reason or 'No reason provided.'}"}
+
+    raise HTTPException(404, "User not found")
+
+
+@router.post("/wipe-memory")
+async def admin_wipe_memory(req: WipeMemoryRequest):
+    """Wipe all conversation memory and metrics history for a user. Audit-logged. IRREVERSIBLE."""
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    found = False
+    hw_id = ""
+    user_name = ""
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            hw_id = p.get("hardware_id", req.user_id)
+            user_name = p.get("name", "")
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, "User not found")
+
+    wiped = []
+
+    # Wipe conversation memory
+    memory_file = VAULT_ROOT / "Clients" / hw_id / "memory.json"
+    if memory_file.exists():
+        save_json(memory_file, [])
+        wiped.append("conversation_memory")
+
+    # Wipe metrics history (keep current nevedal_state but clear history)
+    metrics_file = VAULT_ROOT / "Clients" / hw_id / "metrics.json"
+    if metrics_file.exists():
+        metrics = load_json(metrics_file, {})
+        metrics["history"] = []
+        save_json(metrics_file, metrics)
+        wiped.append("metrics_history")
+
+    # Wipe session-specific memory files in vault
+    vault_dir = VAULT_ROOT / "Clients" / hw_id
+    if vault_dir.exists():
+        for f in vault_dir.glob("session_*.json"):
+            save_json(f, {})
+            wiped.append(f"session:{f.stem}")
+
+    _audit_log_append("ADMIN_WIPE_MEMORY", user_id=req.user_id, user_name=user_name, wiped=wiped)
+    return {
+        "status": "memory_wiped",
+        "user_id": req.user_id,
+        "wiped": wiped,
+        "message": f"All memory wiped for {user_name or req.user_id}. {len(wiped)} data stores cleared.",
+    }
 
 
 @router.get("/analytics/events")
@@ -634,4 +821,723 @@ async def get_metrics_distribution():
         },
         "risk_distribution": risk_counts,
         "total_clients": len(gap_scores)
+    }
+
+
+# =============================================================================
+# LIVE SESSIONS — Active sessions from LIVE_SESSION_TRACKER
+# =============================================================================
+
+@router.get("/live-sessions")
+async def get_live_sessions():
+    """Return all currently active sessions."""
+    try:
+        from app.websocket.bridge_server import LIVE_SESSION_TRACKER
+        live = []
+        for sid, sess in LIVE_SESSION_TRACKER.items():
+            live.append({
+                "session_id": sid,
+                "client_id": sess.get("client_id", ""),
+                "started_at": sess.get("started_at", ""),
+                "session_type": sess.get("session_type", "ai"),
+                "mood": sess.get("mood_at_start", ""),
+            })
+        return {"sessions": live, "count": len(live)}
+    except ImportError:
+        return {"sessions": [], "count": 0, "note": "Bridge server not loaded in this process"}
+
+
+# =============================================================================
+# COMMUNITY HEALTH — Aggregate coherence metrics
+# =============================================================================
+
+@router.get("/community-health")
+async def get_community_health():
+    """Aggregate community-wide coherence metrics from nevedal_metrics."""
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    total_clients = 0
+    c_emo_values = []
+    risk_distribution = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
+    cee_count = 0
+
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("role") != "CLIENT":
+            continue
+        total_clients += 1
+
+        metrics_file = VAULT_ROOT / "Clients" / p.get("hardware_id") / "metrics.json"
+        metrics = load_json(metrics_file, {})
+        ns = metrics.get("nevedal_state", {})
+
+        c_emo = ns.get("c_emo", 0)
+        if c_emo:
+            c_emo_values.append(c_emo)
+        risk = ns.get("risk_level", "LOW")
+        if risk in risk_distribution:
+            risk_distribution[risk] += 1
+        if ns.get("cee_window"):
+            cee_count += 1
+
+    avg_c_emo = sum(c_emo_values) / len(c_emo_values) if c_emo_values else 0
+
+    return {
+        "total_clients": total_clients,
+        "avg_c_emo": round(avg_c_emo, 4),
+        "c_emo_range": {
+            "min": round(min(c_emo_values), 4) if c_emo_values else 0,
+            "max": round(max(c_emo_values), 4) if c_emo_values else 0,
+        },
+        "risk_distribution": risk_distribution,
+        "active_cee_windows": cee_count,
+        "clients_with_data": len(c_emo_values),
+    }
+
+
+# =============================================================================
+# ACTIVITY FEED — Recent system events from audit_log
+# =============================================================================
+
+@router.get("/activity-feed")
+async def get_activity_feed(limit: int = 50):
+    """Return recent activity from daily analytics and audit events."""
+    analytics_dir = DATA_DIR / "analytics"
+    events = []
+
+    if analytics_dir.exists():
+        # Gather from most recent daily stats files
+        stat_files = sorted(analytics_dir.glob("daily_*.json"), reverse=True)[:7]
+        for sf in stat_files:
+            stats = load_json(sf, {})
+            date_str = sf.stem.replace("daily_", "")
+            if stats.get("sessions_started"):
+                events.append({
+                    "type": "sessions",
+                    "date": date_str,
+                    "message": f"{stats['sessions_started']} sessions started",
+                    "detail": stats,
+                })
+            if stats.get("new_users"):
+                events.append({
+                    "type": "new_users",
+                    "date": date_str,
+                    "message": f"{stats['new_users']} new users registered",
+                })
+
+    # Also pull from recent notifications log
+    notifications_file = DATA_DIR / "notifications.json"
+    if notifications_file.exists():
+        try:
+            all_notifs = load_json(notifications_file, [])
+            if isinstance(all_notifs, list):
+                for n in all_notifs[-limit:]:
+                    events.append({
+                        "type": "notification",
+                        "date": n.get("created_at", ""),
+                        "message": n.get("message", ""),
+                        "priority": n.get("priority", "NORMAL"),
+                    })
+        except Exception:
+            pass
+
+    # Sort by date descending, limit
+    events.sort(key=lambda e: e.get("date", ""), reverse=True)
+    return {"events": events[:limit], "count": len(events[:limit])}
+
+
+# =============================================================================
+# TOKEN ECONOMICS — Azure OpenAI usage tracking
+# =============================================================================
+
+@router.get("/token-economics")
+async def get_token_economics():
+    """Return token usage and cost estimates from daily analytics."""
+    analytics_dir = DATA_DIR / "analytics"
+    daily_usage = []
+    total_tokens = 0
+
+    if analytics_dir.exists():
+        stat_files = sorted(analytics_dir.glob("daily_*.json"), reverse=True)[:30]
+        for sf in stat_files:
+            stats = load_json(sf, {})
+            tokens = stats.get("tokens_used", 0)
+            total_tokens += tokens
+            daily_usage.append({
+                "date": sf.stem.replace("daily_", ""),
+                "tokens": tokens,
+                "sessions": stats.get("sessions_started", 0),
+            })
+
+    # Cost estimation (GPT-4o pricing approximation)
+    # Input: $2.50/1M tokens, Output: $10/1M tokens, blended ~$6/1M
+    estimated_cost_usd = round(total_tokens * 6 / 1_000_000, 2)
+
+    return {
+        "total_tokens_30d": total_tokens,
+        "estimated_cost_30d_usd": estimated_cost_usd,
+        "daily_usage": daily_usage,
+        "pricing_note": "Estimated at ~$6/1M tokens blended GPT-4o rate",
+    }
+
+
+# =============================================================================
+# BILLING — Revenue Analytics & Subscription Management
+# =============================================================================
+
+# Stripe SDK (optional)
+try:
+    import stripe as _stripe
+    _stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
+    _STRIPE_AVAILABLE = bool(_stripe.api_key)
+except ImportError:
+    _STRIPE_AVAILABLE = False
+
+PLAN_PRICES = {
+    "STANDARD": 49,
+    "INNER_CHAMBER": 49,
+    "TOP_TIER": 149,
+    "SOVEREIGN_CIRCLE": 149,
+}
+
+PLAN_LABELS = {
+    "COACH_ONLY": "Coach Only",
+    "TRIAL": "Threshold (Trial)",
+    "STANDARD": "Inner Chamber",
+    "INNER_CHAMBER": "Inner Chamber",
+    "TOP_TIER": "Sovereign Circle",
+    "SOVEREIGN_CIRCLE": "Sovereign Circle",
+}
+
+
+class OverridePlanRequest(BaseModel):
+    user_id: str
+    new_plan: str
+    admin_note: str = ""
+
+
+class RefundRequest(BaseModel):
+    user_id: str
+    amount: float
+    reason: str = ""
+
+
+class CouponRequest(BaseModel):
+    code: str
+    discount: float
+    type: str = "percent"  # "percent" or "fixed"
+
+
+class RetryPaymentRequest(BaseModel):
+    payment_id: str
+
+
+def _load_registry():
+    return load_json(DATA_DIR / "user_registry.json")
+
+
+async def _save_registry_async(reg, request=None):
+    """Save registry to JSON and sync to PostgreSQL if pool is available."""
+    # Always write JSON
+    with open(DATA_DIR / "user_registry.json", "w") as f:
+        json.dump(reg, f, indent=2, default=str)
+    # Also sync to PostgreSQL if available (so the bridge's in-memory cache stays current)
+    if request and hasattr(request.app.state, "db_pool") and request.app.state.db_pool:
+        try:
+            from app.websocket.user_store import UserStore
+            store = UserStore(request.app.state.db_pool)
+            store._ready = True
+            await store.save_all(reg)
+        except Exception as e:
+            print(f"[admin] PG sync after registry save failed: {e}")
+
+
+def _save_registry(reg):
+    """Save registry to JSON (sync fallback when request object is unavailable)."""
+    with open(DATA_DIR / "user_registry.json", "w") as f:
+        json.dump(reg, f, indent=2, default=str)
+
+
+@router.get("/billing/revenue")
+async def get_revenue_metrics():
+    """Aggregated revenue metrics: MRR, coaching revenue, churn, conversion."""
+    registry = _load_registry()
+    billing = load_json(DATA_DIR / "billing.json")
+
+    # Count subscribers by tier
+    tier_counts: Dict[str, int] = {}
+    active_paid = 0
+    trial_count = 0
+    cancelled_count = 0
+    conversions = 0
+    total_trials = 0
+
+    for _key, entry in registry.items():
+        profile = entry.get("profile", {})
+        plan = (profile.get("subscription_plan") or "TRIAL").upper()
+        status = (profile.get("subscription_status") or "").upper()
+
+        tier_counts[plan] = tier_counts.get(plan, 0) + 1
+
+        if plan in ("TRIAL", "THRESHOLD", ""):
+            trial_count += 1
+            total_trials += 1
+        elif status in ("ACTIVE",) and plan in PLAN_PRICES:
+            active_paid += 1
+
+        if status in ("CANCELLED", "EXPIRED"):
+            cancelled_count += 1
+
+        if profile.get("_trial_converted"):
+            conversions += 1
+            total_trials += 1
+
+    # MRR: sum of active paid subscriptions * their monthly price
+    mrr = 0
+    tier_revenue: Dict[str, Dict[str, Any]] = {}
+    for tier, count in tier_counts.items():
+        price = PLAN_PRICES.get(tier, 0)
+        # Only count "active" users for MRR
+        active_in_tier = 0
+        for _k, e in registry.items():
+            p = e.get("profile", {})
+            if (p.get("subscription_plan") or "").upper() == tier and \
+               (p.get("subscription_status") or "").upper() in ("ACTIVE", "TRIAL_ACTIVE", ""):
+                if tier in PLAN_PRICES:
+                    active_in_tier += 1
+        tier_mrr = active_in_tier * price
+        mrr += tier_mrr
+        tier_revenue[tier] = {"count": count, "revenue": tier_mrr}
+
+    # Coaching revenue from billing.json
+    coaching_revenue = 0
+    for txn in billing.get("transactions", []):
+        if txn.get("type") in ("coaching_pack", "coaching_session"):
+            coaching_revenue += txn.get("amount", 0)
+
+    # Churn rate
+    total_ever = active_paid + cancelled_count
+    churn_rate = cancelled_count / total_ever if total_ever > 0 else 0
+
+    # Trial conversion rate
+    conversion_rate = conversions / total_trials if total_trials > 0 else 0
+
+    return {
+        "mrr": mrr,
+        "total_revenue": mrr * 12,  # Annualized estimate
+        "coaching_revenue": coaching_revenue,
+        "churn_rate": round(churn_rate, 4),
+        "trial_conversion_rate": round(conversion_rate, 4),
+        "active_paid": active_paid,
+        "trial_count": trial_count,
+        "cancelled_count": cancelled_count,
+        "conversions": conversions,
+    }
+
+
+@router.get("/billing/subscriptions")
+async def get_subscription_analytics():
+    """Subscription analytics: counts by tier, subscriber list."""
+    registry = _load_registry()
+
+    by_tier: Dict[str, Dict[str, Any]] = {}
+    subscribers = []
+    active_count = 0
+    trial_count = 0
+
+    for _key, entry in registry.items():
+        profile = entry.get("profile", {})
+        plan = (profile.get("subscription_plan") or "TRIAL").upper()
+        status = (profile.get("subscription_status") or "").upper()
+        role = (profile.get("role") or "").upper()
+
+        if role == "COACH":
+            continue  # Only count clients
+
+        price = PLAN_PRICES.get(plan, 0)
+
+        if plan not in by_tier:
+            by_tier[plan] = {"count": 0, "revenue": 0}
+        by_tier[plan]["count"] += 1
+        if status in ("ACTIVE", "TRIAL_ACTIVE", ""):
+            by_tier[plan]["revenue"] += price
+
+        if plan in PLAN_PRICES and status in ("ACTIVE",):
+            active_count += 1
+        if plan in ("TRIAL", "THRESHOLD"):
+            trial_count += 1
+
+        subscribers.append({
+            "id": _key,
+            "hardware_id": profile.get("hardware_id", ""),
+            "name": profile.get("name") or profile.get("display_name") or "",
+            "email": profile.get("email", ""),
+            "subscription_plan": plan,
+            "subscription_status": status,
+            "created_at": profile.get("created_at") or profile.get("trial_start_date", ""),
+        })
+
+    return {
+        "by_tier": by_tier,
+        "active_count": active_count,
+        "trial_count": trial_count,
+        "total_subscribers": len(subscribers),
+        "subscribers": subscribers,
+    }
+
+
+@router.get("/billing/failed-payments")
+async def get_failed_payments():
+    """List failed payment attempts."""
+    billing = load_json(DATA_DIR / "billing.json")
+    failed = [
+        t for t in billing.get("transactions", [])
+        if t.get("status") == "failed" or t.get("type") == "payment_failed"
+    ]
+
+    # Also check Stripe if available
+    stripe_failed = []
+    if _STRIPE_AVAILABLE:
+        try:
+            charges = _stripe.Charge.list(limit=50)
+            for ch in charges.auto_paging_iter():
+                if ch.status == "failed":
+                    stripe_failed.append({
+                        "id": ch.id,
+                        "user_id": ch.metadata.get("user_id", ""),
+                        "user_name": ch.metadata.get("user_name", ch.billing_details.name or ""),
+                        "amount": ch.amount / 100,
+                        "failure_reason": ch.failure_message or ch.outcome.get("reason", "Unknown") if ch.outcome else "Unknown",
+                        "created_at": datetime.fromtimestamp(ch.created).isoformat(),
+                    })
+                if len(stripe_failed) >= 50:
+                    break
+        except Exception:
+            pass
+
+    combined = stripe_failed + [
+        {
+            "id": f.get("id", ""),
+            "user_id": f.get("user_id", ""),
+            "user_name": f.get("user_name", ""),
+            "amount": f.get("amount", 0),
+            "failure_reason": f.get("reason", "Unknown"),
+            "created_at": f.get("timestamp", ""),
+        }
+        for f in failed
+    ]
+
+    return {"payments": combined, "count": len(combined)}
+
+
+@router.post("/billing/refund")
+async def process_refund(req: RefundRequest):
+    """Process a refund via Stripe or local billing."""
+    registry = _load_registry()
+    billing = load_json(DATA_DIR / "billing.json")
+
+    # Find user
+    user_name = ""
+    stripe_customer = None
+    for _k, entry in registry.items():
+        p = entry.get("profile", {})
+        if p.get("hardware_id") == req.user_id:
+            user_name = p.get("name", "")
+            stripe_customer = p.get("stripe_customer_id")
+            break
+
+    refund_record = {
+        "id": f"refund_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        "user_id": req.user_id,
+        "user_name": user_name,
+        "amount": req.amount,
+        "reason": req.reason,
+        "type": "refund",
+        "timestamp": str(datetime.now()),
+        "stripe_refund": False,
+    }
+
+    # Try Stripe refund
+    if _STRIPE_AVAILABLE and stripe_customer:
+        try:
+            # Find the most recent charge for this customer
+            charges = _stripe.Charge.list(customer=stripe_customer, limit=1)
+            if charges.data:
+                _stripe.Refund.create(
+                    charge=charges.data[0].id,
+                    amount=int(req.amount * 100),
+                    reason="requested_by_customer",
+                )
+                refund_record["stripe_refund"] = True
+        except Exception as e:
+            refund_record["stripe_error"] = str(e)
+
+    billing.setdefault("transactions", []).append(refund_record)
+    save_json(DATA_DIR / "billing.json", billing)
+
+    # Log in audit
+    audit = load_json(DATA_DIR / "audit_log.json", [])
+    if not isinstance(audit, list):
+        audit = []
+    audit.append({
+        "action": "ADMIN_REFUND",
+        "user_id": req.user_id,
+        "amount": req.amount,
+        "reason": req.reason,
+        "timestamp": str(datetime.now()),
+    })
+    save_json(DATA_DIR / "audit_log.json", audit)
+
+    return {"status": "refunded", "refund": refund_record}
+
+
+@router.post("/billing/override-plan")
+async def override_user_plan(req: OverridePlanRequest, request: Request):
+    """Manually set a user's subscription plan. Audit-logged."""
+    valid_plans = ("COACH_ONLY", "TRIAL", "STANDARD", "TOP_TIER")
+    if req.new_plan not in valid_plans:
+        raise HTTPException(400, f"Invalid plan. Must be one of: {valid_plans}")
+
+    registry = _load_registry()
+    found = False
+    old_plan = ""
+
+    for _k, entry in registry.items():
+        p = entry.get("profile", {})
+        if p.get("hardware_id") == req.user_id:
+            old_plan = p.get("subscription_plan", "TRIAL")
+            p["subscription_plan"] = req.new_plan
+            p["subscription_status"] = "ACTIVE" if req.new_plan not in ("TRIAL",) else "TRIAL_ACTIVE"
+            token_map = {"COACH_ONLY": 0, "TRIAL": 10000, "STANDARD": 50000, "TOP_TIER": 200000}
+            p["token_balance"] = token_map.get(req.new_plan, 0)
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, "User not found")
+
+    await _save_registry_async(registry, request)
+
+    # Audit log
+    audit = load_json(DATA_DIR / "audit_log.json", [])
+    if not isinstance(audit, list):
+        audit = []
+    audit.append({
+        "action": "ADMIN_PLAN_OVERRIDE",
+        "user_id": req.user_id,
+        "old_plan": old_plan,
+        "new_plan": req.new_plan,
+        "admin_note": req.admin_note,
+        "timestamp": str(datetime.now()),
+    })
+    save_json(DATA_DIR / "audit_log.json", audit)
+
+    return {
+        "status": "overridden",
+        "user_id": req.user_id,
+        "old_plan": old_plan,
+        "new_plan": req.new_plan,
+    }
+
+
+@router.post("/billing/coupon")
+async def create_coupon(req: CouponRequest):
+    """Create a discount coupon. Stores locally and optionally in Stripe."""
+    billing = load_json(DATA_DIR / "billing.json")
+
+    coupon_record = {
+        "code": req.code,
+        "discount": req.discount,
+        "type": req.type,
+        "created_at": str(datetime.now()),
+        "active": True,
+        "stripe_coupon": False,
+    }
+
+    # Try creating in Stripe
+    if _STRIPE_AVAILABLE:
+        try:
+            kwargs: Dict[str, Any] = {"id": req.code, "duration": "once"}
+            if req.type == "percent":
+                kwargs["percent_off"] = req.discount
+            else:
+                kwargs["amount_off"] = int(req.discount * 100)
+                kwargs["currency"] = "usd"
+            _stripe.Coupon.create(**kwargs)
+            coupon_record["stripe_coupon"] = True
+        except Exception as e:
+            coupon_record["stripe_error"] = str(e)
+
+    billing.setdefault("coupons", []).append(coupon_record)
+    save_json(DATA_DIR / "billing.json", billing)
+
+    return {"status": "created", "coupon": coupon_record}
+
+
+@router.post("/billing/retry-payment")
+async def retry_payment(req: RetryPaymentRequest):
+    """Retry a failed Stripe payment."""
+    if not _STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe is not configured")
+
+    try:
+        # If it's an invoice, retry collection
+        if req.payment_id.startswith("in_"):
+            invoice = _stripe.Invoice.retrieve(req.payment_id)
+            _stripe.Invoice.pay(invoice.id)
+            return {"status": "retried", "payment_id": req.payment_id}
+
+        # If it's a payment intent, confirm
+        if req.payment_id.startswith("pi_"):
+            pi = _stripe.PaymentIntent.retrieve(req.payment_id)
+            _stripe.PaymentIntent.confirm(pi.id)
+            return {"status": "retried", "payment_id": req.payment_id}
+
+        raise HTTPException(400, "Unsupported payment ID format")
+    except Exception as e:
+        raise HTTPException(400, f"Retry failed: {e}")
+
+
+# =============================================================================
+# ADMIN SETTINGS — Persistent configuration (Deadman Switch, Retention, etc.)
+# =============================================================================
+
+SETTINGS_FILE = DATA_DIR / "admin_settings.json"
+
+VALID_SETTINGS = {
+    "deadman_silence_threshold_days": {"type": int, "min": 1, "max": 7, "default": 3},
+    "memory_retention_policy": {"type": str, "values": ["forever", "1_year", "6_months"], "default": "forever"},
+}
+
+
+@router.get("/settings")
+async def get_admin_settings():
+    """Get all admin-configurable settings."""
+    saved = load_json(SETTINGS_FILE, {})
+    result = {}
+    for key, schema in VALID_SETTINGS.items():
+        result[key] = saved.get(key, schema["default"])
+    return {"settings": result}
+
+
+@router.post("/settings")
+async def update_admin_setting(req: UpdateSettingsRequest):
+    """Update a single admin setting. Audit-logged."""
+    if req.key not in VALID_SETTINGS:
+        raise HTTPException(400, f"Unknown setting: {req.key}. Valid keys: {list(VALID_SETTINGS.keys())}")
+
+    schema = VALID_SETTINGS[req.key]
+    if schema["type"] == int:
+        try:
+            val = int(req.value)
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"Setting {req.key} must be an integer")
+        if val < schema.get("min", 0) or val > schema.get("max", 999):
+            raise HTTPException(400, f"Value out of range [{schema['min']}, {schema['max']}]")
+    elif schema["type"] == str:
+        val = str(req.value)
+        if "values" in schema and val not in schema["values"]:
+            raise HTTPException(400, f"Invalid value. Allowed: {schema['values']}")
+    else:
+        val = req.value
+
+    saved = load_json(SETTINGS_FILE, {})
+    old_value = saved.get(req.key, schema["default"])
+    saved[req.key] = val
+    save_json(SETTINGS_FILE, saved)
+
+    _audit_log_append("ADMIN_SETTING_CHANGED", key=req.key, old_value=old_value, new_value=val)
+    return {"status": "updated", "key": req.key, "value": val}
+
+
+# =============================================================================
+# EMERGENCY PURGE — Crisis data purge for a specific user
+# =============================================================================
+
+
+class UpdateSettingsRequest(BaseModel):
+    key: str
+    value: Any
+
+
+class EmergencyPurgeRequest(BaseModel):
+    user_id: str
+    reason: str
+    purge_conversations: bool = True
+    purge_metrics: bool = True
+    purge_sessions: bool = True
+    purge_biometrics: bool = True
+
+
+@router.post("/emergency-purge")
+async def emergency_purge(req: EmergencyPurgeRequest):
+    """
+    Emergency data purge for a user — removes selected data categories.
+    More granular than wipe-memory. Audit-logged. IRREVERSIBLE.
+    """
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    found = False
+    hw_id = ""
+    user_name = ""
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            hw_id = p.get("hardware_id", req.user_id)
+            user_name = p.get("name", "")
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(404, "User not found")
+
+    purged = []
+    vault_dir = VAULT_ROOT / "Clients" / hw_id
+
+    if req.purge_conversations:
+        memory_file = vault_dir / "memory.json"
+        if memory_file.exists():
+            save_json(memory_file, [])
+            purged.append("conversations")
+
+    if req.purge_metrics:
+        metrics_file = vault_dir / "metrics.json"
+        if metrics_file.exists():
+            metrics = load_json(metrics_file, {})
+            metrics["history"] = []
+            save_json(metrics_file, metrics)
+            purged.append("metrics_history")
+
+    if req.purge_sessions:
+        if vault_dir.exists():
+            for f in vault_dir.glob("session_*.json"):
+                save_json(f, {})
+                purged.append(f"session:{f.stem}")
+
+    if req.purge_biometrics:
+        metrics_file = vault_dir / "metrics.json"
+        if metrics_file.exists():
+            metrics = load_json(metrics_file, {})
+            ns = metrics.get("nevedal_state", {})
+            for field in ["voice_baseline", "voice_signature", "pitch_baseline", "energy_baseline",
+                           "speech_rate_baseline", "pause_ratio_baseline", "baseline_established",
+                           "biometric_enrolled"]:
+                ns.pop(field, None)
+            metrics["nevedal_state"] = ns
+            save_json(metrics_file, metrics)
+            purged.append("biometrics")
+
+    _audit_log_append(
+        "ADMIN_EMERGENCY_PURGE",
+        user_id=req.user_id,
+        user_name=user_name,
+        reason=req.reason,
+        purged=purged,
+    )
+
+    return {
+        "status": "purged",
+        "user_id": req.user_id,
+        "purged": purged,
+        "message": f"Emergency purge complete for {user_name or req.user_id}. {len(purged)} data categories cleared.",
     }

@@ -119,13 +119,13 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
-    ADMIN_USERNAME: str = "sovereign"
-    ADMIN_PASSWORD: str = "SovereignDev2026!"
+    ADMIN_USERNAME: str  # Required — no default (must be set via ADMIN_USERNAME env var)
+    ADMIN_PASSWORD: str  # Required — no default (must be set via ADMIN_PASSWORD env var)
     
     # -------------------------------------------------------------------------
     # Security
     # -------------------------------------------------------------------------
-    CORS_ORIGINS: str = "http://10.0.0.81:3000,http://localhost:3000,https://app.sovereignsanctuary.net,null"
+    CORS_ORIGINS: str = "http://10.0.0.81:3000,http://localhost:3000,https://app.sovereignsanctuary.net,https://coach.sovereignsanctuary.net,https://command.sovereignsanctuary.net"
     RATE_LIMIT_PER_MINUTE: int = 60
     
     # -------------------------------------------------------------------------
@@ -156,8 +156,23 @@ class Settings(BaseSettings):
     ENABLE_ZOOM: bool = False
     ENABLE_DRIP_CAMPAIGN: bool = True
     ENABLE_SKYEYE: bool = True
-    ENABLE_SKYEYE_SESSIONS: bool = False  # Auto session engine (set True when platform APIs connected)
+    ENABLE_SKYEYE_SESSIONS: bool = True  # Auto session engine — autonomous posting enabled
     ENABLE_SOVEREIGN_SWARM: bool = True   # Sovereign Swarm Intelligence Framework
+    ENABLE_NATE_NUDGE: bool = True        # Nate the Nudge proactive notification system
+    
+    # User Registry backend
+    USE_POSTGRES_REGISTRY: bool = True    # When True, bridge stores users in PostgreSQL (recommended)
+    
+    # Sovereign Swarm secrets
+    SWARM_SECRET: Optional[str] = None    # HMAC secret for ZEFCP fragments (auto-derived from master key if unset)
+    AZURE_STORAGE_CONNECTION_STRING: Optional[str] = None  # Azure Blob Storage for warm/cold memory tiering
+    
+    # -------------------------------------------------------------------------
+    # Nate the Nudge — Timing & Thresholds
+    # -------------------------------------------------------------------------
+    NUDGE_MOOD_CHECK_INTERVAL_HOURS: int = 24       # Hours between mood-check nudges
+    NUDGE_SESSION_PREP_LOOKAHEAD_HOURS: int = 3     # How far ahead to look for sessions
+    NUDGE_SCHEDULER_INTERVAL_MINUTES: int = 30      # How often the scheduler runs nudge checks
 
     # -------------------------------------------------------------------------
     # Sovereign Swarm Identity Chain (Ed25519 master key PEM)
@@ -222,10 +237,21 @@ class Settings(BaseSettings):
     ZOOM_DEFAULT_AUTO_RECORDING: str = "cloud"  # none|cloud|local - auto records to Zoom cloud
     
     # -------------------------------------------------------------------------
+    # Paths
+    # -------------------------------------------------------------------------
+    DATA_DIR: str = "/app/data"           # Root data directory for session/registry files
+    WORKBOOKS_DIR: str = "/app/workbooks" # Workbook templates and exports
+
+    # -------------------------------------------------------------------------
+    # Application URLs
+    # -------------------------------------------------------------------------
+    APP_URL: str = "https://app.sovereignsanctuary.net"  # Public-facing app URL for email links and notifications
+
+    # -------------------------------------------------------------------------
     # Environment
     # -------------------------------------------------------------------------
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = "production"  # Safe default — override to "development" in .env for local dev
+    DEBUG: bool = False  # Safe default — override to True in .env for local dev
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"
     

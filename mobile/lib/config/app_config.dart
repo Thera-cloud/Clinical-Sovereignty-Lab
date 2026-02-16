@@ -9,14 +9,14 @@ class AppConfig {
   // NETWORK CONFIGURATION
   // ===========================================================================
   
-  /// Your server IP address (local development)
-  static const String serverHost = '10.0.0.81';
+  /// Local development host (only used when useProduction is false)
+  static const String serverHost = 'localhost';
   
-  /// Production domain
-  static const String productionDomain = 'www.sovereignsanctuary.net';
+  /// Production domain (API / WebSocket gateway)
+  static const String productionDomain = 'api.sovereignsanctuary.net';
   
   /// Use production or local
-  static const bool useProduction = false; // Set to true for production
+  static const bool useProduction = true; // Set to false for local development only
   
   /// API server port
   static const int apiPort = 8000;
@@ -43,7 +43,7 @@ class AppConfig {
   
   /// Admin console URL
   static String get adminUrl => useProduction
-      ? 'https://admin.$productionDomain'
+      ? 'https://command.sovereignsanctuary.net'
       : 'http://$serverHost:$adminPort';
   
   // ===========================================================================
@@ -84,6 +84,9 @@ class AppConfig {
   
   /// Enable crisis detection alerts
   static const bool enableCrisisDetection = true;
+  
+  /// Enable Sovereign Vault (B8) — storage, uploads, Transfer Crystal
+  static const bool ENABLE_SOVEREIGN_VAULT = true;
   
   // ===========================================================================
   // TIMEOUTS & LIMITS

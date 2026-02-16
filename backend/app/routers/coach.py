@@ -3,17 +3,38 @@ Coach Portal API Routes
 Pre-session briefs, client management, and coach-specific features
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
+
+from app.auth import get_current_user
 from datetime import datetime, timedelta
+import logging
 import os
 import json
 from pathlib import Path
 
-router = APIRouter(prefix="/api/coach", tags=["coach"])
+_logger = logging.getLogger("coach_router")
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
+router = APIRouter(
+    prefix="/api/coach",
+    tags=["coach"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+def _get_coach_shield(request: Request):
+    """Retrieve CoachIntegrityShield from app state (non-blocking on failure)."""
+    try:
+        hive_v4 = getattr(request.app.state, "hive_v4", None)
+        if hive_v4:
+            return hive_v4.get("coach_integrity_shield")
+    except Exception:
+        pass
+    return None
+
+from app.config import settings as _settings
+DATA_DIR = Path(_settings.DATA_DIR)
 VAULT_ROOT = DATA_DIR / "Vaults"
 
 # Models
@@ -26,6 +47,10 @@ class HomeworkRequest(BaseModel):
     client_id: str
     homework: str
     due_date: Optional[str] = None
+
+class MatchmakerRequest(BaseModel):
+    client_id: str
+    top_n: int = 3
 
 # Helpers
 def load_json(filepath: Path, default=None):
@@ -42,8 +67,17 @@ def save_json(filepath: Path, data):
 # Endpoints
 
 @router.get("/clients/{coach_id}")
-async def get_assigned_clients(coach_id: str):
+async def get_assigned_clients(coach_id: str, request: Request):
     """Get all clients assigned to this coach"""
+    # ── HIVE DEFENSE v4.3: Coach Integrity Shield — off-session access ──
+    shield = _get_coach_shield(request)
+    if shield:
+        try:
+            import asyncio
+            asyncio.ensure_future(shield.detect_off_session_access(coach_id))
+        except Exception as _e:
+            _logger.debug("CoachIntegrityShield access check non-blocking: %s", _e)
+
     registry = load_json(DATA_DIR / "user_registry.json")
     
     clients = []
@@ -87,8 +121,19 @@ async def get_assigned_clients(coach_id: str):
     return {"clients": clients, "count": len(clients)}
 
 @router.get("/presession-brief/{client_id}")
-async def get_presession_brief(client_id: str):
+async def get_presession_brief(client_id: str, request: Request, user=Depends(get_current_user)):
     """Generate a comprehensive pre-session brief for a client"""
+    # ── HIVE DEFENSE v4.3: Coach Integrity Shield — off-session access ──
+    shield = _get_coach_shield(request)
+    if shield:
+        try:
+            coach_id = user.get("user_id", "") if isinstance(user, dict) else getattr(user, "user_id", "")
+            if coach_id:
+                import asyncio
+                asyncio.ensure_future(shield.detect_off_session_access(coach_id))
+        except Exception as _e:
+            _logger.debug("CoachIntegrityShield access check non-blocking: %s", _e)
+
     registry = load_json(DATA_DIR / "user_registry.json")
     
     # Find client
@@ -283,7 +328,7 @@ def _generate_suggestions(metrics, topics, breakthroughs, concerns):
     return suggestions if suggestions else ["No specific suggestions - follow client's lead this session."]
 
 @router.post("/notes")
-async def add_coach_note(req: CoachNoteRequest):
+async def add_coach_note(req: CoachNoteRequest, request: Request, user=Depends(get_current_user)):
     """Add a note to a client's file"""
     notes_file = VAULT_ROOT / "Clients" / req.client_id / "coach_notes.json"
     notes = load_json(notes_file, [])
@@ -297,6 +342,17 @@ async def add_coach_note(req: CoachNoteRequest):
     
     notes.append(note_entry)
     save_json(notes_file, notes)
+
+    # ── HIVE DEFENSE v4.3: Coach Integrity Shield — note analysis ──
+    shield = _get_coach_shield(request)
+    if shield:
+        try:
+            coach_id = user.get("user_id", "") if isinstance(user, dict) else getattr(user, "user_id", "")
+            if coach_id:
+                import asyncio
+                asyncio.ensure_future(shield.analyze_notes(coach_id))
+        except Exception as _e:
+            _logger.debug("CoachIntegrityShield note analysis non-blocking: %s", _e)
     
     return {"message": "Note added", "note": note_entry}
 
@@ -360,8 +416,17 @@ async def mark_homework_complete(homework_id: int, client_id: str, notes: str = 
     raise HTTPException(404, "Homework not found")
 
 @router.get("/stats/{coach_id}")
-async def get_coach_stats(coach_id: str):
+async def get_coach_stats(coach_id: str, request: Request):
     """Get statistics for a coach"""
+    # ── HIVE DEFENSE v4.3: Coach Integrity Shield — attrition tracking ──
+    shield = _get_coach_shield(request)
+    if shield:
+        try:
+            import asyncio
+            asyncio.ensure_future(shield.track_attrition(coach_id))
+        except Exception as _e:
+            _logger.debug("CoachIntegrityShield attrition non-blocking: %s", _e)
+
     registry = load_json(DATA_DIR / "user_registry.json")
     sessions = load_json(DATA_DIR / "sessions.json", [])
     
@@ -459,3 +524,22 @@ async def ask_nate_about_client(client_id: str, question: str):
     }
     
     return response
+
+
+# =============================================================================
+# MATCHMAKER PROTOCOL — AI Coach Matching
+# =============================================================================
+
+
+@router.post("/matchmaker")
+async def run_matchmaker(req: MatchmakerRequest):
+    """Run the matchmaker analysis for a client, returning top N coach matches."""
+    from app.services.coach_matcher import CoachMatcher
+
+    matcher = CoachMatcher(data_dir=DATA_DIR, vault_root=VAULT_ROOT)
+    matches = await matcher.get_top_matches(req.client_id, n=req.top_n)
+
+    if not matches:
+        raise HTTPException(404, "No coaches available or client not found")
+
+    return {"client_id": req.client_id, "matches": matches}

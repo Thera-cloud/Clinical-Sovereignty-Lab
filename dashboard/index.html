@@ -320,6 +320,16 @@
         .login-footer a:hover {
             color: var(--gold-primary);
         }
+
+        /* ── Mobile Responsive ── */
+        @media (max-width: 768px) {
+            .login-container { padding: 24px; margin: 16px; max-width: calc(100% - 32px); }
+            .login-header h1 { font-size: 20px; }
+        }
+        @media (max-width: 480px) {
+            .login-container { padding: 16px; }
+            .login-header h1 { font-size: 18px; }
+        }
     </style>
 </head>
 <body>
@@ -353,20 +363,6 @@
                 <div class="form-group">
                     <label class="form-label">Password</label>
                     <input type="password" class="form-input" id="password" placeholder="Enter password" autocomplete="current-password">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Access Level</label>
-                    <div class="role-selector">
-                        <div class="role-option selected" data-role="ADMIN" onclick="selectRole(this)">
-                            <div class="icon">👑</div>
-                            <div class="label">Admin</div>
-                        </div>
-                        <div class="role-option" data-role="COACH" onclick="selectRole(this)">
-                            <div class="icon">🎯</div>
-                            <div class="label">Coach</div>
-                        </div>
-                    </div>
                 </div>
 
                 <button class="login-btn" id="loginBtn" onclick="attemptLogin()">
@@ -438,13 +434,60 @@
         </div>
     </div>
 
+    <!-- Passphrase Challenge Overlay (Layer 3 of admin security) -->
+    <div id="passphraseOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:1100;overflow-y:auto;padding:40px 20px;">
+        <div style="max-width:440px;margin:80px auto 0;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;">
+            <div style="padding:40px 32px 0;text-align:center;">
+                <div style="font-size:10px;letter-spacing:3px;color:var(--red-critical);text-transform:uppercase;margin-bottom:16px;">Final Verification</div>
+                <div style="font-family:var(--font-display);font-size:22px;font-weight:300;color:var(--text-primary);margin-bottom:24px;line-height:1.4;">
+                    "Are you unconditional love<br>or are you conditional love?"
+                </div>
+            </div>
+            <div style="padding:0 32px 32px;">
+                <div class="error-message" id="passphraseError" style="display:none;"></div>
+                <div class="form-group">
+                    <label class="form-label">Your Answer</label>
+                    <input type="text" class="form-input" id="passphraseInput" placeholder="Speak your truth..." autocomplete="off">
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+                    <span id="passphraseAttempts" style="font-size:11px;color:var(--text-muted);"></span>
+                    <button class="login-btn" style="width:auto;padding:14px 32px;" onclick="verifyPassphrase()">
+                        Proceed
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lockout Overlay -->
+    <div id="lockoutOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.98);z-index:1200;padding:40px 20px;">
+        <div style="max-width:400px;margin:120px auto 0;text-align:center;">
+            <div style="font-size:48px;margin-bottom:24px;">🔒</div>
+            <div style="font-family:var(--font-display);font-size:24px;font-weight:300;color:var(--red-critical);margin-bottom:16px;">Access Denied</div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:24px;">Too many failed attempts. Please wait before trying again.</div>
+            <div id="lockoutTimer" style="font-size:20px;color:var(--text-muted);font-family:monospace;"></div>
+        </div>
+    </div>
+
     <script>
         // =============================================================================
         // WEBSOCKET CONNECTION
         // =============================================================================
-        const SERVER_URL = 'wss://api.sovereignsanctuary.net/ws';
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+        const SERVER_URL = getWsUrl();
         let socket = null;
-        let selectedRole = 'ADMIN';
+        const selectedRole = 'ADMIN'; // Hardcoded — admin-only portal
+
+        // Passphrase challenge state (verification happens server-side)
+        const MAX_PASSPHRASE_ATTEMPTS = 3;
+        const LOCKOUT_SECONDS = 300; // 5 minutes
+        let passphraseAttempts = 0;
+        let lockedUntil = parseInt(sessionStorage.getItem('_pp_lock') || '0');
+        let lockoutInterval = null;
 
         function connect() {
             try {
@@ -485,11 +528,10 @@
                 console.log('Received:', data);
 
                 if (data.type === 'login_success') {
-                    // Store session data
+                    // Store session data (token-based — never store password)
                     sessionStorage.setItem('username', document.getElementById('username').value);
                     sessionStorage.setItem('profile', JSON.stringify(data.profile));
                     sessionStorage.setItem('token', data.token);
-                    sessionStorage.setItem('password', document.getElementById('password').value);
 
                     // Check if consent update needed
                     if (data.consent_update_needed) {
@@ -501,8 +543,8 @@
                         return;
                     }
                     
-                    // Redirect to command center
-                    window.location.href = 'command.html';
+                    // Show passphrase challenge (Layer 3)
+                    showPassphraseChallenge();
                     
                 } else if (data.type === 'consent_updated') {
                     // Consent accepted — update stored profile and proceed
@@ -510,7 +552,34 @@
                         sessionStorage.setItem('profile', JSON.stringify(data.profile));
                     }
                     document.getElementById('consentOverlay').style.display = 'none';
-                    window.location.href = 'command.html';
+                    // After consent, show passphrase challenge
+                    showPassphraseChallenge();
+
+                } else if (data.type === 'passphrase_verified') {
+                    if (data.success) {
+                        // Correct — proceed to command center
+                        sessionStorage.removeItem('_pp_lock');
+                        document.getElementById('passphraseOverlay').style.display = 'none';
+                        window.location.href = 'command.html';
+                    } else {
+                        // Wrong answer — handle attempts/lockout client-side
+                        passphraseAttempts++;
+                        const remaining = MAX_PASSPHRASE_ATTEMPTS - passphraseAttempts;
+                        if (remaining <= 0) {
+                            lockedUntil = Date.now() + (LOCKOUT_SECONDS * 1000);
+                            sessionStorage.setItem('_pp_lock', lockedUntil.toString());
+                            document.getElementById('passphraseOverlay').style.display = 'none';
+                            showLockout();
+                        } else {
+                            const errEl = document.getElementById('passphraseError');
+                            errEl.textContent = `Incorrect. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.`;
+                            errEl.style.display = 'block';
+                            errEl.classList.add('visible');
+                            document.getElementById('passphraseAttempts').textContent = `${passphraseAttempts}/${MAX_PASSPHRASE_ATTEMPTS}`;
+                            document.getElementById('passphraseInput').value = '';
+                            document.getElementById('passphraseInput').focus();
+                        }
+                    }
 
                 } else if (data.type === 'login_failed') {
                     showError(data.message || 'Invalid credentials or insufficient permissions');
@@ -530,10 +599,65 @@
             document.getElementById('consentAcceptBtn').disabled = true;
         }
 
-        function selectRole(element) {
-            document.querySelectorAll('.role-option').forEach(el => el.classList.remove('selected'));
-            element.classList.add('selected');
-            selectedRole = element.dataset.role;
+        // =============================================================================
+        // PASSPHRASE CHALLENGE (Layer 3 of admin security)
+        // =============================================================================
+        function showPassphraseChallenge() {
+            // Check for active lockout
+            const now = Date.now();
+            if (lockedUntil > now) {
+                showLockout();
+                return;
+            }
+
+            passphraseAttempts = 0;
+            document.getElementById('passphraseInput').value = '';
+            document.getElementById('passphraseError').style.display = 'none';
+            document.getElementById('passphraseAttempts').textContent = '';
+            document.getElementById('passphraseOverlay').style.display = 'block';
+
+            // Focus the input after a brief delay for the overlay transition
+            setTimeout(() => document.getElementById('passphraseInput').focus(), 100);
+        }
+
+        function verifyPassphrase() {
+            const answer = document.getElementById('passphraseInput').value.trim();
+
+            if (!answer) return;
+
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                showError('Connection lost. Please refresh and try again.');
+                return;
+            }
+
+            // Send passphrase to backend for server-side verification
+            socket.send(JSON.stringify({
+                type: 'verify_admin_passphrase',
+                passphrase: answer
+            }));
+        }
+
+        function showLockout() {
+            document.getElementById('passphraseOverlay').style.display = 'none';
+            document.getElementById('lockoutOverlay').style.display = 'block';
+
+            if (lockoutInterval) clearInterval(lockoutInterval);
+            lockoutInterval = setInterval(() => {
+                const remaining = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+                const mins = Math.floor(remaining / 60);
+                const secs = remaining % 60;
+                document.getElementById('lockoutTimer').textContent =
+                    `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+
+                if (remaining <= 0) {
+                    clearInterval(lockoutInterval);
+                    sessionStorage.removeItem('_pp_lock');
+                    document.getElementById('lockoutOverlay').style.display = 'none';
+                    // Return to login form
+                    document.getElementById('loginBtn').textContent = 'Enter Command Center';
+                    document.getElementById('loginBtn').disabled = false;
+                }
+            }, 1000);
         }
 
         function attemptLogin() {
@@ -579,10 +703,15 @@
             document.getElementById('errorMessage').classList.remove('visible');
         }
 
-        // Enter key to submit
+        // Enter key to submit (login form or passphrase)
         document.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                attemptLogin();
+                const ppOverlay = document.getElementById('passphraseOverlay');
+                if (ppOverlay && ppOverlay.style.display !== 'none') {
+                    verifyPassphrase();
+                } else {
+                    attemptLogin();
+                }
             }
         });
 
@@ -593,6 +722,11 @@
             btn.style.background = this.checked ? 'var(--gold-primary)' : 'var(--text-muted)';
             btn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
         });
+
+        // Check for active lockout on page load
+        if (lockedUntil > Date.now()) {
+            showLockout();
+        }
 
         // Initialize
         connect();

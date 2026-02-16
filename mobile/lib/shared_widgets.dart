@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+
+/// Debug-only print: suppressed in production builds.
+// ignore: avoid_print
+void _debugLog(Object? message) { if (kDebugMode) print(message); }
 import 'package:audio_session/audio_session.dart';
+import 'package:just_audio/just_audio.dart' as just_audio;
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
+// dart:io is only used for mobile temp file operations (guarded by !kIsWeb checks)
+import 'dart:io' if (dart.library.io) 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 
 // Conditional import: Web Audio API player for web, no-op stub for mobile
 import 'web_pcm_player_stub.dart'
@@ -19,6 +27,9 @@ import 'web_pcm_player_stub.dart'
 class VagusEngine {
   // --- 1. CORE VARIABLES (These were missing in your last build) ---
   final SpeechToText _speech = SpeechToText();
+  
+  // Mobile audio player (just_audio) for MP3 and PCM playback
+  just_audio.AudioPlayer? _mobilePlayer;
   
   // State Flags
   bool isAudioReady = false;
@@ -34,12 +45,12 @@ class VagusEngine {
 
   // --- 2. INITIALIZATION (Robust) ---
   Future<void> initializeSystem() async {
-    print(">>> [VAGUS] Initializing Audio Cortex...");
+    _debugLog(">>> [VAGUS] Initializing Audio Cortex...");
     
     // A. Permission Gate
     var status = await Permission.microphone.request();
     if (status != PermissionStatus.granted) {
-      print("!!! [VAGUS] Mic Permission Denied by User.");
+      _debugLog("!!! [VAGUS] Mic Permission Denied by User.");
       isAudioReady = false;
       return; 
     }
@@ -63,23 +74,31 @@ class VagusEngine {
     // C. Interruption Handling
     session.interruptionEventStream.listen((event) {
       if (event.begin) {
-        print(">>> [VAGUS] Audio Interrupted (Call Started)");
+        _debugLog(">>> [VAGUS] Audio Interrupted (Call Started)");
       } else {
-        print(">>> [VAGUS] Audio Resumed (Call Ended)");
+        _debugLog(">>> [VAGUS] Audio Resumed (Call Ended)");
       }
     });
 
     session.devicesChangedEventStream.listen((event) {
-       print(">>> [VAGUS] Audio Device Changed: ${event.devicesAdded}");
+       _debugLog(">>> [VAGUS] Audio Device Changed: ${event.devicesAdded}");
     });
 
     // D. Hardware Spin-up
     await session.setActive(true);
-    // await _player.openPlayer();
-    // await _recorder.openRecorder();
+    
+    // E. Mobile audio player (just_audio) for TTS/MP3 playback
+    if (!kIsWeb) {
+      try {
+        _mobilePlayer = just_audio.AudioPlayer();
+        _debugLog(">>> [VAGUS] Mobile audio player (just_audio) initialized");
+      } catch (e) {
+        _debugLog("!!! [VAGUS] Mobile audio player init failed: $e");
+      }
+    }
     
     isAudioReady = true;
-    print(">>> [VAGUS] Audio System Online & Ready.");
+    _debugLog(">>> [VAGUS] Audio System Online & Ready.");
   }
 
   // --- 3. INPUT: LISTENING (Speech-to-Text) ---
@@ -88,8 +107,8 @@ class VagusEngine {
     if (_isListening) return;
 
     bool available = await _speech.initialize(
-      onStatus: (status) => print('>>> [SPEECH] Status: $status'),
-      onError: (error) => print('!!! [SPEECH] Error: $error'),
+      onStatus: (status) => _debugLog('>>> [SPEECH] Status: $status'),
+      onError: (error) => _debugLog('!!! [SPEECH] Error: $error'),
     );
 
     if (available) {
@@ -101,7 +120,7 @@ class VagusEngine {
           _silenceTimer?.cancel();
           _silenceTimer = Timer(const Duration(milliseconds: 1500), () {
             if (result.recognizedWords.isNotEmpty) {
-              print(">>> [VAGUS] Silence Detected. Sending Query.");
+              _debugLog(">>> [VAGUS] Silence Detected. Sending Query.");
               stopListening();
               onFinalResult(result.recognizedWords);
             }
@@ -130,7 +149,7 @@ class VagusEngine {
   void initializePlayer() {
     if (kIsWeb) {
       _webPlayer.initialize();
-      print(">>> [VAGUS] Web Audio Player initialized.");
+      _debugLog(">>> [VAGUS] Web Audio Player initialized.");
     }
   }
 
@@ -147,7 +166,7 @@ class VagusEngine {
         _playNextChunk();
       }
     } catch (e) {
-      print("!!! [VAGUS] Audio Decode Error: $e");
+      _debugLog("!!! [VAGUS] Audio Decode Error: $e");
     }
   }
 
@@ -159,11 +178,28 @@ class VagusEngine {
       if (kIsWeb) {
         _webPlayer.playMp3(bytes);
       } else {
-        // Mobile: TODO — use just_audio for MP3 playback
-        print(">>> [VAGUS] MP3 playback on mobile not yet implemented");
+        // Mobile: Play MP3 via just_audio — write to temp file, then play
+        if (_mobilePlayer != null) {
+          try {
+            final dir = await getTemporaryDirectory();
+            final tmpFile = File('${dir.path}/nate_tts_${DateTime.now().millisecondsSinceEpoch}.mp3');
+            await tmpFile.writeAsBytes(bytes);
+            await _mobilePlayer!.setFilePath(tmpFile.path);
+            await _mobilePlayer!.play();
+            // Clean up temp file after playback
+            _mobilePlayer!.playerStateStream.firstWhere(
+              (state) => state.processingState == just_audio.ProcessingState.completed,
+            ).then((_) => tmpFile.delete().catchError((_) {}));
+            _debugLog(">>> [VAGUS] MP3 playing via just_audio (${bytes.length} bytes)");
+          } catch (e) {
+            _debugLog("!!! [VAGUS] Mobile MP3 playback error: $e");
+          }
+        } else {
+          _debugLog("!!! [VAGUS] Mobile audio player not initialized");
+        }
       }
     } catch (e) {
-      print("!!! [VAGUS] MP3 Decode Error: $e");
+      _debugLog("!!! [VAGUS] MP3 Decode Error: $e");
     }
   }
 
@@ -182,10 +218,64 @@ class VagusEngine {
       // Immediately process next chunk (they queue in Web Audio API)
       _playNextChunk();
     } else {
-      // Mobile: TODO — use native audio player (just_audio / flutter_sound)
-      // For now, drain the buffer
+      // Mobile: Play PCM chunk via just_audio by wrapping in a WAV container
+      if (_mobilePlayer != null) {
+        try {
+          // Wrap raw PCM in a minimal WAV header (16-bit, 24kHz, mono)
+          final wavBytes = _wrapPcmAsWav(chunk, sampleRate: 24000, bitsPerSample: 16, channels: 1);
+          getTemporaryDirectory().then((dir) async {
+            final tmpFile = File('${dir.path}/nate_pcm_${DateTime.now().millisecondsSinceEpoch}.wav');
+            await tmpFile.writeAsBytes(wavBytes);
+            await _mobilePlayer!.setFilePath(tmpFile.path);
+            _mobilePlayer!.play();
+            // Continue to next chunk after this one finishes
+            _mobilePlayer!.playerStateStream.firstWhere(
+              (state) => state.processingState == just_audio.ProcessingState.completed,
+            ).then((_) {
+              tmpFile.delete().catchError((_) {});
+              _playNextChunk();
+            });
+          });
+          return; // Don't call _playNextChunk here — it's called in the callback above
+        } catch (e) {
+          _debugLog("!!! [VAGUS] Mobile PCM playback error: $e");
+        }
+      }
+      // Fallback: drain buffer if player not available
       _playNextChunk();
     }
+  }
+
+  /// Wrap raw PCM bytes in a minimal WAV file header for just_audio playback.
+  Uint8List _wrapPcmAsWav(Uint8List pcmData, {int sampleRate = 24000, int bitsPerSample = 16, int channels = 1}) {
+    final dataSize = pcmData.length;
+    final byteRate = sampleRate * channels * (bitsPerSample ~/ 8);
+    final blockAlign = channels * (bitsPerSample ~/ 8);
+    final fileSize = 36 + dataSize;
+
+    final header = ByteData(44);
+    // "RIFF"
+    header.setUint8(0, 0x52); header.setUint8(1, 0x49); header.setUint8(2, 0x46); header.setUint8(3, 0x46);
+    header.setUint32(4, fileSize, Endian.little);
+    // "WAVE"
+    header.setUint8(8, 0x57); header.setUint8(9, 0x41); header.setUint8(10, 0x56); header.setUint8(11, 0x45);
+    // "fmt "
+    header.setUint8(12, 0x66); header.setUint8(13, 0x6D); header.setUint8(14, 0x74); header.setUint8(15, 0x20);
+    header.setUint32(16, 16, Endian.little);  // Subchunk1Size (PCM = 16)
+    header.setUint16(20, 1, Endian.little);   // AudioFormat (PCM = 1)
+    header.setUint16(22, channels, Endian.little);
+    header.setUint32(24, sampleRate, Endian.little);
+    header.setUint32(28, byteRate, Endian.little);
+    header.setUint16(32, blockAlign, Endian.little);
+    header.setUint16(34, bitsPerSample, Endian.little);
+    // "data"
+    header.setUint8(36, 0x64); header.setUint8(37, 0x61); header.setUint8(38, 0x74); header.setUint8(39, 0x61);
+    header.setUint32(40, dataSize, Endian.little);
+
+    final result = Uint8List(44 + dataSize);
+    result.setRange(0, 44, header.buffer.asUint8List());
+    result.setRange(44, 44 + dataSize, pcmData);
+    return result;
   }
 
   /// Queue trailing silence so the audio doesn't cut off abruptly.
@@ -200,12 +290,15 @@ class VagusEngine {
     _audioBuffer.clear();
     _isProcessingBuffer = false;
     _webPlayer.stop();
+    _mobilePlayer?.stop();
   }
 
   /// Clean up audio resources.
   void disposeAudio() {
     _audioBuffer.clear();
     _webPlayer.dispose();
+    _mobilePlayer?.dispose();
+    _mobilePlayer = null;
   }
 }
 
@@ -262,7 +355,7 @@ class NateVoice {
       "type": "tts_speak",
       "text": text,
     }));
-    print(">>> [NATE_VOICE] Sent tts_speak: ${text.substring(0, text.length.clamp(0, 50))}...");
+    _debugLog(">>> [NATE_VOICE] Sent tts_speak: ${text.substring(0, text.length.clamp(0, 50))}...");
   }
 
   /// Route incoming `nate_audio_delta` payload here.
@@ -281,7 +374,7 @@ class NateVoice {
 
   /// Route incoming `tts_done` message here.
   void handleTtsDone() {
-    print(">>> [NATE_VOICE] tts_done received");
+    _debugLog(">>> [NATE_VOICE] tts_done received");
     _ttsDoneReceived = true;
     // Queue a short trailing silence so the audio doesn't cut off abruptly
     _audio.queueTrailingSilence(durationMs: 400);

@@ -13,17 +13,24 @@ Per DATA_SOURCE_MAPPING_V2.md architecture
 
 import json
 import asyncio
+import logging
 import os
+import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+logger = logging.getLogger("sanctuary_engine")
+
+_sanctuary_lock = threading.Lock()
+
 try:
     from transformers import pipeline
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-    print(">>> [SANCTUARY] AI detection unavailable: No module named 'transformers'")
+    logger.info("[SANCTUARY] AI detection unavailable: No module named 'transformers'")
 
 # Note: BillingSystem, AnalyticsEngine passed in from bridge_server.py
 # No direct Stripe imports - use BillingSystem instead
@@ -61,8 +68,13 @@ class FamilySanctuaryEngine:
     def _load_sanctuaries(self):
         """Load sanctuary data from disk"""
         if self.sanctuary_file.exists():
-            with open(self.sanctuary_file, 'r') as f:
-                self.data = json.load(f)
+            size = self.sanctuary_file.stat().st_size
+            if size > 10_000_000:  # 10MB limit (L7)
+                logger.warning(f"[SANCTUARY] Sanctuary file too large: {size} bytes, refusing to load")
+                self.data = {"active_sanctuaries": {}, "completed_sanctuaries": {}}
+            else:
+                with open(self.sanctuary_file, 'r') as f:
+                    self.data = json.load(f)
         else:
             self.data = {
                 "active_sanctuaries": {},
@@ -72,8 +84,12 @@ class FamilySanctuaryEngine:
     
     def _save(self):
         """Save sanctuary data to disk"""
-        with open(self.sanctuary_file, 'w') as f:
-            json.dump(self.data, f, indent=2)
+        with _sanctuary_lock:
+            try:
+                with open(self.sanctuary_file, 'w') as f:
+                    json.dump(self.data, f, indent=2, default=str)
+            except Exception as e:
+                logger.error(f"[SANCTUARY] Save error: {e}")
 
     def _record_analytics(self, event_type: str, user_id: str = None, data: dict = None):
         """Record analytics event if analytics engine is available"""
@@ -81,7 +97,7 @@ class FamilySanctuaryEngine:
             try:
                 self.analytics.record_event(event_type, user_id, data)
             except Exception as e:
-                print(f">>> [SANCTUARY] Analytics recording failed: {e}")
+                logger.error(f"[SANCTUARY] Analytics recording failed: {e}")
 
     # =========================================================================
     # WEBSOCKET REGISTRY - Proper connection tracking
@@ -98,7 +114,7 @@ class FamilySanctuaryEngine:
             self.sanctuary_connections[sanctuary_id] = set()
         self.sanctuary_connections[sanctuary_id].add(websocket)
         
-        print(f">>> [SANCTUARY] Registered websocket for {user_id} in {sanctuary_id}")
+        logger.info(f"[SANCTUARY] Registered websocket for {user_id} in {sanctuary_id}")
 
     def _unregister_websocket(self, sanctuary_id: str, user_id: str):
         """Unregister a websocket when member disconnects"""
@@ -106,7 +122,7 @@ class FamilySanctuaryEngine:
             ws = self._websocket_registry[sanctuary_id].pop(user_id, None)
             if ws and sanctuary_id in self.sanctuary_connections:
                 self.sanctuary_connections[sanctuary_id].discard(ws)
-        print(f">>> [SANCTUARY] Unregistered websocket for {user_id} in {sanctuary_id}")
+        logger.info(f"[SANCTUARY] Unregistered websocket for {user_id} in {sanctuary_id}")
 
     def get_member_websocket(self, sanctuary_id: str, user_id: str):
         """Get websocket for a specific member"""
@@ -212,7 +228,7 @@ class FamilySanctuaryEngine:
             "family_id": family_id
         })
         
-        print(f">>> [SANCTUARY] Created sanctuary {sanctuary_id} for family {family_id}")
+        logger.info(f"[SANCTUARY] Created sanctuary {sanctuary_id} for family {family_id}")
         return sanctuary_id
     
     async def charge_base_fee(self, sanctuary_id: str, head_of_household_id: str) -> Tuple[bool, str]:
@@ -241,7 +257,7 @@ class FamilySanctuaryEngine:
         try:
             if not BILLING_ENABLED:
                 charge_status = "TEST_MODE"
-                print(f">>> [SANCTUARY] Billing disabled - recording base fee (test mode) for {sanctuary_id}")
+                logger.info(f"[SANCTUARY] Billing disabled - recording base fee (test mode) for {sanctuary_id}")
                 if self.billing:
                     txn = self.billing.record_transaction(
                         user_id=head_of_household_id,
@@ -261,7 +277,7 @@ class FamilySanctuaryEngine:
                 # Billing is enabled; if no provider is configured, still record ledger locally.
                 if not self.billing:
                     charge_status = "RECORDED"
-                    print(f">>> [SANCTUARY] Billing enabled but no provider; recording base fee for {sanctuary_id}")
+                    logger.warning(f"[SANCTUARY] Billing enabled but no provider; recording base fee for {sanctuary_id}")
                 else:
                     txn = self.billing.record_transaction(
                         user_id=head_of_household_id,
@@ -278,7 +294,7 @@ class FamilySanctuaryEngine:
         except Exception as e:
             # Never block the sanctuary from having an authoritative ledger entry
             charge_status = "RECORDED"
-            print(f">>> [SANCTUARY] Base fee txn record failed; recording locally instead: {e}")
+            logger.error(f"[SANCTUARY] Base fee txn record failed; recording locally instead: {e}")
 
         prev_total = float(billing.get("total_charges", 0.0) or 0.0)
         billing["base_fee_charged"] = True
@@ -340,12 +356,21 @@ class FamilySanctuaryEngine:
         if not sanctuary:
             return {"success": False, "error": "Sanctuary not found"}
         
-        # Check if member already exists
+        # SECURITY: Verify family membership before allowing join.
+        # Check if the user is already a member OR is in the invited list.
         existing_member = None
         for member in sanctuary.get('members', []):
             if member['user_id'] == user_id:
                 existing_member = member
                 break
+        
+        if not existing_member:
+            # Not yet a member — verify they are invited to this sanctuary
+            invited_ids = sanctuary.get("invited_member_ids", [])
+            family_id = sanctuary.get("family_id")
+            if user_id not in invited_ids:
+                logger.warning(f"[SANCTUARY] Unauthorized join attempt: {user_id} not invited to {sanctuary_id}")
+                return {"success": False, "error": "You are not invited to this family sanctuary"}
         
         if existing_member:
             # RECONNECTION - Update connection and status
@@ -357,18 +382,18 @@ class FamilySanctuaryEngine:
                 existing_member['status'] = 'ACTIVE'
                 existing_member['exited_at'] = None
                 action = "RETURNED"
-                print(f">>> [SANCTUARY] Member {user_name} RETURNED to {sanctuary_id}")
+                logger.info(f"[SANCTUARY] Member {user_name} RETURNED to {sanctuary_id}")
                 self._record_analytics("sanctuary_member_returned", user_id, {"sanctuary_id": sanctuary_id})
             elif old_status == 'PAUSED':
                 # Reconnecting after disconnect
                 existing_member['status'] = 'ACTIVE'
                 action = "RECONNECTED"
-                print(f">>> [SANCTUARY] Member {user_name} RECONNECTED to {sanctuary_id}")
+                logger.info(f"[SANCTUARY] Member {user_name} RECONNECTED to {sanctuary_id}")
                 self._record_analytics("sanctuary_member_reconnected", user_id, {"sanctuary_id": sanctuary_id})
             else:
                 # Already active, just updating websocket (page refresh)
                 action = "REFRESHED"
-                print(f">>> [SANCTUARY] Member {user_name} REFRESHED connection to {sanctuary_id}")
+                logger.info(f"[SANCTUARY] Member {user_name} REFRESHED connection to {sanctuary_id}")
                 self._record_analytics("sanctuary_member_refreshed", user_id, {"sanctuary_id": sanctuary_id})
             
             # Register websocket
@@ -419,7 +444,7 @@ class FamilySanctuaryEngine:
                 "member_count": len(sanctuary['members'])
             })
             
-            print(f">>> [SANCTUARY] Member {user_name} JOINED {sanctuary_id}")
+            logger.info(f"[SANCTUARY] Member {user_name} JOINED {sanctuary_id}")
             
             return {
                 "success": True,
@@ -460,7 +485,7 @@ class FamilySanctuaryEngine:
             if member['user_id'] == user_id:
                 member['status'] = 'PAUSED'
                 member['last_seen'] = datetime.now().isoformat()
-                print(f">>> [SANCTUARY] Member {member['name']} PAUSED (disconnected) from {sanctuary_id}")
+                logger.info(f"[SANCTUARY] Member {member['name']} PAUSED (disconnected) from {sanctuary_id}")
                 break
         
         self._unregister_websocket(sanctuary_id, user_id)
@@ -536,6 +561,8 @@ class FamilySanctuaryEngine:
         message_type: str = "MEMBER_MESSAGE",
     ) -> str:
         """Add message to sanctuary and return message ID"""
+        if len(content) > 10000:
+            content = content[:10000]
         sanctuary = self.data["active_sanctuaries"][sanctuary_id]
         
         # Get sender info
@@ -594,7 +621,7 @@ class FamilySanctuaryEngine:
             try:
                 await ws.send(message_json)
             except Exception as e:
-                print(f">>> [SANCTUARY] Broadcast failed to {user_id}: {e}")
+                logger.error(f"[SANCTUARY] Broadcast failed to {user_id}: {e}")
                 # Mark as disconnected but don't remove - they might reconnect
                 self.member_disconnect(sanctuary_id, user_id)
     
@@ -733,7 +760,7 @@ class FamilySanctuaryEngine:
                     )
                     return True
             except Exception as e:
-                print(f">>> [SANCTUARY] Error: {e}")
+                logger.error(f"[SANCTUARY] Error: {e}")
         
         return False
     
@@ -752,7 +779,7 @@ class FamilySanctuaryEngine:
                             profiles.append(v["profile"])
                             break
         except Exception as e:
-            print(f">>> [SANCTUARY] Profile error: {e}")
+            logger.error(f"[SANCTUARY] Profile error: {e}")
         return profiles
     
     async def trigger_intervention(
@@ -809,7 +836,7 @@ class FamilySanctuaryEngine:
         # Find recipient's WebSocket using registry
         recipient_ws = self.get_member_websocket(sanctuary_id, recipient_id)
         if not recipient_ws:
-            print(f">>> [SANCTUARY] No websocket found for {recipient_id}")
+            logger.warning(f"[SANCTUARY] No websocket found for {recipient_id}")
             return
         
         offer_message = {
@@ -825,7 +852,7 @@ class FamilySanctuaryEngine:
         try:
             await recipient_ws.send(json.dumps(offer_message))
         except Exception as e:
-            print(f">>> [SANCTUARY] Failed to send coaching offer: {e}")
+            logger.error(f"[SANCTUARY] Failed to send coaching offer: {e}")
     
     # =========================================================================
     # COACHING & BILLING
@@ -899,7 +926,7 @@ class FamilySanctuaryEngine:
                     )
                     transaction_id = (txn or {}).get("transaction_id")
             except Exception as e:
-                print(f">>> [SANCTUARY] Coaching txn (test mode) record failed: {e}")
+                logger.error(f"[SANCTUARY] Coaching txn (test mode) record failed: {e}")
 
             sanctuary["billing"]["total_charges"] += amount
             sanctuary["billing"]["charges"].append({
@@ -968,7 +995,7 @@ class FamilySanctuaryEngine:
             return True, "Coaching charged successfully"
             
         except Exception as e:
-            print(f">>> [SANCTUARY] Coaching charge error: {e}")
+            logger.error(f"[SANCTUARY] Coaching charge error: {e}")
             return False, str(e)
 
     async def charge_assisted_response(
@@ -1012,7 +1039,7 @@ class FamilySanctuaryEngine:
                     )
                     transaction_id = (txn or {}).get("transaction_id")
             except Exception as e:
-                print(f">>> [SANCTUARY] Assisted response txn (test mode) record failed: {e}")
+                logger.error(f"[SANCTUARY] Assisted response txn (test mode) record failed: {e}")
 
             sanctuary["billing"]["total_charges"] += float(amount)
             sanctuary["billing"]["charges"].append({
@@ -1076,7 +1103,7 @@ class FamilySanctuaryEngine:
 
             return True, "Assisted response charged successfully"
         except Exception as e:
-            print(f">>> [SANCTUARY] Assisted response charge error: {e}")
+            logger.error(f"[SANCTUARY] Assisted response charge error: {e}")
             return False, str(e)
 
     async def charge_group_coaching(
@@ -1117,7 +1144,7 @@ class FamilySanctuaryEngine:
                     )
                     transaction_id = (txn or {}).get("transaction_id")
             except Exception as e:
-                print(f">>> [SANCTUARY] Group coaching txn (test mode) record failed: {e}")
+                logger.error(f"[SANCTUARY] Group coaching txn (test mode) record failed: {e}")
 
             sanctuary["billing"]["total_charges"] += amount
             sanctuary["billing"]["charges"].append({
@@ -1174,7 +1201,7 @@ class FamilySanctuaryEngine:
 
             return True, "Group coaching charged successfully"
         except Exception as e:
-            print(f">>> [SANCTUARY] Group coaching charge error: {e}")
+            logger.error(f"[SANCTUARY] Group coaching charge error: {e}")
             return False, str(e)
     
     async def increment_coaching_count(self, sanctuary_id: str, member_id: str):
@@ -1268,7 +1295,7 @@ class FamilySanctuaryEngine:
                 "reason": reason
             })
             
-            print(f">>> [SANCTUARY] Member {member['name']} EXITED from {sanctuary_id}")
+            logger.info(f"[SANCTUARY] Member {member['name']} EXITED from {sanctuary_id}")
     
     async def complete_session(self, sanctuary_id: str):
         """Complete sanctuary session"""
@@ -1297,9 +1324,22 @@ class FamilySanctuaryEngine:
         
         self._save()
         
-        print(f">>> [SANCTUARY] Session {sanctuary_id} COMPLETED")
-        # TODO: Archive to Azure Blob
-        # await self._archive_to_azure(sanctuary_id)
+        logger.info(f"[SANCTUARY] Session {sanctuary_id} COMPLETED")
+
+        # Archive to Azure Blob Storage (if configured)
+        try:
+            import os as _os
+            if _os.getenv("AZURE_STORAGE_CONNECTION_STRING"):
+                from app.services.blob_storage import upload_bytes
+                import json as _json
+                archive_data = _json.dumps(sanctuary, default=str).encode("utf-8")
+                blob_name = f"sanctuaries/{sanctuary_id}.json"
+                upload_bytes(archive_data, blob_name, content_type="application/json")
+                logger.info(f"[SANCTUARY] Archived {sanctuary_id} to Azure Blob: {blob_name}")
+            else:
+                logger.info(f"[SANCTUARY] Azure Blob not configured, skipping archive for {sanctuary_id}")
+        except Exception as blob_err:
+            logger.error(f"[SANCTUARY] Azure Blob archive error: {blob_err}")
     
     # =========================================================================
     # GETTER METHODS
@@ -1406,9 +1446,17 @@ class FamilySanctuaryEngine:
                 pass
         return round(total, 2)
     
-    def get_session(self, sanctuary_id: str) -> Optional[Dict]:
-        """Get sanctuary session data"""
-        return self.data["active_sanctuaries"].get(sanctuary_id)
+    def get_session(self, sanctuary_id: str, caller_user_id: str = None) -> Optional[dict]:
+        """Get sanctuary session. Verifies caller is a member if caller_user_id provided."""
+        sanctuary = self.data.get("active_sanctuaries", {}).get(sanctuary_id)
+        if not sanctuary:
+            return None
+        # Access check: caller must be a member
+        if caller_user_id:
+            member_ids = [m.get("user_id") for m in sanctuary.get("members", [])]
+            if caller_user_id not in member_ids and caller_user_id != sanctuary.get("head_of_household_id"):
+                return {"error": "ACCESS_DENIED", "message": "You are not a member of this sanctuary"}
+        return sanctuary
     
     # =========================================================================
     # HELPER METHODS
@@ -1432,7 +1480,7 @@ class FamilySanctuaryEngine:
                     if profile.get("hardware_id") == user_id:
                         return profile
         except Exception as e:
-            print(f">>> [SANCTUARY] Error loading user profile: {e}")
+            logger.error(f"[SANCTUARY] Error loading user profile: {e}")
         
         return {}
     
@@ -1529,7 +1577,7 @@ Who would like to share first about what brought the family together today?"""
         member["status"] = "IN_COACHING"
         sanctuary["status"] = "COACHING_ACTIVE"
         self._save()
-        print(f">>> [COACHING] Started session for {member.get('name')}")
+        logger.info(f"[COACHING] Started session for {member.get('name')}")
         return coaching_session
     
     def add_coaching_message(self, sanctuary_id: str, member_id: str, role: str, content: str) -> bool:
@@ -1573,7 +1621,7 @@ Who would like to share first about what brought the family together today?"""
         if not self.get_active_coaching_sessions(sanctuary_id):
             sanctuary["status"] = "ACTIVE"
         self._save()
-        print(f">>> [COACHING] Ended session for {member_id}")
+        logger.info(f"[COACHING] Ended session for {member_id}")
         return True
     
     def get_active_coaching_sessions(self, sanctuary_id: str) -> list:
@@ -2398,6 +2446,88 @@ Who would like to share first about what brought the family together today?"""
             "coherent": {"type": "coherent_breathing", "inhale": 5, "exhale": 5, "cycles": 6},
         }
         return exercises.get(exercise_type, exercises["box"])
+
+    # =========================================================================
+    # FAMILY C_EMO CALCULATION
+    # =========================================================================
+
+    def calculate_c_emo_family(self, sanctuary_id: str) -> dict:
+        """
+        Compute family-level quantum emotional coherence from all member
+        Nevedal states within an active sanctuary session.
+
+        Returns:
+            {
+                "family_wellness_index": float,
+                "coherence_matrix": {  "memberA:memberB": float, ... },
+                "member_scores": { member_name: float, ... },
+                "member_count": int,
+            }
+
+        Formula:
+            Pairwise coherence = 1.0 - abs(c_emo_A - c_emo_B)
+            Family Wellness Index = avg(all_member_c_emo)
+        """
+        sanctuary = self._get_sanctuary(sanctuary_id)
+        if not sanctuary:
+            return {"error": "Sanctuary not found", "family_wellness_index": 0}
+
+        # Gather each member's current C_emo from metrics engine
+        member_scores = {}
+        members = sanctuary.get("members", {})
+
+        for member_id, member_data in members.items():
+            member_name = member_data.get("name", member_id[:8])
+            # Try to load from nevedal handler
+            c_emo = 0.5  # Default
+            if self.nevedal_handler:
+                try:
+                    profile = {"role": "CLIENT", "hardware_id": member_id}
+                    metrics = self.nevedal_handler.metrics_engine.load_metrics(profile) if hasattr(self.nevedal_handler, 'metrics_engine') else {}
+                    nevedal_state = metrics.get("nevedal_state", {})
+                    c_emo = nevedal_state.get("C_emo", 0.5)
+                except Exception:
+                    pass
+            member_scores[member_name] = c_emo
+
+        if not member_scores:
+            return {"family_wellness_index": 0, "coherence_matrix": {},
+                    "member_scores": {}, "member_count": 0}
+
+        # Pairwise coherence matrix
+        names = list(member_scores.keys())
+        coherence_matrix = {}
+        for i, name_a in enumerate(names):
+            for name_b in names[i + 1:]:
+                pair_key = f"{name_a}:{name_b}"
+                coherence_matrix[pair_key] = round(
+                    1.0 - abs(member_scores[name_a] - member_scores[name_b]), 4
+                )
+
+        # Family Wellness Index
+        all_scores = list(member_scores.values())
+        wellness_index = round(sum(all_scores) / len(all_scores), 4) if all_scores else 0
+
+        result = {
+            "family_wellness_index": wellness_index,
+            "coherence_matrix": coherence_matrix,
+            "member_scores": {k: round(v, 4) for k, v in member_scores.items()},
+            "member_count": len(member_scores),
+        }
+
+        # Store in sanctuary state
+        sanctuary["c_emo_family"] = wellness_index
+        sanctuary["coherence_matrix"] = coherence_matrix
+
+        return result
+
+    def _get_sanctuary(self, sanctuary_id: str) -> dict:
+        """Helper to retrieve a sanctuary from data."""
+        try:
+            data = self._load_sanctuaries()
+            return data.get(sanctuary_id, {})
+        except Exception:
+            return {}
 
     # =========================================================================
     # LIVE COACH BRIEFING SYSTEM (Add-on)

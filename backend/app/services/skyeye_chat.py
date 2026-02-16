@@ -1,6 +1,6 @@
 """
 LITTLE NATE — SkyEye Chat Service (Sovereign Swarm Edition)
-Big Nate / Little Nate conversation with 5 command modes.
+Big Nate / Little Nate conversation with 8 command modes.
 
 Modes:
   1. STRATEGY  — Brainstorming, insights, performance discussion (default)
@@ -8,6 +8,9 @@ Modes:
   3. BRIEFING  — On-demand sovereign briefing from all 6 strategic memory layers
   4. INQUIRY   — Data questions routed to specific services
   5. SWARM     — Fibre status, spawning, pruning commands
+  6. MARKETING — Full marketing authority: playbook, campaigns, funnel, content
+  7. DEFENSE   — Full defense authority: Hive Defense status, threats, Guardian Fibre
+  8. ADMIN     — Full admin authority: users, billing, subscriptions, audit log
 """
 
 import json
@@ -30,8 +33,11 @@ class ChatMode:
     BRIEFING = "briefing"
     INQUIRY = "inquiry"
     SWARM = "swarm"
+    MARKETING = "marketing"
+    DEFENSE = "defense"
+    ADMIN = "admin"
 
-    ALL = [STRATEGY, COMMAND, BRIEFING, INQUIRY, SWARM]
+    ALL = [STRATEGY, COMMAND, BRIEFING, INQUIRY, SWARM, MARKETING, DEFENSE, ADMIN]
 
 
 # =============================================================================
@@ -123,12 +129,42 @@ MODE 5 — SWARM:
 - Show Wisdom Mesh health, recent convergence alerts.
 - Example: "Spawn a cultural sentinel for Gen Z TikTok" → confirm parameters → execute.
 
+MODE 6 — MARKETING (Authority):
+- Triggered by: "marketing", "campaign", "playbook", "content plan", "audience", "funnel"
+- You have FULL marketing authority. You can view and discuss:
+  • The marketing playbook (content pillars, target audiences, content mix, posting schedule)
+  • Pending marketing actions and their approval status
+  • Funnel stats (prospects, conversions, by platform, by audience)
+  • Campaign performance and ROI
+- You can propose new campaigns, suggest playbook changes, and recommend content strategies.
+- Present marketing data with strategic context, not raw dumps.
+
+MODE 7 — DEFENSE (Authority):
+- Triggered by: "defense", "security", "threat", "hive", "attack", "guardian", "sentinel"
+- You have FULL defense authority. You can view and discuss:
+  • Hive Defense v4 service readiness (GuardianFibre, PipelineDrum, SentinelMesh, etc.)
+  • Active threat alerts and recent security incidents
+  • Transit Guardian and Anonymization Proxy status
+  • Webhook Fortress integrity and verification stats
+- You report on defense posture clearly: what's green, what's degraded, what needs attention.
+- You recommend defensive actions but do NOT execute them directly.
+
+MODE 8 — ADMIN (Authority):
+- Triggered by: "admin", "users", "billing", "revenue", "subscription", "audit log", "system"
+- You have FULL administration overview. You can view and discuss:
+  • User statistics (total, active, by role, by tier)
+  • Subscription and billing data (MRR, churn, failed payments)
+  • Recent audit log entries (admin actions, security events)
+  • System health (container status, API uptime, database metrics)
+- You present admin data with executive-level clarity.
+- You recommend admin actions but do NOT execute user modifications directly.
+
 ═══════════════════════════════════════════════════════════
 """
 
 
 class SkyEyeChatService:
-    """Manages Big Nate / Little Nate conversations via Azure OpenAI Realtime API — 5 modes."""
+    """Manages Big Nate / Little Nate conversations via Azure OpenAI Realtime API — 8 modes."""
 
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -150,6 +186,27 @@ class SkyEyeChatService:
     def _detect_mode(self, message: str) -> str:
         """Detect which mode Big Nate's message triggers."""
         msg = message.lower().strip()
+
+        # Marketing authority triggers (check before general inquiry)
+        marketing_triggers = ["marketing", "campaign", "playbook", "content plan",
+                              "audience", "funnel", "content pillar", "posting schedule",
+                              "social strategy", "growth strategy"]
+        if any(trigger in msg for trigger in marketing_triggers):
+            return ChatMode.MARKETING
+
+        # Defense authority triggers
+        defense_triggers = ["defense", "security", "threat", "hive", "attack",
+                            "guardian fibre", "sentinel", "pipeline drum",
+                            "anonymization", "webhook fortress", "intrusion"]
+        if any(trigger in msg for trigger in defense_triggers):
+            return ChatMode.DEFENSE
+
+        # Admin authority triggers
+        admin_triggers = ["admin", "billing", "revenue", "subscription",
+                          "audit log", "system health", "user count",
+                          "churn", "mrr", "failed payment"]
+        if any(trigger in msg for trigger in admin_triggers):
+            return ChatMode.ADMIN
 
         # Briefing mode triggers
         briefing_triggers = ["briefing", "brief me", "what's the situation", "status report",
@@ -205,13 +262,16 @@ class SkyEyeChatService:
 
     # ─── Main Send ───
 
-    async def send_message(self, user_message: str) -> Dict[str, Any]:
+    async def send_message(self, user_message: str, mode_override: str = None) -> Dict[str, Any]:
         """
         Send a message from Big Nate and get Little Nate's response.
-        Auto-detects mode and enriches context accordingly.
+        Auto-detects mode unless mode_override is provided.
         """
-        # Detect mode
-        detected_mode = self._detect_mode(user_message)
+        # Use explicit mode if valid, otherwise auto-detect
+        if mode_override and mode_override.lower() in ChatMode.ALL:
+            detected_mode = mode_override.lower()
+        else:
+            detected_mode = self._detect_mode(user_message)
         self.current_mode = detected_mode
 
         # Store Big Nate's message
@@ -262,8 +322,57 @@ class SkyEyeChatService:
             "sender": "little_nate",
             "message": response_text,
             "mode": detected_mode,
-            "created_at": row["created_at"].isoformat()
+            "created_at": row["created_at"].isoformat(),
+            "follow_up_suggestions": self._get_follow_ups(detected_mode),
         }
+
+    # ─── Follow-Up Suggestions per Mode ───
+
+    @staticmethod
+    def _get_follow_ups(mode: str) -> List[str]:
+        """Return contextual follow-up suggestions based on the active mode."""
+        return {
+            ChatMode.STRATEGY: [
+                "What should our next campaign focus on?",
+                "Review current standing orders",
+                "Propose a new content pillar",
+            ],
+            ChatMode.COMMAND: [
+                "Approve latest proposal",
+                "Reject and explain why",
+                "Show pending commands",
+            ],
+            ChatMode.BRIEFING: [
+                "Deep dive into coherence trends",
+                "Expand on foresight alerts",
+                "Review family patterns",
+            ],
+            ChatMode.INQUIRY: [
+                "Show me TikTok performance",
+                "How many new prospects this week?",
+                "What's our conversion rate?",
+            ],
+            ChatMode.SWARM: [
+                "Show fibre inventory",
+                "Mesh health status",
+                "Spawn a new sentinel",
+            ],
+            ChatMode.MARKETING: [
+                "Review the playbook",
+                "Show funnel stats",
+                "What campaigns are pending?",
+            ],
+            ChatMode.DEFENSE: [
+                "Hive Defense status report",
+                "Any active threats?",
+                "Guardian Fibre health",
+            ],
+            ChatMode.ADMIN: [
+                "How many active users?",
+                "Revenue this month",
+                "Show recent audit log",
+            ],
+        }.get(mode, ["Tell me more", "Switch to briefing mode", "What's the situation?"])
 
     # ─── Mode-Specific Context Enrichment ───
 
@@ -282,6 +391,12 @@ class SkyEyeChatService:
             return await self._build_inquiry_context()
         elif mode == ChatMode.SWARM:
             return await self._build_swarm_context()
+        elif mode == ChatMode.MARKETING:
+            return await self._build_marketing_authority_context()
+        elif mode == ChatMode.DEFENSE:
+            return await self._build_defense_context()
+        elif mode == ChatMode.ADMIN:
+            return await self._build_admin_context()
         return ""
 
     async def _build_briefing_context(self) -> str:
@@ -409,7 +524,233 @@ class SkyEyeChatService:
         sections.append("\n═══ END SWARM CONTEXT ═══\n")
         return "\n".join(sections)
 
-    # ─── Marketing Context ───
+    # ─── Authority Mode Contexts (Marketing, Defense, Admin) ───
+
+    async def _build_marketing_authority_context(self) -> str:
+        """Pull full marketing data for the Marketing authority mode."""
+        sections = ["\n\n═══ MARKETING AUTHORITY CONTEXT ═══"]
+
+        try:
+            from app.services.marketing_brain import MarketingBrain
+            brain = MarketingBrain(self.db_pool)
+
+            # Playbook
+            try:
+                playbook = await brain.get_playbook()
+                if playbook:
+                    pillars = playbook.get("content_pillars", [])
+                    audiences = playbook.get("target_audiences", {})
+                    mix = playbook.get("content_mix", {})
+                    sections.append(f"\n[PLAYBOOK]")
+                    if pillars:
+                        sections.append(f"  Content Pillars: {', '.join(str(p) for p in pillars[:6])}")
+                    if audiences:
+                        sections.append(f"  Target Audiences: {', '.join(str(k) for k in audiences.keys())}")
+                    if mix:
+                        sections.append(f"  Content Mix: {json.dumps(mix, default=str)[:200]}")
+            except Exception:
+                sections.append("\n[PLAYBOOK] Unavailable")
+
+            # Pending marketing actions
+            try:
+                pending = await brain.get_pending_actions()
+                if pending:
+                    sections.append(f"\n[PENDING ACTIONS] {len(pending)} awaiting decision:")
+                    for a in pending[:5]:
+                        sections.append(f"  • [{a.get('action_type', '?')}] {a.get('title', '?')} — proposed by {a.get('proposed_by', '?')}")
+                else:
+                    sections.append("\n[PENDING ACTIONS] None")
+            except Exception:
+                sections.append("\n[PENDING ACTIONS] Unavailable")
+
+            # Funnel stats
+            try:
+                async with self.db_pool.acquire() as conn:
+                    row = await conn.fetchrow("""
+                        SELECT COUNT(*) as total_prospects,
+                               COUNT(*) FILTER (WHERE converted_at IS NOT NULL) as conversions
+                        FROM marketing_prospects
+                        WHERE created_at > NOW() - INTERVAL '7 days'
+                    """)
+                    if row:
+                        sections.append(f"\n[FUNNEL (7d)] Prospects: {row['total_prospects']}, "
+                                        f"Conversions: {row['conversions']}")
+            except Exception:
+                sections.append("\n[FUNNEL] Stats unavailable")
+
+        except Exception as e:
+            sections.append(f"\n[MARKETING] MarketingBrain unavailable: {e}")
+
+        sections.append("\n═══ END MARKETING AUTHORITY CONTEXT ═══\n")
+        return "\n".join(sections)
+
+    async def _build_defense_context(self) -> str:
+        """Pull Hive Defense v4 status for the Defense authority mode."""
+        sections = ["\n\n═══ DEFENSE AUTHORITY CONTEXT ═══"]
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Service readiness from hive_defense_events table
+                try:
+                    rows = await conn.fetch("""
+                        SELECT service_name, status, checked_at
+                        FROM hive_defense_status
+                        ORDER BY checked_at DESC
+                        LIMIT 10
+                    """)
+                    if rows:
+                        sections.append("\n[HIVE DEFENSE SERVICE STATUS]")
+                        for r in rows:
+                            emoji = "OK" if r["status"] == "healthy" else "DEGRADED"
+                            sections.append(f"  • {r['service_name']}: {emoji}")
+                except Exception:
+                    sections.append("\n[HIVE DEFENSE STATUS] Status table not available")
+
+                # Recent threat alerts
+                try:
+                    rows = await conn.fetch("""
+                        SELECT alert_type, severity, description, created_at
+                        FROM hive_defense_alerts
+                        WHERE created_at > NOW() - INTERVAL '24 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    if rows:
+                        sections.append(f"\n[THREAT ALERTS (24h)] {len(rows)} alerts:")
+                        for r in rows:
+                            sections.append(f"  • [{r['severity']}] {r['alert_type']}: "
+                                            f"{r.get('description', '')[:80]}")
+                    else:
+                        sections.append("\n[THREAT ALERTS (24h)] None — all clear")
+                except Exception:
+                    sections.append("\n[THREAT ALERTS] Alerts table not available")
+
+                # Guardian Fibre events
+                try:
+                    rows = await conn.fetch("""
+                        SELECT event_type, details, created_at
+                        FROM guardian_fibre_events
+                        WHERE created_at > NOW() - INTERVAL '24 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    if rows:
+                        sections.append(f"\n[GUARDIAN FIBRE (24h)] {len(rows)} events:")
+                        for r in rows:
+                            sections.append(f"  • {r['event_type']}: {str(r.get('details', ''))[:60]}")
+                    else:
+                        sections.append("\n[GUARDIAN FIBRE (24h)] No events — nominal")
+                except Exception:
+                    sections.append("\n[GUARDIAN FIBRE] Events table not available")
+
+                # Webhook verification stats
+                try:
+                    row = await conn.fetchrow("""
+                        SELECT COUNT(*) FILTER (WHERE result = 'verified') as verified,
+                               COUNT(*) FILTER (WHERE result = 'rejected') as rejected,
+                               COUNT(*) as total
+                        FROM webhook_verifications
+                        WHERE created_at > NOW() - INTERVAL '24 hours'
+                    """)
+                    if row and row["total"] > 0:
+                        sections.append(f"\n[WEBHOOK FORTRESS (24h)] "
+                                        f"Verified: {row['verified']}, "
+                                        f"Rejected: {row['rejected']}, "
+                                        f"Total: {row['total']}")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            sections.append(f"\n[DEFENSE] Database unavailable: {e}")
+
+        sections.append("\n═══ END DEFENSE AUTHORITY CONTEXT ═══\n")
+        return "\n".join(sections)
+
+    async def _build_admin_context(self) -> str:
+        """Pull administration overview for the Admin authority mode."""
+        sections = ["\n\n═══ ADMIN AUTHORITY CONTEXT ═══"]
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                # User statistics
+                try:
+                    row = await conn.fetchrow("""
+                        SELECT COUNT(*) as total_users,
+                               COUNT(*) FILTER (WHERE role = 'client') as clients,
+                               COUNT(*) FILTER (WHERE role = 'coach') as coaches,
+                               COUNT(*) FILTER (WHERE role = 'admin') as admins,
+                               COUNT(*) FILTER (WHERE last_active > NOW() - INTERVAL '7 days') as active_7d
+                        FROM users
+                    """)
+                    if row:
+                        sections.append(f"\n[USER STATS]")
+                        sections.append(f"  Total: {row['total_users']} | "
+                                        f"Clients: {row['clients']} | "
+                                        f"Coaches: {row['coaches']} | "
+                                        f"Admins: {row['admins']}")
+                        sections.append(f"  Active (7d): {row['active_7d']}")
+                except Exception:
+                    sections.append("\n[USER STATS] Users table query failed")
+
+                # Subscription / billing stats
+                try:
+                    row = await conn.fetchrow("""
+                        SELECT COUNT(*) as total_subs,
+                               COUNT(*) FILTER (WHERE status = 'active') as active_subs,
+                               COUNT(*) FILTER (WHERE status = 'past_due') as past_due,
+                               COUNT(*) FILTER (WHERE status = 'canceled') as canceled
+                        FROM subscriptions
+                    """)
+                    if row:
+                        sections.append(f"\n[SUBSCRIPTIONS]")
+                        sections.append(f"  Active: {row['active_subs']} | "
+                                        f"Past Due: {row['past_due']} | "
+                                        f"Canceled: {row['canceled']} | "
+                                        f"Total: {row['total_subs']}")
+                except Exception:
+                    sections.append("\n[SUBSCRIPTIONS] Table not available")
+
+                # Tier breakdown
+                try:
+                    rows = await conn.fetch("""
+                        SELECT tier, COUNT(*) as count
+                        FROM users
+                        WHERE tier IS NOT NULL
+                        GROUP BY tier
+                        ORDER BY count DESC
+                    """)
+                    if rows:
+                        sections.append(f"\n[TIER BREAKDOWN]")
+                        for r in rows:
+                            sections.append(f"  • {r['tier']}: {r['count']}")
+                except Exception:
+                    pass
+
+                # Recent audit log entries
+                try:
+                    rows = await conn.fetch("""
+                        SELECT action, target_type, details, created_at
+                        FROM audit_log
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    if rows:
+                        sections.append(f"\n[AUDIT LOG (recent)]")
+                        for r in rows:
+                            sections.append(f"  • {r['action']} on {r.get('target_type', '?')}: "
+                                            f"{str(r.get('details', ''))[:60]}")
+                    else:
+                        sections.append("\n[AUDIT LOG] No entries")
+                except Exception:
+                    sections.append("\n[AUDIT LOG] Table not available")
+
+        except Exception as e:
+            sections.append(f"\n[ADMIN] Database unavailable: {e}")
+
+        sections.append("\n═══ END ADMIN AUTHORITY CONTEXT ═══\n")
+        return "\n".join(sections)
+
+    # ─── Marketing Context (general enrichment for all modes) ───
 
     async def _get_marketing_context(self) -> str:
         """Get Marketing Brain context to append to conversation."""

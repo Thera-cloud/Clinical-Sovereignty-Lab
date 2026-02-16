@@ -14,6 +14,7 @@ Email templates and notification logic for:
 Uses: SendGrid, Twilio (SMS), or generic SMTP
 """
 
+import logging
 import os
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
@@ -29,6 +30,8 @@ from email.mime.multipart import MIMEMultipart
 # CONFIGURATION
 # =============================================================================
 
+logger = logging.getLogger(__name__)
+
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.sendgrid.net")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "apikey")
@@ -36,7 +39,8 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")  # SendGrid API key
 FROM_EMAIL = os.getenv("FROM_EMAIL", "sanctuary@littlenate.ai")
 FROM_NAME = os.getenv("FROM_NAME", "Sovereign Sanctuary")
 
-APP_URL = os.getenv("APP_URL", "https://app.littlenate.ai")
+from app.config import settings as _app_settings
+APP_URL = _app_settings.APP_URL
 
 # =============================================================================
 # EMAIL TEMPLATES
@@ -206,7 +210,52 @@ TEMPLATES = {
 </html>
 """
     },
-    
+
+    # -------------------------------------------------------------------------
+    # TRIAL PHASE 2 (Week 2 reduced access)
+    # -------------------------------------------------------------------------
+    "trial_phase2_reduced": {
+        "subject": "Week 2 of your trial — reduced AI access",
+        "html": """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Georgia', serif; background: #050505; color: #F5F5F5; margin: 0; padding: 40px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo { font-size: 32px; color: #C9A962; letter-spacing: 4px; }
+        .content { background: #111111; border: 1px solid #1A1A1A; padding: 40px; border-radius: 4px; }
+        h1 { font-weight: 300; font-size: 28px; color: #F5F5F5; margin-bottom: 20px; }
+        p { color: #9A9A9A; line-height: 1.8; margin-bottom: 20px; }
+        .upgrade { background: rgba(201, 169, 98, 0.1); border-left: 3px solid #C9A962; padding: 16px; margin: 24px 0; }
+        .upgrade p { color: #E8D5A3; margin: 0; }
+        .cta { display: inline-block; background: #C9A962; color: #050505; text-decoration: none; padding: 14px 32px; font-size: 14px; letter-spacing: 1px; margin-top: 20px; }
+        .footer { text-align: center; margin-top: 40px; color: #5A5A5A; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">SANCTUARY</div>
+        </div>
+        <div class="content">
+            <h1>Hey {{ name }}, you're entering Week 2.</h1>
+            <p>Your AI access is now limited to 30 minutes per day (down from full access in Week 1).</p>
+            <div class="upgrade">
+                <p>{{ coherence_prompt }}</p>
+            </div>
+            <a href="{{ app_url }}/membership" class="cta">Upgrade to Inner Chamber</a>
+        </div>
+        <div class="footer">
+            <p>Sovereign Sanctuary — A space for your journey</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+    },
+
     # -------------------------------------------------------------------------
     # PAYMENT FAILED
     # -------------------------------------------------------------------------
@@ -443,11 +492,32 @@ class EmailService:
         template_name: str,
         context: Dict[str, Any],
         from_email: str = FROM_EMAIL,
-        from_name: str = FROM_NAME
+        from_name: str = FROM_NAME,
+        transit_guardian=None,
     ) -> bool:
-        """Send email using template."""
+        """Send email using template. Optionally inspects for PII via Transit Guardian."""
         
         subject, html_content = self._render_template(template_name, context)
+
+        # ── HIVE DEFENSE v4.3: Inspect outbound notification for PII ──
+        # Email subjects and preview text are visible in lock-screen notifications,
+        # so they must be scrubbed of PII before sending.
+        if transit_guardian is not None:
+            try:
+                inspection = await transit_guardian.inspect_push_notification(
+                    title=subject,
+                    body=html_content[:500],
+                    user_id=to_email,
+                    destination="sendgrid",
+                )
+                if not inspection["safe"]:
+                    subject = inspection["scrubbed_title"]
+                    logger.warning(
+                        "PII scrubbed from email subject to %s: %s",
+                        to_email[:10], [p["type"] for p in inspection["pii_found"]],
+                    )
+            except Exception as _tg_err:
+                logger.debug("Transit Guardian email inspection non-blocking: %s", _tg_err)
         
         message = MIMEMultipart("alternative")
         message["Subject"] = subject
@@ -491,6 +561,14 @@ class EmailService:
     
     async def send_trial_expired(self, to_email: str, name: str) -> bool:
         return await self.send_email(to_email, "trial_expired", {"name": name})
+
+    async def send_trial_phase2_reduced_access(
+        self, to_email: str, name: str, coherence_prompt: str
+    ) -> bool:
+        return await self.send_email(to_email, "trial_phase2_reduced", {
+            "name": name,
+            "coherence_prompt": coherence_prompt,
+        })
     
     async def send_payment_failed(self, to_email: str, amount: str, date: str) -> bool:
         return await self.send_email(to_email, "payment_failed", {
@@ -557,7 +635,7 @@ class NotificationScheduler:
             AND u.id NOT IN (
                 SELECT DISTINCT target_id FROM audit_log 
                 WHERE action_type = 'TRIAL_REMINDER_SENT' 
-                AND timestamp > NOW() - INTERVAL '5 days'
+                AND logged_at > NOW() - INTERVAL '5 days'
             )
             """
         )
@@ -575,11 +653,32 @@ class NotificationScheduler:
                 user['id']
             )
             
+            # Calculate actual coherence change from nevedal_metrics
+            coherence_change = "+0%"
+            try:
+                first_c_emo = await self.db.fetchval(
+                    """SELECT c_emo FROM nevedal_metrics
+                       WHERE user_id = $1 ORDER BY recorded_at ASC LIMIT 1""",
+                    user['id'],
+                )
+                latest_c_emo = await self.db.fetchval(
+                    """SELECT c_emo FROM nevedal_metrics
+                       WHERE user_id = $1 ORDER BY recorded_at DESC LIMIT 1""",
+                    user['id'],
+                )
+                if first_c_emo and latest_c_emo and float(first_c_emo) > 0:
+                    pct = ((float(latest_c_emo) - float(first_c_emo)) / float(first_c_emo)) * 100
+                    sign = "+" if pct >= 0 else ""
+                    coherence_change = f"{sign}{pct:.0f}%"
+            except Exception as e:
+                logger.debug("Coherence calc fallback: %s", e)
+                coherence_change = "+0%"  # Graceful fallback
+
             await self.email.send_trial_expiring(
                 user['email'],
                 user['name'],
                 sessions=stats['sessions'] or 0,
-                coherence_change="+23%",  # TODO: Calculate actual
+                coherence_change=coherence_change,
                 insights=stats['sessions'] * 4  # Rough estimate
             )
             
@@ -660,7 +759,7 @@ class NotificationScheduler:
 """
 # In your FastAPI startup:
 
-from notifications import EmailService, NotificationScheduler
+from app.services.notifications_service import EmailService, NotificationScheduler
 import asyncio
 
 email_service = EmailService()

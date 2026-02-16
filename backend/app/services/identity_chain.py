@@ -14,6 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import base64
+import logging
 import hashlib
 import json
 import os
@@ -30,6 +31,12 @@ from cryptography.exceptions import InvalidSignature
 
 from app.services.exceptions import IdentityException, SecurityException
 
+logger = logging.getLogger(__name__)
+
+
+# TODO(L4): Implement key rotation for Sovereign Mind master key. Current design
+# assumes long-lived keys; rotation would require re-signing all Fibre identities
+# and a migration path for existing signed chains.
 
 # =============================================================================
 # KEY HELPERS
@@ -131,7 +138,8 @@ class IdentityChainService:
         is_legit = service.verify_chain(record)
     """
 
-    def __init__(self):
+    def __init__(self, db_pool=None):
+        self.db_pool = db_pool
         self._master_private_key: Optional[Ed25519PrivateKey] = None
         self._master_public_key: Optional[Ed25519PublicKey] = None
         self._master_public_pem: Optional[str] = None
@@ -150,6 +158,18 @@ class IdentityChainService:
 
     def load_master_key(self, private_key_pem: str) -> None:
         """Load the Sovereign Mind master key from a PEM string (from .env / Azure Key Vault)."""
+        if not private_key_pem or not isinstance(private_key_pem, str):
+            raise IdentityException(
+                entity_id=self._master_id,
+                reason="Invalid key format: PEM string required",
+            )
+        # Explicit PEM format validation before parsing
+        stripped = private_key_pem.strip()
+        if not stripped.startswith("-----BEGIN") or not stripped.endswith("-----"):
+            raise IdentityException(
+                entity_id=self._master_id,
+                reason="Invalid key format: must be PEM-encoded (-----BEGIN ... -----)",
+            )
         try:
             self._master_private_key = _private_key_from_pem(private_key_pem)
             self._master_public_key = self._master_private_key.public_key()
@@ -196,10 +216,64 @@ class IdentityChainService:
         self._fibre_identities[fibre_id] = record
 
         print(f">>> [IDENTITY CHAIN] Fibre identity created: {fibre_id}")
+
+        # Note: persist_identity is async — caller should await it if db_pool is set.
+        # We store the record for deferred persistence from the FibreManager.
         return record, _private_key_to_pem(fibre_private)
 
     def get_fibre_identity(self, fibre_id: UUID) -> Optional[IdentityRecord]:
         return self._fibre_identities.get(fibre_id)
+
+    async def persist_identity(self, fibre_id: UUID, record: IdentityRecord) -> None:
+        """Persist a Fibre identity to the fibres table (public_key + identity_signature columns)."""
+        if not self.db_pool:
+            return
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE fibres
+                    SET public_key = $2, identity_signature = $3, updated_at = NOW()
+                    WHERE fibre_id = $1
+                """, fibre_id, record.public_key_pem, record.parent_signature)
+        except Exception as e:
+            print(f">>> [IDENTITY CHAIN] Failed to persist identity for {fibre_id}: {e}")
+
+    async def load_identities_from_db(self) -> int:
+        """
+        Load existing Fibre identities from the database on startup.
+        Rebuilds the in-memory registry from the fibres table.
+
+        Returns:
+            Number of identities loaded.
+        """
+        if not self.db_pool:
+            return 0
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT fibre_id, public_key, identity_signature
+                    FROM fibres
+                    WHERE public_key IS NOT NULL AND status != 'pruned'
+                """)
+            loaded = 0
+            for row in rows:
+                fid = row["fibre_id"]
+                pub_key = row["public_key"]
+                sig = row["identity_signature"]
+                if pub_key:
+                    record = IdentityRecord(
+                        entity_id=fid,
+                        public_key_pem=pub_key,
+                        parent_signature=sig,
+                        parent_public_key_pem=self._master_public_pem,
+                    )
+                    self._fibre_identities[fid] = record
+                    loaded += 1
+            print(f">>> [IDENTITY CHAIN] Loaded {loaded} identities from database")
+            return loaded
+        except Exception as e:
+            print(f">>> [IDENTITY CHAIN] Failed to load identities from DB: {e}")
+            return 0
 
     # ── Signing ──
 
@@ -246,7 +320,8 @@ class IdentityChainService:
             return True
         except InvalidSignature:
             return False
-        except Exception:
+        except Exception as e:
+            logger.debug("Parent signature verification: %s", e)
             return False
 
     # ── Utilities ──
@@ -256,10 +331,21 @@ class IdentityChainService:
         """SHA-256 fingerprint of a public key (for logging, not security)."""
         return hashlib.sha256(public_key_pem.encode()).hexdigest()[:16]
 
-    def revoke_fibre_identity(self, fibre_id: UUID) -> bool:
-        """Remove a Fibre's identity from the registry (part of pruning)."""
-        if fibre_id in self._fibre_identities:
+    async def revoke_fibre_identity(self, fibre_id: UUID) -> bool:
+        """Remove a Fibre's identity from the registry and clear DB (part of pruning)."""
+        removed = fibre_id in self._fibre_identities
+        if removed:
             del self._fibre_identities[fibre_id]
+        # Also clear from DB
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE fibres SET public_key = NULL, identity_signature = NULL
+                        WHERE fibre_id = $1
+                    """, fibre_id)
+            except Exception as e:
+                print(f">>> [IDENTITY CHAIN] Failed to clear DB identity for {fibre_id}: {e}")
+        if removed:
             print(f">>> [IDENTITY CHAIN] Fibre identity revoked: {fibre_id}")
-            return True
-        return False
+        return removed

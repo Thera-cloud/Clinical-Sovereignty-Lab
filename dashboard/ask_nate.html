@@ -12,10 +12,10 @@
             --bg-card: #111111;
             --bg-elevated: #1A1A1A;
             --border: #252525;
-            --gold: #FFD700;
-            --gold-dim: rgba(255, 215, 0, 0.2);
-            --cyan: #00D4FF;
-            --cyan-dim: rgba(0, 212, 255, 0.15);
+            --gold: #C9A962;
+            --gold-dim: rgba(201, 169, 98, 0.2);
+            --cyan: #4ECDC4;
+            --cyan-dim: rgba(78, 205, 196, 0.15);
             --text-primary: #FFFFFF;
             --text-secondary: #888888;
             --text-muted: #555555;
@@ -82,7 +82,7 @@
             gap: 10px;
         }
 
-        .eye {
+        .nate-eye {
             width: 8px;
             height: 8px;
             background: rgba(0, 255, 255, 0.6);
@@ -217,20 +217,20 @@
             background: linear-gradient(135deg, var(--gold), #FF8C00);
         }
 
-        .bubble {
+        .message-bubble {
             padding: 14px 18px;
             border-radius: 16px;
             font-size: 14px;
             line-height: 1.6;
         }
 
-        .bubble.nate {
+        .message.nate .message-bubble {
             background: var(--cyan-dim);
-            border: 1px solid rgba(0, 212, 255, 0.3);
+            border: 1px solid rgba(78, 205, 196, 0.3);
             border-bottom-left-radius: 4px;
         }
 
-        .bubble.user {
+        .message.user .message-bubble {
             background: linear-gradient(135deg, var(--gold), #FF8C00);
             color: #000;
             border-bottom-right-radius: 4px;
@@ -334,6 +334,34 @@
         .send-btn:hover {
             transform: scale(1.05);
         }
+
+        /* ── Connection Status Indicator ── */
+        .ws-status { position: fixed; top: 8px; right: 8px; padding: 4px 10px; border-radius: 12px; font-size: 10px; z-index: 999; display: none; }
+        .ws-status.disconnected { display: block; background: rgba(255, 59, 59, 0.2); color: #FF3B3B; }
+        .ws-status.reconnecting { display: block; background: rgba(255, 149, 0, 0.2); color: #FF9500; }
+
+        /* ── Loading Spinner ── */
+        .loading-overlay { display: none; position: absolute; inset: 0; background: rgba(5,5,5,0.7); z-index: 10; align-items: center; justify-content: center; }
+        .loading-overlay.active { display: flex; }
+        .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Mobile Responsive ── */
+        @media (max-width: 768px) {
+            .header { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
+            .nav a { font-size: 11px; padding: 6px 10px; }
+            .chat-container { max-width: 100%; margin: 0; padding: 12px; }
+            .input-row { flex-direction: column; gap: 8px; }
+            .input-row input { font-size: 14px; }
+            .send-btn { width: 100%; justify-content: center; padding: 12px; }
+            .quick-btns { justify-content: center; }
+        }
+        @media (max-width: 480px) {
+            .header { padding: 8px; }
+            .logo-text { font-size: 14px; }
+            .nav { gap: 4px; }
+            .nav a { font-size: 10px; padding: 4px 8px; }
+        }
     </style>
 </head>
 <body>
@@ -377,7 +405,11 @@
             </div>
 
             <div class="messages" id="messages">
-                <!-- Messages will appear here -->
+                <div class="empty-chat-state" id="emptyChatState" style="text-align:center; padding:40px 20px; color:var(--text-muted);">
+                    <div style="font-size:40px; margin-bottom:12px; opacity:0.4;">💬</div>
+                    <div style="font-size:14px; margin-bottom:4px;">No messages yet</div>
+                    <div style="font-size:12px;">Select a client and ask a question to begin</div>
+                </div>
             </div>
         </div>
 
@@ -390,7 +422,12 @@
     </div>
 
     <script>
-        const SERVER_URL = 'wss://api.sovereignsanctuary.net/ws';
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+        const SERVER_URL = getWsUrl();
         let socket = null;
         let selectedClientId = null;
 
@@ -404,10 +441,9 @@
             socket.onopen = () => {
                 const profile = JSON.parse(sessionStorage.getItem('profile') || '{}');
                 socket.send(JSON.stringify({
-                    type: 'login_request',
-                    username: sessionStorage.getItem("username") || profile.name,
-                    password: sessionStorage.getItem('password'),
-                    expected_role: profile.role
+                    type: 'auth',
+                    token: sessionStorage.getItem('token'),
+                    hardware_id: profile.hardware_id || 'WEB_ADMIN'
                 }));
             };
             socket.onmessage = handleMessage;
@@ -433,7 +469,7 @@
                     const bubble = streamingMessageEl.querySelector(".message-bubble");
                     if (bubble) bubble.textContent = text;
                 }
-                document.getElementById("messages").scrollTop = document.getElementById("messages").scrollHeight;
+                document.getElementById("chatArea").scrollTop = document.getElementById("chatArea").scrollHeight;
             } else if (data.type === "nate_done" || data.type === "stream_end") {
                 streamingMessageEl = null;
             }
@@ -490,6 +526,10 @@
 
         function addMessage(text, sender, sources = []) {
             const messages = document.getElementById('messages');
+            // Hide empty state on first message
+            const emptyState = document.getElementById('emptyChatState');
+            if (emptyState) emptyState.style.display = 'none';
+
             const message = document.createElement('div');
             message.className = `message ${sender}`;
 
@@ -497,7 +537,7 @@
             avatar.className = `message-avatar ${sender}`;
 
             const bubble = document.createElement('div');
-            bubble.className = `bubble ${sender}`;
+            bubble.className = `message-bubble`;
             bubble.innerHTML = text.replace(/\n/g, '<br>');
 
             message.appendChild(avatar);

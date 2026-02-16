@@ -97,12 +97,27 @@ class CampaignFibre(BaseFibre):
                     content_type=content_pillar,
                 )
             except Exception as e:
-                post_data = {
-                    "platform": platform,
-                    "content_pillar": content_pillar,
-                    "text": f"[Placeholder — content generator unavailable: {e}]",
-                    "generated_by": f"campaign_fibre_{self.fibre_id}",
-                }
+                # Retry once before falling back
+                import asyncio as _aio
+                try:
+                    await _aio.sleep(2)  # Brief backoff
+                    generator = SkyEyeContentGenerator(self.db_pool)
+                    post_data = await generator.generate_strategic_post(
+                        platform=platform,
+                        content_type=content_pillar,
+                    )
+                except Exception as retry_err:
+                    # Log the error and return a status-only result (no user-facing placeholder text)
+                    print(f">>> [CAMPAIGN FIBRE] Content generation failed after retry: {retry_err}")
+                    post_data = {
+                        "platform": platform,
+                        "content_pillar": content_pillar,
+                        "text": "",
+                        "status": "generation_failed",
+                        "error": str(e),
+                        "generated_by": f"campaign_fibre_{self.fibre_id}",
+                        "requires_manual_review": True,
+                    }
 
         self._campaign_history.append({
             "task_id": str(task.task_id),
@@ -111,17 +126,18 @@ class CampaignFibre(BaseFibre):
             "timestamp": datetime.utcnow().isoformat(),
         })
 
+        _gen_success = not (post_data or {}).get("status") == "generation_failed"
         return FibreResult(
             task_id=task.task_id,
             fibre_id=self.fibre_id,
-            success=True,
+            success=_gen_success,
             output={
                 "post": post_data or {},
                 "platform": platform,
                 "content_pillar": content_pillar,
                 "standing_orders_applied": len(standing_orders),
             },
-            tokens_used=500,
+            tokens_used=500 if _gen_success else 0,
             ethical_compliance=1.0,
             self_alignment_score=1.0,
         )

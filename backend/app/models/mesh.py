@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 class MeshMessageType(str, Enum):
     """Message archetypes on the Wisdom Mesh."""
     OBSERVATION = "observation"         # Raw insight from a Fibre
+    INSIGHT = "insight"                 # Completed Fibre observation (ZEFCP reassembly)
+    FIBRE_FRAGMENT = "fibre_fragment"   # Micro-fragment for distributed assembly (ZEFCP)
     DIRECTIVE = "directive"             # Downward from Sovereign Mind
     CONVERGENCE = "convergence"         # Multiple Fibres reached similar conclusion
     QUERY = "query"                     # Request for information
@@ -113,5 +115,6 @@ class MeshHealth(BaseModel):
     active_subscriptions: int = 0
     pending_messages: int = 0
     convergence_alerts_24h: int = 0
+    batched_messages_pending: int = 0  # Low-priority messages awaiting temporal batch flush (§5.4)
     anomaly_indicators: List[str] = Field(default_factory=list)
     measured_at: datetime = Field(default_factory=datetime.utcnow)

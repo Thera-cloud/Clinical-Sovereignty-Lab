@@ -30,7 +30,9 @@ from pathlib import Path
 # =============================================================================
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://localhost/little_nate")
-JWT_SECRET = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is required — generate with: openssl rand -hex 32")
 JWT_EXPIRY_HOURS = 24
 REQUIRED_CONSENT_VERSION = "v12.6_2026_FINAL"
 
@@ -54,7 +56,12 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
+    allow_origins=[
+        o.strip() for o in os.getenv(
+            "CORS_ORIGINS",
+            "https://app.sovereignsanctuary.net,https://coach.sovereignsanctuary.net,https://command.sovereignsanctuary.net,https://api.sovereignsanctuary.net"
+        ).split(",") if o.strip()
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -86,6 +93,16 @@ async def startup():
         print(f"⚠️ Database connection failed: {e}")
         print("   Falling back to JSON file storage")
         db.pool = None
+
+    # Register Sovereign Vault API (requires db pool)
+    if db.pool:
+        try:
+            from app.routers.vault_api import create_vault_router
+            vault_router = create_vault_router(db.pool)
+            app.include_router(vault_router)
+            print("✅ Sovereign Vault API registered")
+        except Exception as e:
+            print(f"⚠️ Sovereign Vault API failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -601,6 +618,15 @@ async def get_user_nevedal(user_id: str, current_user: Dict = Depends(get_curren
                     interpretation="No metrics recorded yet"
                 )
             
+            # Decrypt biometric fields that may have been encrypted at rest
+            biometrics_data = row['biometrics']
+            if biometrics_data and isinstance(biometrics_data, dict):
+                try:
+                    from app.field_encryption import decrypt_fields
+                    biometrics_data = decrypt_fields(biometrics_data)
+                except Exception:
+                    pass  # Graceful fallback
+            
             return NevedalResponse(
                 user_id=user_id,
                 metrics=NevedalMetrics(
@@ -610,7 +636,7 @@ async def get_user_nevedal(user_id: str, current_user: Dict = Depends(get_curren
                     gamma_env=float(row['gamma_env']),
                     e_g_joint=float(row['e_g_joint']),
                     cee_window=row['cee_window'],
-                    biometrics=row['biometrics']
+                    biometrics=biometrics_data
                 ),
                 recorded_at=row['recorded_at']
             )

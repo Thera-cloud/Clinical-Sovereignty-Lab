@@ -51,9 +51,9 @@ class CoherenceMeasurement(BaseModel):
     score: float = Field(..., ge=0.0, le=1.0)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
-    # Scope identifiers (populated based on layer)
-    user_id: Optional[int] = None          # Individual
-    family_id: Optional[int] = None        # Family
+    # Scope identifiers (populated based on layer — UUIDs per migration 007 schema)
+    user_id: Optional[UUID] = None          # Individual
+    family_id: Optional[UUID] = None        # Family
     community_id: Optional[str] = None     # Community
     cultural_context: Optional[str] = None # Cultural
     region: Optional[str] = None           # Global

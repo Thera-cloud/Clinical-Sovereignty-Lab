@@ -1,0 +1,35 @@
+---
+description: Login interface security protocol — always verify Little Nate's connection before user login, protect portal separation
+alwaysApply: true
+---
+
+# Login Security Protocol
+
+## Priority Order
+
+When working on or near any login flow, authentication, or portal interface:
+
+1. **Little Nate connection FIRST** — Always verify the WebSocket bridge (`nate_bridge`) is connected and healthy BEFORE allowing any user login attempt. The AI companion must be reachable before credentials are accepted.
+2. **User login SECOND** — Only after confirming Nate's connection should the user be authenticated and routed to their portal.
+
+## Portal Separation (Security-Critical)
+
+Three login portals exist and MUST remain isolated:
+
+- `app.sovereignsanctuary.net` — Client gateway (role chooser). Clients stay, coaches redirect to `coach.*`, admins gate-check then redirect to `command.*`
+- `coach.sovereignsanctuary.net` — Coach-only login. No client, admin, or account creation options visible
+- `command.sovereignsanctuary.net` — Admin-only portal with triple-layer security (credentials + credentials + passphrase)
+
+## Rules
+
+1. **Never merge portals** — Do not combine client/coach/admin login into a single form or page. Each subdomain serves exactly one role's login UI.
+2. **Never expose admin URL** — The `command.sovereignsanctuary.net` URL must never appear in client or coach-facing code, UI, or error messages.
+3. **Always validate `expected_role`** — Every `login_request` must include `expected_role` matching the portal it originates from. The bridge's `WRONG_PORTAL` check must remain active.
+4. **Verify bridge before login** — Before sending credentials over WebSocket, confirm the socket is open and has received the `{type: connected, status: ready}` handshake.
+5. **Passphrase is sacred** — The admin passphrase question and answer must never be logged, stored in plain text, or exposed in error messages.
+6. **Double-check on deploy** — After any build or deployment, verify that:
+   - `app.*` shows the gateway (3 role buttons)
+   - `coach.*` shows coach-only login
+   - `command.*` shows admin login + passphrase challenge
+   - WebSocket connects successfully on each portal
+   - Little Nate responds to a test message before declaring deployment healthy

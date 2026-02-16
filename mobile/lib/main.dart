@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/services.dart';
+
+/// Debug-only print: suppressed in production builds.
+// ignore: avoid_print
+void debugLog(Object? message) { if (kDebugMode) print(message); }
 import 'package:web_socket_channel/web_socket_channel.dart';
 // 1. ADDED: Permission Handler (Required for Vagus v2.6.1)
 import 'package:permission_handler/permission_handler.dart';
@@ -22,8 +26,11 @@ import 'package:file_picker/file_picker.dart';
 import 'metrics_widgets.dart';
 import 'updated_screens.dart';
 import 'avatar.dart';
+import 'screens/onboarding_threshold_screen.dart';
+import 'screens/onboarding_paid_screen.dart';
 
 import 'shared_widgets.dart';
+import 'services/device_shield.dart';
 
 
 // =============================================================================
@@ -61,8 +68,9 @@ String get defaultWsUrl {
       return 'wss://api.sovereignsanctuary.net/ws';
     }
 
-    // When hosted on app.sovereignsanctuary.net, use api.sovereignsanctuary.net for WebSocket
-    if (host == 'app.sovereignsanctuary.net' || host.startsWith('app.')) {
+    // When hosted on app/coach subdomains, use api.sovereignsanctuary.net for WebSocket
+    if (host == 'app.sovereignsanctuary.net' || host.startsWith('app.') ||
+        host == 'coach.sovereignsanctuary.net' || host.startsWith('coach.')) {
       return 'wss://api.sovereignsanctuary.net/ws';
     }
 
@@ -72,6 +80,18 @@ String get defaultWsUrl {
 
   // Native mobile (iOS/Android) — use production WebSocket
   return 'wss://api.sovereignsanctuary.net/ws';
+}
+
+/// Returns the locked portal mode based on the web hostname.
+/// - 'CLIENT' on app.sovereignsanctuary.net (universal gateway, client-focused)
+/// - 'COACH'  on coach.sovereignsanctuary.net (coach-only)
+/// - null     on localhost / dev (show full lobby for development)
+String? get portalMode {
+  if (!kIsWeb) return null;
+  final host = Uri.base.host;
+  if (host == 'coach.sovereignsanctuary.net' || host.startsWith('coach.')) return 'COACH';
+  if (host == 'app.sovereignsanctuary.net' || host.startsWith('app.')) return 'CLIENT';
+  return null; // localhost / dev — show full lobby
 }
 
 String _apiBaseFromWsUrl(String wsUrl) {
@@ -107,10 +127,11 @@ String get defaultApiBaseUrl {
     final qpOverride = (uri.queryParameters['api'] ?? '').trim();
     if (qpOverride.isNotEmpty) return qpOverride;
 
-    // If the web app is hosted on an "app" frontend domain, the API is usually on "api".
+    // If the web app is hosted on app/coach subdomains, the API is on "api" subdomain.
     // This avoids calling `https://app.../api/...` which is typically a static host (404).
     final host = uri.host;
-    if (host == 'app.sovereignsanctuary.net' || host.startsWith('app.')) {
+    if (host == 'app.sovereignsanctuary.net' || host.startsWith('app.') ||
+        host == 'coach.sovereignsanctuary.net' || host.startsWith('coach.')) {
       return '${uri.scheme}://api.sovereignsanctuary.net';
     }
 
@@ -124,7 +145,8 @@ String get defaultApiBaseUrl {
     return '${uri.scheme}://$host';
   }
 
-  return 'http://10.0.0.81:8000';
+  // Production fallback — never expose internal IPs to clients
+  return 'https://api.sovereignsanctuary.net';
 }
 
 void main() {
@@ -138,9 +160,22 @@ void main() {
   PlatformDispatcher.instance.onError = (error, stack) {
     // Log and mark handled.
     // ignore: avoid_print
-    print("UNCAUGHT (handled): $error");
+    debugLog("UNCAUGHT (handled): $error");
     return true;
   };
+
+  // ── HIVE DEFENSE v4.3: Device Shield — run full security check on launch ──
+  if (!kIsWeb) {
+    DeviceShield.instance.runFullCheck().then((report) {
+      debugLog('>>> [DeviceShield] Launch check: ${report.overallStatus.name} '
+          '(${report.passedCount}/${report.totalChecks} passed)');
+      if (report.overallStatus == ShieldStatus.locked) {
+        debugLog('>>> [DeviceShield] CRITICAL: Device compromised — degraded mode');
+      }
+    }).catchError((e) {
+      debugLog('>>> [DeviceShield] Non-blocking launch error: $e');
+    });
+  }
 
   runApp(const MaterialApp(
     home: _InitialRouteWidget(),
@@ -843,7 +878,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       _channel!.stream.listen(
         _handlePacket,
         onError: (e) {
-          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection error: $e")));
+          debugLog("Connection error: $e");
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Connection interrupted. Reconnecting...")));
         },
         onDone: () {},
       );
@@ -1003,19 +1039,19 @@ class HardwareIdentity {
       final String? result = await platform.invokeMethod('getHardwareID');
       if (result != null && result.length > 5) {
         _hardwareID = result;
-        print(">>> [IDENTITY] Hardware ID Verified: $_hardwareID");
+        debugLog(">>> [IDENTITY] Hardware ID Verified: $_hardwareID");
         return _hardwareID;
       } else {
         throw PlatformException(code: "INVALID_ID", message: "ID too short/null");
       }
     } on MissingPluginException {
       // 1. CRITICAL FIX: Specifically catch the Missing Plugin error
-      print("âš ï¸ [WARN] Native Bridge Missing - Using Dev Fallback");
+      debugLog("âš ï¸ [WARN] Native Bridge Missing - Using Dev Fallback");
       _hardwareID = "DEV_BYPASS_${Random().nextInt(99999)}";
       return _hardwareID;
     } catch (e) {
       // Catch-all for any other weirdness
-      print("!!! [IDENTITY] General Error: $e");
+      debugLog("!!! [IDENTITY] General Error: $e");
       _hardwareID = "ERROR_BYPASS_${Random().nextInt(99999)}";
       return _hardwareID;
     }
@@ -1028,9 +1064,9 @@ class HardwareIdentity {
       await _storage.write(key: 'session_user', value: username);
       await _storage.write(key: 'user_profile', value: jsonEncode(profile)); // Fixed Key Name consistency
       await _storage.write(key: 'last_login', value: DateTime.now().toIso8601String());
-      print(">>> [IDENTITY] Session Secured in Vault.");
+      debugLog(">>> [IDENTITY] Session Secured in Vault.");
     } catch (e) {
-      print("!!! [IDENTITY] Write Error: $e");
+      debugLog("!!! [IDENTITY] Write Error: $e");
     }
   }
 
@@ -1040,22 +1076,22 @@ class HardwareIdentity {
       String? profileRaw = await _storage.read(key: 'user_profile'); // Matching key from saveSession
       
       if (token != null && profileRaw != null) {
-        print(">>> [IDENTITY] Found existing session token.");
+        debugLog(">>> [IDENTITY] Found existing session token.");
         
         // 1.3: Biometric Gate
         bool authenticated = await _authenticateBiometrics();
         if (authenticated) {
-          print(">>> [IDENTITY] Biometric Auth Success. Unlocking Vault.");
+          debugLog(">>> [IDENTITY] Biometric Auth Success. Unlocking Vault.");
           return jsonDecode(profileRaw);
         } else {
-          print("!!! [IDENTITY] Biometric Auth Failed or Cancelled.");
+          debugLog("!!! [IDENTITY] Biometric Auth Failed or Cancelled.");
           // Security Choice: Do we clear session on failed bio? 
           // For now, return null but keep session (user can retry).
           return null; 
         }
       }
     } catch (e) {
-      print("!!! [IDENTITY] Recovery Error: $e");
+      debugLog("!!! [IDENTITY] Recovery Error: $e");
       await clearSession();
     }
     return null;
@@ -1063,7 +1099,7 @@ class HardwareIdentity {
 
   Future<void> clearSession() async {
     await _storage.deleteAll();
-    print(">>> [IDENTITY] Secure Storage Wiped.");
+    debugLog(">>> [IDENTITY] Secure Storage Wiped.");
   }
 
   // 1.4: Detailed Biometric Logic
@@ -1073,7 +1109,7 @@ class HardwareIdentity {
       bool isDeviceSupported = await _auth.isDeviceSupported();
       
       if (!canCheck || !isDeviceSupported) {
-        print(">>> [IDENTITY] Biometrics not available. Bypassing.");
+        debugLog(">>> [IDENTITY] Biometrics not available. Bypassing.");
         return true; 
       }
 
@@ -1086,7 +1122,7 @@ class HardwareIdentity {
         )
       );
     } catch (e) {
-      print("!!! [IDENTITY] Biometric Exception: $e");
+      debugLog("!!! [IDENTITY] Biometric Exception: $e");
       return true; // Fail Open for Development, switch to 'return false' for Prod
     }
   }
@@ -1120,7 +1156,7 @@ class NeuralInterface extends StatefulWidget {
   State<NeuralInterface> createState() => _NeuralInterfaceState();
 }
 
-class _NeuralInterfaceState extends State<NeuralInterface> {
+class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingObserver {
   final VagusEngine _audio = VagusEngine(); 
   
   // Internal Socket Management
@@ -1153,8 +1189,36 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _connectToCortex();
     _initSpeechToText();
+
+    // ── HIVE DEFENSE v4.3: Start periodic DeviceShield checks during session ──
+    if (!kIsWeb) {
+      DeviceShield.instance.startPeriodicChecks(
+        interval: const Duration(minutes: 5),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (!kIsWeb) {
+      DeviceShield.instance.stopPeriodicChecks();
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (kIsWeb) return;
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      DeviceShield.instance.onAppBackground();
+    } else if (state == AppLifecycleState.resumed) {
+      DeviceShield.instance.onAppForeground();
+    }
   }
 
   // 1. ESTABLISH FRESH CONNECTION
@@ -1176,7 +1240,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
       );
 
       // 2. IMMEDIATE LOGIN
-      print(">>> NEURAL INTERFACE: Sending Login...");
+      debugLog(">>> NEURAL INTERFACE: Sending Login...");
       _socket!.sink.add(jsonEncode({
         "type": "login_request",
         "username": widget.username,
@@ -1185,7 +1249,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
       }));
 
     } catch (e) {
-      _addSystemMsg("Fatal Connection Error: $e");
+      debugLog("Connection error: $e");
     }
 
     // Audio Listeners
@@ -1202,11 +1266,11 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
     try {
       _speechAvailable = await _speech.initialize(
         onError: (error) {
-          print('Speech error: ${error.errorMsg}');
+          debugLog('Speech error: ${error.errorMsg}');
           if (mounted) setState(() => _isListening = false);
         },
         onStatus: (status) {
-          print('Speech status: $status');
+          debugLog('Speech status: $status');
           if (status == 'done' || status == 'notListening') {
             _suppressSpeechUntil = DateTime.now().add(const Duration(milliseconds: 1500));
             if (mounted) setState(() => _isListening = false);
@@ -1215,7 +1279,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
       );
       if (mounted) setState(() {});
     } catch (e) {
-      print('Speech init error: $e');
+      debugLog('Speech init error: $e');
       _speechAvailable = false;
     }
   }
@@ -1271,11 +1335,11 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
     try {
       final decoded = jsonDecode(message);
       if (decoded is! Map) {
-        print("Parse Error: expected JSON object, got ${decoded.runtimeType}");
+        debugLog("Parse Error: expected JSON object, got ${decoded.runtimeType}");
         return;
       }
       final data = Map<String, dynamic>.from(decoded as Map);
-      print(">>> CORTEX SAYS: $data"); 
+      debugLog(">>> CORTEX SAYS: $data"); 
 
       if (data['type'] == 'login_success') {
         setState(() => _connectionStatus = "ONLINE (SECURE)");
@@ -1304,7 +1368,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
          });
       }
       else if (data['type'] == 'metrics_update') {
-        print('>>> METRICS: Real-time update received');
+        debugLog('>>> METRICS: Real-time update received');
         setState(() {
           final metrics = data['metrics'];
           _currentMetrics = metrics is Map ? Map<String, dynamic>.from(metrics) : null;
@@ -1368,7 +1432,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
         }
       }
     } catch (e) {
-      print("Parse Error: $e");
+      debugLog("Parse Error: $e");
     }
   }
 
@@ -1428,7 +1492,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> {
       return;
     }
 
-    print(">>> SENDING: $text");
+    debugLog(">>> SENDING: $text");
     _socket!.sink.add(jsonEncode({
       "type": "nate_query", 
       "nate_query": text,
@@ -1676,17 +1740,17 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
       _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
-          print("Coach Socket Error: $e");
+          debugLog("Coach Socket Error: $e");
           if (mounted) setState(() => _statusMessage = "Connection Failed");
         },
         onDone: () {
-          print("Coach Socket Closed");
+          debugLog("Coach Socket Closed");
           if (mounted) setState(() => _statusMessage = "Disconnected");
         }
       );
 
       // 2. IMMEDIATE LOGIN
-      print(">>> COACH DASHBOARD: Sending Login...");
+      debugLog(">>> COACH DASHBOARD: Sending Login...");
       _socket!.sink.add(jsonEncode({
         "type": "login_request",
         "username": widget.username,
@@ -1695,7 +1759,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
       }));
 
     } catch (e) {
-      print("Fatal Connection Error: $e");
+      debugLog("Fatal Connection Error: $e");
     }
   }
 
@@ -1712,7 +1776,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
 
       // A. Login Confirmation
       if (data['type'] == 'login_success') {
-        print(">>> COACH AUTHENTICATED. Fetching Data...");
+        debugLog(">>> COACH AUTHENTICATED. Fetching Data...");
         _fetchDashboard(); // Load data only after login is confirmed
       }
 
@@ -1730,7 +1794,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
       // C. Login Failed — show error and return to login screen
       else if (data['type'] == 'login_failed' || data['type'] == 'login_failure' || data['type'] == 'error') {
         final msg = (data['message'] ?? 'Login failed').toString();
-        print(">>> COACH LOGIN FAILED: $msg");
+        debugLog(">>> COACH LOGIN FAILED: $msg");
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(msg),
@@ -1742,7 +1806,7 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
         }
       }
     } catch (e) {
-      print("Error parsing socket message: $e");
+      debugLog("Error parsing socket message: $e");
     }
   }
 
@@ -1762,20 +1826,26 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
               title: const Text("Client Observation Reports", style: TextStyle(color: Colors.white)),
               onTap: () { 
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Downloading Client Reports...")));
-                // In future: _socket!.sink.add(jsonEncode({"type": "fetch_reports"}));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Fetching Client Reports...")));
+                _socket?.sink.add(jsonEncode({"type": "fetch_reports", "coach_id": widget.currentUserProfile['hardware_id'] ?? ''}));
               },
             ),
             ListTile(
               leading: const Icon(Icons.psychology, color: Colors.purple),
               title: const Text("My Coaching Analysis", style: TextStyle(color: Colors.white)),
-              onTap: () { Navigator.pop(ctx); },
+              onTap: () { 
+                Navigator.pop(ctx);
+                _socket?.sink.add(jsonEncode({"type": "fetch_coaching_advice", "coach_id": widget.currentUserProfile['hardware_id'] ?? ''}));
+              },
             ),
             ListTile(
               leading: const Icon(Icons.attach_money, color: Colors.green),
               title: const Text("Billing / Time Logs", style: TextStyle(color: Colors.white)),
               subtitle: const Text("View billable heartbeat data", style: TextStyle(color: Colors.grey, fontSize: 10)),
-              onTap: () { Navigator.pop(ctx); },
+              onTap: () { 
+                Navigator.pop(ctx);
+                _socket?.sink.add(jsonEncode({"type": "coach_get_financials", "coach_id": widget.currentUserProfile['hardware_id'] ?? ''}));
+              },
             ),
           ],
         ),
@@ -2148,7 +2218,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         widget.profile['email']?.split('@')[0] ??
         'client1';
 
-    print('>>> SANCTUARY: Authenticating...');
+    debugLog('>>> SANCTUARY: Authenticating...');
     _channel?.sink.add(json.encode({
       "type": "login_request",
       "username": username,
@@ -2346,10 +2416,19 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    print('>>> SANCTUARY: App lifecycle changed to $state');
+    debugLog('>>> SANCTUARY: App lifecycle changed to $state');
+
+    // ── HIVE DEFENSE v4.3: DeviceShield lifecycle callbacks ──
+    if (!kIsWeb) {
+      if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+        DeviceShield.instance.onAppBackground();
+      } else if (state == AppLifecycleState.resumed) {
+        DeviceShield.instance.onAppForeground();
+      }
+    }
     
     if (state == AppLifecycleState.resumed) {
-      print('>>> SANCTUARY: App resumed, syncing state...');
+      debugLog('>>> SANCTUARY: App resumed, syncing state...');
       // Auto-sync state when returning from background (handles missed broadcasts)
       if (_sanctuaryId != null) {
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -2363,15 +2442,15 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   void _reconnectIfNeeded() {
     // Check if WebSocket is still connected
     if (_channel == null) {
-      print('>>> SANCTUARY: Reconnecting...');
+      debugLog('>>> SANCTUARY: Reconnecting...');
       _connectToServer();
     } else {
       // Send a ping to check connection, if it fails reconnect
       try {
         _channel?.sink.add(json.encode({"type": "ping"}));
-        print('>>> SANCTUARY: Connection still alive');
+        debugLog('>>> SANCTUARY: Connection still alive');
       } catch (e) {
-        print('>>> SANCTUARY: Connection lost, reconnecting...');
+        debugLog('>>> SANCTUARY: Connection lost, reconnecting...');
         _channel = null;
         _connectToServer();
       }
@@ -2386,11 +2465,11 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     try {
       _speechAvailable = await _speech.initialize(
         onError: (error) {
-          print('Speech error: ${error.errorMsg}');
+          debugLog('Speech error: ${error.errorMsg}');
           setState(() => _isListening = false);
         },
         onStatus: (status) {
-          print('Speech status: $status');
+          debugLog('Speech status: $status');
           if (status == 'done' || status == 'notListening') {
             if (mounted) setState(() => _isListening = false);
             // Keep dictation continuous for accessibility: if the user pauses and
@@ -2413,7 +2492,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       );
       setState(() {});
     } catch (e) {
-      print('Speech init error: $e');
+      debugLog('Speech init error: $e');
       _speechAvailable = false;
     }
   }
@@ -2649,16 +2728,19 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
           final data = json.decode(message);
           _handleWebSocketMessage(data);
         } catch (e) {
-          print('Error parsing message: $e');
+          debugLog('Error parsing message: $e');
         }
       },
       onError: (error) {
-        print('>>> SANCTUARY: WebSocket error: $error');
-        _showError('Connection lost');
+        debugLog('>>> SANCTUARY: WebSocket error: $error');
+        if (mounted) _showError('Connection interrupted. Reconnecting...');
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) _connectToServer();
+        });
       },
       onDone: () {
-        print('>>> SANCTUARY: WebSocket closed');
-        // Reconnect after brief delay (handles iOS Safari drops)
+        debugLog('>>> SANCTUARY: WebSocket closed');
+        if (mounted) _showError('Reconnecting...');
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) _connectToServer();
         });
@@ -2827,16 +2909,16 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
 
   void _handleWebSocketMessage(Map<String, dynamic> data) {
     final type = data['type'];
-    print('>>> SANCTUARY RECEIVED: $type');
+    debugLog('>>> SANCTUARY RECEIVED: $type');
     
     switch (type) {
       // LOGIN
       case 'login_success':
-        print('>>> SANCTUARY: Authenticated successfully');
+        debugLog('>>> SANCTUARY: Authenticated successfully');
         // Now request or create the sanctuary (event-driven, not timer-based)
         final familyId = widget.profile['family_id'];
         final hardwareId = widget.profile['hardware_id'] ?? 'GUEST';
-        print('>>> SANCTUARY: Checking for existing sanctuary for family $familyId');
+        debugLog('>>> SANCTUARY: Checking for existing sanctuary for family $familyId');
         _channel?.sink.add(json.encode({
           "type": "sanctuary_get_or_create",
           "family_id": familyId,
@@ -2846,7 +2928,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         break;
         
       case 'metrics_update':
-        print('>>> METRICS: Real-time update received');
+        debugLog('>>> METRICS: Real-time update received');
         setState(() {
           final metrics = data['metrics'];
           _currentMetrics = metrics is Map ? Map<String, dynamic>.from(metrics) : null;
@@ -2894,7 +2976,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
           setState(() {
             _messages = joinMessages.map((m) => Map<String, dynamic>.from(m as Map)).toList();
           });
-          print('>>> SANCTUARY: Loaded \${joinMessages.length} messages from history');
+          debugLog('>>> SANCTUARY: Loaded \${joinMessages.length} messages from history');
         }
         _showSuccess('Joined Family Sanctuary!');
         break;
@@ -2938,7 +3020,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         break;
         
       case 'sanctuary_state_sync':
-        print('>>> SANCTUARY: State sync received');
+        debugLog('>>> SANCTUARY: State sync received');
         final isPaused = data['is_paused'] ?? false;
         final activeCoaching = data['active_coaching'] as List? ?? [];
         final myCoachingActive = data['my_coaching_active'] ?? false;
@@ -3127,7 +3209,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       // COACHING
 
       case 'sanctuary_coaching_offer':
-        print('>>> SANCTUARY: Coaching offer received');
+        debugLog('>>> SANCTUARY: Coaching offer received');
         setState(() {
           _showCoachingModal = true;
           _coachingOffer = data;
@@ -3206,7 +3288,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
 
       // COACHING STARTED - Enter private coaching mode
       case 'sanctuary_coaching_started':
-        print('>>> SANCTUARY: Entering private coaching');
+        debugLog('>>> SANCTUARY: Entering private coaching');
         setState(() {
           _inPrivateCoaching = true;
           _showCoachingModal = false;  // Close any open modal
@@ -3240,7 +3322,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       
       // COACHING RESUMED - User reconnected while in coaching session
       case 'sanctuary_coaching_resumed':
-        print('>>> SANCTUARY: Resuming private coaching session');
+        debugLog('>>> SANCTUARY: Resuming private coaching session');
         setState(() {
           _inPrivateCoaching = true;
           _showCoachingModal = false;  // Close any open modal
@@ -3280,7 +3362,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       
       // COACHING LIMIT REACHED - Offer continuation or return
       case 'sanctuary_coaching_limit_reached':
-        print('>>> SANCTUARY: Coaching limit reached');
+        debugLog('>>> SANCTUARY: Coaching limit reached');
         setState(() {
           _coachingLimitReached = true;
           _coachingMaxSteps = data['max_steps'] ?? 5;
@@ -3290,7 +3372,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       
       // COACHING EXTENDED - Session extended after $5 payment
       case 'sanctuary_coaching_extended':
-        print('>>> SANCTUARY: Coaching extended');
+        debugLog('>>> SANCTUARY: Coaching extended');
         setState(() {
           _coachingLimitReached = false;
           _coachingMaxSteps = data['new_max_steps'] ?? 10;
@@ -3309,7 +3391,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       
       // ASSISTED RESPONSE GENERATED
       case 'sanctuary_assisted_response_generated':
-        print('>>> SANCTUARY: Assisted response received');
+        debugLog('>>> SANCTUARY: Assisted response received');
         final assistedResponse = data['assisted_response'] ?? data['response'] ?? '';
         if (assistedResponse.isNotEmpty) {
           setState(() {
@@ -3402,7 +3484,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         _addSystemMessage(data['message'] ?? 'Sanctuary resumed. 💙');
         break;
       case 'sanctuary_generating_summary':
-        print('>>> SANCTUARY: Generating summary...');
+        debugLog('>>> SANCTUARY: Generating summary...');
         setState(() {
           _generatingSummary = true;
         });
@@ -3412,7 +3494,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         break;
 
       case 'sanctuary_summary':
-        print('>>> SANCTUARY: Summary received');
+        debugLog('>>> SANCTUARY: Summary received');
         setState(() {
           _generatingSummary = false;
           _showSessionSummary = true;
@@ -3422,7 +3504,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         break;
 
       case 'sanctuary_entry_questions':
-        print('>>> SANCTUARY: Entry questions received');
+        debugLog('>>> SANCTUARY: Entry questions received');
         setState(() {
           _showEntryQuestions = true;
           _entryQuestions = (data['questions'] as List<dynamic>?)?.map((q) => Map<String, dynamic>.from(q as Map)).toList() ?? [];
@@ -3431,10 +3513,10 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         });
         break;
       case 'sanctuary_entry_complete':
-        print('>>> SANCTUARY: Entry complete');
+        debugLog('>>> SANCTUARY: Entry complete');
         break;
       case 'sanctuary_entry_ready':
-        print('>>> SANCTUARY: Entry ready');
+        debugLog('>>> SANCTUARY: Entry ready');
         setState(() {
           _showEntryQuestions = false;
           _sanctuaryId = data['sanctuary_id'];
@@ -3502,7 +3584,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         break;
         
       default:
-        print('>>> SANCTUARY: Unhandled message type: $type');
+        debugLog('>>> SANCTUARY: Unhandled message type: $type');
     }
   }
 
@@ -4313,7 +4395,7 @@ void _showCoachingLimitDialog(Map<String, dynamic> data) {
 }
 
 void _syncSanctuaryState() {
-  print('>>> SANCTUARY: Requesting state sync...');
+  debugLog('>>> SANCTUARY: Requesting state sync...');
   _channel?.sink.add(jsonEncode({
     'type': 'sanctuary_sync_state',
     'sanctuary_id': _sanctuaryId,
@@ -5096,6 +5178,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
   // Credentials for Handoff
   String _tempUser = "";
   String _tempPass = "";
+
+  // Admin gate-check: true when we are verifying admin credentials before redirect
+  bool _adminGateCheck = false;
   
   // Resolve dynamically so `/#/?ws=...` overrides apply without rebuilding.
   String get _serverUrl => defaultWsUrl;
@@ -5129,7 +5214,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
       _lobbySub = _channel!.stream.listen(
         _handlePacket,
         onError: (e) {
-          print("Lobby Socket Error: $e");
+          debugLog("Lobby Socket Error: $e");
           if (mounted) {
             setState(() {
               _isConnected = false;
@@ -5138,7 +5223,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
           }
         },
         onDone: () {
-          print("Lobby Socket Closed");
+          debugLog("Lobby Socket Closed");
           if (mounted) {
             setState(() {
               _isConnected = false;
@@ -5171,7 +5256,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
     try {
       final data = jsonDecode(message);
-      print("Lobby Received: $data");
+      debugLog("Lobby Received: $data");
 
       if (data['type'] == 'login_success') {
         setState(() => _isLoading = false);
@@ -5179,6 +5264,29 @@ class _LobbyScreenState extends State<LobbyScreen> {
         Map<String, dynamic> profile = data['profile'];
         String role = profile['role'] ?? "CLIENT";
         String token = data['token'] ?? "";
+
+        // ---------------------------------------------------------------
+        // ADMIN GATE-CHECK: If we were verifying admin credentials at the
+        // gateway (app.*), redirect the browser to command.* instead of
+        // navigating to the admin dashboard within Flutter.
+        // ---------------------------------------------------------------
+        if (_adminGateCheck) {
+          _adminGateCheck = false;
+          if (kIsWeb) {
+            // Use url_launcher to redirect to the admin command portal
+            launchUrl(
+              Uri.parse('https://command.sovereignsanctuary.net'),
+              mode: LaunchMode.externalApplication,
+            );
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text("Admin verified. Redirecting to Sovereign Command..."),
+              backgroundColor: Color(0xFFC9A962),
+            ));
+          }
+          return;
+        }
         
         // Close the Lobby socket - next screen will create its own authenticated connection.
         // Cancel subscription FIRST to prevent Uncaught Error from onDone firing after navigation.
@@ -5207,9 +5315,44 @@ class _LobbyScreenState extends State<LobbyScreen> {
             return;
           }
 
+          // C1: Trial welcome walkthrough (Threshold users)
+          final subPlan = (profile['subscription_plan'] ?? profile['tier'] ?? '').toString().toUpperCase();
+          final hasSeenOnboarding = profile['has_seen_onboarding'] == true;
+          final hasSeenPaidOnboarding = profile['has_seen_paid_onboarding'] == true;
+          final isTrial = subPlan.contains('TRIAL') || subPlan.isEmpty ||
+              (!subPlan.contains('STANDARD') && !subPlan.contains('INNER') &&
+               !subPlan.contains('TOP') && !subPlan.contains('SOVEREIGN'));
+          final isPaid = subPlan.contains('STANDARD') || subPlan.contains('INNER_CHAMBER') ||
+              subPlan.contains('TOP_TIER') || subPlan.contains('SOVEREIGN_CIRCLE');
+
+          if (role == 'CLIENT' && isTrial && !hasSeenOnboarding) {
+            final profileWithToken = {...profile, "token": token};
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => OnboardingThresholdScreen(
+              profileWithToken: profileWithToken,
+              username: user,
+              password: pass,
+            )));
+            return;
+          }
+
+          // C2: Inner Chamber / Sovereign Circle welcome walkthrough (paid users)
+          if (role == 'CLIENT' && isPaid && !hasSeenPaidOnboarding) {
+            final profileWithToken = {...profile, "token": token};
+            final tier = subPlan.contains('TOP') || subPlan.contains('SOVEREIGN') ? 'TOP_TIER' : 'STANDARD';
+            final isFoundingMember = profile['is_founding_member'] == true;
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => OnboardingPaidScreen(
+              profileWithToken: profileWithToken,
+              username: user,
+              password: pass,
+              tier: tier,
+              isFoundingMember: isFoundingMember,
+            )));
+            return;
+          }
+
           // Check if onboarding tutorial needs to be shown (mandatory for first-time users)
           final onboardingDone = profile['onboarding_completed'] == true;
-          
+
           if (!onboardingDone && role != 'ADMIN') {
             // Route to onboarding tutorial first
             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => OnboardingTutorialScreen(
@@ -5289,8 +5432,65 @@ class _LobbyScreenState extends State<LobbyScreen> {
         }
       }
     } catch (e) {
-      print("Parse Error: $e");
+      debugLog("Parse Error: $e");
     }
+  }
+
+  /// Admin gate-check: verifies ADMIN credentials at the gateway before
+  /// redirecting to command.sovereignsanctuary.net. On success, _handlePacket
+  /// sees _adminGateCheck==true and opens the command portal URL.
+  void _showAdminGateDialog() {
+    if (!_isConnected) {
+      _connectToBridge();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reconnecting...")));
+    }
+
+    TextEditingController userCtrl = TextEditingController();
+    TextEditingController passCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text("ADMIN VERIFICATION", style: TextStyle(color: Color(0xFFFF006E), fontFamily: 'Courier')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Verify your admin credentials to access Sovereign Command.",
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+            const SizedBox(height: 10),
+            TextField(controller: passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "KEY", prefixIcon: Icon(Icons.vpn_key))),
+          ],
+        ),
+        actions: [
+          TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF006E), foregroundColor: Colors.white),
+            child: const Text("VERIFY & ENTER"),
+            onPressed: () {
+              _tempUser = userCtrl.text.trim();
+              _tempPass = passCtrl.text.trim();
+              _adminGateCheck = true;
+
+              _channel?.sink.add(jsonEncode({
+                "type": "login_request",
+                "username": _tempUser,
+                "password": _tempPass,
+                "expected_role": "ADMIN"
+              }));
+
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying admin credentials...")));
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _showLoginDialog(String expectedRole) {
@@ -5640,6 +5840,8 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mode = portalMode; // null = dev/localhost, 'CLIENT' = app.*, 'COACH' = coach.*
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -5675,36 +5877,101 @@ class _LobbyScreenState extends State<LobbyScreen> {
               const SizedBox(height: 40),
               const Icon(Icons.shield_moon, size: 80, color: Color(0xFF333333)),
               const SizedBox(height: 20),
-              const Text("SOVEREIGN SANCTUARY", style: TextStyle(color: Colors.white, letterSpacing: 4, fontFamily: 'Courier', fontSize: 18)),
+
+              // --- PORTAL-AWARE TITLE ---
+              Text(
+                mode == 'COACH'
+                    ? "SOVEREIGN SANCTUARY\nCoach Portal"
+                    : mode == 'CLIENT'
+                        ? "SOVEREIGN SANCTUARY"
+                        : "SOVEREIGN SANCTUARY",
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, letterSpacing: 4, fontFamily: 'Courier', fontSize: 18),
+              ),
+
               const SizedBox(height: 60),
 
-              _buildGateButton(
-                "CLIENT PORTAL", "Therapy & Growth", Icons.spa, Colors.blueAccent,
-                () => _showLoginDialog("CLIENT")
-              ),
-              const SizedBox(height: 20),
+              // =============================================================
+              // COACH MODE (coach.sovereignsanctuary.net) — coach-only login
+              // =============================================================
+              if (mode == 'COACH') ...[
+                _buildGateButton(
+                  "COACH ACCESS", "Supervision & Admin", Icons.admin_panel_settings, const Color(0xFFFFD700),
+                  () => _showLoginDialog("COACH")
+                ),
+              ]
+              // =============================================================
+              // CLIENT / GATEWAY MODE (app.sovereignsanctuary.net)
+              // Shows role chooser: Client stays, Coach redirects, Admin gate-checks
+              // =============================================================
+              else if (mode == 'CLIENT') ...[
+                // --- "Who are you?" gateway ---
+                const Text(
+                  "Welcome. How would you like to proceed?",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13, fontFamily: 'Courier'),
+                ),
+                const SizedBox(height: 30),
 
-              _buildGateButton(
-                "COACH ACCESS", "Supervision & Admin", Icons.admin_panel_settings, const Color(0xFFFFD700),
-                () => _showLoginDialog("COACH")
-              ),
+                _buildGateButton(
+                  "I AM A CLIENT", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                  () => _showLoginDialog("CLIENT")
+                ),
+                const SizedBox(height: 20),
 
-              const SizedBox(height: 20),
+                _buildGateButton(
+                  "I AM A COACH", "Go to Coach Portal", Icons.admin_panel_settings, const Color(0xFFFFD700),
+                  () {
+                    // Redirect to the coach subdomain
+                    if (kIsWeb) {
+                      launchUrl(
+                        Uri.parse('https://coach.sovereignsanctuary.net'),
+                        mode: LaunchMode.externalApplication,
+                      );
+                    }
+                  }
+                ),
+                const SizedBox(height: 20),
 
-              _buildGateButton(
-                "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
-                () => _showLoginDialog("ADMIN")
-              ),
+                _buildGateButton(
+                  "ADMINISTRATION", "System Control", Icons.security, const Color(0xFFFF006E),
+                  () => _showAdminGateDialog()
+                ),
+              ]
+              // =============================================================
+              // DEV / LOCALHOST MODE — show all buttons (original behavior)
+              // =============================================================
+              else ...[
+                _buildGateButton(
+                  "CLIENT PORTAL", "Therapy & Growth", Icons.spa, Colors.blueAccent,
+                  () => _showLoginDialog("CLIENT")
+                ),
+                const SizedBox(height: 20),
+
+                _buildGateButton(
+                  "COACH ACCESS", "Supervision & Admin", Icons.admin_panel_settings, const Color(0xFFFFD700),
+                  () => _showLoginDialog("COACH")
+                ),
+                const SizedBox(height: 20),
+
+                _buildGateButton(
+                  "ADMIN ACCESS", "System Control", Icons.security, const Color(0xFFFF006E),
+                  () => _showLoginDialog("ADMIN")
+                ),
+              ],
 
               const SizedBox(height: 40),
-              TextButton(
-                onPressed: () {
-                  Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => const SignUpWizard()
-                  ));
-                },
-                child: const Text("CREATE NEW ACCOUNT", style: TextStyle(color: Colors.white, decoration: TextDecoration.underline, letterSpacing: 1.5, fontSize: 13, fontWeight: FontWeight.w500)),
-           ),
+
+              // "CREATE NEW ACCOUNT" — visible on app.* and dev, hidden on coach.*
+              if (mode != 'COACH')
+                TextButton(
+                  onPressed: () {
+                    Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => const SignUpWizard()
+                    ));
+                  },
+                  child: const Text("CREATE NEW ACCOUNT", style: TextStyle(color: Colors.white, decoration: TextDecoration.underline, letterSpacing: 1.5, fontSize: 13, fontWeight: FontWeight.w500)),
+                ),
           ],
         ),
        ),
@@ -5906,7 +6173,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
   }
 
   Future<void> _sanitizeSession() async {
-    print(">>> [INTAKE] Sanitizing session to prevent auto-linking...");
+    debugLog(">>> [INTAKE] Sanitizing session to prevent auto-linking...");
     await HardwareIdentity().clearSession();
   }
 
@@ -6014,7 +6281,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
       }
     }
 
-    print(">>> [REG] Payload built: ${regPayload['username']} / ${regPayload['role']}");
+    debugLog(">>> [REG] Payload built: ${regPayload['username']} / ${regPayload['role']}");
 
     // 2. THE BURNER SOCKET — stored as instance var to prevent GC
     _regSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
@@ -6023,13 +6290,13 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
     regSocket.stream.listen((message) {
       final data = jsonDecode(message);
-      print(">>> [REG] SERVER SAYS: $data");
+      debugLog(">>> [REG] SERVER SAYS: $data");
 
       // When server confirms connection ready, NOW send the registration payload
       if (data['type'] == 'connected') {
         if (!regSent) {
           regSent = true;
-          print(">>> [REG] Connection confirmed — sending register_request NOW");
+          debugLog(">>> [REG] Connection confirmed — sending register_request NOW");
           regSocket.sink.add(jsonEncode(regPayload));
         }
         return;
@@ -6098,17 +6365,17 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
       // CASE D: Unknown response - show it so we can debug
       else {
-        print(">>> [REG] Unhandled response type: ${data['type']}");
+        debugLog(">>> [REG] Unhandled response type: ${data['type']}");
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Server: ${data['type']} — ${data['message'] ?? jsonEncode(data)}"),
           duration: const Duration(seconds: 5),
         ));
       }
     }, onError: (e) {
-      print(">>> [REG] WebSocket error: $e");
+      debugLog(">>> [REG] WebSocket error: $e");
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e"), backgroundColor: Colors.red));
     }, onDone: () {
-      print(">>> [REG] WebSocket closed (regSent=$regSent)");
+      debugLog(">>> [REG] WebSocket closed (regSent=$regSent)");
       _regSocket = null;
       if (!regSent) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -7399,7 +7666,7 @@ class ClientScheduleScreen extends StatefulWidget {
 
 class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   WebSocketChannel? _socket;
-  final String _serverUrl = 'wss://api.sovereignsanctuary.net/ws';
+  final String _serverUrl = getWebSocketUrl();
   List<Map<String, dynamic>> _upcomingSessions = [];
   List<Map<String, dynamic>> _availableSlots = [];
   String? _selectedDate;
@@ -7417,7 +7684,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   void _connect() {
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
-      _socket!.stream.listen(_handleMessage, onError: (e) => print('WS Error: $e'), onDone: () {
+      _socket!.stream.listen(_handleMessage, onError: (e) => debugLog('WS Error: $e'), onDone: () {
         Future.delayed(const Duration(seconds: 3), _connect);
       });
       _socket!.sink.add(jsonEncode({
@@ -7426,7 +7693,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         "password": widget.password ?? '',
       }));
     } catch (e) {
-      print('Connection error: $e');
+      debugLog('Connection error: $e');
     }
   }
   
@@ -7470,7 +7737,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         }
       }
     } catch (e) {
-      print('Parse error: $e');
+      debugLog('Parse error: $e');
     }
   }
   

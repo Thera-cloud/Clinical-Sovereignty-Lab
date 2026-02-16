@@ -227,7 +227,7 @@
 
     <script>
         var username = sessionStorage.getItem("username");
-        var password = sessionStorage.getItem("password");
+        var token = sessionStorage.getItem("token");
         var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
         if (!username) window.location.href = "index.html";
 
@@ -245,10 +245,16 @@
             return { age_groups: ages, diagnoses: dxs, treatment_types: txs, time_range: document.getElementById("time-range").value };
         }
 
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+
         function connectWebSocket() {
-            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws = new WebSocket(getWsUrl());
             ws.onopen = function() {
-                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+                ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             ws.onmessage = function(event) {
                 var data;

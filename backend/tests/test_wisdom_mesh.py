@@ -3,6 +3,7 @@ Tests for WisdomMeshService — inter-Fibre communication.
 Tests use in-memory fallback mode (no Redis required).
 """
 
+import asyncio
 import pytest
 from datetime import datetime
 from uuid import uuid4
@@ -148,3 +149,135 @@ class TestMeshHealth:
 
         health = await mesh.get_mesh_health()
         assert health.total_messages_24h >= 5
+
+
+class TestTemporalBatching:
+    """Tests for low-priority temporal batching (PhD Spec §5.4)."""
+
+    def _make_msg(self, priority: MeshPriority = MeshPriority.LOW) -> MeshMessage:
+        return MeshMessage(
+            message_type=MeshMessageType.OBSERVATION,
+            sender_id=uuid4(),
+            domain_tags=["batch-test"],
+            body={"batch": True},
+            priority=priority,
+        )
+
+    @pytest.mark.asyncio
+    async def test_low_priority_queued_not_sent_immediately(self):
+        """LOW-priority messages should be queued, not published immediately."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=5.0)
+
+        msg = self._make_msg(MeshPriority.LOW)
+        result = await mesh.publish(msg)
+
+        assert result is True
+        # Message is in the batch queue, not yet sent
+        assert len(mesh._batch_queue) == 1
+        assert mesh._metrics["messages_sent"] == 0  # not yet flushed
+        # Cleanup
+        if mesh._batch_task and not mesh._batch_task.done():
+            mesh._batch_task.cancel()
+            try:
+                await mesh._batch_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_normal_priority_not_batched(self):
+        """NORMAL-priority messages should bypass the batch queue entirely."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=5.0)
+
+        msg = self._make_msg(MeshPriority.NORMAL)
+        await mesh.publish(msg)
+
+        assert len(mesh._batch_queue) == 0
+        assert mesh._metrics["messages_sent"] == 1
+
+    @pytest.mark.asyncio
+    async def test_flush_publishes_batched_messages(self):
+        """flush_batch_queue() should publish all queued messages."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=60.0)
+
+        # Queue 3 low-priority messages
+        for _ in range(3):
+            await mesh.publish(self._make_msg(MeshPriority.LOW))
+
+        assert len(mesh._batch_queue) == 3
+        assert mesh._metrics["messages_sent"] == 0
+
+        # Manually flush
+        flushed = await mesh.flush_batch_queue()
+
+        assert flushed == 3
+        assert len(mesh._batch_queue) == 0
+        assert mesh._metrics["messages_sent"] == 3
+        # Cleanup
+        if mesh._batch_task and not mesh._batch_task.done():
+            mesh._batch_task.cancel()
+            try:
+                await mesh._batch_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_auto_flush_after_window(self):
+        """Batch queue should auto-flush after the batch window elapses."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=0.2)
+
+        await mesh.publish(self._make_msg(MeshPriority.LOW))
+        await mesh.publish(self._make_msg(MeshPriority.LOW))
+
+        assert mesh._metrics["messages_sent"] == 0
+
+        # Wait for the auto-flush
+        await asyncio.sleep(0.5)
+
+        assert mesh._metrics["messages_sent"] == 2
+        assert len(mesh._batch_queue) == 0
+
+    @pytest.mark.asyncio
+    async def test_health_shows_batched_count(self):
+        """Health metrics should report the number of messages awaiting flush."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=60.0)
+
+        for _ in range(4):
+            await mesh.publish(self._make_msg(MeshPriority.LOW))
+
+        health = await mesh.get_mesh_health()
+        assert health.batched_messages_pending == 4
+        # Cleanup
+        if mesh._batch_task and not mesh._batch_task.done():
+            mesh._batch_task.cancel()
+            try:
+                await mesh._batch_task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_disconnect_flushes_batch_queue(self):
+        """Disconnect should flush remaining batched messages before closing."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=60.0)
+
+        for _ in range(2):
+            await mesh.publish(self._make_msg(MeshPriority.LOW))
+
+        assert len(mesh._batch_queue) == 2
+
+        await mesh.disconnect()
+
+        assert len(mesh._batch_queue) == 0
+        # Messages should have been published during disconnect
+        assert mesh._metrics["messages_sent"] == 2
+
+    @pytest.mark.asyncio
+    async def test_batching_disabled_when_window_zero(self):
+        """When batch_window_seconds=0, low-priority messages publish immediately."""
+        mesh = WisdomMeshService(db_pool=FakePool(), batch_window_seconds=0)
+
+        msg = self._make_msg(MeshPriority.LOW)
+        await mesh.publish(msg)
+
+        # Should have been published immediately, not batched
+        assert len(mesh._batch_queue) == 0
+        assert mesh._metrics["messages_sent"] == 1

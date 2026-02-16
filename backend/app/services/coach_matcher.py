@@ -5,10 +5,13 @@ coherence (C_emo), GAP, and Quantum scores.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,7 +30,8 @@ def _load_json(path, default=None):
     try:
         with open(path, "r") as f:
             return json.load(f)
-    except Exception:
+    except Exception as e:
+        logger.debug("_load_json helper: %s", e)
         return default if default is not None else {}
 
 
@@ -273,6 +277,16 @@ class CoachMatcher:
             performance_score=round(performance, 3),
             wisdom_score=round(wisdom, 3),
         )
+
+    def calculate_compatibility(self, client_id: str, coach_id: str) -> Optional[int]:
+        """
+        Matchmaker Protocol alias: returns a 0-100 integer compatibility score.
+        Wraps compute_match_score() and scales from 0.0-1.0 to 0-100.
+        """
+        result = self.compute_match_score(client_id, coach_id)
+        if result is None:
+            return None
+        return round(result.score * 100)
 
     async def get_top_matches(self, client_id: str, n: int = 3) -> List[Dict]:
         """Get top N coach matches for a client."""

@@ -1,0 +1,156 @@
+{
+  "_comment": "Little Nate's Birth Configuration — Standing Orders Seed",
+  "_version": "1.0.0",
+  "_created": "2026-02-14",
+
+  "identity": {
+    "name": "Little Nate",
+    "full_name": "Sovereign AI Companion — Little Nate",
+    "persona": "Warm, perceptive, relationally attuned therapeutic companion",
+    "therapeutic_orientation": "Emotionally Focused Therapy (EFT) primary, integrative secondary",
+    "attachment_model": "secure_base",
+    "voice_tone": "warm, present, curious, non-judgmental",
+    "humor_style": "gentle, empathic, never dismissive",
+    "core_values": [
+      "unconditional_positive_regard",
+      "relational_sovereignty",
+      "clinical_integrity",
+      "emotional_courage",
+      "family_as_primary_system"
+    ]
+  },
+
+  "clinical_orientation": {
+    "primary_modality": "EFT",
+    "secondary_modalities": [
+      "attachment_theory",
+      "narrative_therapy",
+      "somatic_experiencing",
+      "internal_family_systems",
+      "gottman_method"
+    ],
+    "never_modalities": [
+      "conversion_therapy",
+      "aversion_therapy"
+    ],
+    "scope_boundaries": {
+      "never_diagnose": true,
+      "never_prescribe_medication": true,
+      "never_provide_legal_advice": true,
+      "never_provide_medical_advice": true,
+      "never_provide_financial_advice": true,
+      "always_defer_to_coach": true,
+      "always_flag_safety_concerns": true
+    }
+  },
+
+  "safety_thresholds": {
+    "crisis_detection": {
+      "suicidal_ideation_keywords": true,
+      "self_harm_keywords": true,
+      "harm_to_others_keywords": true,
+      "child_abuse_indicators": true,
+      "elder_abuse_indicators": true,
+      "domestic_violence_indicators": true
+    },
+    "escalation_chain": [
+      "immediate_coach_notification",
+      "supervisor_notification",
+      "crisis_line_referral",
+      "mandatory_reporting_protocol"
+    ],
+    "c_emo_crisis_threshold": 0.15,
+    "gamma_env_crisis_threshold": 0.85,
+    "silence_alert_hours": {
+      "yellow": 48,
+      "orange": 96,
+      "red": 168,
+      "critical": 336
+    },
+    "max_session_duration_minutes": 90,
+    "cooldown_between_sessions_minutes": 15
+  },
+
+  "operational_defaults": {
+    "welcome_conversation_type": "casual",
+    "cold_start_exchanges_needed": 3,
+    "coach_match_algorithm": "weighted_composite",
+    "coach_match_top_n": 3,
+    "fibre_initial_autonomy": "observation",
+    "fibre_promotion_threshold_proposals": 50,
+    "fibre_promotion_approval_rate": 0.85,
+    "night_school_auto_ingest": false,
+    "night_school_approval_required": true,
+    "trail_emission_interval_seconds": 30,
+    "weather_update_interval_seconds": 5,
+    "briefing_generation_hours_before": 2,
+    "silent_detector_sweep_minutes": 15,
+    "crystal_synthesis_interval_days": 30,
+    "imprint_batch_size": 100,
+    "pii_detection_enabled": true,
+    "pii_redaction_enabled": true
+  },
+
+  "billing_defaults": {
+    "threshold_tier": {
+      "price_monthly": 0,
+      "included_ai_minutes": 30,
+      "included_coach_sessions": 0,
+      "family_sanctuary_access": false,
+      "me2me_access": false,
+      "legacy_vault_gb": 0,
+      "trial_duration_days": 14
+    },
+    "inner_chamber_tier": {
+      "price_monthly": 49,
+      "included_ai_minutes": 300,
+      "included_coach_sessions": 4,
+      "family_sanctuary_access": true,
+      "me2me_access": false,
+      "legacy_vault_gb": 1,
+      "overage_ai_minute_cost": 0.15
+    },
+    "sovereign_circle_tier": {
+      "price_monthly": 149,
+      "included_ai_minutes": -1,
+      "included_coach_sessions": 8,
+      "family_sanctuary_access": true,
+      "me2me_access": true,
+      "legacy_vault_gb": 50,
+      "overage_ai_minute_cost": 0.10,
+      "me2me_avatar_hours_included": 10,
+      "me2me_avatar_overage_cost_per_hour": 2.00
+    },
+    "session_cost_cap": 500,
+    "monthly_cost_cap": 2000,
+    "legacy_vault_cost_per_gb_month": 0.50,
+    "deep_archive_cost_per_gb_month": 0.10
+  },
+
+  "swarm_defaults": {
+    "quakete_ramp_up_threshold": 0.3,
+    "quakete_critical_threshold": 0.15,
+    "cosmic_ring_max_size": 7,
+    "trail_ttl_seconds": 120,
+    "zefcp_fragment_max_bytes": 27,
+    "zefcp_assembly_timeout_seconds": 30,
+    "sovereign_mind_reflection_interval_hours": 24,
+    "convergence_min_families": 50,
+    "convergence_confidence_threshold": 0.8,
+    "memorial_wisdom_min_entries": 5
+  },
+
+  "me2me_defaults": {
+    "consent_renewal_days": 365,
+    "crystal_min_sessions_for_synthesis": 10,
+    "crystal_confidence_minimum": 0.6,
+    "avatar_activation_crystal_versions_needed": 3,
+    "growth_layer_clearly_marked": true,
+    "grief_monitoring_enabled": true,
+    "grief_session_cooldown_minutes": 30,
+    "age_gate_default": 18,
+    "family_fabric_auto_link": false,
+    "guardian_succession_check_days": 365,
+    "migration_parallel_running_days": 90
+  }
+}

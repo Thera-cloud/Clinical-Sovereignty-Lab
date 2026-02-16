@@ -232,24 +232,31 @@ END $$;
 
 -- ---------------------------------------------------------------------------
 -- 7. Extend skyeye_content_queue with CTA and A/B test columns
+-- NOTE: skyeye_content_queue is created in migration 010. If running migrations
+-- in order on a fresh DB, this block will be skipped and the columns should be
+-- added after 010 applies. The IF EXISTS guard prevents failures.
 -- ---------------------------------------------------------------------------
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name = 'skyeye_content_queue' AND column_name = 'cta_type') THEN
-        ALTER TABLE skyeye_content_queue ADD COLUMN cta_type TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name = 'skyeye_content_queue' AND column_name = 'cta_target_url') THEN
-        ALTER TABLE skyeye_content_queue ADD COLUMN cta_target_url TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name = 'skyeye_content_queue' AND column_name = 'ab_test_id') THEN
-        ALTER TABLE skyeye_content_queue ADD COLUMN ab_test_id INT REFERENCES content_ab_tests(id);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name = 'skyeye_content_queue' AND column_name = 'content_pillar') THEN
-        ALTER TABLE skyeye_content_queue ADD COLUMN content_pillar TEXT;
+    -- Only proceed if the table exists (created by migration 010)
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_name = 'skyeye_content_queue') THEN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'skyeye_content_queue' AND column_name = 'cta_type') THEN
+            ALTER TABLE skyeye_content_queue ADD COLUMN cta_type TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'skyeye_content_queue' AND column_name = 'cta_target_url') THEN
+            ALTER TABLE skyeye_content_queue ADD COLUMN cta_target_url TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'skyeye_content_queue' AND column_name = 'ab_test_id') THEN
+            ALTER TABLE skyeye_content_queue ADD COLUMN ab_test_id INT REFERENCES content_ab_tests(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_name = 'skyeye_content_queue' AND column_name = 'content_pillar') THEN
+            ALTER TABLE skyeye_content_queue ADD COLUMN content_pillar TEXT;
+        END IF;
     END IF;
 END $$;
 

@@ -8,13 +8,15 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:convert';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'settings_screen.dart';
+import '../config/app_config.dart' as central_config;
 
 // -----------------------------------------------------------------------------
 // CONFIGURATION
 // -----------------------------------------------------------------------------
 class AppConfig {
-  static const String serverUrl = 'ws://10.0.0.81:8765';
+  static String get serverUrl => central_config.AppConfig.wsUrl;
   static const String appName = 'Sovereign Sanctuary';
   static const String consentVersion = 'v13.0_2026';
 }
@@ -806,7 +808,30 @@ class _CalendarTabState extends State<CalendarTab> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          backgroundColor: const Color(0xFF111111),
+                          title: const Text('Cancel Session', style: TextStyle(color: Colors.red)),
+                          content: Text(
+                            'Cancel session with ${s['client'] ?? 'this client'}? 24-hour cancellation policy applies.',
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Keep', style: TextStyle(color: Colors.grey))),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                widget.onSessionTap({'action': 'cancel', ...s});
+                              },
+                              child: const Text('Cancel Session', style: TextStyle(color: Colors.white)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                     icon: const Icon(Icons.close, size: 16),
                     label: const Text("Cancel"),
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(vertical: 10)),
@@ -975,7 +1000,7 @@ class SessionsTab extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: () => onSessionTap({'action': 'playback', ...s}),
                     icon: const Icon(Icons.play_arrow, size: 16),
                     label: const Text("Playback"),
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.grey, side: const BorderSide(color: Colors.grey), padding: const EdgeInsets.symmetric(vertical: 10)),
@@ -2777,7 +2802,21 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
           const Text("UPCOMING SESSION", style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.w600)),
           Text(_briefData!['next_session'] ?? 'Unknown', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
         ])),
-        ElevatedButton(onPressed: () {}, style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), child: const Text("Join Zoom", style: TextStyle(fontSize: 11))),
+        ElevatedButton(onPressed: () async {
+          final zoomLink = _briefData?['zoom_link'] ?? _briefData?['meeting_url'] ?? '';
+          if (zoomLink.toString().isNotEmpty) {
+            final uri = Uri.parse(zoomLink.toString());
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No Zoom link available for this session'), backgroundColor: Color(0xFF333333)),
+              );
+            }
+          }
+        }, style: ElevatedButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), child: const Text("Join Zoom", style: TextStyle(fontSize: 11))),
       ]),
     );
   }
@@ -3074,10 +3113,53 @@ class _CoachingAdviceScreenState extends State<CoachingAdviceScreen> {
       padding: const EdgeInsets.all(16),
       decoration: const BoxDecoration(color: Color(0xFF111111), border: Border(top: BorderSide(color: Color(0xFF222222)))),
       child: Row(children: [
-        Expanded(child: ElevatedButton.icon(onPressed: () {}, icon: const Icon(Icons.save, size: 16), label: const Text("Save to Client File"),
+        Expanded(child: ElevatedButton.icon(onPressed: () {
+          // Save coaching advice to client file via WebSocket
+          widget.socket?.sink.add(jsonEncode({
+            'type': 'coach_live_note',
+            'client_id': widget.session['client_id'] ?? widget.session['id'] ?? '',
+            'note_type': 'coaching_advice',
+            'note': jsonEncode(_adviceData),
+            'session_date': widget.session['date'] ?? '',
+          }));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Saved to client file'), backgroundColor: Color(0xFF1A1A1A)),
+            );
+          }
+        }, icon: const Icon(Icons.save, size: 16), label: const Text("Save to Client File"),
           style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, padding: const EdgeInsets.symmetric(vertical: 14)))),
         const SizedBox(width: 10),
-        Expanded(child: OutlinedButton.icon(onPressed: () {}, icon: const Icon(Icons.upload, size: 16), label: const Text("Export"),
+        Expanded(child: OutlinedButton.icon(onPressed: () {
+          // Export coaching advice — format as text and trigger share sheet
+          final buf = StringBuffer()
+            ..writeln('Coaching Advice — ${_adviceData?['client_name'] ?? 'Unknown'}')
+            ..writeln('Session Date: ${_adviceData?['session_date'] ?? ''}')
+            ..writeln('Duration: ${_adviceData?['duration'] ?? ''} min')
+            ..writeln()
+            ..writeln('KEY OBSERVATION:')
+            ..writeln(_adviceData?['key_observation'] ?? '')
+            ..writeln()
+            ..writeln('RECOMMENDATION:')
+            ..writeln(_adviceData?['recommendation'] ?? '')
+            ..writeln()
+            ..writeln('NEXT SESSION SUGGESTIONS:');
+          for (final s in (_adviceData?['next_session_suggestions'] as List? ?? [])) {
+            buf.writeln('• $s');
+          }
+          // Send as WebSocket message for server-side export
+          widget.socket?.sink.add(jsonEncode({
+            'type': 'save_recording',
+            'client_id': widget.session['client_id'] ?? widget.session['id'] ?? '',
+            'content': buf.toString(),
+            'filename': 'coaching_advice_${widget.session['client'] ?? 'session'}.txt',
+          }));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Export sent'), backgroundColor: Color(0xFF1A1A1A)),
+            );
+          }
+        }, icon: const Icon(Icons.upload, size: 16), label: const Text("Export"),
           style: OutlinedButton.styleFrom(foregroundColor: Colors.grey, side: const BorderSide(color: Colors.grey), padding: const EdgeInsets.symmetric(vertical: 14)))),
       ]),
     );

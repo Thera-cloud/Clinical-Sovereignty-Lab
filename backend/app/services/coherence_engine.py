@@ -10,12 +10,32 @@ Layers:
     4. Cultural     — Internal therapeutic vs. external SkyEye gap
     5. Global       — Planetary emotional weather report
 
+Theoretical Basis:
+    - Layer 1 (Individual): Emotional coherence measurement draws on affective neuroscience
+      (Damasio, 1994) and the somatic marker hypothesis.
+    - Layer 2 (Family): Bowen Family Systems Theory (Bowen, 1978) — differentiation of self,
+      multigenerational transmission process, and family emotional system.
+    - Layer 3 (Community): Social Identity Theory (Tajfel & Turner, 1979) — group cohesion,
+      in-group solidarity, and collective identity coherence.
+    - Layer 4 (Cultural): Hofstede Cultural Dimensions (Hofstede, 1980, 2001) — cultural
+      incoherence index measuring alignment between internal therapeutic values and external
+      cultural messaging.
+    - Layer 5 (Global): Multi-scale coherence synthesis (Nevedal, 2026) — weighted integration
+      across all ecological layers of human experience.
+
+    References:
+        Bowen, M. (1978). Family Therapy in Clinical Practice. Jason Aronson.
+        Damasio, A. (1994). Descartes' Error: Emotion, Reason, and the Human Brain.
+        Hofstede, G. (2001). Culture's Consequences (2nd ed.). Sage Publications.
+        Tajfel, H. & Turner, J.C. (1979). An Integrative Theory of Intergroup Conflict.
+
 Phase 2A — Code Guidelines Section V.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -31,6 +51,8 @@ from app.models.coherence import (
     PulseSnapshot,
 )
 from app.services.exceptions import CoherenceException, InsufficientDataException
+
+logger = logging.getLogger(__name__)
 
 
 class CoherenceEngine:
@@ -81,8 +103,15 @@ class CoherenceEngine:
                 ORDER BY started_at DESC
             """, user_id)
 
-        if len(metrics) < self.thresholds.individual_min_sessions:
-            # Still produce a measurement, but with low confidence
+        if not metrics and not quiz_rows and not sessions:
+            # No data at all — cannot produce any meaningful measurement
+            raise InsufficientDataException(
+                layer="individual",
+                required=self.thresholds.individual_min_sessions,
+                available=0,
+            )
+        elif len(metrics) < self.thresholds.individual_min_sessions:
+            # Sparse data — produce measurement with low confidence (no exception)
             pass
 
         # Compute components
@@ -111,12 +140,14 @@ class CoherenceEngine:
         session_count = len(sessions)
         behavioral = min(1.0, session_count / 12.0)  # 12 sessions/month = 1.0
 
-        # Weighted composite
+        # Weighted composite (weights from swarm_config)
+        from app.swarm_config import swarm_settings
+        _iw = swarm_settings.COHERENCE_INDIVIDUAL_WEIGHTS
         score = (
-            0.40 * cee_aggregate +
-            0.15 * cee_ratio +
-            0.20 * quiz_signal +
-            0.25 * behavioral
+            _iw["cee_aggregate"] * cee_aggregate +
+            _iw["cee_ratio"] * cee_ratio +
+            _iw["quiz_signal"] * quiz_signal +
+            _iw["behavioral"] * behavioral
         )
         score = max(0.0, min(1.0, score))
 
@@ -181,8 +212,8 @@ class CoherenceEngine:
                 )
                 if latest:
                     member_scores.append(latest["score"])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("DB query _get_latest_measurement for family member: %s", e)
 
         if len(member_scores) < 2:
             raise InsufficientDataException(
@@ -203,11 +234,13 @@ class CoherenceEngine:
         # Interruption efficacy (improvement trend)
         efficacy = await self._measure_family_improvement(family_id)
 
+        from app.swarm_config import swarm_settings
+        _fw = swarm_settings.COHERENCE_FAMILY_WEIGHTS
         score = (
-            0.35 * mean_score +
-            0.30 * resonance +
-            0.20 * transmission +
-            0.15 * efficacy
+            _fw["mean_score"] * mean_score +
+            _fw["resonance"] * resonance +
+            _fw["transmission"] * transmission +
+            _fw["efficacy"] * efficacy
         )
         score = max(0.0, min(1.0, score))
         confidence = min(1.0, len(member_scores) / 4.0)
@@ -275,7 +308,9 @@ class CoherenceEngine:
 
         # Community coherence: high mean + low spread = coherent
         cohesion = 1.0 - min(1.0, std_score * 3)
-        score = 0.60 * mean_score + 0.40 * cohesion
+        from app.swarm_config import swarm_settings
+        _cw = swarm_settings.COHERENCE_COMMUNITY_WEIGHTS
+        score = _cw["mean_score"] * mean_score + _cw["cohesion"] * cohesion
         score = max(0.0, min(1.0, score))
         confidence = min(1.0, len(family_scores) / 100.0)
 
@@ -311,8 +346,8 @@ class CoherenceEngine:
             internal = await self._get_latest_measurement(CoherenceLayer.COMMUNITY)
             if internal:
                 internal_score = internal["score"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DB query _get_latest_measurement community: %s", e)
 
         # External signal: SkyEye sentiment analysis
         external_score = await self._get_skyeye_sentiment()
@@ -370,14 +405,15 @@ class CoherenceEngine:
                 latest = await self._get_latest_aggregate(layer)
                 if latest is not None:
                     layer_scores[layer.value] = latest
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("DB query _get_latest_aggregate for layer %s: %s", layer.value, e)
 
         if not layer_scores:
             layer_scores = {"individual": 0.5}
 
         # Weighted synthesis
-        weights = {"individual": 0.20, "family": 0.25, "community": 0.30, "cultural": 0.25}
+        from app.swarm_config import swarm_settings
+        weights = swarm_settings.COHERENCE_GLOBAL_WEIGHTS
         weighted_sum = 0.0
         total_weight = 0.0
         for layer_name, score in layer_scores.items():
@@ -412,8 +448,8 @@ class CoherenceEngine:
             internal = await self._get_latest_aggregate(CoherenceLayer.INDIVIDUAL)
             if internal is not None:
                 internal_score = internal
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DB query _get_latest_aggregate individual: %s", e)
 
         external_score = await self._get_skyeye_sentiment()
         gap = internal_score - external_score
@@ -445,14 +481,16 @@ class CoherenceEngine:
             global_m = await self.measure_global()
             global_index = global_m.score
             layer_scores = global_m.components
-        except Exception:
+        except Exception as e:
+            logger.debug("DB query measure_global: %s", e)
             global_index = 0.0
             layer_scores = {}
 
         # Gap analysis
         try:
             gap = await self.compute_gap_analysis()
-        except Exception:
+        except Exception as e:
+            logger.debug("DB query compute_gap_analysis: %s", e)
             gap = None
 
         # Active foresight alerts
@@ -463,8 +501,8 @@ class CoherenceEngine:
                     "SELECT COUNT(*) as cnt FROM foresight_alerts WHERE resolved_at IS NULL"
                 )
                 alert_count = row["cnt"] if row else 0
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DB query foresight_alerts count: %s", e)
 
         # Notable changes
         notable = await self._detect_notable_changes()
@@ -485,14 +523,17 @@ class CoherenceEngine:
     # COHERENCE BRIEFING GENERATION
     # =========================================================================
 
-    async def generate_briefing(self) -> Dict[str, Any]:
-        """Generate a periodic coherence briefing (for Strategic Memory Layer 4)."""
+    async def generate_briefing(self, persist: bool = True) -> Dict[str, Any]:
+        """
+        Generate a periodic coherence briefing (for Strategic Memory Layer 4).
+        If persist=True, stores the briefing in Strategic Memory automatically.
+        """
         now = datetime.utcnow()
         period_start = now - timedelta(hours=24)
 
         snapshot = await self.generate_pulse_snapshot()
 
-        return {
+        briefing = {
             "period_start": period_start,
             "period_end": now,
             "global_coherence_index": snapshot.global_coherence_index,
@@ -507,6 +548,17 @@ class CoherenceEngine:
             "notable_changes": snapshot.notable_changes,
             "recommendations": [],
         }
+
+        # Persist to Strategic Memory Layer 4
+        if persist:
+            try:
+                from app.services.strategic_memory import StrategicMemoryService
+                memory = StrategicMemoryService(self.db_pool)
+                await memory.store_coherence_briefing(briefing)
+            except Exception as e:
+                print(f">>> [COHERENCE] Failed to store briefing: {e}")
+
+        return briefing
 
     # =========================================================================
     # PRIVATE HELPERS
@@ -603,24 +655,30 @@ class CoherenceEngine:
         return None
 
     async def _measure_family_improvement(self, family_id) -> float:
-        """Measure improvement trend in family coherence over 30 days."""
-        async with self.db_pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT score, measured_at
-                FROM coherence_measurements
-                WHERE layer = 'family' AND family_id = $1
-                  AND measured_at > NOW() - INTERVAL '30 days'
-                ORDER BY measured_at ASC
-            """, family_id)
+        """Measure improvement trend in family coherence over 30 days.
+        Returns 0.5 (neutral) when insufficient data to compute a trend.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT score, measured_at
+                    FROM coherence_measurements
+                    WHERE layer = 'family' AND family_id = $1
+                      AND measured_at > NOW() - INTERVAL '30 days'
+                    ORDER BY measured_at ASC
+                """, family_id)
 
-        if len(rows) < 2:
-            return 0.5  # neutral
+            if len(rows) < 2:
+                return 0.5  # neutral — insufficient data for trend
 
-        scores = [float(r["score"]) for r in rows]
-        first_half = np.mean(scores[:len(scores)//2])
-        second_half = np.mean(scores[len(scores)//2:])
-        improvement = second_half - first_half
-        return max(0.0, min(1.0, 0.5 + improvement))
+            scores = [float(r["score"]) for r in rows]
+            first_half = np.mean(scores[:len(scores)//2])
+            second_half = np.mean(scores[len(scores)//2:])
+            improvement = second_half - first_half
+            return max(0.0, min(1.0, 0.5 + improvement))
+        except Exception as e:
+            print(f">>> [COHERENCE] Family improvement measurement error: {e}")
+            return 0.5  # neutral fallback on error
 
     async def _get_skyeye_sentiment(self) -> float:
         """Get aggregate sentiment from SkyEye social media monitoring."""
@@ -637,8 +695,8 @@ class CoherenceEngine:
                 """)
                 if row and row["avg_sentiment"] is not None:
                     return max(0.0, min(1.0, float(row["avg_sentiment"])))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DB query SkyEye sentiment: %s", e)
         return 0.5  # neutral default
 
     async def _get_external_themes(self) -> List[str]:
@@ -653,7 +711,8 @@ class CoherenceEngine:
                     ORDER BY cnt DESC LIMIT 5
                 """)
                 return [r["type"] for r in rows if r["type"]]
-        except Exception:
+        except Exception as e:
+            logger.debug("DB query external themes: %s", e)
             return []
 
     async def _get_internal_themes(self) -> List[str]:
@@ -668,7 +727,8 @@ class CoherenceEngine:
                     ORDER BY cnt DESC LIMIT 5
                 """)
                 return [r["theme"] for r in rows if r["theme"]]
-        except Exception:
+        except Exception as e:
+            logger.debug("DB query internal themes: %s", e)
             return []
 
     async def _detect_notable_changes(self) -> List[str]:
@@ -691,6 +751,6 @@ class CoherenceEngine:
                         f"{r['layer'].capitalize()} coherence {direction} by "
                         f"{abs(r['delta_24h']):.2f} (now {r['score']:.2f})"
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("DB query notable changes: %s", e)
         return changes

@@ -9,6 +9,19 @@ Abstract base class for all Fibres, implementing:
     - Self-alignment assessment
     - execute() wrapper: budget → ethical → subclass → journal → self-assess
 
+Theoretical Basis:
+    - Constitutional AI (Bai et al., 2022) — the Frozen Ethical Core implements
+      immutable constitutional principles that govern all Fibre behavior.
+    - Trust Calibration (Lee & See, 2004) — the autonomy ladder (Observation →
+      Restricted → Autonomous) implements graduated trust with alignment verification.
+    - Mirroring Principle (Gallese, 2001) — Fibres adapt communication style to
+      human partners based on interaction history, reflecting mirror neuron theory.
+
+    References:
+        Bai, Y. et al. (2022). Constitutional AI: Harmlessness from AI Feedback. Anthropic.
+        Gallese, V. (2001). The 'Shared Manifold' Hypothesis. Journal of Consciousness Studies.
+        Lee, J.D. & See, K.A. (2004). Trust in Automation. Human Factors, 46(1), 50-80.
+
 Phase 3A — Code Guidelines Section 5.
 """
 
@@ -156,6 +169,8 @@ class BaseFibre(ABC):
         db_pool=None,
         identity_record=None,
         private_key_pem: Optional[str] = None,
+        wisdom_mesh=None,
+        immunity_service=None,
     ):
         self.fibre_id: UUID = uuid4()
         self.config = config
@@ -167,6 +182,10 @@ class BaseFibre(ABC):
         # Identity
         self._identity_record = identity_record
         self._private_key_pem = private_key_pem
+
+        # Sovereign Swarm integration
+        self._wisdom_mesh = wisdom_mesh
+        self._immunity_service = immunity_service
 
         # State
         self.status: FibreStatus = FibreStatus.INITIALIZING
@@ -251,6 +270,13 @@ class BaseFibre(ABC):
                 violation=f"Action '{task.task_type}' not permitted at autonomy level {self.autonomy_level.value}",
             )
 
+        # 2b. Sovereign Immunity check (quarantine gate)
+        if self._immunity_service:
+            if self._immunity_service.is_quarantined(self.fibre_id):
+                raise FibreException(
+                    f"Fibre {self.fibre_id} is quarantined — execution blocked"
+                )
+
         # 3. Subclass execution
         self._current_tasks.append(task.task_id)
         try:
@@ -280,6 +306,13 @@ class BaseFibre(ABC):
         # 5. Self-alignment assessment
         self._self_assess(result)
 
+        # 6. Publish result to Wisdom Mesh
+        await self._publish_result_to_mesh(task, result)
+
+        # 7. Record token usage with Sovereign Immunity
+        if self._immunity_service and result.tokens_used:
+            self._immunity_service.record_token_usage(self.fibre_id, result.tokens_used)
+
         return result
 
     # ── Abstract Methods (subclasses implement) ──
@@ -300,38 +333,81 @@ class BaseFibre(ABC):
         """
         ...
 
+    # ── Wisdom Mesh Publishing ──
+
+    async def _publish_result_to_mesh(self, task: FibreTask, result: FibreResult) -> None:
+        """Publish task result as an OBSERVATION message on the Wisdom Mesh."""
+        if not self._wisdom_mesh:
+            return
+        try:
+            from app.models.mesh import MeshMessage, MeshMessageType, MeshPriority, MeshTopology
+            message = MeshMessage(
+                message_type=MeshMessageType.OBSERVATION,
+                priority=MeshPriority.NORMAL,
+                sender_id=self.fibre_id,
+                sender_type=self.config.fibre_type.value,
+                domain_tags=self.config.domain_tags or [self.config.fibre_type.value],
+                topology_level=MeshTopology.LEVEL_2_OPERATIONAL,
+                subject=f"task_result:{task.task_type}",
+                body={
+                    "task_id": str(task.task_id),
+                    "task_type": task.task_type,
+                    "success": result.success,
+                    "summary": str(result.output)[:500] if result.output else "",
+                    "tokens_used": result.tokens_used,
+                    "fibre_name": self.name,
+                },
+            )
+            await self._wisdom_mesh.publish(message)
+        except Exception as e:
+            # Mesh publishing is best-effort; never block execution
+            print(f">>> [FIBRE {self.fibre_id}] Mesh publish failed: {e}")
+
     # ── Self-Alignment ──
 
     def _self_assess(self, result: FibreResult) -> None:
         """Update alignment scores based on task result."""
+        from app.swarm_config import swarm_settings
+        _decay = swarm_settings.ALIGNMENT_DECAY_FACTOR
+        _update = swarm_settings.ALIGNMENT_UPDATE_FACTOR
+
         # Ethical alignment (based on ethical compliance score)
         self._alignment_scores["ethical"] = (
-            0.9 * self._alignment_scores["ethical"] +
-            0.1 * result.ethical_compliance
+            _decay * self._alignment_scores["ethical"] +
+            _update * result.ethical_compliance
         )
 
         # Strategic alignment (based on self-reported alignment)
         self._alignment_scores["strategic"] = (
-            0.9 * self._alignment_scores["strategic"] +
-            0.1 * result.self_alignment_score
+            _decay * self._alignment_scores["strategic"] +
+            _update * result.self_alignment_score
         )
 
         # Statistical alignment (based on success rate)
         success_val = 1.0 if result.success else 0.5
         self._alignment_scores["statistical"] = (
-            0.9 * self._alignment_scores["statistical"] +
-            0.1 * success_val
+            _decay * self._alignment_scores["statistical"] +
+            _update * success_val
         )
 
         # Check for drift
+        _thresholds = {
+            "ethical": swarm_settings.ALIGNMENT_THRESHOLD_ETHICAL,
+            "strategic": swarm_settings.ALIGNMENT_THRESHOLD_STRATEGIC,
+            "statistical": swarm_settings.ALIGNMENT_THRESHOLD_STATISTICAL,
+        }
         for dimension, score in self._alignment_scores.items():
-            threshold = {"ethical": 0.8, "strategic": 0.7, "statistical": 0.7}
-            if score < threshold.get(dimension, 0.7):
+            if score < _thresholds.get(dimension, 0.7):
                 print(f">>> [FIBRE {self.fibre_id}] Alignment drift: {dimension}={score:.3f}")
 
     def check_alignment(self) -> Dict[str, Any]:
         """Full alignment check — returns scores and pass/fail for each dimension."""
-        thresholds = {"ethical": 0.8, "strategic": 0.7, "statistical": 0.7}
+        from app.swarm_config import swarm_settings
+        thresholds = {
+            "ethical": swarm_settings.ALIGNMENT_THRESHOLD_ETHICAL,
+            "strategic": swarm_settings.ALIGNMENT_THRESHOLD_STRATEGIC,
+            "statistical": swarm_settings.ALIGNMENT_THRESHOLD_STATISTICAL,
+        }
         results = {}
         all_pass = True
         for dim, score in self._alignment_scores.items():
@@ -398,24 +474,38 @@ class BaseFibre(ABC):
     def _interaction_history_key(self, partner_id: str) -> str:
         return f"mirror:{self.fibre_id}:{partner_id}"
 
+    # In-memory cache of interaction profiles keyed by partner_id
+    _interaction_profiles: Dict[str, Dict[str, Any]] = {}
+
     def adapt_communication(self, partner_id: str, interaction_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Adapt output style to a human partner's communication patterns.
         Learned from interaction history: detail level, formality, format preference.
+        Profiles are persisted to the fibres.interaction_profiles JSONB column.
         """
-        # Build a profile from interaction data
+        # Load existing profile for this partner (from cache or DB)
+        existing = self._interaction_profiles.get(partner_id, {})
+
+        # Build / merge a profile from new interaction data
         profile = interaction_data.get("profile", {})
-        detail_level = profile.get("detail_preference", "medium")  # low | medium | high
-        formality = profile.get("formality", "professional")       # casual | professional | formal
-        format_pref = profile.get("format", "prose")               # prose | bullets | structured
+        detail_level = profile.get("detail_preference", existing.get("detail_level", "medium"))
+        formality = profile.get("formality", existing.get("formality", "professional"))
+        format_pref = profile.get("format", existing.get("format", "prose"))
+
+        # Track interaction count for learning confidence
+        interaction_count = existing.get("interaction_count", 0) + 1
 
         style = {
             "partner_id": partner_id,
             "detail_level": detail_level,
             "formality": formality,
             "format": format_pref,
+            "interaction_count": interaction_count,
             "adapted_at": datetime.utcnow().isoformat(),
         }
+
+        # Cache in-memory
+        self._interaction_profiles[partner_id] = style
 
         self._journal_entries.append({
             "timestamp": datetime.utcnow().isoformat(),
@@ -424,7 +514,45 @@ class BaseFibre(ABC):
             "style": style,
         })
 
+        # Persist to database asynchronously
+        self._persist_interaction_profiles()
+
         return style
+
+    def _persist_interaction_profiles(self) -> None:
+        """Persist interaction_profiles to the fibres table (fire-and-forget)."""
+        if not self.db_pool:
+            return
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._async_persist_profiles())
+        except RuntimeError:
+            pass  # No running loop — skip persistence
+
+    async def _async_persist_profiles(self) -> None:
+        """Write interaction_profiles JSONB to the fibres table."""
+        try:
+            import json as _json
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE fibres
+                       SET interaction_profiles = $2, updated_at = NOW()
+                       WHERE fibre_id = $1""",
+                    self.fibre_id,
+                    _json.dumps(self._interaction_profiles),
+                )
+        except Exception as e:
+            print(f">>> [FIBRE] interaction_profiles persist error: {e}")
+
+    def get_communication_style(self, partner_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve the learned communication style for a partner."""
+        return self._interaction_profiles.get(partner_id)
+
+    def load_interaction_profiles(self, profiles_json: Dict[str, Any]) -> None:
+        """Load interaction profiles from database on Fibre restoration."""
+        if profiles_json and isinstance(profiles_json, dict):
+            self._interaction_profiles = profiles_json
 
     # ── Serialization ──
 

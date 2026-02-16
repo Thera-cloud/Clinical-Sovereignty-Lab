@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hive Defense Protocol — Phase 8 Security Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --void:#050510;--panel:#0A0F1E;--glass:rgba(10,15,30,0.65);--glass2:rgba(10,15,30,0.85);
+  --bdr:rgba(255,255,255,0.06);--bdr2:rgba(255,255,255,0.1);--bdr3:rgba(255,255,255,0.15);
+  --green:#00E5A0;--greeng:rgba(0,229,160,0.12);
+  --blue:#38BDF8;--blueg:rgba(56,189,248,0.12);
+  --purple:#A78BFA;--purpleg:rgba(167,139,250,0.12);
+  --amber:#FFB800;--amberg:rgba(255,184,0,0.12);
+  --red:#FF3B5C;--redg:rgba(255,59,92,0.12);
+  --gold:#C9A962;--goldg:rgba(201,169,98,0.12);
+  --cyan:#4ECDC4;--cyang:rgba(78,205,196,0.12);
+  --t1:#E8EAF0;--t2:#8B92A8;--t3:#5A6178;--t4:#3A4058;
+  --serif:'Instrument Serif',Georgia,serif;
+  --sans:'DM Sans',-apple-system,sans-serif;
+  --mono:'JetBrains Mono',monospace;
+  --r:12px;--rs:8px;--rl:16px;
+  --blur:blur(20px);
+  --shadow:0 8px 32px rgba(0,0,0,0.4);
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--void);color:var(--t1);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 0%,rgba(255,59,92,0.04) 0%,transparent 60%),radial-gradient(ellipse at 80% 100%,rgba(167,139,250,0.03) 0%,transparent 60%);pointer-events:none;z-index:0}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--t4);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--t3)}
+
+/* TOPBAR */
+.topbar{position:sticky;top:0;z-index:200;background:var(--glass2);backdrop-filter:var(--blur);border-bottom:1px solid var(--bdr);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between}
+.topbar-left{display:flex;align-items:center;gap:16px}
+.back-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--rs);background:rgba(255,255,255,0.04);border:1px solid var(--bdr);color:var(--t2);text-decoration:none;font-size:18px;transition:.2s}
+.back-btn:hover{background:rgba(255,255,255,0.08);color:var(--t1)}
+.topbar-title{font-family:var(--serif);font-size:22px;color:var(--t1)}
+.topbar-title span{color:var(--red)}
+.topbar-right{display:flex;align-items:center;gap:12px}
+
+/* DEFCON BADGE */
+.defcon-badge{display:flex;align-items:center;gap:8px;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:600;font-family:var(--mono);letter-spacing:1px;border:1px solid;transition:.3s}
+.defcon-5{background:rgba(0,229,160,0.1);border-color:rgba(0,229,160,0.25);color:var(--green)}
+.defcon-4{background:rgba(56,189,248,0.1);border-color:rgba(56,189,248,0.25);color:var(--blue)}
+.defcon-3{background:rgba(255,184,0,0.1);border-color:rgba(255,184,0,0.25);color:var(--amber)}
+.defcon-2{background:rgba(255,140,0,0.15);border-color:rgba(255,140,0,0.3);color:#FF8C00}
+.defcon-1{background:rgba(255,59,92,0.15);border-color:rgba(255,59,92,0.3);color:var(--red);animation:pulse-red 1.5s ease-in-out infinite}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 10px rgba(255,59,92,0.2)}50%{box-shadow:0 0 25px rgba(255,59,92,0.5)}}
+
+/* LAYOUT */
+.main{max-width:1400px;margin:0 auto;padding:24px;position:relative;z-index:1}
+
+/* GRID */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px}
+@media(max-width:1200px){.grid-4{grid-template-columns:1fr 1fr}.grid-3{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+
+/* GLASS PANELS */
+.glass{background:var(--glass);backdrop-filter:var(--blur);border:1px solid var(--bdr);border-radius:var(--rl);box-shadow:var(--shadow);overflow:hidden}
+.glass-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--bdr)}
+.glass-title{font-family:var(--serif);font-size:15px;display:flex;align-items:center;gap:8px}
+.glass-body{padding:16px 18px}
+.glass-body.scroll{max-height:400px;overflow-y:auto}
+
+/* SECTION HEADERS */
+.section{margin-bottom:24px}
+.section-title{font-family:var(--serif);font-size:18px;margin-bottom:14px;display:flex;align-items:center;gap:10px;color:var(--t1)}
+.section-title .icon{font-size:20px}
+
+/* STAT CARD */
+.stat{text-align:center;padding:18px 12px}
+.stat-value{font-family:var(--mono);font-size:28px;font-weight:700;line-height:1.1}
+.stat-label{font-size:11px;color:var(--t2);margin-top:6px;text-transform:uppercase;letter-spacing:1px}
+.stat-value.green{color:var(--green)}.stat-value.red{color:var(--red)}.stat-value.amber{color:var(--amber)}
+.stat-value.blue{color:var(--blue)}.stat-value.purple{color:var(--purple)}.stat-value.gold{color:var(--gold)}
+.stat-value.cyan{color:var(--cyan)}
+
+/* TABLE */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;padding:8px 10px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;font-size:10px;border-bottom:1px solid var(--bdr2)}
+.tbl td{padding:8px 10px;border-bottom:1px solid var(--bdr);color:var(--t2);vertical-align:top}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:rgba(255,255,255,0.02)}
+
+/* BADGES */
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.badge-green{background:var(--greeng);color:var(--green)}.badge-red{background:var(--redg);color:var(--red)}
+.badge-amber{background:var(--amberg);color:var(--amber)}.badge-blue{background:var(--blueg);color:var(--blue)}
+.badge-purple{background:var(--purpleg);color:var(--purple)}.badge-gold{background:var(--goldg);color:var(--gold)}
+.badge-cyan{background:var(--cyang);color:var(--cyan)}
+
+/* MONO TEXT */
+.mono{font-family:var(--mono);font-size:12px}
+.dim{color:var(--t3)}
+
+/* EMPTY STATE */
+.empty{text-align:center;padding:40px 20px;color:var(--t3);font-size:13px}
+
+/* OVERVIEW STRIP */
+.overview-strip{display:flex;align-items:stretch;gap:0;margin-bottom:24px;border-radius:var(--rl);overflow:hidden;background:var(--glass);border:1px solid var(--bdr)}
+.overview-strip .cell{flex:1;padding:18px 16px;text-align:center;border-right:1px solid var(--bdr)}
+.overview-strip .cell:last-child{border-right:none}
+.overview-strip .cell-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:6px}
+.overview-strip .cell-value{font-family:var(--mono);font-size:22px;font-weight:700}
+
+/* PATENT STRIPE */
+.patent-stripe{background:rgba(201,169,98,0.06);border:1px solid rgba(201,169,98,0.12);border-radius:var(--rs);padding:10px 16px;margin-bottom:24px;font-size:11px;color:var(--gold);display:flex;align-items:center;gap:10px}
+.patent-stripe .icon{font-size:16px}
+
+/* REFRESH */
+.refresh-btn{background:rgba(255,255,255,0.04);border:1px solid var(--bdr);border-radius:var(--rs);padding:6px 14px;color:var(--t2);font-size:12px;cursor:pointer;transition:.2s;font-family:var(--sans)}
+.refresh-btn:hover{background:rgba(255,255,255,0.08);color:var(--t1)}
+
+/* LOADING SHIMMER */
+.loading{position:relative;overflow:hidden}
+.loading::after{content:'';position:absolute;top:0;left:-50%;width:50%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.03),transparent);animation:shimmer 1.5s infinite}
+@keyframes shimmer{100%{left:150%}}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <a href="command.html" class="back-btn">&larr;</a>
+    <div class="topbar-title">Hive <span>Defense</span> Protocol</div>
+  </div>
+  <div class="topbar-right">
+    <div id="defconBadge" class="defcon-badge defcon-5">DEFCON 5</div>
+    <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+    <span id="lastUpdate" class="mono dim" style="font-size:11px"></span>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="main">
+
+  <!-- PATENT STRIPE -->
+  <div class="patent-stripe">
+    <span class="icon">&#9878;</span>
+    Patent-Pending &mdash; Claims 30&ndash;56 &bull; Phase 8 Security System &bull; Three Cords Doctrine &bull; Trinity Helix &bull; Projected Helix
+  </div>
+
+  <!-- OVERVIEW STRIP -->
+  <div class="overview-strip" id="overviewStrip">
+    <div class="cell"><div class="cell-label">DEFCON Level</div><div class="cell-value green" id="ovDefcon">--</div></div>
+    <div class="cell"><div class="cell-label">Services Loaded</div><div class="cell-value blue" id="ovServices">--</div></div>
+    <div class="cell"><div class="cell-label">Attack Vectors</div><div class="cell-value purple" id="ovVectors">--</div></div>
+    <div class="cell"><div class="cell-label">Three Cord</div><div class="cell-value gold" id="ovCords">--</div></div>
+    <div class="cell"><div class="cell-label">Forensic Records</div><div class="cell-value cyan" id="ovForensic">--</div></div>
+    <div class="cell"><div class="cell-label">Attacker Profiles</div><div class="cell-value red" id="ovAttackers">--</div></div>
+  </div>
+
+  <!-- ROW 1: DEFCON + MIRROR SHELL + GATE -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#9888;</span> Core Defense Layer</div>
+    <div class="grid-3">
+      <!-- DEFCON -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128737; DEFCON Controller</div></div>
+        <div class="glass-body" id="defconPanel">
+          <div class="grid-2" style="margin-bottom:12px">
+            <div class="stat"><div class="stat-value amber" id="defconLevel">--</div><div class="stat-label">Current Level</div></div>
+            <div class="stat"><div class="stat-value blue" id="defconInterval">--</div><div class="stat-label">Heartbeat Interval</div></div>
+          </div>
+          <div style="font-size:12px;color:var(--t2)">
+            <div><strong>Trigger:</strong> <span id="defconTrigger" class="mono">--</span></div>
+            <div style="margin-top:4px"><strong>Mirror Mode:</strong> <span id="defconMirror" class="mono">--</span></div>
+            <div style="margin-top:4px"><strong>Last Escalation:</strong> <span id="defconEsc" class="mono dim">--</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MIRROR SHELL -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128065; Mirror Shell</div></div>
+        <div class="glass-body" id="mirrorPanel">
+          <div class="grid-2" style="margin-bottom:8px">
+            <div class="stat"><div class="stat-value cyan" id="mirrorTotal">--</div><div class="stat-label">Signals Processed</div></div>
+            <div class="stat"><div class="stat-value green" id="mirrorPassed">--</div><div class="stat-label">Passed to Real</div></div>
+          </div>
+          <div class="grid-2">
+            <div class="stat"><div class="stat-value amber" id="mirrorAbsorbed">--</div><div class="stat-label">Absorbed</div></div>
+            <div class="stat"><div class="stat-value red" id="mirrorContained">--</div><div class="stat-label">Contained</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COHERENCE GATE -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#9889; Coherence Gate</div></div>
+        <div class="glass-body" id="gatePanel">
+          <div class="grid-2" style="margin-bottom:8px">
+            <div class="stat"><div class="stat-value blue" id="gateTotal">--</div><div class="stat-label">Total Evaluated</div></div>
+            <div class="stat"><div class="stat-value green" id="gatePassed">--</div><div class="stat-label">Passed</div></div>
+          </div>
+          <div class="grid-2">
+            <div class="stat"><div class="stat-value amber" id="gateSuspicious">--</div><div class="stat-label">Suspicious</div></div>
+            <div class="stat"><div class="stat-value red" id="gateAbsorbed">--</div><div class="stat-label">Absorbed</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 2: CURIOSITY + HEARTBEAT + DRIFT -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#128270;</span> Behavioral Monitoring</div>
+    <div class="grid-3">
+      <!-- CURIOSITY -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128269; Curiosity Protocol</div><span class="badge badge-purple" id="curiosityCount">0</span></div>
+        <div class="glass-body scroll" id="curiosityPanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- HEARTBEAT -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128147; Heartbeat Registry</div></div>
+        <div class="glass-body" id="heartbeatPanel">
+          <div class="grid-2">
+            <div class="stat"><div class="stat-value green" id="hbRegistered">--</div><div class="stat-label">Registered</div></div>
+            <div class="stat"><div class="stat-value red" id="hbSilent">--</div><div class="stat-label">Silent</div></div>
+          </div>
+          <div id="hbSilentList" style="margin-top:12px;font-size:11px;color:var(--t3)"></div>
+        </div>
+      </div>
+
+      <!-- DRIFT SCORES -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128200; Drift Scores</div><span class="badge badge-amber" id="driftCount">0</span></div>
+        <div class="glass-body scroll" id="driftPanel"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 3: CONTAINMENT + QUARANTINE + GHOST MISSIONS -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#128274;</span> Containment &amp; Response</div>
+    <div class="grid-3">
+      <!-- CONTAINMENT ZONES -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#9940; Containment Zones</div><span class="badge badge-red" id="zoneCount">0</span></div>
+        <div class="glass-body scroll" id="containmentPanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- QUARANTINE -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128683; Active Quarantines</div><span class="badge badge-amber" id="quarantineCount">0</span></div>
+        <div class="glass-body scroll" id="quarantinePanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- GHOST MISSIONS -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128123; Ghost Swarm Missions</div><span class="badge badge-purple" id="ghostCount">0</span></div>
+        <div class="glass-body scroll" id="ghostPanel"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 4: HELIX + PROJECTIONS + CONSERVATION -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#127856;</span> Trinity Helix &amp; Projected Helix</div>
+    <div class="grid-3">
+      <!-- TRINITY HELIX -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128260; Trinity Helix State</div></div>
+        <div class="glass-body" id="helixPanel">
+          <div style="margin-bottom:10px"><strong style="font-size:11px;color:var(--t3)">CURRENT SEQUENCE</strong></div>
+          <div id="helixSequence" class="mono" style="font-size:16px;color:var(--purple);letter-spacing:2px">--</div>
+          <div class="grid-2" style="margin-top:14px">
+            <div class="stat"><div class="stat-value purple" id="helixRotations">--</div><div class="stat-label">Rotations</div></div>
+            <div class="stat"><div class="stat-value blue" id="helixInterval">--</div><div class="stat-label">Interval (ms)</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROJECTED HELIX -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#127919; Projected Helix Deployments</div><span class="badge badge-red" id="projectionCount">0</span></div>
+        <div class="glass-body scroll" id="projectionPanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- CONSERVATION LEDGER -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#9878; Conservation Ledger</div></div>
+        <div class="glass-body" id="conservationPanel">
+          <div class="grid-2">
+            <div class="stat"><div class="stat-value gold" id="consEnergy">--</div><div class="stat-label">Total Energy</div></div>
+            <div class="stat"><div class="stat-value green" id="consValid">--</div><div class="stat-label">Valid</div></div>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--t2)">
+            <div><strong>Violations:</strong> <span id="consViolations" class="mono">--</span></div>
+            <div style="margin-top:4px"><strong>Last Verified:</strong> <span id="consVerified" class="mono dim">--</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 5: ATTACKER PROFILES + FORENSIC LOG -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#128373;</span> Intelligence &amp; Forensics</div>
+    <div class="grid-2">
+      <!-- ATTACKER PROFILES -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128520; Attacker Profiles</div><span class="badge badge-red" id="attackerCount">0</span></div>
+        <div class="glass-body scroll" id="attackerPanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- FORENSIC LOG -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128220; Forensic Log (Recent)</div></div>
+        <div class="glass-body scroll" id="forensicPanel"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROW 6: INVERTED SPACES + MIRROR NAMESPACES -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#128302;</span> Mirror Dimensions</div>
+    <div class="grid-2">
+      <!-- INVERTED SPACES -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#9670; Inverted Spaces</div></div>
+        <div class="glass-body scroll" id="invertedPanel"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- MIRROR NAMESPACES -->
+      <div class="glass">
+        <div class="glass-header"><div class="glass-title">&#128736; Mirror Namespaces</div></div>
+        <div class="glass-body scroll" id="namespacesPanel"><div class="empty">Loading...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEFCON HISTORY -->
+  <div class="section">
+    <div class="section-title"><span class="icon">&#128203;</span> DEFCON History</div>
+    <div class="glass">
+      <div class="glass-body scroll" id="defconHistoryPanel"><div class="empty">Loading...</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── API HELPERS ──────────────────────────────────────────────────────────
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : '';
+
+async function apiFetch(path) {
+  try {
+    const token = sessionStorage.getItem('token');
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(`${API}${path}`, { headers });
+    if (!resp.ok) throw new Error(`API ${resp.status}`);
+    return await resp.json();
+  } catch (e) {
+    console.warn(`API error ${path}:`, e);
+    return null;
+  }
+}
+
+function ts(iso) {
+  if (!iso) return '--';
+  const d = new Date(iso);
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+}
+
+// ── DEFCON LEVEL COLOR ───────────────────────────────────────────────────
+function defconClass(level) {
+  const n = parseInt(level) || 5;
+  return `defcon-${n}`;
+}
+
+// ── LOAD OVERVIEW ────────────────────────────────────────────────────────
+async function loadOverview() {
+  const data = await apiFetch('/api/hive-defense/overview');
+  if (!data) return;
+  document.getElementById('ovDefcon').textContent = data.defcon_level;
+  document.getElementById('ovServices').textContent = data.services_loaded;
+  document.getElementById('ovVectors').textContent = data.attack_vectors_defended;
+  document.getElementById('ovCords').textContent = data.three_cord_coverage;
+  document.getElementById('ovForensic').textContent = (data.counts || {}).forensic_records || 0;
+  document.getElementById('ovAttackers').textContent = (data.counts || {}).attacker_profiles || 0;
+
+  const badge = document.getElementById('defconBadge');
+  const lvl = parseInt(data.defcon_level) || 5;
+  badge.className = `defcon-badge ${defconClass(lvl)}`;
+  badge.textContent = `DEFCON ${lvl}`;
+}
+
+// ── LOAD DEFCON ──────────────────────────────────────────────────────────
+async function loadDefcon() {
+  const data = await apiFetch('/api/hive-defense/defcon');
+  if (!data) return;
+  const lvl = parseInt(data.level) || 5;
+  document.getElementById('defconLevel').textContent = lvl;
+  document.getElementById('defconInterval').textContent = (data.heartbeat_interval || 0) + 's';
+  document.getElementById('defconTrigger').textContent = data.trigger_reason || 'None';
+  document.getElementById('defconMirror').textContent = data.mirror_mode || 'standard';
+  document.getElementById('defconEsc').textContent = ts(data.last_escalation);
+
+  // Color the level
+  const el = document.getElementById('defconLevel');
+  el.className = 'stat-value';
+  if (lvl >= 4) el.classList.add('green');
+  else if (lvl === 3) el.classList.add('amber');
+  else el.classList.add('red');
+}
+
+// ── LOAD MIRROR SHELL ────────────────────────────────────────────────────
+async function loadMirror() {
+  const data = await apiFetch('/api/hive-defense/mirror/stats');
+  if (!data) return;
+  document.getElementById('mirrorTotal').textContent = data.total_processed || 0;
+  document.getElementById('mirrorPassed').textContent = data.passed || 0;
+  document.getElementById('mirrorAbsorbed').textContent = data.absorbed || 0;
+  document.getElementById('mirrorContained').textContent = data.contained || 0;
+}
+
+// ── LOAD GATE METRICS ────────────────────────────────────────────────────
+async function loadGate() {
+  const data = await apiFetch('/api/hive-defense/gate/metrics');
+  if (!data) return;
+  document.getElementById('gateTotal').textContent = data.total || 0;
+  document.getElementById('gatePassed').textContent = data.passed || 0;
+  document.getElementById('gateSuspicious').textContent = data.suspicious || 0;
+  document.getElementById('gateAbsorbed').textContent = data.absorbed || 0;
+}
+
+// ── LOAD CURIOSITY ───────────────────────────────────────────────────────
+async function loadCuriosity() {
+  const data = await apiFetch('/api/hive-defense/curiosity/entities');
+  if (!data) return;
+  document.getElementById('curiosityCount').textContent = (data.entities || []).length;
+  const panel = document.getElementById('curiosityPanel');
+  if (!data.entities || data.entities.length === 0) {
+    panel.innerHTML = '<div class="empty">No entities under observation</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Entity</th><th>Level</th><th>Events</th></tr>';
+  data.entities.forEach(e => {
+    const cls = e.level === 'alarm' ? 'badge-red' : e.level === 'concern' ? 'badge-amber' : e.level === 'interest' ? 'badge-blue' : 'badge-green';
+    html += `<tr><td class="mono">${e.entity_id.substring(0,8)}...</td><td><span class="badge ${cls}">${e.level}</span></td><td>${e.events_count}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD HEARTBEAT ───────────────────────────────────────────────────────
+async function loadHeartbeat() {
+  const data = await apiFetch('/api/hive-defense/heartbeat/registry');
+  if (!data) return;
+  document.getElementById('hbRegistered').textContent = data.registered_entities || 0;
+  document.getElementById('hbSilent').textContent = data.silent_entities || 0;
+  const list = document.getElementById('hbSilentList');
+  if (data.silent_ids && data.silent_ids.length > 0) {
+    list.innerHTML = '<strong style="color:var(--red)">Silent IDs:</strong> ' + data.silent_ids.map(id => `<span class="mono">${id.substring(0,8)}</span>`).join(', ');
+  } else {
+    list.innerHTML = '<span style="color:var(--green)">All entities pulsing normally</span>';
+  }
+}
+
+// ── LOAD DRIFT SCORES ────────────────────────────────────────────────────
+async function loadDrift() {
+  const data = await apiFetch('/api/hive-defense/drift/scores?min_magnitude=0.1');
+  if (!data) return;
+  document.getElementById('driftCount').textContent = (data.scores || []).length;
+  const panel = document.getElementById('driftPanel');
+  if (!data.scores || data.scores.length === 0) {
+    panel.innerHTML = '<div class="empty">No significant drift detected</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Entity</th><th>Combined</th><th>Data</th><th>Comm</th></tr>';
+  data.scores.forEach(s => {
+    const cls = s.combined >= 0.5 ? 'badge-red' : s.combined >= 0.3 ? 'badge-amber' : 'badge-blue';
+    html += `<tr><td class="mono">${s.entity_id.substring(0,8)}...</td><td><span class="badge ${cls}">${s.combined.toFixed(3)}</span></td><td class="mono">${(s.data_access||0).toFixed(2)}</td><td class="mono">${(s.communication||0).toFixed(2)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD CONTAINMENT ZONES ───────────────────────────────────────────────
+async function loadContainment() {
+  const data = await apiFetch('/api/hive-defense/containment/zones');
+  if (!data) return;
+  document.getElementById('zoneCount').textContent = (data.zones || []).length;
+  const panel = document.getElementById('containmentPanel');
+  if (!data.zones || data.zones.length === 0) {
+    panel.innerHTML = '<div class="empty">No active containment zones</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Zone</th><th>Status</th></tr>';
+  data.zones.forEach(z => {
+    const id = typeof z === 'string' ? z : (z.id || z.zone_id || JSON.stringify(z));
+    html += `<tr><td class="mono">${String(id).substring(0,12)}...</td><td><span class="badge badge-red">Active</span></td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD QUARANTINE ──────────────────────────────────────────────────────
+async function loadQuarantine() {
+  const data = await apiFetch('/api/hive-defense/quarantine/active');
+  if (!data) return;
+  document.getElementById('quarantineCount').textContent = (data.quarantines || []).length;
+  const panel = document.getElementById('quarantinePanel');
+  if (!data.quarantines || data.quarantines.length === 0) {
+    panel.innerHTML = '<div class="empty">No fibres in quarantine</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Fibre</th><th>HB</th><th>Ring</th><th>Trail</th><th>Started</th></tr>';
+  data.quarantines.forEach(q => {
+    const ok = v => v ? '<span class="badge badge-green">OK</span>' : '<span class="badge badge-red">FAIL</span>';
+    html += `<tr><td class="mono">${q.fibre_id.substring(0,8)}...</td><td>${ok(q.heartbeat_ok)}</td><td>${ok(q.ring_ok)}</td><td>${ok(q.trail_ok)}</td><td class="mono dim">${ts(q.started_at)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD GHOST MISSIONS ──────────────────────────────────────────────────
+async function loadGhosts() {
+  const data = await apiFetch('/api/hive-defense/ghost/missions');
+  if (!data) return;
+  document.getElementById('ghostCount').textContent = (data.missions || []).length;
+  const panel = document.getElementById('ghostPanel');
+  if (!data.missions || data.missions.length === 0) {
+    panel.innerHTML = '<div class="empty">No active ghost missions</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Zone</th><th>Ghosts</th><th>Status</th><th>Deployed</th></tr>';
+  data.missions.forEach(m => {
+    const cls = m.status === 'active' ? 'badge-green' : m.status === 'completed' ? 'badge-blue' : 'badge-amber';
+    html += `<tr><td class="mono">${(m.zone||'').substring(0,10)}</td><td>${m.ghosts}</td><td><span class="badge ${cls}">${m.status}</span></td><td class="mono dim">${ts(m.deployed_at)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD HELIX STATE ─────────────────────────────────────────────────────
+async function loadHelix() {
+  const data = await apiFetch('/api/hive-defense/helix/state');
+  if (!data) return;
+  const seq = data.current_sequence || [];
+  document.getElementById('helixSequence').textContent = seq.join(' ');
+  document.getElementById('helixRotations').textContent = data.rotation_count || 0;
+  document.getElementById('helixInterval').textContent = (data.rotation_interval_ms || 0).toFixed(0);
+}
+
+// ── LOAD PROJECTIONS ─────────────────────────────────────────────────────
+async function loadProjections() {
+  const data = await apiFetch('/api/hive-defense/projection/deployments');
+  if (!data) return;
+  document.getElementById('projectionCount').textContent = (data.deployments || []).length;
+  const panel = document.getElementById('projectionPanel');
+  if (!data.deployments || data.deployments.length === 0) {
+    panel.innerHTML = '<div class="empty">No active projections</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>ID</th><th>Status</th><th>Accuracy</th><th>Intercepts</th></tr>';
+  data.deployments.forEach(d => {
+    const cls = d.status === 'active' ? 'badge-red' : 'badge-amber';
+    html += `<tr><td class="mono">${d.id.substring(0,8)}...</td><td><span class="badge ${cls}">${d.status}</span></td><td class="mono">${((d.mirror_accuracy||0)*100).toFixed(1)}%</td><td>${d.commands_intercepted||0}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD CONSERVATION ────────────────────────────────────────────────────
+async function loadConservation() {
+  const data = await apiFetch('/api/hive-defense/conservation/latest');
+  if (!data || !data.entry) {
+    document.getElementById('consEnergy').textContent = '--';
+    document.getElementById('consValid').textContent = '--';
+    return;
+  }
+  const e = data.entry;
+  document.getElementById('consEnergy').textContent = (e.total_energy || 0).toFixed(2);
+  document.getElementById('consValid').textContent = e.is_valid ? 'YES' : 'NO';
+  document.getElementById('consValid').className = 'stat-value ' + (e.is_valid ? 'green' : 'red');
+  document.getElementById('consViolations').textContent = e.violations || 0;
+  document.getElementById('consVerified').textContent = ts(e.verified_at);
+}
+
+// ── LOAD ATTACKER PROFILES ───────────────────────────────────────────────
+async function loadAttackers() {
+  const data = await apiFetch('/api/hive-defense/attackers/profiles');
+  if (!data) return;
+  document.getElementById('attackerCount').textContent = (data.profiles || []).length;
+  const panel = document.getElementById('attackerPanel');
+  if (!data.profiles || data.profiles.length === 0) {
+    panel.innerHTML = '<div class="empty">No known attacker profiles</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Profile</th><th>Sophistication</th><th>Timezone</th><th>First Seen</th></tr>';
+  data.profiles.forEach(p => {
+    html += `<tr><td class="mono">${p.id.substring(0,8)}...</td><td class="mono">${p.sophistication||'unknown'}</td><td>${p.timezone||'--'}</td><td class="mono dim">${ts(p.first_seen)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD FORENSIC LOG ────────────────────────────────────────────────────
+async function loadForensics() {
+  const data = await apiFetch('/api/hive-defense/forensics/recent?limit=30');
+  if (!data) return;
+  const panel = document.getElementById('forensicPanel');
+  if (!data.records || data.records.length === 0) {
+    panel.innerHTML = '<div class="empty">No forensic records</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Type</th><th>Source</th><th>Target</th><th>Hash</th><th>Time</th></tr>';
+  data.records.forEach(r => {
+    html += `<tr><td><span class="badge badge-purple">${r.event_type}</span></td><td class="mono">${(r.source||'--').substring(0,10)}</td><td class="mono">${(r.target||'--').substring(0,10)}</td><td class="mono dim">${r.chain_hash||'--'}</td><td class="mono dim">${ts(r.timestamp)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD INVERTED SPACES ─────────────────────────────────────────────────
+async function loadInverted() {
+  const data = await apiFetch('/api/hive-defense/helix/inverted-spaces');
+  if (!data) return;
+  const panel = document.getElementById('invertedPanel');
+  if (!data.spaces || data.spaces.length === 0) {
+    panel.innerHTML = '<div class="empty">No active inverted spaces</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>ID</th><th>Entry Gate</th><th>Interactions</th><th>Tripwires</th></tr>';
+  data.spaces.forEach(s => {
+    html += `<tr><td class="mono">${s.id.substring(0,8)}...</td><td class="mono">${s.entry_gate||'--'}</td><td>${s.interactions}</td><td><span class="badge badge-red">${s.tripwires}</span></td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD MIRROR NAMESPACES ───────────────────────────────────────────────
+async function loadNamespaces() {
+  const data = await apiFetch('/api/hive-defense/mirror/namespaces');
+  if (!data) return;
+  const panel = document.getElementById('namespacesPanel');
+  if (!data.namespaces || data.namespaces.length === 0) {
+    panel.innerHTML = '<div class="empty">No active mirror namespaces</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>Namespace</th><th>Details</th></tr>';
+  data.namespaces.forEach(ns => {
+    const label = typeof ns === 'string' ? ns : (ns.id || ns.namespace_id || JSON.stringify(ns));
+    html += `<tr><td class="mono">${String(label).substring(0,20)}</td><td class="dim">Active</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── LOAD DEFCON HISTORY ──────────────────────────────────────────────────
+async function loadDefconHistory() {
+  const data = await apiFetch('/api/hive-defense/defcon/history?limit=20');
+  if (!data) return;
+  const panel = document.getElementById('defconHistoryPanel');
+  if (!data.history || data.history.length === 0) {
+    panel.innerHTML = '<div class="empty">No DEFCON transitions recorded</div>';
+    return;
+  }
+  let html = '<table class="tbl"><tr><th>From</th><th>To</th><th>Reason</th><th>Timestamp</th></tr>';
+  data.history.forEach(h => {
+    html += `<tr><td class="mono">DEFCON ${h.from_level}</td><td class="mono"><strong>DEFCON ${h.to_level}</strong></td><td>${h.reason||'--'}</td><td class="mono dim">${ts(h.timestamp)}</td></tr>`;
+  });
+  html += '</table>';
+  panel.innerHTML = html;
+}
+
+// ── REFRESH ALL ──────────────────────────────────────────────────────────
+async function refreshAll() {
+  document.getElementById('lastUpdate').textContent = 'Refreshing...';
+  await Promise.all([
+    loadOverview(),
+    loadDefcon(),
+    loadMirror(),
+    loadGate(),
+    loadCuriosity(),
+    loadHeartbeat(),
+    loadDrift(),
+    loadContainment(),
+    loadQuarantine(),
+    loadGhosts(),
+    loadHelix(),
+    loadProjections(),
+    loadConservation(),
+    loadAttackers(),
+    loadForensics(),
+    loadInverted(),
+    loadNamespaces(),
+    loadDefconHistory(),
+  ]);
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────
+refreshAll();
+setInterval(refreshAll, 30000);
+</script>
+</body>
+</html>

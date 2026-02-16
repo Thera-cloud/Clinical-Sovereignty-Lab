@@ -268,7 +268,12 @@
     </div>
 
     <script>
-        var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+        var SERVER_URL = getWsUrl();
         var socket = null;
         var allUsers = [];
         var previewData = null;
@@ -278,14 +283,14 @@
 
         function connect() {
             var uname = sessionStorage.getItem("username");
-            var pwd = sessionStorage.getItem("password");
-            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            var token = sessionStorage.getItem("token");
+            if (!uname || !token) { window.location.href = "index.html"; return; }
             document.getElementById("connectionStatus").textContent = "Connecting...";
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
                 var profileStr = sessionStorage.getItem("profile");
                 var profile = profileStr ? JSON.parse(profileStr) : {};
-                socket.send(JSON.stringify({ type: "login_request", username: uname, password: pwd, expected_role: profile.role }));
+                socket.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             socket.onmessage = handleMessage;
             socket.onclose = function() { setStatus(false); setTimeout(connect, 3000); };
@@ -312,7 +317,7 @@
             var data = JSON.parse(event.data);
             console.log("Received:", data.type, data);
 
-            if (data.type === "login_success") {
+            if (data.type === "login_success" || data.type === "auth_success") {
                 setStatus(true);
                 socket.send(JSON.stringify({ type: "admin_get_users" }));
             }

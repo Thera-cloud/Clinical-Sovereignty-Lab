@@ -91,6 +91,7 @@
         <div class="sub-nav-item active">Live Monitor</div>
         <div class="sub-nav-item" onclick="location.href='the_eye_crisis.html'">Crisis</div>
         <div class="sub-nav-item" onclick="location.href='the_eye_community.html'">Community</div>
+        <div class="sub-nav-item" onclick="location.href='hive_defense.html'">Hive Defense</div>
     </nav>
     <main class="main-content">
         <div class="stats-row" id="stats-row">
@@ -114,7 +115,7 @@
     (function() {
         "use strict";
         var username = sessionStorage.getItem("username");
-        var password = sessionStorage.getItem("password");
+        var token = sessionStorage.getItem("token");
         var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
         if (!username) { window.location.href = "index.html"; return; }
         if (profile.role !== "ADMIN") { alert("Admin access required"); window.location.href = "command.html"; return; }
@@ -136,7 +137,7 @@
         function connect() {
             ws = new WebSocket(getWsUrl());
             ws.onopen = function() {
-                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+                ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             ws.onmessage = function(event) {
                 var data; try { data = JSON.parse(event.data); } catch(e) { return; }
@@ -168,6 +169,16 @@
                 }
             };
             ws.onclose = function() { authenticated = false; setTimeout(connect, 2000); };
+        }
+
+        function forceDisconnect(clientId) {
+            if (!confirm("Force disconnect " + clientId + "? Their session will be terminated immediately.")) return;
+            if (ws && authenticated) {
+                ws.send(JSON.stringify({ type: "admin_force_disconnect", client_id: clientId }));
+                alert("Disconnect command sent for " + clientId);
+            } else {
+                alert("Not connected to bridge. Cannot force disconnect.");
+            }
         }
 
         function renderSessions() {
@@ -211,7 +222,7 @@
                 if (ns.ventriloquism_detected) html += '<div class="session-alert escalation">\uD83D\uDDE3 Proxy speech detected</div>';
                 if (ns.reconsolidation_window_open) html += '<div class="session-alert cee">\uD83E\uDDE0 Reconsolidation window open</div>';
                 html += '</div>';
-                html += '<button class="disconnect-btn" onclick="alert(\'Force disconnect coming soon\')">Force Disconnect</button>';
+                html += '<button class="disconnect-btn" onclick="forceDisconnect(\'' + uid + '\')">Force Disconnect</button>';
                 html += '</div>';
             });
             document.getElementById("sessions").innerHTML = html;

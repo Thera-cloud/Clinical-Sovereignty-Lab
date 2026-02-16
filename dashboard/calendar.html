@@ -7,15 +7,15 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
-            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
-            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #C9A962; --gold-dim: rgba(201, 169, 98, 0.2);
+            --cyan: #4ECDC4; --cyan-dim: rgba(78, 205, 196, 0.1);
             --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
             --red: #FF3B3B;
             --orange: #FF9500;
             --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
         }
-        body { font-family: system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        body { font-family: system-ui, sans-serif; background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
         .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
         .logo { display: flex; align-items: center; gap: 12px; }
         .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
@@ -49,9 +49,35 @@
         .session-btn.secondary { background: var(--bg-dark); color: var(--text-secondary); border: 1px solid var(--border); }
         .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
         .empty-state .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
+
+        /* ── Loading Spinner ── */
+        .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Connection Status ── */
+        .ws-status { position: fixed; top: 8px; right: 8px; padding: 4px 10px; border-radius: 12px; font-size: 10px; z-index: 999; display: none; }
+        .ws-status.disconnected { display: block; background: rgba(255, 59, 59, 0.2); color: #FF3B3B; }
+        .ws-status.reconnecting { display: block; background: rgba(255, 149, 0, 0.2); color: #FF9500; }
+
+        /* ── Mobile Responsive ── */
+        @media (max-width: 768px) {
+            .main-layout { grid-template-columns: 1fr; height: auto; }
+            .calendar-grid { grid-template-columns: repeat(7, 1fr); }
+            .day-cell { aspect-ratio: auto; min-height: 48px; padding: 4px; font-size: 11px; }
+            .header { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
+            .calendar-card { padding: 12px; }
+            .session-card { padding: 12px; }
+        }
+        @media (max-width: 480px) {
+            .calendar-title { font-size: 16px; }
+            .day-cell { min-height: 36px; font-size: 10px; }
+            .header { padding: 8px; }
+            .logo-text { font-size: 14px; }
+        }
     </style>
 </head>
 <body>
+    <div id="wsStatus" class="ws-status"></div>
     <header class="header">
         <div class="logo">
             <div class="logo-icon">👑</div>
@@ -76,9 +102,9 @@
         <div class="sessions-panel">
             <div class="panel-title">📅 Today's Sessions</div>
             <div id="sessionsList">
-                <div class="empty-state">
-                    <div class="icon">📅</div>
-                    <div>No sessions scheduled</div>
+                <div class="empty-state" id="sessionsLoading">
+                    <div class="spinner" style="margin: 0 auto 12px;"></div>
+                    <div>Loading sessions...</div>
                 </div>
             </div>
         </div>
@@ -104,8 +130,8 @@
 
         function init() {
             var uname = sessionStorage.getItem("username");
-            var pwd = sessionStorage.getItem("password");
-            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            var token = sessionStorage.getItem("token");
+            if (!uname || !token) { window.location.href = "index.html"; return; }
             connect();
             renderCalendar();
         }
@@ -113,21 +139,26 @@
         function connect() {
             socket = new WebSocket(getWsUrl());
             socket.onopen = function() {
+                document.getElementById('wsStatus').className = 'ws-status';
                 var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
                 socket.send(JSON.stringify({
-                    type: "login_request",
-                    username: sessionStorage.getItem("username"),
-                    password: sessionStorage.getItem("password"),
-                    expected_role: profile.role || "COACH"
+                    type: "auth",
+                    token: sessionStorage.getItem("token"),
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
                 }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setTimeout(connect, 2000); };
+            socket.onclose = function() {
+                var el = document.getElementById('wsStatus');
+                el.className = 'ws-status reconnecting';
+                el.textContent = 'Reconnecting...';
+                setTimeout(connect, 2000);
+            };
         }
 
         function handleMessage(event) {
             var data = JSON.parse(event.data);
-            if (data.type === "login_success") {
+            if (data.type === "login_success" || data.type === "auth_success") {
                 requestCalendar();
                 socket.send(JSON.stringify({ type: "coach_get_clients" }));
             } else if (data.type === "coach_calendar_data") {
@@ -225,7 +256,7 @@
                 var st = statusClass(s.status);
 
                 html += '<div class="session-card">';
-                html += '<div class="session-time">' + (s.time || "TBD") + '</div>';
+                html += '<div class="session-time">' + (s.time || "Not scheduled") + '</div>';
                 html += '<div class="session-client">' + cname + '</div>';
                 html += '<span class="session-status ' + st + '">' + (s.status || "pending").toUpperCase() + '</span>';
                 html += '<div class="session-actions">';

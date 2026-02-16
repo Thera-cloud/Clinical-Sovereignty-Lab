@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from passlib.hash import pbkdf2_sha256
+import hashlib
 
 from app.config import settings
 
@@ -59,7 +59,10 @@ class TicketService:
             # Generate credentials
             username = self._email_to_username(prospect["email"])
             temp_password = password or secrets.token_urlsafe(12)
-            password_hash = pbkdf2_sha256.hash(temp_password)
+            # Hash password using same scheme as bridge_server.py (salt:hex PBKDF2-SHA256)
+            _salt = secrets.token_hex(16)
+            _hashed = hashlib.pbkdf2_hmac('sha256', temp_password.encode(), _salt.encode(), 100000)
+            password_hash = f"{_salt}:{_hashed.hex()}"
 
             # Determine tier
             tier = "TRIAL" if not late_redemption else "STANDARD"

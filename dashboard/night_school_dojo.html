@@ -1040,13 +1040,12 @@
                     return;
                 }
 
-                // Fallback: sessionStorage login
+                // Fallback: sessionStorage token auth
                 var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
                 socket.send(JSON.stringify({
-                    type: "login_request",
-                    username: sessionStorage.getItem("username"),
-                    password: sessionStorage.getItem("password"),
-                    expected_role: profile.role
+                    type: "auth",
+                    token: sessionStorage.getItem("token"),
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
                 }));
             };
             socket.onmessage = handleMessage;
@@ -1235,7 +1234,7 @@
                 var statusEl = document.getElementById("debateStatus");
                 var ruling = data.ruling || {};
                 statusEl.innerHTML = '<span style="color:#FFD700;">⚖️ RULING ISSUED</span><br>' +
-                    '<span style="color:#fff; font-size:11px;">Prevailing: ' + (ruling.prevailing_coach || 'TBD') + '</span><br>' +
+                    '<span style="color:#fff; font-size:11px;">Prevailing: ' + (ruling.prevailing_coach || 'Undecided') + '</span><br>' +
                     '<span style="color:#aaa; font-size:10px;">' + (ruling.reasoning || '') + '</span>';
                 // Update scores
                 var scores = data.scores || {};

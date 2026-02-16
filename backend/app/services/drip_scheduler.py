@@ -5,8 +5,9 @@ and Golden Ticket lifecycle management.
 """
 
 import json
+import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -29,6 +30,8 @@ try:
     TWILIO_AVAILABLE = True
 except ImportError:
     TWILIO_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 class DripScheduler:
@@ -118,8 +121,82 @@ class DripScheduler:
             replace_existing=True
         )
 
+        # Generate foresight alerts every 6 hours
+        self.scheduler.add_job(
+            self.run_foresight_engine,
+            IntervalTrigger(hours=6),
+            id="run_foresight_engine",
+            name="Generate foresight predictions and validate past alerts",
+            replace_existing=True
+        )
+
+        # Coherence pulse snapshot every 4 hours
+        self.scheduler.add_job(
+            self.run_coherence_pulse,
+            IntervalTrigger(hours=4),
+            id="run_coherence_pulse",
+            name="Generate coherence pulse snapshot and briefing",
+            replace_existing=True
+        )
+
+        # Dead-man switch check every 1 hour
+        self.scheduler.add_job(
+            self.check_deadman_switch,
+            IntervalTrigger(hours=1),
+            id="check_deadman_switch",
+            name="Dead-man switch: revert Fibres if no human heartbeat",
+            replace_existing=True
+        )
+
+        # Escalation timeout check every 2 hours
+        self.scheduler.add_job(
+            self.check_approval_escalations,
+            IntervalTrigger(hours=2),
+            id="check_approval_escalations",
+            name="Escalate unresponded proposals after timeout",
+            replace_existing=True
+        )
+
+        # Nate the Nudge — proactive notifications (gated by ENABLE_NATE_NUDGE)
+        if getattr(settings, "ENABLE_NATE_NUDGE", True):
+            nudge_interval = getattr(settings, "NUDGE_SCHEDULER_INTERVAL_MINUTES", 30)
+            self.scheduler.add_job(
+                self.run_nate_nudge,
+                IntervalTrigger(minutes=nudge_interval),
+                id="run_nate_nudge",
+                name="Generate proactive nudges (session prep, mood, milestones)",
+                replace_existing=True
+            )
+
+        # Deadman Switch — silence monitoring every 4 hours
+        self.scheduler.add_job(
+            self.run_deadman_switch,
+            IntervalTrigger(hours=4),
+            id="run_deadman_switch",
+            name="Check for silent clients (Deadman Switch)",
+            replace_existing=True
+        )
+
+        # Trial management — sweep every hour for expired trials + nudges
+        self.scheduler.add_job(
+            self.sweep_trial_expirations,
+            IntervalTrigger(hours=1),
+            id="sweep_trial_expirations",
+            name="Trial expiry sweep, grace period, conversion tracking",
+            replace_existing=True
+        )
+
+        # Trial phase transition — daily at 9 AM: notify users entering Week 2 reduced access
+        self.scheduler.add_job(
+            self.sweep_trial_phase_transitions,
+            CronTrigger(hour=9, minute=0),
+            id="sweep_trial_phase_transitions",
+            name="Notify trial users entering Week 2 (reduced AI access)",
+            replace_existing=True
+        )
+
         self.scheduler.start()
-        print(">>> [DRIP] Scheduler started with 6 jobs")
+        print(">>> [DRIP] Scheduler started with 14 jobs")
 
     def shutdown(self):
         """Gracefully shut down the scheduler."""
@@ -184,7 +261,9 @@ class DripScheduler:
                             )
 
                             if next_step:
-                                next_at = datetime.utcnow() + timedelta(hours=next_step["delay_hours"])
+                                next_at = datetime.now(timezone.utc) + timedelta(
+                                    hours=next_step["delay_hours"]
+                                )
                                 await conn.execute(
                                     """UPDATE prospects
                                        SET current_step = current_step + 1,
@@ -222,7 +301,9 @@ class DripScheduler:
         try:
             async with self.db_pool.acquire() as conn:
                 # Find emails not opened within the fallback window
-                threshold = datetime.utcnow() - timedelta(hours=settings.DRIP_SMS_FALLBACK_DELAY_HOURS)
+                threshold = datetime.now(timezone.utc) - timedelta(
+                    hours=settings.DRIP_SMS_FALLBACK_DELAY_HOURS
+                )
 
                 unread = await conn.fetch(
                     """SELECT dl.*, p.phone, p.first_name, p.sms_opt_out,
@@ -269,7 +350,7 @@ class DripScheduler:
         """Send reminders for unredeemed Golden Tickets (Day 3 and Day 6)."""
         try:
             async with self.db_pool.acquire() as conn:
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc)
 
                 # Day 3 reminders
                 if settings.GOLDEN_TICKET_REMINDER_DAY_3:
@@ -349,7 +430,7 @@ class DripScheduler:
         """Aggregate daily campaign analytics."""
         try:
             async with self.db_pool.acquire() as conn:
-                today = datetime.utcnow().date()
+                today = datetime.now(timezone.utc).date()
 
                 campaigns = await conn.fetch(
                     "SELECT id FROM campaigns WHERE status IN ('active', 'paused')"
@@ -569,6 +650,442 @@ class DripScheduler:
             )
         except Exception as e:
             print(f">>> [DRIP] Ticket reminder email error for {prospect['email']}: {e}")
+
+    # =========================================================================
+    # JOB: Foresight Engine
+    # =========================================================================
+
+    async def run_foresight_engine(self):
+        """Generate foresight predictions and validate past alerts."""
+        try:
+            from app.services.foresight_engine import ForesightEngine
+            engine = ForesightEngine(db_pool=self.db_pool)
+            alerts = await engine.generate_alerts()
+            if alerts:
+                print(f">>> [DRIP] Foresight: generated {len(alerts)} alert(s)")
+            validated = await engine.validate_past_predictions()
+            if validated:
+                print(f">>> [DRIP] Foresight: validated {validated} past prediction(s)")
+        except Exception as e:
+            print(f">>> [DRIP] run_foresight_engine error: {e}")
+
+    # =========================================================================
+    # JOB: Coherence Pulse Snapshot
+    # =========================================================================
+
+    async def run_coherence_pulse(self):
+        """Generate coherence pulse snapshot and store briefing."""
+        try:
+            from app.services.coherence_engine import CoherenceEngine
+            from app.services.strategic_memory import StrategicMemoryService
+            engine = CoherenceEngine(db_pool=self.db_pool)
+
+            # Generate pulse snapshot (measures all 5 layers)
+            await engine.generate_pulse_snapshot()
+
+            # Generate and store briefing in Strategic Memory Layer 4
+            briefing = await engine.generate_briefing()
+            if briefing:
+                memory = StrategicMemoryService(self.db_pool)
+                await memory.store_coherence_briefing(briefing)
+                print(">>> [DRIP] Coherence briefing stored in strategic memory")
+        except Exception as e:
+            print(f">>> [DRIP] run_coherence_pulse error: {e}")
+
+    # =========================================================================
+    # JOB: Dead-Man Switch
+    # =========================================================================
+
+    async def check_deadman_switch(self):
+        """Check if human heartbeat is overdue; revert Fibres if triggered."""
+        try:
+            from app.services.approval_protocol import ApprovalProtocolService
+            approval = ApprovalProtocolService(db_pool=self.db_pool)
+            # Pass fibre_manager if available via app state
+            fibre_manager = None
+            try:
+                import asyncio
+                app = getattr(asyncio.get_event_loop(), '_app', None)
+                if app and hasattr(app, 'state'):
+                    fibre_manager = getattr(app.state, 'fibre_manager', None)
+            except Exception as e:
+                logger.debug("Get fibre_manager from app state: %s", e)
+            result = await approval.check_deadman_switch(fibre_manager=fibre_manager)
+            if result.get("triggered"):
+                print(f">>> [DRIP] Dead-man switch activated! "
+                      f"Reverted {result.get('fibres_reverted', 0)} Fibres")
+        except Exception as e:
+            print(f">>> [DRIP] check_deadman_switch error: {e}")
+
+    # =========================================================================
+    # JOB: Approval Escalation
+    # =========================================================================
+
+    async def check_approval_escalations(self):
+        """Escalate proposals that have been pending too long without response."""
+        try:
+            from app.services.approval_protocol import ApprovalProtocolService
+            approval = ApprovalProtocolService(db_pool=self.db_pool)
+            escalated = await approval.check_escalation_timeouts()
+            if escalated:
+                print(f">>> [DRIP] Escalated {len(escalated)} overdue proposals")
+        except Exception as e:
+            print(f">>> [DRIP] check_approval_escalations error: {e}")
+
+    # =========================================================================
+    # JOB: Nate the Nudge — Proactive Notifications
+    # =========================================================================
+
+    async def run_nate_nudge(self):
+        """Generate all proactive nudges (session prep, mood, milestones)."""
+        try:
+            from app.services.nate_nudge import NateNudgeService
+            nudge_service = NateNudgeService(self.db_pool)
+            results = await nudge_service.run_all_nudge_checks()
+            total = sum(results.values())
+            if total:
+                print(f">>> [DRIP] Nate Nudge: generated {total} nudge(s)")
+        except Exception as e:
+            print(f">>> [DRIP] run_nate_nudge error: {e}")
+
+    # =========================================================================
+    # JOB: Deadman Switch — Silence Monitoring
+    # =========================================================================
+
+    async def run_deadman_switch(self):
+        """Check for silent clients and fire alerts."""
+        try:
+            from app.services.deadman_switch import DeadmanSwitchService
+            switch = DeadmanSwitchService(self.db_pool)
+            result = await switch.check_all_clients()
+            if result["alerts_generated"]:
+                print(f">>> [DRIP] Deadman Switch: {result['alerts_generated']} alert(s) "
+                      f"from {result['clients_checked']} clients checked")
+        except Exception as e:
+            print(f">>> [DRIP] run_deadman_switch error: {e}")
+
+    # =========================================================================
+    # JOB: Trial Expiration Sweep
+    # =========================================================================
+
+    async def sweep_trial_expirations(self):
+        """
+        Hourly sweep for trial management:
+        1. Pre-expiry nudges at 3 days and 1 day remaining
+        2. Trial expiry: set status to TRIAL_EXPIRED, zero tokens
+        3. Grace period: 3 days after expiry before full downgrade
+        4. Conversion tracking: log trial-to-paid transitions
+        """
+        from pathlib import Path as _Path
+
+        data_dir = _Path(getattr(settings, "DATA_DIR", "/app/data"))
+        registry_path = data_dir / "user_registry.json"
+
+        if not registry_path.exists():
+            return
+
+        try:
+            with open(registry_path, "r") as f:
+                registry = json.load(f)
+        except Exception as e:
+            logger.error("Trial sweep: failed to load registry: %s", e)
+            return
+
+        now = datetime.now(timezone.utc)
+        modified = False
+        nudges_sent = 0
+        expirations = 0
+        grace_downgrades = 0
+        conversions_logged = 0
+
+        for key, entry in registry.items():
+            profile = entry.get("profile", {})
+            plan = (profile.get("subscription_plan") or "").upper()
+            status = (profile.get("subscription_status") or "").upper()
+
+            # Only process trial users
+            if plan not in ("TRIAL", "THRESHOLD", "") or status in ("TRIAL_EXPIRED", "EXPIRED", "GRACE_EXPIRED"):
+                # Check for conversion tracking: user was trial and is now paid
+                if status == "ACTIVE" and profile.get("_trial_converted") is None:
+                    if plan in ("STANDARD", "INNER_CHAMBER", "TOP_TIER", "SOVEREIGN_CIRCLE"):
+                        trial_start = profile.get("trial_start_date") or profile.get("created_at")
+                        if trial_start:
+                            profile["_trial_converted"] = str(now)
+                            profile["_trial_conversion_source"] = plan
+                            modified = True
+                            conversions_logged += 1
+                            logger.info("Trial conversion: user %s -> %s", key, plan)
+                continue
+
+            # Determine trial end date
+            trial_start_str = profile.get("trial_start_date") or profile.get("created_at")
+            if not trial_start_str:
+                continue
+
+            try:
+                trial_start = datetime.fromisoformat(str(trial_start_str).replace("Z", "+00:00").replace("+00:00", ""))
+            except (ValueError, TypeError):
+                continue
+
+            trial_days = 14  # Default from PLAN_DETAILS
+            trial_end = trial_start + timedelta(days=trial_days)
+            days_remaining = (trial_end - now).total_seconds() / 86400
+
+            # --- Pre-expiry nudges (3 days and 1 day) ---
+            if 0.5 < days_remaining <= 3.5 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):
+                nudge_key = f"_trial_nudge_{'3d' if days_remaining > 1.5 else '1d'}"
+                if not profile.get(nudge_key):
+                    # Send Nate Nudge
+                    try:
+                        from app.services.nate_nudge import NateNudgeService
+                        nudge_svc = NateNudgeService(self.db_pool)
+                        days_label = "3 days" if days_remaining > 1.5 else "1 day"
+                        user_name = profile.get("name") or profile.get("display_name") or "there"
+
+                        async with self.db_pool.acquire() as conn:
+                            await conn.execute(
+                                """
+                                INSERT INTO nate_nudges
+                                    (user_id, nudge_type, title, content, metadata, scheduled_at)
+                                VALUES ($1, 'trial_expiry', $2, $3, $4, NOW())
+                                ON CONFLICT DO NOTHING
+                                """,
+                                profile.get("hardware_id", key),
+                                f"Your trial ends in {days_label}",
+                                f"Hey {user_name}, you have {days_label} left in your Threshold trial. "
+                                f"Upgrade to Inner Chamber ($49/mo) or Sovereign Circle ($149/mo) "
+                                f"to keep your progress and unlock full features.",
+                                json.dumps({"days_remaining": round(days_remaining, 1), "nudge_type": nudge_key}),
+                            )
+                        profile[nudge_key] = str(now)
+                        modified = True
+                        nudges_sent += 1
+                    except Exception as e:
+                        logger.warning("Trial nudge failed for %s: %s", key, e)
+
+                    # Also send email notification
+                    try:
+                        from app.services.notifications_service import EmailService
+                        email_svc = EmailService()
+                        user_email = profile.get("email")
+                        user_name = profile.get("name") or "Friend"
+                        if user_email:
+                            await email_svc.send_trial_expiring(
+                                user_email, user_name,
+                                sessions=profile.get("session_count", 0),
+                                coherence_change=profile.get("coherence_delta", "+0%"),
+                                insights=profile.get("session_count", 0) * 3,
+                            )
+                    except Exception as e:
+                        logger.warning("Trial expiry email failed for %s: %s", key, e)
+
+            # --- Trial expired ---
+            elif days_remaining <= 0 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):
+                profile["subscription_status"] = "TRIAL_EXPIRED"
+                profile["trial_expired_at"] = str(now)
+                profile["token_balance"] = 0
+                profile["_grace_period_end"] = str(now + timedelta(days=3))
+                modified = True
+                expirations += 1
+
+                # Send trial expired email
+                try:
+                    from app.services.notifications_service import EmailService
+                    email_svc = EmailService()
+                    user_email = profile.get("email")
+                    user_name = profile.get("name") or "Friend"
+                    if user_email:
+                        await email_svc.send_trial_expired(user_email, user_name)
+                except Exception as e:
+                    logger.warning("Trial expired email failed for %s: %s", key, e)
+
+            # --- Grace period ended (3 days after expiry) ---
+            elif status == "TRIAL_EXPIRED":
+                grace_end_str = profile.get("_grace_period_end")
+                if grace_end_str:
+                    try:
+                        grace_end = datetime.fromisoformat(str(grace_end_str))
+                        if now > grace_end:
+                            profile["subscription_status"] = "GRACE_EXPIRED"
+                            profile["subscription_plan"] = "EXPIRED"
+                            profile["token_balance"] = 0
+                            modified = True
+                            grace_downgrades += 1
+                    except (ValueError, TypeError):
+                        pass
+
+        # Save registry if modified
+        if modified:
+            try:
+                with open(registry_path, "w") as f:
+                    json.dump(registry, f, indent=2, default=str)
+            except Exception as e:
+                logger.error("Trial sweep: failed to save registry: %s", e)
+
+        if nudges_sent or expirations or grace_downgrades or conversions_logged:
+            print(
+                f">>> [DRIP] Trial sweep: "
+                f"{nudges_sent} nudge(s), {expirations} expiration(s), "
+                f"{grace_downgrades} grace downgrade(s), {conversions_logged} conversion(s)"
+            )
+
+    async def sweep_trial_phase_transitions(self):
+        """
+        Daily sweep for users transitioning from Week 1 to Week 2 of trial.
+        - Users with subscription_status = 'TRIAL_ACTIVE' and trial_start_date exactly 7 days ago
+        - Send 'reduced access' notification explaining Week 2 limits
+        - Include coherence upgrade prompt encouraging upgrade to Inner Chamber
+
+        Primary: check users table (source of truth when USE_POSTGRES_REGISTRY=true).
+        Fallback: also check user_registry.json for backward compatibility.
+        """
+        from pathlib import Path as _Path
+
+        if not self.db_pool:
+            return
+
+        data_dir = _Path(getattr(settings, "DATA_DIR", "/app/data"))
+        registry_path = data_dir / "user_registry.json"
+
+        # Primary: check users table (source of truth)
+        # Fallback: user_registry.json for backward compatibility
+        registry = {}
+        file_loaded_keys = set()
+        if registry_path.exists():
+            try:
+                with open(registry_path, "r") as f:
+                    registry = json.load(f)
+                file_loaded_keys = set(registry.keys())
+            except Exception as e:
+                logger.error("Trial phase sweep: failed to load registry: %s", e)
+
+        # Supplement from PostgreSQL: trial users not yet phase2-notified
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        """SELECT id, username, email, name, created_at
+                           FROM users WHERE tier IN ('TRIAL', 'THRESHOLD')
+                             AND subscription_status = 'TRIAL_ACTIVE'
+                             AND created_at <= NOW() - INTERVAL '7 days'
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM nate_nudges
+                                 WHERE user_id = users.id AND nudge_type = 'trial_phase2'
+                             )"""
+                    )
+                    for row in rows:
+                        uid = str(row["id"])
+                        if uid not in registry:
+                            registry[uid] = {
+                                "profile": {
+                                    "hardware_id": uid,
+                                    "subscription_plan": "TRIAL",
+                                    "subscription_status": "TRIAL_ACTIVE",
+                                    "trial_start_date": (
+                                        row["created_at"].isoformat()
+                                        if row["created_at"]
+                                        else None
+                                    ),
+                                    "created_at": (
+                                        row["created_at"].isoformat()
+                                        if row["created_at"]
+                                        else None
+                                    ),
+                                    "name": row.get("name"),
+                                    "email": row.get("email") or row.get("username"),
+                                }
+                            }
+            except Exception as e:
+                logger.warning("Trial phase sweep: DB fallback failed: %s", e)
+
+        if not registry:
+            return
+
+        now = datetime.now(timezone.utc)
+        modified = False
+        notifications_sent = 0
+
+        for key, entry in registry.items():
+            profile = entry.get("profile", {})
+            status = (profile.get("subscription_status") or "").upper()
+            plan = (profile.get("subscription_plan") or "").upper()
+
+            if plan not in ("TRIAL", "THRESHOLD", "") or status != "TRIAL_ACTIVE":
+                continue
+
+            if profile.get("_trial_phase2_notified"):
+                continue
+
+            trial_start_str = profile.get("trial_start_date") or profile.get("created_at")
+            if not trial_start_str:
+                continue
+
+            try:
+                trial_start = datetime.fromisoformat(str(trial_start_str).replace("Z", "+00:00").replace("+00:00", ""))
+            except (ValueError, TypeError):
+                continue
+
+            days_since_start = (now - trial_start).days
+            # Use >= 7 so users are caught even if job runs late (day 8, 9, etc.)
+            if days_since_start < 7 or profile.get("_trial_phase2_notified"):
+                continue
+
+            user_name = profile.get("name") or profile.get("display_name") or "there"
+            hardware_id = profile.get("hardware_id", key)
+
+            coherence_prompt = (
+                "Upgrade to Inner Chamber ($49/mo) to keep full AI access, unlock Family Sanctuary, "
+                "and continue your emotional coherence journey without limits."
+            )
+
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO nate_nudges
+                            (user_id, nudge_type, title, content, metadata, scheduled_at)
+                        VALUES ($1, 'trial_phase2', $2, $3, $4, NOW())
+                        ON CONFLICT DO NOTHING
+                        """,
+                        hardware_id,
+                        "Week 2 of your trial — reduced AI access",
+                        (
+                            f"Hey {user_name}, you're entering Week 2 of your Threshold trial. "
+                            f"Your AI access is now limited to 30 minutes per day (down from full access). "
+                            f"{coherence_prompt}"
+                        ),
+                        json.dumps({"phase": "gated", "day": 8}),
+                    )
+                profile["_trial_phase2_notified"] = str(now)
+                # Only persist to registry file if entry came from file (not DB-only)
+                if key in file_loaded_keys:
+                    modified = True
+                notifications_sent += 1
+            except Exception as e:
+                logger.warning("Trial phase2 nudge failed for %s: %s", key, e)
+
+            try:
+                from app.services.notifications_service import EmailService
+                email_svc = EmailService()
+                user_email = profile.get("email")
+                if user_email:
+                    await email_svc.send_trial_phase2_reduced_access(
+                        user_email, user_name, coherence_prompt=coherence_prompt
+                    )
+            except Exception as e:
+                logger.warning("Trial phase2 email failed for %s: %s", key, e)
+
+        if modified and registry_path.exists():
+            try:
+                # Save only file-sourced entries (exclude DB-only synthetic entries)
+                to_save = {k: v for k, v in registry.items() if k in file_loaded_keys}
+                with open(registry_path, "w") as f:
+                    json.dump(to_save, f, indent=2, default=str)
+            except Exception as e:
+                logger.error("Trial phase sweep: failed to save registry: %s", e)
+
+        if notifications_sent:
+            print(f">>> [DRIP] Trial phase sweep: {notifications_sent} Week 2 notification(s) sent")
 
     @staticmethod
     def _normalize_phone(phone: str) -> str:

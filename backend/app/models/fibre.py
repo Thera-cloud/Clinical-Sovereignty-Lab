@@ -145,6 +145,9 @@ class Fibre(BaseModel):
     evolution_journal_ref: Optional[str] = None  # blob storage key
     wisdom_mesh_subscriptions: List[str] = Field(default_factory=list)
 
+    # Mirroring — interaction profiles (Phase 6D, migration 015)
+    interaction_profiles: Dict[str, Any] = Field(default_factory=dict)
+
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

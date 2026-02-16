@@ -5,17 +5,36 @@ Inter-Fibre communication system built on Redis Streams.
 Features:
     - Pub/Sub with topic-based and direct routing
     - Priority delivery (low/normal/high/critical)
-    - Convergence detection (cosine similarity on insight embeddings)
+    - Convergence detection — tiered similarity pipeline:
+        1. Azure OpenAI embeddings (highest accuracy, requires API key)
+        2. TF-IDF cosine similarity via sklearn (good offline fallback)
+        3. Jaccard word-overlap (fast, zero-dependency baseline)
     - Bandwidth management (relevance filtering, temporal batching)
     - Health metrics
 
+Theoretical Basis:
+    - Swarm Intelligence (Bonabeau, Dorigo & Theraulaz, 1999) — decentralized
+      self-organized systems achieving collective intelligence through local interactions.
+    - Stigmergy (Grassé, 1959) — indirect coordination through environmental
+      modification, here via shared message streams.
+    - Convergence Detection — identifies when independent Fibres reach similar
+      conclusions, signaling emergent collective insight.
+
+    References:
+        Bonabeau, E., Dorigo, M. & Theraulaz, G. (1999). Swarm Intelligence.
+            Oxford University Press.
+        Grassé, P.P. (1959). La reconstruction du nid et les coordinations
+            interindividuelles chez Bellicositermes natalensis.
+
 Phase 3C — Code Guidelines Section IX / XII.
+Embedding-based convergence detection implemented (Phase 5 upgrade).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Dict, List, Optional, Set
@@ -33,6 +52,30 @@ from app.models.mesh import (
 )
 from app.services.exceptions import MeshDeliveryException, MeshBandwidthException
 
+logger = logging.getLogger(__name__)
+
+# ── Similarity backend detection ──
+# We probe once at import time so the hot path never pays import cost.
+
+_SIMILARITY_BACKEND: str = "jaccard"  # default fallback
+
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
+    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine  # type: ignore
+    _SIMILARITY_BACKEND = "tfidf"
+except ImportError:
+    pass
+
+try:
+    import httpx  # type: ignore  # used for Azure OpenAI embedding calls
+    from app.config import settings as _app_settings
+    if _app_settings.AZURE_API_KEY and _app_settings.AZURE_OPENAI_ENDPOINT:
+        _SIMILARITY_BACKEND = "embeddings"
+except Exception:
+    pass
+
+logger.info("Wisdom Mesh similarity backend: %s", _SIMILARITY_BACKEND)
+
 
 class WisdomMeshService:
     """
@@ -45,12 +88,20 @@ class WisdomMeshService:
     # Redis stream names follow topic structure from code guidelines Section 6.2
     STREAM_PREFIX = "mesh:"
     DIRECT_PREFIX = "mesh:direct:"
-    CONVERGENCE_WINDOW_SECONDS = 300  # 5-minute window for convergence detection
-    MAX_MESSAGES_PER_MINUTE = 1000
 
-    def __init__(self, redis_client=None, db_pool=None):
+    # Sourced from centralized swarm config (overridable via SWARM_* env vars)
+    from app.swarm_config import swarm_settings as _cfg
+    CONVERGENCE_WINDOW_SECONDS = _cfg.MESH_CONVERGENCE_WINDOW_SECONDS
+    MAX_MESSAGES_PER_MINUTE = _cfg.MESH_MAX_MESSAGES_PER_MINUTE
+
+    # Default temporal batching window (seconds) for low-priority messages (§5.4)
+    DEFAULT_BATCH_WINDOW_SECONDS = _cfg.MESH_BATCH_WINDOW_SECONDS
+
+    def __init__(self, redis_client=None, db_pool=None, immunity_service=None,
+                 batch_window_seconds: float = None):
         self._redis = redis_client
         self.db_pool = db_pool
+        self._immunity_service = immunity_service
         self._subscriptions: Dict[UUID, Set[str]] = {}  # fibre_id -> set of topics
         self._message_log: List[MeshMessage] = []  # in-memory log (Redis is primary)
         self._convergence_buffer: List[Dict[str, Any]] = []
@@ -62,10 +113,19 @@ class WisdomMeshService:
             "start_time": datetime.utcnow(),
         }
 
+        # Temporal batching for low-priority messages (PhD Spec §5.3)
+        self._batch_window = batch_window_seconds if batch_window_seconds is not None else self.DEFAULT_BATCH_WINDOW_SECONDS
+        self._batch_queue: List[MeshMessage] = []
+        self._batch_task: Optional[asyncio.Task] = None
+        self._batch_lock = asyncio.Lock()
+
     # ── Connection ──
 
-    async def connect(self, redis_url: str = "redis://localhost:6379") -> None:
+    async def connect(self, redis_url: str = None) -> None:
         """Connect to Redis if not already connected."""
+        if redis_url is None:
+            import os
+            redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         if self._redis is None:
             try:
                 import redis.asyncio as aioredis
@@ -82,7 +142,30 @@ class WisdomMeshService:
         """
         Publish a message on the Wisdom Mesh.
         Routes by recipient_id (direct) or domain_tags (topic-based).
+        Sovereign Immunity guard checks sender identity and anomaly status.
+
+        Low-priority messages are held in a temporal batch queue and flushed
+        periodically (PhD Spec §5.4 — bandwidth management via temporal batching).
         """
+        # Sovereign Immunity gate
+        if self._immunity_service:
+            try:
+                allowed = await self._immunity_service.guard_message(message)
+                if not allowed:
+                    self._metrics["delivery_failures"] += 1
+                    return False
+            except Exception as e:
+                print(f">>> [WISDOM MESH] Immunity check error (allowing): {e}")
+
+        # ── Temporal batching for LOW-priority messages (§5.4) ──
+        if message.priority == MeshPriority.LOW and self._batch_window > 0:
+            return await self._enqueue_batch(message)
+
+        # ── Immediate publish for NORMAL / HIGH / CRITICAL ──
+        return await self._publish_immediate(message)
+
+    async def _publish_immediate(self, message: MeshMessage) -> bool:
+        """Publish a message immediately (non-batched path)."""
         try:
             self._metrics["messages_sent"] += 1
 
@@ -104,11 +187,12 @@ class WisdomMeshService:
             await self._publish_to_stream(stream_name, message)
             await self._log_message(message)
 
-            # Add to convergence buffer
+            # Add to convergence buffer with PII-redacted body
+            redacted_body = self._redact_for_convergence(message.body)
             self._convergence_buffer.append({
                 "message_id": str(message.message_id),
                 "sender_id": str(message.sender_id),
-                "body": message.body,
+                "body": redacted_body,
                 "domain_tags": message.domain_tags,
                 "timestamp": datetime.utcnow(),
             })
@@ -119,6 +203,71 @@ class WisdomMeshService:
             self._metrics["delivery_failures"] += 1
             print(f">>> [WISDOM MESH] Publish error: {e}")
             return False
+
+    # ── Temporal Batching (PhD Spec §5.4) ──
+
+    async def _enqueue_batch(self, message: MeshMessage) -> bool:
+        """
+        Add a low-priority message to the temporal batch queue.
+
+        Messages accumulate for up to ``_batch_window`` seconds and are then
+        flushed together. This prevents information overload from frequent
+        low-priority chatter (heartbeats, routine observations) while
+        preserving ordering and convergence buffer inclusion.
+        """
+        async with self._batch_lock:
+            self._batch_queue.append(message)
+            logger.debug(
+                "Batched low-priority message %s (queue depth: %d)",
+                message.message_id, len(self._batch_queue),
+            )
+            # Ensure the background flusher is running
+            if self._batch_task is None or self._batch_task.done():
+                self._batch_task = asyncio.create_task(self._batch_flush_loop())
+        return True
+
+    async def _batch_flush_loop(self) -> None:
+        """
+        Background coroutine that waits for the configured batch window
+        then flushes all accumulated low-priority messages at once.
+
+        The loop runs once per flush; a new task is spawned on the next
+        enqueue if needed, keeping CPU at zero when no low-priority traffic
+        is flowing.
+        """
+        try:
+            await asyncio.sleep(self._batch_window)
+            await self.flush_batch_queue()
+        except asyncio.CancelledError:
+            # Graceful shutdown — flush remaining messages immediately
+            await self.flush_batch_queue()
+        except Exception as e:
+            logger.error("Batch flush loop error: %s", e)
+
+    async def flush_batch_queue(self) -> int:
+        """
+        Flush all queued low-priority messages, publishing each immediately.
+
+        Returns the number of messages flushed.  Thread-safe via ``_batch_lock``.
+        """
+        async with self._batch_lock:
+            to_flush = list(self._batch_queue)
+            self._batch_queue.clear()
+
+        flushed = 0
+        for msg in to_flush:
+            ok = await self._publish_immediate(msg)
+            if ok:
+                flushed += 1
+            else:
+                logger.warning("Batch flush failed for message %s", msg.message_id)
+
+        if flushed:
+            logger.info(
+                "Flushed %d low-priority messages (batch window: %.1fs)",
+                flushed, self._batch_window,
+            )
+        return flushed
 
     async def _publish_to_stream(self, stream_name: str, message: MeshMessage) -> None:
         """Publish a message to a specific Redis stream."""
@@ -244,11 +393,13 @@ class WisdomMeshService:
 
     # ── Convergence Detection ──
 
-    async def detect_convergence(self, min_score: float = 0.75) -> List[ConvergenceAlert]:
+    async def detect_convergence(self, min_score: float = None) -> List[ConvergenceAlert]:
         """
         Detect when multiple Fibres independently reach similar conclusions.
         Uses cosine similarity on message body content with temporal correlation.
         """
+        if min_score is None:
+            min_score = self._cfg.MESH_CONVERGENCE_MIN_SCORE
         now = datetime.utcnow()
         window_start = now - timedelta(seconds=self.CONVERGENCE_WINDOW_SECONDS)
 
@@ -316,23 +467,128 @@ class WisdomMeshService:
 
         return alerts
 
+    # ── Similarity helpers (module-level backend selected at import) ──
+
+    @staticmethod
+    def _body_to_text(body: Any) -> str:
+        """Normalise a message body (dict or str) into a plain text string."""
+        if isinstance(body, dict):
+            return json.dumps(body, default=str)
+        return str(body)
+
+    @staticmethod
+    def _redact_for_convergence(body: Any) -> Any:
+        """Redact PII from message body before storing in convergence buffer.
+
+        Preserves semantic meaning (domain tags, topic keywords) while stripping
+        personally identifiable information that could leak therapy details.
+        """
+        import re
+        _PII_PATTERNS = [
+            (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL]'),
+            (re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'), '[PHONE]'),
+            (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), '[SSN]'),
+        ]
+        if isinstance(body, str):
+            text = body
+            for pattern, replacement in _PII_PATTERNS:
+                text = pattern.sub(replacement, text)
+            return text
+        elif isinstance(body, dict):
+            redacted = {}
+            for k, v in body.items():
+                if isinstance(v, str):
+                    text = v
+                    for pattern, replacement in _PII_PATTERNS:
+                        text = pattern.sub(replacement, text)
+                    redacted[k] = text
+                else:
+                    redacted[k] = v
+            return redacted
+        return body
+
     @staticmethod
     def _compute_similarity(body1: Any, body2: Any) -> float:
         """
-        Compute similarity between two message bodies.
-        Uses word overlap (Jaccard) as a fast heuristic.
-        Full cosine similarity with embeddings available in Phase 5.
+        Compute semantic similarity between two message bodies.
+
+        Tiered strategy (selected once at module import):
+            1. **Azure OpenAI embeddings** — highest quality; requires
+               AZURE_API_KEY and AZURE_OPENAI_ENDPOINT in env.
+            2. **TF-IDF cosine similarity** — good offline fallback using
+               sklearn (if installed).
+            3. **Jaccard word overlap** — zero-dependency baseline.
+
+        All tiers return a float in [0.0, 1.0].
         """
-        def to_words(body: Any) -> Set[str]:
-            text = json.dumps(body) if isinstance(body, dict) else str(body)
-            return set(text.lower().split())
+        text1 = WisdomMeshService._body_to_text(body1)
+        text2 = WisdomMeshService._body_to_text(body2)
 
-        w1 = to_words(body1)
-        w2 = to_words(body2)
-
-        if not w1 or not w2:
+        if not text1.strip() or not text2.strip():
             return 0.0
 
+        # ── Tier 1: Azure OpenAI Embeddings ──
+        if _SIMILARITY_BACKEND == "embeddings":
+            try:
+                return WisdomMeshService._embedding_similarity(text1, text2)
+            except Exception as exc:
+                logger.warning("Embedding similarity failed, falling back to TF-IDF: %s", exc)
+                # Fall through to TF-IDF / Jaccard
+
+        # ── Tier 2: TF-IDF Cosine Similarity ──
+        if _SIMILARITY_BACKEND in ("embeddings", "tfidf"):
+            try:
+                return WisdomMeshService._tfidf_similarity(text1, text2)
+            except Exception as exc:
+                logger.warning("TF-IDF similarity failed, falling back to Jaccard: %s", exc)
+
+        # ── Tier 3: Jaccard word overlap ──
+        return WisdomMeshService._jaccard_similarity(text1, text2)
+
+    @staticmethod
+    def _embedding_similarity(text1: str, text2: str) -> float:
+        """
+        Compute cosine similarity using Azure OpenAI text-embedding-3-small.
+        Uses a synchronous httpx call (the method is static / called from sync context).
+        """
+        endpoint = _app_settings.AZURE_OPENAI_ENDPOINT.rstrip("/")
+        # Use text-embedding-3-small — cost-effective and fast
+        url = f"{endpoint}/openai/deployments/text-embedding-3-small/embeddings?api-version=2024-06-01"
+        headers = {
+            "api-key": _app_settings.AZURE_API_KEY,
+            "Content-Type": "application/json",
+        }
+        payload = {"input": [text1, text2]}
+
+        resp = httpx.post(url, json=payload, headers=headers, timeout=10.0)
+        resp.raise_for_status()
+        data = resp.json()
+
+        emb1 = np.array(data["data"][0]["embedding"], dtype=np.float64)
+        emb2 = np.array(data["data"][1]["embedding"], dtype=np.float64)
+
+        # Cosine similarity
+        dot = np.dot(emb1, emb2)
+        norm = np.linalg.norm(emb1) * np.linalg.norm(emb2)
+        if norm == 0:
+            return 0.0
+        return float(np.clip(dot / norm, 0.0, 1.0))
+
+    @staticmethod
+    def _tfidf_similarity(text1: str, text2: str) -> float:
+        """Compute cosine similarity on TF-IDF vectors (sklearn)."""
+        vectorizer = TfidfVectorizer(stop_words="english")
+        tfidf_matrix = vectorizer.fit_transform([text1, text2])
+        sim_matrix = sklearn_cosine(tfidf_matrix[0:1], tfidf_matrix[1:2])
+        return float(np.clip(sim_matrix[0][0], 0.0, 1.0))
+
+    @staticmethod
+    def _jaccard_similarity(text1: str, text2: str) -> float:
+        """Jaccard word-overlap — zero-dependency baseline."""
+        w1 = set(text1.lower().split())
+        w2 = set(text2.lower().split())
+        if not w1 or not w2:
+            return 0.0
         intersection = len(w1 & w2)
         union = len(w1 | w2)
         return intersection / union if union > 0 else 0.0
@@ -371,10 +627,22 @@ class WisdomMeshService:
         pending = 0
         if self._redis:
             try:
-                info = await self._redis.info("streams")
-                # Count pending across all mesh streams
-            except Exception:
-                pass
+                # Scan mesh streams and sum pending entries across consumer groups
+                cursor = b"0"
+                while True:
+                    cursor, keys = await self._redis.scan(cursor, match=f"{self.STREAM_PREFIX}*", count=100)
+                    for key in keys:
+                        key_str = key if isinstance(key, str) else key.decode()
+                        try:
+                            groups = await self._redis.xinfo_groups(key_str)
+                            for g in groups:
+                                pending += g.get("pending", 0)
+                        except Exception:
+                            pass  # Stream may have no consumer groups
+                    if cursor == b"0" or cursor == 0:
+                        break
+            except Exception as e:
+                print(f">>> [WISDOM MESH] Pending count error: {e}")
 
         return MeshHealth(
             total_messages_24h=self._metrics["messages_sent"],
@@ -385,12 +653,24 @@ class WisdomMeshService:
             active_subscriptions=sum(len(topics) for topics in self._subscriptions.values()),
             pending_messages=pending,
             convergence_alerts_24h=self._metrics["convergence_alerts"],
+            batched_messages_pending=len(self._batch_queue),
         )
 
     # ── Lifecycle ──
 
     async def disconnect(self) -> None:
         """Close Redis connection and clean up resources."""
+        # Cancel batch flusher and flush remaining messages
+        if self._batch_task and not self._batch_task.done():
+            self._batch_task.cancel()
+            try:
+                await self._batch_task
+            except asyncio.CancelledError:
+                pass
+        # Final flush of any remaining batched messages before disconnect
+        if self._batch_queue:
+            await self.flush_batch_queue()
+
         if self._redis:
             try:
                 await self._redis.close()
@@ -400,6 +680,7 @@ class WisdomMeshService:
         self._subscriptions.clear()
         self._message_log.clear()
         self._convergence_buffer.clear()
+        self._batch_queue.clear()
 
     # ── Message Logging ──
 

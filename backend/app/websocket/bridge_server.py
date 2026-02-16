@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import re
 import websockets
 import json
@@ -8,10 +9,19 @@ import os
 import shutil
 import secrets
 import hashlib
+import hmac
 import uuid
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
+
+# Secure logging with PII auto-redaction
+try:
+    from app.secure_logger import get_secure_logger
+    secure_log = get_secure_logger("bridge_server.secure")
+except Exception:
+    import logging as _logging
+    secure_log = _logging.getLogger("bridge_server")
 
 # NOTE:
 # - In production, this module is executed as `python -m app.websocket.bridge_server`
@@ -120,8 +130,56 @@ except Exception:
 # PART 1: INFRASTRUCTURE & CONFIGURATION
 # ------------------------------------------------------------------------------
 HOST = "0.0.0.0"
-PORT = 8765
+PORT = int(os.environ.get("WEBSOCKET_PORT", "8765"))
 REQUIRED_CONSENT_VERSION = "v13.0_2026"
+
+# Database pool — created in main(), used by NateNudge + AI Mode handlers
+db_pool = None
+
+# Bridge context — holds vault_bridge for B5 chat-integrated file interactions
+class _BridgeContext:
+    vault_bridge = None
+bridge_context = _BridgeContext()
+
+# Phase 8: Hive Defense reference — injected from main.py via set_hive_defense()
+_hive_defense_ref = None
+
+def set_hive_defense(hive_dict):
+    """Called from main.py lifespan to share the Hive Defense services with the bridge."""
+    global _hive_defense_ref
+    _hive_defense_ref = hive_dict
+
+# Nate Organizer singleton — lazily created when first organize_* message arrives
+_organizer_mode_instance = None
+
+def _get_or_create_organizer(pool):
+    """Get or create the OrganizerMode singleton for document organization."""
+    global _organizer_mode_instance
+    if _organizer_mode_instance is None:
+        if pool is None:
+            raise RuntimeError("Database pool not available for Organizer")
+        _azure_ep = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        _azure_key = os.getenv("AZURE_API_KEY", "")
+        _azure_deploy = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
+        if not _azure_ep or not _azure_key:
+            raise RuntimeError("Azure OpenAI credentials not configured for Organizer")
+        try:
+            from .vault_bridge import VaultBridge  # noqa: F401 — validate vault is importable
+            from app.services.vault.document_organizer import OrganizerMode
+        except ImportError:
+            from app.services.vault.document_organizer import OrganizerMode
+        _organizer_mode_instance = OrganizerMode(
+            db_pool=pool,
+            azure_endpoint=f"https://{_azure_ep}" if not _azure_ep.startswith("http") else _azure_ep,
+            azure_api_key=_azure_key,
+            deployment=_azure_deploy,
+        )
+    return _organizer_mode_instance
+
+# PostgreSQL-backed user store (replaces JSON file registry)
+_pg_user_store = None        # UserStore instance, initialized in main()
+_registry_cache = {}         # In-memory cache of the full registry dict
+_use_pg_registry = os.environ.get("USE_POSTGRES_REGISTRY", "true").lower() in ("true", "1", "yes")
 
 # Load Environment Variables
 try:
@@ -298,9 +356,36 @@ SETTINGS (accessible via gear icon):
 If you don't know the answer, say so honestly and suggest contacting support@sovereignsanctuary.net."""
 
 # Azure OpenAI Helper Function
-async def call_azure_openai(prompt: str, system_message: str = "You are a helpful assistant.", max_tokens: int = 2000) -> str:
-    """Call Azure OpenAI Realtime API and return full response text"""
+async def call_azure_openai(prompt: str, system_message: str = "You are a helpful assistant.", max_tokens: int = 2000, session_id: str = "") -> str:
+    """Call Azure OpenAI Realtime API and return full response text.
+    
+    HIVE DEFENSE v4.3: Prompts are anonymized via AnonymizationProxy before
+    being sent to the AI API. Responses are de-anonymized before returning.
+    """
     import aiohttp
+
+    # ── HIVE DEFENSE v4.3: Anonymize prompt before sending to AI ──
+    _anon_proxy = None
+    _anon_mapping = None
+    try:
+        _hive = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
+        _hive_v4 = getattr(_hive, 'hive_v4', None) if _hive else None
+        if _hive_v4:
+            _anon_proxy = _hive_v4.get("anonymization_proxy")
+    except Exception:
+        pass
+
+    if _anon_proxy:
+        try:
+            _sid = session_id or "global"
+            anon_result = _anon_proxy.anonymize_for_ai(prompt, session_id=_sid, system_context=system_message)
+            prompt = anon_result["anonymized_prompt"]
+            system_message = anon_result["anonymized_context"] or system_message
+            _anon_mapping = anon_result["mapping"]
+            if anon_result["original_pii_count"] > 0:
+                print(f">>> [AnonymizationProxy] Stripped {anon_result['original_pii_count']} PII items from prompt")
+        except Exception as _anon_err:
+            print(f">>> [AnonymizationProxy] Non-blocking anonymization error: {_anon_err}")
     
     url = AZURE_ENDPOINT
     headers = {
@@ -348,7 +433,15 @@ async def call_azure_openai(prompt: str, system_message: str = "You are a helpfu
                             break
                         elif event_type == "error":
                             raise Exception(f"Azure error: {event}")
-                
+
+                # ── HIVE DEFENSE v4.3: De-anonymize response ──
+                if _anon_proxy and _anon_mapping:
+                    try:
+                        _sid = session_id or "global"
+                        full_response = _anon_proxy.deanonymize(full_response, session_id=_sid, mapping=_anon_mapping)
+                    except Exception as _deanon_err:
+                        print(f">>> [AnonymizationProxy] Non-blocking de-anonymization error: {_deanon_err}")
+
                 return full_response
                 
     except Exception as e:
@@ -381,7 +474,7 @@ async def _handle_tts_speak(client_ws, text: str, request_id: str = ""):
     import aiohttp
     import base64
     
-    print(f">>> [TTS] Starting tts_speak for: '{text[:60]}...'")
+    print(f">>> [TTS] Starting tts_speak ({len(text)} chars)")
     
     # ── Attempt 1: GPT-4o-Mini-TTS REST API (cheap, fast) ──
     try:
@@ -507,7 +600,7 @@ async def _handle_tts_speak(client_ws, text: str, request_id: str = ""):
             await client_ws.send(json.dumps({
                 "type": "tts_done",
                 "request_id": request_id,
-                "error": str(e)
+                "error": "TTS_PROCESSING_FAILED"
             }))
         except Exception:
             pass
@@ -825,7 +918,76 @@ COACH_LEARNING_QUEUE_MAX_ITEMS = _int_env("COACH_LEARNING_QUEUE_MAX_ITEMS", 2000
 COACH_LEARNING_ARCHIVE_MAX_ITEMS = _int_env("COACH_LEARNING_ARCHIVE_MAX_ITEMS", 20000)
 COACH_LIVE_SESSIONS_MAX_ENDED = _int_env("COACH_LIVE_SESSIONS_MAX_ENDED", 500)
 
-ACTIVE_TOKENS = {}
+ACTIVE_TOKENS = {}  # {token: {"profile": profile, "expires": datetime}}
+# NOTE: Global state dicts (ACTIVE_TOKENS, connected_coaches, connected_clients)
+# are mutated from a single asyncio event loop, so no explicit lock is needed
+# for asyncio (single-threaded). File I/O uses fcntl.flock for safety.
+TOKEN_TTL_HOURS = 24
+
+# Per-IP connection limiting
+_connections_per_ip: dict = {}  # ip -> count
+MAX_CONNECTIONS_PER_IP = 20
+
+# Per-connection message rate limiting
+MSG_RATE_LIMIT_WINDOW = 60  # 1 minute
+MSG_RATE_LIMIT_MAX = 120    # max messages per minute
+AI_RATE_LIMIT_MAX = 15      # max AI queries per minute
+
+
+class ConnectionRateLimiter:
+    """Per-connection rate limiter for WebSocket messages."""
+
+    def __init__(self):
+        self.general_timestamps = []
+        self.ai_timestamps = []
+
+    def check_general(self) -> bool:
+        """Check if general message rate is exceeded. Returns True if allowed."""
+        now = datetime.datetime.now()
+        cutoff = now - datetime.timedelta(seconds=MSG_RATE_LIMIT_WINDOW)
+        self.general_timestamps = [t for t in self.general_timestamps if t > cutoff]
+        if len(self.general_timestamps) >= MSG_RATE_LIMIT_MAX:
+            return False
+        self.general_timestamps.append(now)
+        return True
+
+    def check_ai(self) -> bool:
+        """Check if AI query rate is exceeded. Returns True if allowed."""
+        now = datetime.datetime.now()
+        cutoff = now - datetime.timedelta(seconds=MSG_RATE_LIMIT_WINDOW)
+        self.ai_timestamps = [t for t in self.ai_timestamps if t > cutoff]
+        if len(self.ai_timestamps) >= AI_RATE_LIMIT_MAX:
+            return False
+        self.ai_timestamps.append(now)
+        return True
+
+
+def _store_token(token: str, profile: dict):
+    """Store a token with expiry."""
+    ACTIVE_TOKENS[token] = {
+        "profile": profile,
+        "expires": datetime.datetime.now() + datetime.timedelta(hours=TOKEN_TTL_HOURS)
+    }
+    # Prune expired tokens (keep dict manageable)
+    _prune_expired_tokens()
+
+def _get_token_profile(token: str):
+    """Get profile for token if valid and not expired."""
+    entry = ACTIVE_TOKENS.get(token)
+    if not entry:
+        return None
+    if datetime.datetime.now() > entry["expires"]:
+        del ACTIVE_TOKENS[token]
+        return None
+    return entry["profile"]
+
+def _prune_expired_tokens():
+    """Remove expired tokens. Called on each new token store."""
+    now = datetime.datetime.now()
+    expired = [t for t, e in ACTIVE_TOKENS.items() if now > e["expires"]]
+    for t in expired:
+        del ACTIVE_TOKENS[t]
+
 LIVE_SESSION_TRACKER = {}
 ACTIVE_WEBSOCKETS = {}
 
@@ -873,6 +1035,40 @@ connected_coaches: Dict[str, Any] = {}
 # Global dict to track connected clients (CLIENT role) for real-time stats
 connected_clients: Dict[str, Any] = {}
 
+
+async def _ws_stale_cleanup_loop():
+    """Periodic sweep to remove stale WebSocket entries from connection dicts.
+
+    Runs every 60 seconds. Checks if each stored websocket is still open;
+    removes entries whose underlying transport has closed.
+    """
+    while True:
+        await asyncio.sleep(60)
+        for label, conn_dict in [("coach", connected_coaches), ("client", connected_clients)]:
+            stale_ids = []
+            for uid, ws in list(conn_dict.items()):
+                try:
+                    if ws.closed:
+                        stale_ids.append(uid)
+                except Exception:
+                    stale_ids.append(uid)
+            for uid in stale_ids:
+                conn_dict.pop(uid, None)
+            if stale_ids:
+                print(f"[Heartbeat] Removed {len(stale_ids)} stale {label} connection(s)")
+
+
+def _replace_connection(uid: str, new_ws, conn_dict: Dict[str, Any]):
+    """Register a new websocket, closing the old one if it exists and is stale."""
+    old_ws = conn_dict.get(uid)
+    if old_ws is not None and old_ws is not new_ws:
+        try:
+            if not old_ws.closed:
+                asyncio.create_task(old_ws.close(1000, "Replaced by new connection"))
+        except Exception:
+            pass
+    conn_dict[uid] = new_ws
+
 async def send_coach_notification(coach_id: str, message_type: str, data: Dict):
     """
     Send a WebSocket notification to a connected coach.
@@ -908,33 +1104,43 @@ def hash_password(password: str) -> str:
     return f"{salt}:{hashed.hex()}"
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored hash"""
+    """Verify password against stored hash. No plaintext fallback."""
     try:
         salt, hash_hex = stored_hash.split(':')
         hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-        return hashed.hex() == hash_hex
-    except:
-        # Fallback for plain text passwords (legacy)
-        return password == stored_hash
+        return hmac.compare_digest(hashed.hex(), hash_hex)
+    except (ValueError, AttributeError):
+        # Hash format invalid — reject. Never compare plaintext.
+        return False
 
 def generate_session_id() -> str:
     """Generate unique session ID"""
     return f"SES_{datetime.datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(6).upper()}"
 
 def load_json_file(filepath: Path, default: Any = None) -> Any:
-    """Safely load JSON file"""
+    """Safely load JSON file. Tightens permissions on sensitive files if needed."""
     if default is None:
         default = {}
     if not filepath.exists():
         return default
     try:
+        # Harden file permissions on sensitive files at load time
+        if filepath.name in ("user_registry.json", "sessions.json"):
+            try:
+                current_mode = filepath.stat().st_mode & 0o777
+                if current_mode != 0o600:
+                    filepath.chmod(0o600)
+            except Exception:
+                pass
         with open(filepath, 'r') as f:
             return json.load(f)
-    except:
+    except Exception:
         return default
 
+_SENSITIVE_FILES = {"user_registry.json", "sessions.json"}
+
 def save_json_file(filepath: Path, data: Any) -> bool:
-    """Safely save JSON file with backup"""
+    """Safely save JSON file with backup. Restricts permissions on sensitive files."""
     try:
         # Ensure parent directory exists (important in Docker/bind-mount setups)
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -943,6 +1149,12 @@ def save_json_file(filepath: Path, data: Any) -> bool:
             os.rename(filepath, backup)
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2, default=str)
+        # Restrict permissions on sensitive files (owner read/write only)
+        if filepath.name in _SENSITIVE_FILES:
+            try:
+                filepath.chmod(0o600)
+            except Exception:
+                pass
         return True
     except Exception as e:
         print(f">>> [ERROR] Failed to save {filepath}: {e}")
@@ -953,10 +1165,21 @@ def ensure_json_file(filepath: Path, default: Any) -> None:
     """Ensure a JSON file exists on disk (do not overwrite if present)."""
     try:
         if filepath.exists():
+            # Harden permissions on sensitive files
+            if filepath.name in _SENSITIVE_FILES:
+                try:
+                    filepath.chmod(0o600)
+                except Exception:
+                    pass
             return
         filepath.parent.mkdir(parents=True, exist_ok=True)
         with open(filepath, "w") as f:
             json.dump(default, f, indent=2, default=str)
+        if filepath.name in _SENSITIVE_FILES:
+            try:
+                filepath.chmod(0o600)
+            except Exception:
+                pass
     except Exception as e:
         print(f">>> [WARN] Failed to ensure {filepath}: {e}")
 
@@ -1070,7 +1293,20 @@ def compact_live_store(live_store: Any) -> Dict[str, Any]:
 # PART 3: DATABASE & AUTHENTICATION
 # ------------------------------------------------------------------------------
 def load_registry() -> dict:
-    # Merge backend registry (read-only) with bridge registry (read-write) so all users can login consistently.
+    """
+    Load the user registry.
+    
+    When USE_POSTGRES_REGISTRY is enabled and the PG-backed UserStore is ready,
+    returns the in-memory cache (fast, no I/O). Otherwise falls back to
+    merging JSON files from disk (legacy behavior).
+    
+    The 162+ call sites throughout bridge_server.py call this function unchanged.
+    """
+    global _registry_cache
+    if _use_pg_registry and _pg_user_store and _pg_user_store.is_ready:
+        return _registry_cache
+
+    # Fallback: JSON file merge (legacy behavior)
     local = load_json_file(REGISTRY_FILE, {}) or {}
     if not isinstance(local, dict):
         local = {}
@@ -1081,20 +1317,66 @@ def load_registry() -> dict:
         return local
     if not local:
         return backend
-    # Merge: keep local values when keys collide, but include missing backend users.
     merged = dict(backend)
     merged.update(local)
     return merged
 
 def save_registry(new_data: dict) -> bool:
-    return save_json_file(REGISTRY_FILE, new_data)
+    """
+    Save the user registry.
+    
+    When USE_POSTGRES_REGISTRY is enabled, updates the in-memory cache and
+    schedules an async write to PostgreSQL. Always writes JSON as a backup.
+    Uses file locking to prevent concurrent write corruption.
+    """
+    global _registry_cache
+    if _use_pg_registry and _pg_user_store and _pg_user_store.is_ready:
+        _registry_cache = new_data
+        _pg_user_store.schedule_sync(new_data)
+    # L6: Backup before save (timestamped backup for rotation)
+    path = REGISTRY_FILE
+    if path.exists():
+        try:
+            backup_dir = path.parent / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(path, backup_dir / f"user_registry_{ts}.json.bak")
+            backups = sorted(backup_dir.glob("user_registry_*.json.bak"), key=lambda p: p.stat().st_mtime)
+            for old in backups[:-5]:
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f">>> [REGISTRY] Backup failed (non-fatal): {e}")
+    # Write JSON as backup (dual-write for safety) with file locking
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(new_data, f, indent=2, default=str)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        # L5: Restrict permissions to owner read/write
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f">>> [ERROR] Failed to save registry: {e}")
+        return False
 
 
 def sync_registry_from_backend() -> None:
     """
     Best-effort: if backend registry exists (prod), merge its users into the bridge registry file.
     This keeps client/coach/admin UX uniform across services even when data dirs are separate.
+    Skipped when PostgreSQL registry is active (PG is the single source of truth).
     """
+    if _use_pg_registry:
+        return  # PG is the source of truth; no JSON sync needed at startup
     try:
         backend = load_json_file(BACKEND_REGISTRY_FILE, {}) or {}
         if not isinstance(backend, dict) or not backend:
@@ -1104,7 +1386,6 @@ def sync_registry_from_backend() -> None:
             local = {}
         merged = dict(backend)
         merged.update(local)
-        # Only write if bridge is missing users that backend has
         if len(merged) != len(local):
             save_json_file(REGISTRY_FILE, merged)
             print(f">>> [REGISTRY] Synced bridge registry from backend: {len(local)} -> {len(merged)} users")
@@ -1112,7 +1393,7 @@ def sync_registry_from_backend() -> None:
         print(f">>> [REGISTRY] Sync from backend failed: {e}")
 
 
-# Run once at startup so bridge can authenticate all backend users.
+# Run once at startup so bridge can authenticate all backend users (JSON fallback only).
 sync_registry_from_backend()
 
 # ==============================================================================
@@ -1427,9 +1708,7 @@ def authenticate_user(username: str, password: str, expected_role: str = None) -
     
     stored_password = target["credentials"].get("password", "")
     if not verify_password(password, stored_password):
-        # Try plain text match for legacy accounts
-        if stored_password != password:
-            return None, "INVALID_PASSWORD"
+        return None, "INVALID_PASSWORD"
     
     p = target.get("profile", {})
     
@@ -1441,7 +1720,7 @@ def authenticate_user(username: str, password: str, expected_role: str = None) -
         return None, "WRONG_PORTAL"
 
     token = secrets.token_hex(16)
-    ACTIVE_TOKENS[token] = p
+    _store_token(token, p)
     
     # Update last login
     try:
@@ -1564,7 +1843,7 @@ def register_new_user(data: dict) -> Tuple[bool, str]:
             plan = "TOP_TIER"
             sub_status = "ACTIVE"
             can_access_nate = True
-            token_balance = 100000
+            token_balance = 200000
             trial_end = ""
         else:  # TRIAL (default)
             tier = "STANDARD"
@@ -1572,7 +1851,7 @@ def register_new_user(data: dict) -> Tuple[bool, str]:
             sub_status = "TRIAL_ACTIVE"
             can_access_nate = True
             token_balance = 10000
-            trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
+            trial_end = str((datetime.datetime.now() + datetime.timedelta(days=14)).date())
     else:
         # Coach defaults
         tier = "COACH"
@@ -3438,12 +3717,12 @@ class BillingSystem:
         """Create subscription record"""
         billing = self.load_billing()
         
+        # Aligned with config/standing_orders_seed.json
         plan_details = {
-            "TRIAL": {"tokens": 10000, "coach_sessions": 0, "price": 0, "duration_days": 14},
-            "STANDARD": {"tokens": 50000, "coach_sessions": 0, "price": 29, "duration_days": 30},
-            "TOP_TIER": {"tokens": 200000, "coach_sessions": 4, "price": 199, "duration_days": 30},
-            "FAMILY": {"tokens": 300000, "coach_sessions": 6, "price": 299, "duration_days": 30},
-            "COACH_ONLY": {"tokens": 0, "coach_sessions": -1, "price": 0, "duration_days": 365}
+            "COACH_ONLY": {"tokens": 0, "ai_minutes": 0, "coach_sessions": -1, "price": 0, "duration_days": 365, "can_access_nate": False},
+            "TRIAL": {"tokens": 10000, "ai_minutes": 30, "coach_sessions": 0, "price": 0, "duration_days": 14},
+            "STANDARD": {"tokens": 50000, "ai_minutes": 300, "coach_sessions": 4, "price": 49, "duration_days": 30},
+            "TOP_TIER": {"tokens": 200000, "ai_minutes": -1, "coach_sessions": 8, "price": 149, "duration_days": 30},
         }
         
         details = plan_details.get(plan, plan_details["STANDARD"])
@@ -4619,7 +4898,7 @@ class AzureCortex:
             # Build patterns
             patterns = story.get('patterns', {}).get('when_activated', {})
             patterns_text = f"""  - Trigger: {patterns.get('trigger', 'unknown')}
-        - Uerneath: {patterns.get('underneath', 'unknown')}
+        - Underneath: {patterns.get('underneath', 'unknown')}
         - What helps: {', '.join(patterns.get('what_helps', [])[:3])}
         - What doesn't help: {', '.join(patterns.get('what_doesnt_help', [])[:2])}"""
                     
@@ -5125,12 +5404,37 @@ class AzureCortex:
                 
             # Format conversation
             conversation = ""
+            _family_guardian_alerts = []
             for msg in recent_messages[-8:]:
                 sender_name = msg.get('sender_name', 'Unknown')
                 sender_id = msg.get('sender_id', '') or msg.get('user_id', '') or ''
                 sender_tag = f"{sender_name}/{sender_id}" if sender_id else f"{sender_name}"
                 # IMPORTANT: sender_tag is server-authenticated identity metadata.
                 conversation += f"[AUTH:{sender_tag}] {msg.get('content', '')}\n"
+
+                # ── HIVE DEFENSE v4.3: FamilySessionGuardian analysis per utterance ──
+                try:
+                    _hive = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
+                    _hive_v4 = getattr(_hive, 'hive_v4', None) if _hive else None
+                    if _hive_v4:
+                        _fsg = _hive_v4.get("family_session_guardian")
+                        if _fsg:
+                            _sid = sanctuary_data.get("sanctuary_id", "")
+                            _role = msg.get('role', 'member')
+                            _is_minor = msg.get('is_minor', False)
+                            _utterance_result = _fsg.analyze_utterance(
+                                session_id=_sid,
+                                speaker_id=sender_id,
+                                speaker_role=_role,
+                                text=msg.get('content', ''),
+                                target_id="",
+                                target_is_minor=_is_minor,
+                            )
+                            if _utterance_result.get("issues"):
+                                _family_guardian_alerts.extend(_utterance_result["issues"])
+                                print(f">>> [FamilySessionGuardian] Alert in sanctuary {_sid}: {_utterance_result['issues']}")
+                except Exception as _fsg_err:
+                    print(f">>> [FamilySessionGuardian] Non-blocking error: {_fsg_err}")
                 
             # Detect crisis
             crisis_level = "NONE"
@@ -5948,23 +6252,172 @@ async def handle_client(websocket, path=None):
     current_profile = None
     current_hardware_id = None
     current_username = None
-    
+    rate_limiter = ConnectionRateLimiter()
+
+    # Connection rate limiting per IP
+    client_ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
+    _connections_per_ip[client_ip] = _connections_per_ip.get(client_ip, 0) + 1
+    if _connections_per_ip[client_ip] > MAX_CONNECTIONS_PER_IP:
+        print(f">>> [SECURITY] Connection limit exceeded for IP {client_ip}")
+        await websocket.close(1008, "Too many connections")
+        _connections_per_ip[client_ip] -= 1
+        return
+
+    # Auth timeout: disconnect if not authenticated within 30 seconds
+    auth_deadline = datetime.datetime.now() + datetime.timedelta(seconds=30)
+
     try:
         await websocket.send(json.dumps({"type": "connected", "status": "ready"}))
         async for message in websocket:
-            print(f">>> RECEIVED: {message[:200]}")
             try:
                 d = json.loads(message)
                 t = d.get("type")
             except Exception as e:
-                await websocket.send(json.dumps({"type": "error", "message": f"BAD_JSON: {e}"}))
+                await websocket.send(json.dumps({"type": "error", "message": "INVALID_MESSAGE_FORMAT"}))
+                print(f">>> [ERROR] Bad JSON from {uid or 'unauthenticated'}: {e}")
                 continue
-            
+
+            # Redact sensitive message types from logs
+            _log_type = d.get("type", "unknown") if isinstance(d, dict) else "parse_pending"
+            if _log_type in ("login_request", "register_request", "admin_reset_password", "forgot_password"):
+                print(f">>> RECEIVED: type={_log_type} [content redacted]")
+            else:
+                print(f">>> RECEIVED: type={_log_type} len={len(message)}")
+
+            # Rate limit check
+            if not rate_limiter.check_general():
+                await websocket.send(json.dumps({"type": "error", "message": "RATE_LIMIT_EXCEEDED"}))
+                continue
+            # Additional AI rate limit for expensive operations
+            if t in ("nate_query", "chat_message", "coach_nate_query", "voice_query"):
+                if not rate_limiter.check_ai():
+                    await websocket.send(json.dumps({"type": "error", "message": "AI_RATE_LIMIT_EXCEEDED"}))
+                    continue
+
+            # Enforce auth timeout
+            if not current_profile and datetime.datetime.now() > auth_deadline:
+                await websocket.send(json.dumps({"type": "error", "message": "Authentication timeout — please log in within 30 seconds"}))
+                await websocket.close(1008, "Auth timeout")
+                return
+
+            # ── PHASE 8: Mirror Shell Signal Evaluation ──────────────────
+            # Every external WebSocket message is logged through the Mirror
+            # Shell for forensic monitoring and anomaly detection.
+            # The shell runs asynchronously and does NOT block the message
+            # dispatch — it records the signal for the Curiosity Protocol,
+            # Drift Scorer, and Forensic Logger to analyze.
+            try:
+                _hive = getattr(_fastapi_app, 'hive_defense', None) if '_fastapi_app' in dir() else None
+                if _hive is None and db_pool is not None:
+                    # Try to get from the module-level reference
+                    _hive = _hive_defense_ref
+                if _hive and _hive.get("mirror_shell"):
+                    import asyncio as _aio
+                    _aio.ensure_future(
+                        _hive["mirror_shell"].process_signal({
+                            "source": uid or "GUEST",
+                            "type": t,
+                            "payload_size": len(message),
+                            "hardware_id": current_hardware_id or "unknown",
+                        })
+                    )
+            except Exception:
+                pass  # Mirror Shell is non-blocking; failures never affect WS traffic
+
+            # ── HIVE DEFENSE v4.0: Guardian Fibre per-message observation ─
+            # Every WS message from an authenticated user updates the
+            # behavioral model via GuardianFibre.observe_request().
+            # Runs asynchronously so it never blocks the message dispatch.
+            if uid and current_profile:
+                try:
+                    _hv4 = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
+                    _hv4 = getattr(_hv4, 'hive_v4', None) if _hv4 else None
+                    if _hv4:
+                        _gf = _hv4.get("guardian_fibre")
+                        if _gf:
+                            import asyncio as _aio_gf
+                            _aio_gf.ensure_future(
+                                _gf.observe_request(
+                                    user_id=uid,
+                                    message_type=t or "unknown",
+                                    payload_size=len(message),
+                                    metadata={
+                                        "hardware_id": current_hardware_id or "unknown",
+                                        "role": current_profile.get("role", ""),
+                                    },
+                                )
+                            )
+                except Exception:
+                    pass  # Guardian Fibre is non-blocking
+
+            # ── HIVE DEFENSE v4.3: Pipeline Drum tap for WS messages (GAP W1) ──
+            # WS traffic bypasses HTTP middleware, so we tap directly here.
+            try:
+                _hv4_drum = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
+                _hv4_drum = getattr(_hv4_drum, 'hive_v4', None) if _hv4_drum else None
+                if _hv4_drum:
+                    _drum = _hv4_drum.get("pipeline_drum")
+                    if _drum:
+                        _drum.tap_request(
+                            endpoint=f"ws://{t or 'unknown'}",
+                            method="WS",
+                            status_code=200,
+                            response_time_ms=0,
+                            payload=message.encode() if isinstance(message, str) else message,
+                        )
+            except Exception:
+                pass  # Pipeline Drum tap is non-blocking
+
             # === AUTHENTICATION ===
             if t == "login_request":
+                # ── HIVE DEFENSE v4.0: Login Guardian brute-force check ──
+                try:
+                    _hive_v4 = getattr(getattr(sys.modules.get('__main__'), 'app', None), 'state', None)
+                    _hive_v4 = getattr(_hive_v4, 'hive_v4', None) if _hive_v4 else None
+                except Exception:
+                    _hive_v4 = None
+
+                _login_blocked = False
+                if _hive_v4:
+                    try:
+                        _role = d.get("expected_role", "CLIENT")
+                        _lg = _hive_v4.get("coach_login_guardian") if _role == "COACH" else _hive_v4.get("member_login_guardian")
+                        if _lg:
+                            _ip = getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else 'unknown'
+                            _login_check = await _lg.check_before_login(d.get("username", ""), _ip, d.get("user_agent", ""))
+                            if _login_check and not _login_check.get("allowed", True):
+                                await websocket.send(json.dumps({"type": "login_failed", "message": "Too many attempts. Please wait and try again."}))
+                                _login_blocked = True
+                    except Exception as _lg_err:
+                        print(f">>> [LoginGuardian] Non-blocking check error: {_lg_err}")
+
+                if not _login_blocked:
+                    pass  # Proceed with normal login
+
                 tok, res = authenticate_user(d["username"], d["password"], d.get("expected_role"))
+                if _login_blocked:
+                    tok = None
+                    res = "RATE_LIMITED"
                 if tok:
                     uid = res.get("hardware_id")
+
+                    # ── HIVE DEFENSE v4.0: Guardian Fibre imprint on login ──
+                    if _hive_v4:
+                        try:
+                            _gf = _hive_v4.get("guardian_fibre")
+                            if _gf:
+                                _user_agent = d.get("user_agent", "")
+                                _tz = d.get("timezone", "")
+                                _ip_geo = d.get("ip_geo", "")
+                                _screen = d.get("screen_resolution", "")
+                                _login_hour = datetime.datetime.now().hour
+                                _anomaly = await _gf.on_login(
+                                    uid, _user_agent, _tz, _ip_geo, _screen, _login_hour
+                                )
+                                if _anomaly and _anomaly.get("score", 0) > 0:
+                                    print(f">>> [GuardianFibre] Login anomaly score for {uid}: {_anomaly.get('score', 0):.1f} state={_anomaly.get('state', 'DORMANT')}")
+                        except Exception as _gf_err:
+                            print(f">>> [GuardianFibre] Non-blocking imprint error: {_gf_err}")
 
                     # --- Account restoration: if PENDING_DELETION and within 30 days, restore ---
                     if res.get("account_status") == "PENDING_DELETION":
@@ -5998,12 +6451,12 @@ async def handle_client(websocket, path=None):
                     
                     # Register coach connection for classroom notifications
                     if res.get("role") in ("COACH", "ADMIN"):
-                        connected_coaches[uid] = websocket
+                        _replace_connection(uid, websocket, connected_coaches)
                         print(f"[Classroom] Registered coach connection: {uid}")
                     
                     # Track connected clients for real-time dashboard stats
                     if res.get("role") == "CLIENT":
-                        connected_clients[uid] = websocket
+                        _replace_connection(uid, websocket, connected_clients)
                         print(f"[Dashboard] Registered client connection: {uid}")
                     
                     _consent_needed = res.pop("_consent_update_needed", False)
@@ -6041,22 +6494,44 @@ async def handle_client(websocket, path=None):
                     }
                     friendly = friendly_messages.get(res, res)
                     await websocket.send(json.dumps({"type": "login_failed", "message": friendly}))
+                    # Feed counter-intelligence orchestrator on failed login
+                    try:
+                        _ci_orch = sys.modules[__name__].__dict__.get('_ci_orchestrator')
+                        if _ci_orch:
+                            from app.services.counter_intelligence.orchestrator import (
+                                AttackSignal, AttackSource,
+                            )
+                            _ci_signal = AttackSignal(
+                                source=AttackSource.WEBSOCKET,
+                                failure_type=f"login_failed:{res}",
+                                ip_address=getattr(websocket, 'remote_address', ('unknown',))[0] if hasattr(websocket, 'remote_address') else None,
+                                user_agent=d.get("user_agent"),
+                                metadata={"username": d.get("username", ""), "expected_role": d.get("expected_role")},
+                            )
+                            asyncio.ensure_future(_ci_orch.ingest_signal(_ci_signal))
+                    except Exception:
+                        pass
             # === TOKEN AUTH (reconnect with existing session) ===
             elif t == "auth":
                 hw_id = d.get("hardware_id")
                 token = d.get("token")
                 if hw_id and token:
-                    users = load_registry()
-                    print(f">>> DEBUG: Loaded {len(users)} users (merged registry), looking for hw_id: {hw_id}")
-                    # Find user by hardware_id (not by key)
-                    found_profile = None
-                    for username, user_data in users.items():
-                        profile = user_data.get("profile", {})
-                        if profile.get("hardware_id") == hw_id:
-                            found_profile = profile
-                            break   
+                    # Validate token against ACTIVE_TOKENS first
+                    token_profile = _get_token_profile(token)
+                    if not token_profile:
+                        print(f">>> Auth failed: invalid token for hw_id={hw_id}")
+                        await websocket.send(json.dumps({"type": "auth_failed", "message": "Invalid or expired token"}))
+                        continue
+                    # Verify the token's profile matches the claimed hardware_id
+                    if token_profile.get("hardware_id") != hw_id:
+                        print(f">>> Auth failed: token does not match hw_id={hw_id}")
+                        await websocket.send(json.dumps({"type": "auth_failed", "message": "Token mismatch"}))
+                        continue
+                    # Token is valid and matches — use the token's profile
+                    found_profile = token_profile
                     
                     if found_profile:
+                        users = load_registry()
                         current_profile = found_profile
                         uid = hw_id
                         current_hardware_id = hw_id
@@ -6167,7 +6642,8 @@ async def handle_client(websocket, path=None):
                     print(f">>> [REG] CRASH during registration: {e}")
                     traceback.print_exc()
                     try:
-                        await websocket.send(json.dumps({"type": "registration_failed", "message": f"SERVER_ERROR: {str(e)}"}))
+                        print(f">>> [ERROR] Registration failed for {d.get('username', 'unknown')}: {e}")
+                        await websocket.send(json.dumps({"type": "registration_failed", "message": "SERVER_ERROR"}))
                     except:
                         pass
             
@@ -6246,7 +6722,7 @@ async def handle_client(websocket, path=None):
                             v["profile"] = prof
                             save_registry(registry)
                             await websocket.send(json.dumps({"type": "password_reset_success", "message": "Password updated. Please log in."}))
-                            print(f">>> [FORGOT_PW] Password reset completed for {k}")
+                            print(f">>> [FORGOT_PW] Password reset completed")
                             found = True
                             break
                     if not found:
@@ -6289,7 +6765,7 @@ async def handle_client(websocket, path=None):
                         
                         try:
                             await notification_system.send_password_reset_sms(phone_normalized, reset_code)
-                            print(f">>> [FORGOT_PW_PHONE] SMS code sent to {phone_normalized}")
+                            print(f">>> [FORGOT_PW_PHONE] SMS code sent")
                         except Exception as em:
                             print(f">>> [FORGOT_PW_PHONE] SMS send failed: {em}")
                     
@@ -6367,7 +6843,7 @@ async def handle_client(websocket, path=None):
                                 v["profile"] = prof
                                 save_registry(registry)
                                 await websocket.send(json.dumps({"type": "password_reset_phone_success", "message": "Password updated. Please log in."}))
-                                print(f">>> [FORGOT_PW_PHONE] Password reset completed for {k}")
+                                print(f">>> [FORGOT_PW_PHONE] Password reset completed")
                                 found = True
                                 break
                             else:
@@ -6449,7 +6925,7 @@ async def handle_client(websocket, path=None):
                         text = d.get("nate_query", d.get("text", ""))
                         # #region agent log
                         _dbg_ts = datetime.datetime.now().isoformat()
-                        print(f">>> [DBG-H1] nate_query received uid={uid} text={text[:50]} sockets={list(cortex.sockets.get(uid, set()))} ts={_dbg_ts}")
+                        print(f">>> [DBG-H1] nate_query received uid={uid} len={len(text)} sockets={len(cortex.sockets.get(uid, set()))} ts={_dbg_ts}")
                         # #endregion
 
                         # --- Conversation Export Detection ---
@@ -6598,7 +7074,8 @@ async def handle_client(websocket, path=None):
                                 "date": target_date,
                             }))
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Failed to load availability: {e}"}))
+                            print(f">>> [ERROR] Failed to load availability: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
             # === CLIENT: BOOK SESSION ===
             elif t == "client_book_session":
@@ -6613,9 +7090,11 @@ async def handle_client(websocket, path=None):
                     if not coach_id or not scheduled_start or not scheduled_end:
                         await websocket.send(json.dumps({"type": "error", "message": "Missing required fields"}))
                     else:
-                        # Session limit check for TOP_TIER
+                        # Session limit check — STANDARD: 4/mo, TOP_TIER: 8/mo
                         plan = (current_profile.get("subscription_plan") or "").upper()
-                        if plan == "TOP_TIER":
+                        session_limits = {"STANDARD": 4, "TOP_TIER": 8}
+                        plan_limit = session_limits.get(plan)
+                        if plan_limit:
                             sessions_all = load_json_file(SESSIONS_FILE, [])
                             now = datetime.datetime.now()
                             month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -6623,11 +7102,11 @@ async def handle_client(websocket, path=None):
                                 if s.get("client_id") == client_id 
                                 and s.get("status") in ["scheduled", "active", "completed"]
                                 and s.get("created_at", "") >= month_start.isoformat())
-                            if month_count >= 4:
+                            if month_count >= plan_limit:
                                 await websocket.send(json.dumps({
                                     "type": "error",
                                     "message": "SESSION_LIMIT_REACHED",
-                                    "detail": "You have reached your 4 sessions/month limit."
+                                    "detail": f"You have reached your {plan_limit} sessions/month limit."
                                 }))
                                 continue
                         
@@ -6739,7 +7218,8 @@ async def handle_client(websocket, path=None):
                                     except Exception:
                                         pass
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Booking failed: {e}"}))
+                            print(f">>> [ERROR] Booking failed: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "BOOKING_FAILED"}))
 
             # === CLIENT: CANCEL SESSION ===
             elif t == "client_cancel_session":
@@ -6765,7 +7245,8 @@ async def handle_client(websocket, path=None):
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Session not found"}))
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Cancel failed: {e}"}))
+                            print(f">>> [ERROR] Cancel failed: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "CANCEL_FAILED"}))
 
             # === CLIENT: GET UPCOMING SESSIONS ===
             elif t == "client_get_upcoming_sessions":
@@ -6793,7 +7274,8 @@ async def handle_client(websocket, path=None):
                             "sessions": upcoming,
                         }))
                     except Exception as e:
-                        await websocket.send(json.dumps({"type": "error", "message": f"Failed: {e}"}))
+                        print(f">>> [ERROR] Booking operation failed: {e}")
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
             # === COACH: APPROVE BOOKING ===
             elif t == "coach_approve_booking":
@@ -6892,7 +7374,8 @@ async def handle_client(websocket, path=None):
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Pending session not found"}))
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Approve failed: {e}"}))
+                            print(f">>> [ERROR] Approve failed: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "APPROVE_FAILED"}))
 
             # === COACH: DECLINE BOOKING ===
             elif t == "coach_decline_booking":
@@ -6934,7 +7417,8 @@ async def handle_client(websocket, path=None):
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Pending session not found"}))
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Decline failed: {e}"}))
+                            print(f">>> [ERROR] Decline failed: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "DECLINE_FAILED"}))
 
             # === COACH: GET PENDING BOOKINGS ===
             elif t == "coach_get_pending_bookings":
@@ -6949,7 +7433,8 @@ async def handle_client(websocket, path=None):
                             "sessions": pending,
                         }))
                     except Exception as e:
-                        await websocket.send(json.dumps({"type": "error", "message": f"Failed: {e}"}))
+                        print(f">>> [ERROR] Pending bookings fetch failed: {e}")
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
             # === COACH: SET FEE ===
             elif t == "coach_set_fee":
@@ -7190,6 +7675,45 @@ async def handle_client(websocket, path=None):
                         "ledger": ledger[-50:],  # Last 50 transactions
                     }))
 
+            # === COACH: FETCH CLIENT OBSERVATION REPORTS ===
+            elif t == "fetch_reports":
+                if current_profile and current_profile.get("role") == "COACH":
+                    coach_id = current_profile.get("hardware_id", "")
+                    registry = load_registry()
+                    reports = []
+                    # Gather reports for all clients assigned to this coach
+                    for rk, rv in registry.items():
+                        p = rv.get("profile", {})
+                        if p.get("assigned_coach") == coach_id and p.get("role") == "CLIENT":
+                            client_name = p.get("name") or p.get("display_name") or rk
+                            client_id = p.get("hardware_id", rk)
+                            # Get session data for report
+                            sessions = rv.get("sessions", [])
+                            session_count = len(sessions)
+                            last_session = sessions[-1] if sessions else {}
+                            # Get coherence data
+                            c_emo = p.get("c_emo_current", 0)
+                            c_emo_trend = p.get("c_emo_trend", "stable")
+                            reports.append({
+                                "client_id": client_id,
+                                "client_name": client_name,
+                                "total_sessions": session_count,
+                                "last_session_date": last_session.get("date", "N/A"),
+                                "c_emo_current": round(c_emo, 4) if isinstance(c_emo, (int, float)) else 0,
+                                "c_emo_trend": c_emo_trend,
+                                "subscription_plan": p.get("subscription_plan", "TRIAL"),
+                                "risk_level": p.get("risk_level", "normal"),
+                                "notes_count": len(rv.get("coach_notes", [])),
+                            })
+                    await websocket.send(json.dumps({
+                        "type": "reports_data",
+                        "reports": reports,
+                        "coach_id": coach_id,
+                        "generated_at": str(datetime.datetime.now()),
+                    }))
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Reports are available to coaches only"}))
+
             # === COACH: SUBMIT W-9 ===
             elif t == "coach_submit_w9":
                 if current_profile and current_profile.get("role") == "COACH":
@@ -7262,6 +7786,184 @@ async def handle_client(websocket, path=None):
                         "coaches_near_1099_threshold": coaches_near_1099,
                         "month": now.strftime("%B %Y"),
                     }))
+
+            # === VAULT FILE UPLOAD (B5 — Chat-integrated file interactions) ===
+            # User identity and tier come from authenticated session only — never from payload
+            elif t == "file_upload_request":
+                if current_profile:
+                    try:
+                        from .bridge_handlers_v2 import handle_file_upload_request
+                        await handle_file_upload_request(websocket, d, bridge_context, current_profile)
+                    except Exception as v_err:
+                        print(f">>> [VAULT] file_upload_request error: {v_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(v_err)}))
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+
+            elif t == "vault_preview_request":
+                if current_profile:
+                    try:
+                        from .bridge_handlers_v2 import handle_vault_preview_request
+                        await handle_vault_preview_request(websocket, d, bridge_context, current_profile)
+                    except Exception as v_err:
+                        print(f">>> [VAULT] vault_preview_request error: {v_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(v_err)}))
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+
+            # === NATE ORGANIZER (Sovereign Circle — Accessibility) ===
+            # Voice-first AI-guided document organization for users with disabilities
+            elif t == "organize_start":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                elif (current_profile.get("subscription_plan", "").upper() not in
+                      ("SOVEREIGN_CIRCLE", "TOP_TIER", "TOP")):
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "Nate Organizer requires Sovereign Circle membership"
+                    }))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        vault_item_id = d.get("vault_item_id")
+                        content = d.get("content", "")
+
+                        # If vault_item_id provided, load content from vault
+                        if vault_item_id and not content and db_pool:
+                            from app.services.vault.vault_operations import VaultOperations
+                            _vops = VaultOperations(db_pool)
+                            item = await _vops.get_item(current_profile.get("hardware_id", ""), vault_item_id)
+                            if item:
+                                content = item.get("extracted_text_preview") or ""
+
+                        if not content.strip():
+                            await websocket.send(json.dumps({
+                                "type": "error", "message": "No content to organize"
+                            }))
+                        else:
+                            result = await _org_mode.start_session(
+                                member_id=current_profile.get("hardware_id", ""),
+                                content=content,
+                                vault_item_id=vault_item_id,
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "organize_started", **result
+                            }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_start error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_message":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        text = d.get("text", "").strip()
+                        if not session_id or not text:
+                            await websocket.send(json.dumps({"type": "error", "message": "Missing session_id or text"}))
+                        else:
+                            result = await _org_mode.process_message(session_id, text)
+                            await websocket.send(json.dumps({
+                                **result, "type": "organize_response"
+                            }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_message error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_confirm":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        result = await _org_mode.confirm_proposal(session_id)
+                        await websocket.send(json.dumps({
+                            **result, "type": "organize_response"
+                        }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_confirm error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_reject":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        result = await _org_mode.reject_proposal(session_id)
+                        await websocket.send(json.dumps({
+                            **result, "type": "organize_response"
+                        }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_reject error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_undo":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        session = _org_mode.session_mgr.get_session(session_id)
+                        if not session:
+                            await websocket.send(json.dumps({"type": "error", "message": "Session not found"}))
+                        else:
+                            sections, desc = await _org_mode.session_mgr.undo(session)
+                            result = {
+                                "type": "organize_response",
+                                "nate_message": desc if sections is None else f"{desc}. Here's where we are now.",
+                                "sections": sections or session.sections_snapshot(),
+                                "progress": session.get_progress(),
+                            }
+                            await websocket.send(json.dumps(result))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_undo error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_save":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        save_mode = d.get("save_mode", "overwrite")
+                        result = await _org_mode.save_session(
+                            session_id, current_profile.get("hardware_id", ""), save_mode
+                        )
+                        await websocket.send(json.dumps({
+                            "type": "organize_saved", **result
+                        }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_save error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
+
+            elif t == "organize_resume":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
+                else:
+                    try:
+                        _org_mode = _get_or_create_organizer(db_pool)
+                        session_id = d.get("session_id", "")
+                        result = await _org_mode.resume_session(
+                            session_id, current_profile.get("hardware_id", "")
+                        )
+                        if result:
+                            await websocket.send(json.dumps({
+                                "type": "organize_resumed", **result
+                            }))
+                        else:
+                            await websocket.send(json.dumps({
+                                "type": "error", "message": "Session not found or cannot be resumed"
+                            }))
+                    except Exception as org_err:
+                        print(f">>> [ORGANIZER] organize_resume error: {org_err}")
+                        await websocket.send(json.dumps({"type": "error", "message": str(org_err)}))
 
             # === GET METRICS ===
             elif t == "get_metrics":
@@ -7445,6 +8147,84 @@ async def handle_client(websocket, path=None):
                     }))
                     print(f"[Admin] Sent {len(pending)} pending coaches")
 
+            # === ADMIN: GET REVENUE ===
+            elif t == "admin_get_revenue":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        billing_data = {}
+                        billing_path = DATA_DIR / "stripe_billing.json"
+                        if billing_path.exists():
+                            with open(billing_path, "r") as f:
+                                billing_data = json.load(f)
+
+                        subs = billing_data.get("subscriptions", {})
+                        customers = billing_data.get("customers", {})
+
+                        # Count active subscriptions by tier
+                        tier_counts = {}
+                        total_mrr = 0
+                        for sub_id, sub in subs.items():
+                            tier = sub.get("tier", "TRIAL")
+                            status = sub.get("status", "")
+                            if status in ("ACTIVE", "active"):
+                                tier_counts[tier] = tier_counts.get(tier, 0) + 1
+                                # Estimate MRR by tier
+                                if tier == "STANDARD" or tier == "inner_chamber":
+                                    total_mrr += 4900
+                                elif tier == "TOP_TIER" or tier == "sovereign_circle":
+                                    total_mrr += 14900
+
+                        await websocket.send(json.dumps({
+                            "type": "revenue_data",
+                            "total_customers": len(customers),
+                            "total_subscriptions": len(subs),
+                            "active_by_tier": tier_counts,
+                            "estimated_mrr_cents": total_mrr,
+                            "estimated_mrr": round(total_mrr / 100, 2),
+                            "billing_source": "stripe_billing.json",
+                        }))
+                    except Exception as rev_err:
+                        await websocket.send(json.dumps({
+                            "type": "revenue_data",
+                            "total_customers": 0,
+                            "total_subscriptions": 0,
+                            "active_by_tier": {},
+                            "estimated_mrr": 0,
+                            "error": str(rev_err),
+                        }))
+
+            # === ADMIN: GET CRISIS WATCHLIST ===
+            elif t == "admin_get_crisis_watchlist":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    registry = load_registry()
+                    crisis_list = []
+                    for k, v in registry.items():
+                        p = v.get("profile", {}) if isinstance(v, dict) else {}
+                        if p.get("role") == "CLIENT":
+                            hw_id = p.get("hardware_id", "")
+                            m = metrics_engine.load_metrics({"role": "CLIENT", "hardware_id": hw_id})
+                            ns = m.get("nevedal_state", {})
+                            risk = ns.get("risk_level", "LOW")
+                            crisis_count = ns.get("crisis_count", 0)
+                            if risk in ("HIGH", "CRITICAL") or crisis_count > 0:
+                                crisis_list.append({
+                                    "hardware_id": hw_id,
+                                    "name": p.get("name", "Unknown"),
+                                    "risk_level": risk,
+                                    "crisis_count": crisis_count,
+                                    "last_assessment": ns.get("last_risk_assessment", ""),
+                                    "c_emo": ns.get("C_emo", 0),
+                                    "anxiety_level": ns.get("anxiety_level", 0),
+                                })
+                    # Sort by risk severity
+                    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+                    crisis_list.sort(key=lambda x: severity_order.get(x.get("risk_level", "LOW"), 3))
+                    await websocket.send(json.dumps({
+                        "type": "crisis_watchlist",
+                        "watchlist": crisis_list,
+                        "total": len(crisis_list),
+                    }))
+
             # === ADMIN: APPROVE COACH ===
             elif t == "admin_approve_coach":
                 if current_profile and current_profile.get("role") == "ADMIN":
@@ -7474,14 +8254,14 @@ async def handle_client(websocket, path=None):
                             else:
                                 await websocket.send(json.dumps({
                                     "type": "error",
-                                    "message": f"Coach found but SAVE FAILED for {coach_id}. Check server disk/permissions."
+                                    "message": "Coach approval save failed. Check server disk/permissions."
                                 }))
-                                print(f"[Admin Approve] SAVE FAILED for coach {coach_id} — registry write error")
+                                print(f"[Admin Approve] SAVE FAILED for coach — registry write error")
                             found = True
                             break
                     if not found:
-                        print(f"[Admin Approve] FAILED: coach_id='{coach_id}' not found. Coach hardware_ids in registry: {all_hw_ids}")
-                        await websocket.send(json.dumps({"type": "error", "message": f"Coach not found. Received ID: '{coach_id}'"}))
+                        print(f"[Admin Approve] FAILED: coach not found in registry")
+                        await websocket.send(json.dumps({"type": "error", "message": "Coach not found in registry."}))
 
             # === ADMIN: REJECT COACH ===
             elif t == "admin_reject_coach":
@@ -7509,14 +8289,36 @@ async def handle_client(websocket, path=None):
                             else:
                                 await websocket.send(json.dumps({
                                     "type": "error",
-                                    "message": f"Coach found but SAVE FAILED for rejection of {coach_id}. Check server disk/permissions."
+                                    "message": "Coach rejection save failed. Check server disk/permissions."
                                 }))
-                                print(f"[Admin Reject] SAVE FAILED for coach {coach_id} — registry write error")
+                                print(f"[Admin Reject] SAVE FAILED — registry write error")
                             found = True
                             break
                     if not found:
-                        await websocket.send(json.dumps({"type": "error", "message": f"Coach not found for rejection. ID: '{coach_id}'"}))
+                        await websocket.send(json.dumps({"type": "error", "message": "Coach not found for rejection."}))
             
+            # === ADMIN: VERIFY PASSPHRASE (Layer 3 security) ===
+            elif t == "verify_admin_passphrase":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    answer = (d.get("passphrase", "") or "").strip().lower()
+                    # Passphrase is stored server-side only — never exposed to client
+                    _correct_passphrase = os.environ.get("ADMIN_PASSPHRASE", "i am who, i am").strip().lower()
+                    if answer == _correct_passphrase:
+                        await websocket.send(json.dumps({
+                            "type": "passphrase_verified",
+                            "success": True
+                        }))
+                        print(f"[Admin] Passphrase verified for {current_profile.get('name', 'unknown')}")
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "passphrase_verified",
+                            "success": False,
+                            "message": "Incorrect passphrase"
+                        }))
+                        print(f"[Admin] Failed passphrase attempt from {current_profile.get('name', 'unknown')}")
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+
             # === ADMIN: RESET USER PASSWORD ===
             elif t == "admin_reset_user_password":
                 if current_profile and current_profile.get("role") == "ADMIN":
@@ -7545,7 +8347,7 @@ async def handle_client(websocket, path=None):
                                 found = True
                                 break
                         if not found:
-                            await websocket.send(json.dumps({"type": "error", "message": f"User not found: {user_id}"}))
+                            await websocket.send(json.dumps({"type": "error", "message": "User not found."}))
             
             # === ADMIN: GET COACH W-9 DOCUMENT ===
             elif t == "admin_get_coach_document":
@@ -7619,7 +8421,7 @@ async def handle_client(websocket, path=None):
                             print(f"[Judge] Student verification request: student={student_id} by coach={current_profile.get('hardware_id')}")
                             break
                     if not student_found:
-                        await websocket.send(json.dumps({"type": "error", "message": f"Student {student_id} not found"}))
+                        await websocket.send(json.dumps({"type": "error", "message": "Student not found."}))
 
             # === ADMIN: APPROVE STUDENT VERIFICATION (JUDGE DOJO) ===
             elif t == "admin_approve_student_verification":
@@ -8688,7 +9490,8 @@ async def handle_client(websocket, path=None):
                         except ImportError:
                             await websocket.send(json.dumps({"type": "error", "message": "Coach matcher not available"}))
                         except Exception as e:
-                            await websocket.send(json.dumps({"type": "error", "message": f"Matching failed: {e}"}))
+                            print(f">>> [ERROR] Matching failed: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "MATCHING_FAILED"}))
 
             # === ADMIN: GET MATCH SUGGESTIONS ===
             elif t == "admin_get_match_suggestions":
@@ -8785,6 +9588,38 @@ async def handle_client(websocket, path=None):
                                 "user_id": user_id
                             }))
                             break
+
+            # === ADMIN: FORCE DISCONNECT USER ===
+            elif t == "admin_force_disconnect":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    client_id = d.get("client_id", "").strip()
+                    if not client_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "client_id required"}))
+                    else:
+                        target_ws = connected_clients.get(client_id) or connected_coaches.get(client_id)
+                        if target_ws:
+                            try:
+                                await target_ws.send(json.dumps({
+                                    "type": "force_disconnect",
+                                    "message": "You have been disconnected by an administrator."
+                                }))
+                                await target_ws.close(1000, "Admin force disconnect")
+                            except Exception:
+                                pass
+                            connected_clients.pop(client_id, None)
+                            connected_coaches.pop(client_id, None)
+                            await websocket.send(json.dumps({
+                                "type": "force_disconnect_done",
+                                "client_id": client_id,
+                                "message": "User disconnected"
+                            }))
+                            print(f"[Admin] Force disconnected user {client_id}")
+                        else:
+                            await websocket.send(json.dumps({
+                                "type": "force_disconnect_done",
+                                "client_id": client_id,
+                                "message": "User is not currently connected"
+                            }))
             
             # === ADMIN: GET CRISIS LOG ===
             elif t == "admin_get_crisis_log":
@@ -9898,10 +10733,11 @@ async def handle_client(websocket, path=None):
                         }))
                     except Exception as e:
                         # Don't drop the socket on calendar errors; surface them to the UI.
+                        print(f">>> [ERROR] Coach calendar failed: {type(e).__name__}: {e}")
                         await websocket.send(json.dumps({
                             "type": "coach_calendar_data",
                             "data": {"month": month, "year": year, "schedule": [], "availability": []},
-                            "error": f"{type(e).__name__}: {str(e)}"
+                            "error": "CALENDAR_LOAD_FAILED"
                         }))
             
             # === COACH: GET RECORDED SESSIONS ===
@@ -10027,7 +10863,7 @@ async def handle_client(websocket, path=None):
                     }))
                 except Exception as e:
                     logger.error(f"Gantt generation failed: {e}")
-                    await websocket.send(json.dumps({"type": "error", "message": f"Gantt generation failed: {str(e)}"}))
+                    await websocket.send(json.dumps({"type": "error", "message": "GANTT_GENERATION_FAILED"}))
 
             # === DOJO: GENERATE EXCEL EXPORT (Project PM & Business only) ===
             elif t == "dojo_generate_excel":
@@ -10056,7 +10892,7 @@ async def handle_client(websocket, path=None):
                     }))
                 except Exception as e:
                     logger.error(f"Excel generation failed: {e}")
-                    await websocket.send(json.dumps({"type": "error", "message": f"Excel generation failed: {str(e)}"}))
+                    await websocket.send(json.dumps({"type": "error", "message": "EXCEL_GENERATION_FAILED"}))
 
             # =================================================================
             # AVATAR MODE - Top Tier Voice-Driven Avatar Interactions
@@ -10472,9 +11308,10 @@ async def handle_client(websocket, path=None):
                                 "nevedal_state": ns,
                             }))
                         except Exception as e:
+                            print(f">>> [ERROR] Failed to load metrics for {user_id}: {e}")
                             await websocket.send(json.dumps({
                                 "type": "error",
-                                "message": f"Failed to load metrics for {user_id}: {e}"
+                                "message": "METRICS_LOAD_FAILED"
                             }))
 
             # === COACH: GET LIVE SANCTUARY BRIEFING ===
@@ -11068,7 +11905,7 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                     print(f"[Classroom] Analysis error: {e}")
                     await websocket.send(json.dumps({
                         "type": "error",
-                        "message": f"Analysis failed: {str(e)}"
+                        "message": "ANALYSIS_FAILED"
                     }))
             
             # === CLASSROOM: ANALYZE VIDEO ===
@@ -11120,7 +11957,7 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                 except Exception as e:
                     await websocket.send(json.dumps({
                         "type": "error",
-                        "message": f"Video analysis failed: {str(e)}"
+                        "message": "VIDEO_ANALYSIS_FAILED"
                     }))
 
             # === CLASSROOM: GET ANALYSIS ===
@@ -11463,7 +12300,7 @@ Coach Reflection on Session {session_id}:
                         "type": "classroom_metrics_applied",
                         "client_id": client_id,
                         "success": False,
-                        "message": str(e)
+                        "message": "OPERATION_FAILED"
                     }))
             
             # === CLASSROOM: CHECK LIVE RECORDING AVAILABILITY ===
@@ -11513,7 +12350,7 @@ Coach Reflection on Session {session_id}:
                     await websocket.send(json.dumps({
                         "type": "classroom_recording_status",
                         "session_id": session_id,
-                        "recording": {"available": False, "status": "error", "error": str(e)}
+                        "recording": {"available": False, "status": "error", "error": "RECORDING_CHECK_FAILED"}
                     }))
             
             # === CLASSROOM: GET LIVE TRANSCRIPT ===
@@ -11573,7 +12410,7 @@ Coach Reflection on Session {session_id}:
                         "type": "classroom_live_transcript",
                         "session_id": session_id,
                         "available": False,
-                        "message": str(e)
+                        "message": "OPERATION_FAILED"
                     }))
             
             # === CLASSROOM: ANALYZE LIVE SESSION ===
@@ -11663,7 +12500,7 @@ Coach Reflection on Session {session_id}:
                         "type": "classroom_live_analysis",
                         "session_id": session_id,
                         "success": False,
-                        "message": str(e)
+                        "message": "OPERATION_FAILED"
                     }))
             
             # === ADMIN: GET FAMILY METRICS ===
@@ -12034,450 +12871,6 @@ Coach Reflection on Session {session_id}:
                         "error": str(cohort_err)
                     }))
 
-            # === ADMIN: GET DYAD SYNC (legacy duplicate) ===
-            elif t == "admin_get_dyad_sync":
-                if current_profile and current_profile.get("role") == "ADMIN":
-                    client_id = d.get("client_id")
-                    coach_id = d.get("coach_id")
-                    session_id = d.get("session_id")  # optional
-                    
-                    if not client_id or not coach_id:
-                        await websocket.send(json.dumps({
-                            "type": "error",
-                            "message": "Missing client_id or coach_id"
-                        }))
-                    else:
-                        # Load metrics for both
-                        registry = load_registry()
-                        client_profile = None
-                        coach_profile = None
-                        
-                        for k, v in registry.items():
-                            profile = v.get("profile", {})
-                            if profile.get("hardware_id") == client_id:
-                                client_profile = profile
-                            if profile.get("hardware_id") == coach_id:
-                                coach_profile = profile
-                        
-                        if not client_profile or not coach_profile:
-                            await websocket.send(json.dumps({
-                                "type": "error",
-                                "message": "Client or coach not found"
-                            }))
-                        else:
-                            # Get Nevedal states
-                            client_metrics = metrics_engine.load_metrics({"role": "CLIENT", "hardware_id": client_id})
-                            coach_metrics = metrics_engine.load_metrics({"role": "COACH", "hardware_id": coach_id})
-                            
-                            client_state = client_metrics.get("nevedal_state", {})
-                            coach_state = coach_metrics.get("nevedal_state", {})
-                            
-                            # Calculate synchrony score (simplified)
-                            client_c_emo = client_state.get("C_emo", 0.5)
-                            coach_c_emo = coach_state.get("C_emo", 0.5)
-                            
-                            # Synchrony = 1 - normalized difference
-                            diff = abs(client_c_emo - coach_c_emo)
-                            synchrony_score = 1.0 - diff
-                            
-                            # Determine grade
-                            if synchrony_score >= 0.85:
-                                grade = "EXCELLENT"
-                            elif synchrony_score >= 0.70:
-                                grade = "GOOD"
-                            elif synchrony_score >= 0.55:
-                                grade = "MODERATE"
-                            else:
-                                grade = "DEVELOPING"
-                            
-                            # Build timeline data (simplified - would need session data for real implementation)
-                            client_timeline = [
-                                {"timestamp": 0, "c_emo": max(0.4, client_c_emo - 0.1)},
-                                {"timestamp": 15, "c_emo": max(0.5, client_c_emo - 0.05)},
-                                {"timestamp": 30, "c_emo": client_c_emo},
-                                {"timestamp": 45, "c_emo": min(1.0, client_c_emo + 0.05)}
-                            ]
-                            
-                            coach_timeline = [
-                                {"timestamp": 0, "c_emo": max(0.4, coach_c_emo - 0.08)},
-                                {"timestamp": 15, "c_emo": max(0.5, coach_c_emo - 0.03)},
-                                {"timestamp": 30, "c_emo": coach_c_emo},
-                                {"timestamp": 45, "c_emo": min(1.0, coach_c_emo + 0.08)}
-                            ]
-                            
-                            # Shared CEE moments (when both > 0.75)
-                            shared_cees = []
-                            if client_c_emo > 0.75 and coach_c_emo > 0.75:
-                                shared_cees = [
-                                    {
-                                        "timestamp": "00:15:30",
-                                        "client_c_emo": round(client_c_emo * 0.95, 2),
-                                        "coach_c_emo": round(coach_c_emo * 0.95, 2)
-                                    },
-                                    {
-                                        "timestamp": "00:32:18",
-                                        "client_c_emo": round(client_c_emo, 2),
-                                        "coach_c_emo": round(coach_c_emo, 2)
-                                    }
-                                ]
-                            
-                            # Calculate correlation (simplified)
-                            correlation_coefficient = synchrony_score * 0.9  # Simplified
-                            lag_time = -2.3 if coach_c_emo > client_c_emo else 1.8
-                            
-                            await websocket.send(json.dumps({
-                                "type": "dyad_sync_data",
-                                "synchrony_score": round(synchrony_score, 2),
-                                "grade": grade,
-                                "client_c_emo": round(client_c_emo, 2),
-                                "coach_c_emo": round(coach_c_emo, 2),
-                                "client_timeline": client_timeline,
-                                "coach_timeline": coach_timeline,
-                                "shared_cees": shared_cees,
-                                "correlation_coefficient": round(correlation_coefficient, 2),
-                                "lag_time": round(lag_time, 1)
-                            }))
-            
-            # === ADMIN: GET FAMILY METRICS ===
-            elif t == "admin_get_family_metrics":
-                if current_profile and current_profile.get("role") == "ADMIN":
-                    family_id = d.get("family_id")
-                    
-                    if not family_id:
-                        await websocket.send(json.dumps({
-                            "type": "error",
-                            "message": "Missing family_id"
-                        }))
-                    else:
-                        # Find family members
-                        registry = load_registry()
-                        family_members = []
-                        
-                        for k, v in registry.items():
-                            profile = v.get("profile", {})
-                            if profile.get("family_id") == family_id:
-                                family_members.append(profile)
-                        
-                        if not family_members:
-                            await websocket.send(json.dumps({
-                                "type": "error",
-                                "message": "No family members found"
-                            }))
-                        else:
-                            # Get metrics for each member
-                            members_data = []
-                            c_emo_values = []
-                            
-                            for member in family_members:
-                                member_metrics = metrics_engine.load_metrics({
-                                    "role": member.get("role", "CLIENT"),
-                                    "hardware_id": member.get("hardware_id")
-                                })
-                                nevedal_state = member_metrics.get("nevedal_state", {})
-                                c_emo = nevedal_state.get("C_emo", 0.5)
-                                c_emo_values.append(c_emo)
-                                
-                                members_data.append({
-                                    "id": member.get("hardware_id"),
-                                    "name": member.get("name", "Unknown"),
-                                    "c_emo_avg": round(c_emo, 2)
-                                })
-                            
-                            # Calculate coherence matrix (pairwise scores)
-                            coherence_matrix = {}
-                            for i, member1 in enumerate(members_data):
-                                for j, member2 in enumerate(members_data):
-                                    if i != j:
-                                        # Simplified coherence = 1 - normalized difference
-                                        diff = abs(c_emo_values[i] - c_emo_values[j])
-                                        coherence = round(1.0 - diff, 2)
-                                        key = f"{member1['name'].lower().split()[0]}_{member2['name'].lower().split()[0]}"
-                                        coherence_matrix[key] = coherence
-                            
-                            # Family wellness index (average C_emo)
-                            family_wellness_index = round(sum(c_emo_values) / len(c_emo_values), 2)
-                            
-                            # Find strongest and weakest bonds
-                            if coherence_matrix:
-                                strongest_pair = max(coherence_matrix.items(), key=lambda x: x[1])
-                                weakest_pair = min(coherence_matrix.items(), key=lambda x: x[1])
-                                
-                                strongest_bond = {
-                                    "pair": strongest_pair[0].split("_"),
-                                    "score": strongest_pair[1]
-                                }
-                                weakest_bond = {
-                                    "pair": weakest_pair[0].split("_"),
-                                    "score": weakest_pair[1]
-                                }
-                            else:
-                                strongest_bond = {"pair": [], "score": 0}
-                                weakest_bond = {"pair": [], "score": 0}
-                            
-                            # Collective CEEs (when all members > 0.75)
-                            collective_cees = []
-                            if all(v > 0.75 for v in c_emo_values):
-                                collective_cees = [
-                                    {"timestamp": "00:18:45", "all_members_synced": True},
-                                    {"timestamp": "00:34:12", "all_members_synced": True}
-                                ]
-                            
-                            # Patent 3: EFT, Reconsolidation, Escalation, Ventriloquism
-                            _eft_data = None
-                            _recon_data = None
-                            _escalation = {}
-                            _ventriloquism = {}
-                            _se = globals().get("sanctuary_engine")
-                            if _se:
-                                try:
-                                    for _sid, _sanc in (_se.data.get("active_sanctuaries") or {}).items():
-                                        if _sanc.get("family_id") == family_id:
-                                            _eft = _sanc.get("eft_tracker")
-                                            if _eft:
-                                                _eft_data = {
-                                                    "session_stage": _eft.get("session_stage", "UNKNOWN"),
-                                                    "negative_cycle": (_eft.get("negative_cycle") or {}).get("description") if _eft.get("negative_cycle") else None,
-                                                    "member_longings": {
-                                                        next((md["name"] for md in members_data if md["id"] == mid), mid): [l.get("description", "unspoken") for l in (longs or [])[:5]]
-                                                        for mid, longs in (_eft.get("member_longings") or {}).items()
-                                                    },
-                                                    "corrective_moments": len(_eft.get("corrective_moments") or []),
-                                                }
-                                            _recon = _sanc.get("reconsolidation_tracker")
-                                            if _recon:
-                                                _recon_data = {
-                                                    "schemas": [{"name": s.get("core_belief", "Unknown"), "activation_count": s.get("activation_count", 0), "mismatch_count": s.get("mismatch_count", 0), "reconsolidated": s.get("reconsolidated", False)} for s in (_recon.get("schemas") or {}).values()],
-                                                    "active_windows": len(_recon.get("mismatch_windows") or []),
-                                                    "verified_reconsolidations": len(_recon.get("reconsolidations") or []),
-                                                }
-                                            for _esc in (_sanc.get("escalation_events") or [])[-10:]:
-                                                _en = _esc.get("sender_name", _esc.get("sender_id", "Unknown"))
-                                                _escalation.setdefault(_en, []).append({"description": _esc.get("description", "Escalation"), "timestamp": _esc.get("timestamp", "")})
-                                            for _vt in (_sanc.get("ventriloquism_events") or [])[-10:]:
-                                                _vn = _vt.get("speaker_name", _vt.get("speaker_id", "Unknown"))
-                                                _ventriloquism.setdefault(_vn, []).append({"phrase": _vt.get("phrase", ""), "description": _vt.get("description", "Proxy speech"), "timestamp": _vt.get("timestamp", "")})
-                                            break
-                                except Exception:
-                                    pass
-                            
-                            _fam_resp = {
-                                "type": "family_metrics",
-                                "family_id": family_id,
-                                "members": members_data,
-                                "coherence_matrix": coherence_matrix,
-                                "family_wellness_index": family_wellness_index,
-                                "strongest_bond": strongest_bond,
-                                "weakest_bond": weakest_bond,
-                                "collective_cees": collective_cees,
-                            }
-                            if _eft_data:
-                                _fam_resp["eft_tracker"] = _eft_data
-                            if _recon_data:
-                                _fam_resp["reconsolidation_tracker"] = _recon_data
-                            if _escalation:
-                                _fam_resp["escalation_events"] = _escalation
-                            if _ventriloquism:
-                                _fam_resp["ventriloquism_events"] = _ventriloquism
-                            
-                            await websocket.send(json.dumps(_fam_resp))
-            
-            # === ADMIN: GET COHORT STATS ===
-            elif t == "admin_get_cohort_stats":
-                if current_profile and current_profile.get("role") == "ADMIN":
-                    filters = d.get("filters", {})
-                    age_groups = filters.get("age_groups", ["18-25", "26-35", "36-50", "51+"])
-                    diagnoses = filters.get("diagnoses", ["anxiety", "depression", "ptsd", "none"])
-                    treatment_types = filters.get("treatment_types", ["ai_only", "ai_coach", "family"])
-                    time_range = filters.get("time_range", "30d")
-                    
-                    # Get all clients
-                    registry = load_registry()
-                    all_clients = []
-                    
-                    for k, v in registry.items():
-                        profile = v.get("profile", {})
-                        if profile.get("role") == "CLIENT":
-                            all_clients.append(profile)
-                    
-                    # Calculate platform average
-                    total_c_emo = 0
-                    count = 0
-                    
-                    # Age group breakdown
-                    by_age_group = {}
-                    for age_group in age_groups:
-                        by_age_group[age_group] = {
-                            "avg_c_emo": 0,
-                            "count": 0,
-                            "total_c_emo": 0
-                        }
-                    
-                    # Diagnosis breakdown
-                    by_diagnosis = {}
-                    for dx in diagnoses:
-                        by_diagnosis[dx] = {
-                            "avg_c_emo": 0,
-                            "count": 0,
-                            "total_c_emo": 0,
-                            "improvement": "+0%"
-                        }
-                    
-                    # Treatment breakdown
-                    by_treatment = {}
-                    for tx in treatment_types:
-                        by_treatment[tx] = {
-                            "avg_c_emo": 0,
-                            "count": 0,
-                            "total_c_emo": 0,
-                            "effectiveness": "baseline"
-                        }
-                    
-                    # Process each client
-                    for client in all_clients:
-                        client_metrics = metrics_engine.load_metrics({
-                            "role": "CLIENT",
-                            "hardware_id": client.get("hardware_id")
-                        })
-                        nevedal_state = client_metrics.get("nevedal_state", {})
-                        c_emo = nevedal_state.get("C_emo", 0.5)
-                        
-                        total_c_emo += c_emo
-                        count += 1
-                        
-                        # Age group (simplified - would need birthdate)
-                        age_group = "26-35"  # Default for now
-                        if age_group in by_age_group:
-                            by_age_group[age_group]["total_c_emo"] += c_emo
-                            by_age_group[age_group]["count"] += 1
-                        
-                        # Diagnosis (simplified - would need diagnosis field)
-                        diagnosis = client.get("diagnosis", "none")
-                        if diagnosis in by_diagnosis:
-                            by_diagnosis[diagnosis]["total_c_emo"] += c_emo
-                            by_diagnosis[diagnosis]["count"] += 1
-                        
-                        # Treatment type (check if has coach)
-                        if client.get("assigned_coach_id"):
-                            tx_type = "ai_coach"
-                        elif client.get("family_id"):
-                            tx_type = "family"
-                        else:
-                            tx_type = "ai_only"
-                        
-                        if tx_type in by_treatment:
-                            by_treatment[tx_type]["total_c_emo"] += c_emo
-                            by_treatment[tx_type]["count"] += 1
-                    
-                    # Calculate averages
-                    platform_avg = round(total_c_emo / count, 2) if count > 0 else 0.64
-                    
-                    for age_group in by_age_group:
-                        if by_age_group[age_group]["count"] > 0:
-                            by_age_group[age_group]["avg_c_emo"] = round(
-                                by_age_group[age_group]["total_c_emo"] / by_age_group[age_group]["count"], 2
-                            )
-                    
-                    for dx in by_diagnosis:
-                        if by_diagnosis[dx]["count"] > 0:
-                            by_diagnosis[dx]["avg_c_emo"] = round(
-                                by_diagnosis[dx]["total_c_emo"] / by_diagnosis[dx]["count"], 2
-                            )
-                            # Simplified improvement calculation
-                            if dx == "anxiety":
-                                by_diagnosis[dx]["improvement"] = "+12%"
-                            elif dx == "depression":
-                                by_diagnosis[dx]["improvement"] = "+8%"
-                            elif dx == "ptsd":
-                                by_diagnosis[dx]["improvement"] = "+15%"
-                            else:
-                                by_diagnosis[dx]["improvement"] = "+5%"
-                    
-                    # Calculate treatment effectiveness
-                    baseline = 0.59
-                    for tx in by_treatment:
-                        if by_treatment[tx]["count"] > 0:
-                            avg = round(by_treatment[tx]["total_c_emo"] / by_treatment[tx]["count"], 2)
-                            by_treatment[tx]["avg_c_emo"] = avg
-                            
-                            if tx == "ai_only":
-                                by_treatment[tx]["effectiveness"] = "baseline"
-                                baseline = avg
-                            else:
-                                improvement = ((avg - baseline) / baseline) * 100
-                                by_treatment[tx]["effectiveness"] = f"+{int(improvement)}%"
-                    
-                    # Patent 2: Crisis Perception, Shame, PMB distributions
-                    crisis_perception_dist = {"NORMALIZER": 0, "MINIMIZER": 0, "AMPLIFIER": 0, "CALIBRATED": 0}
-                    shame_dist = {"FEAR": 0, "ANGER": 0, "WITHDRAWAL": 0, "PEOPLE_PLEASING": 0}
-                    pmb_dist = {"FIGHT": 0, "FLIGHT": 0, "FREEZE": 0, "FAWN": 0}
-                    total_cees_all = 0
-                    
-                    for client in all_clients:
-                        try:
-                            cm = metrics_engine.load_metrics({"role": "CLIENT", "hardware_id": client.get("hardware_id")})
-                            # Crisis perception
-                            cp = cm.get("crisis_perception", {})
-                            cp_type = (cp.get("perception_baseline") or "").upper()
-                            if cp_type in crisis_perception_dist:
-                                crisis_perception_dist[cp_type] += 1
-                            # Shame masking
-                            sp = cm.get("shame_profile", {})
-                            mask = (sp.get("shame_masking_pattern") or "").upper().replace("_MASKED", "")
-                            if mask in shame_dist:
-                                shame_dist[mask] += 1
-                            # PMB reactivity
-                            pmb = cm.get("pmb", {})
-                            rt = (pmb.get("reactivity_type") or "").upper()
-                            if rt in pmb_dist:
-                                pmb_dist[rt] += 1
-                            # CEEs
-                            total_cees_all += cm.get("total_cees", 0)
-                        except Exception:
-                            pass
-                    
-                    # Key insights (dynamically generated)
-                    key_insights = []
-                    if by_age_group:
-                        best_age = max(by_age_group.items(), key=lambda x: x[1].get("avg_c_emo", 0))
-                        if best_age[1].get("avg_c_emo", 0) > 0:
-                            key_insights.append(f"Ages {best_age[0]} show highest baseline coherence ({best_age[1]['avg_c_emo']})")
-                    if by_treatment:
-                        if by_treatment.get("ai_coach", {}).get("avg_c_emo", 0) > by_treatment.get("ai_only", {}).get("avg_c_emo", 0):
-                            base = by_treatment.get("ai_only", {}).get("avg_c_emo", 0.5)
-                            coach_val = by_treatment.get("ai_coach", {}).get("avg_c_emo", 0.5)
-                            if base > 0:
-                                pct = int(((coach_val - base) / base) * 100)
-                                key_insights.append(f"AI+Coach treatment {pct}% more effective than AI alone")
-                    if count > 0:
-                        key_insights.append(f"{count} participants analyzed across cohort")
-                    if not key_insights:
-                        key_insights = ["Collecting data for insights..."]
-                    
-                    # Get analytics for total sessions
-                    analytics = analytics_engine.get_dashboard_stats()
-                    total_sessions = analytics.get("platform_totals", {}).get("total_sessions", 0)
-                    avg_cees = round(total_cees_all / count, 1) if count > 0 else 0
-                    
-                    await websocket.send(json.dumps({
-                        "type": "cohort_stats",
-                        "platform_avg_c_emo": platform_avg,
-                        "total_participants": count,
-                        "sample_size": count,
-                        "total_sessions": total_sessions,
-                        "avg_cees_per_user": avg_cees,
-                        "by_age_group": by_age_group,
-                        "by_diagnosis": by_diagnosis,
-                        "by_treatment": by_treatment,
-                        "by_treatment_type": by_treatment,
-                        "crisis_perception_distribution": crisis_perception_dist,
-                        "shame_distribution": shame_dist,
-                        "pmb_distribution": pmb_dist,
-                        "key_findings": key_insights,
-                        "key_insights": key_insights
-                    }))
-
-
-            
             # === NIGHT SCHOOL: GET WISDOM ===
             elif t == "get_night_school_wisdom":
                 if current_profile and current_profile.get("role") in ["COACH", "ADMIN"]:
@@ -12546,7 +12939,8 @@ Coach Reflection on Session {session_id}:
                         else:
                             await websocket.send(json.dumps({"type": "error", "message": result.get("error", "Upload failed")}))
                     except Exception as e:
-                        await websocket.send(json.dumps({"type": "error", "message": str(e)}))
+                        print(f">>> [ERROR] Curriculum file upload failed: {e}")
+                        await websocket.send(json.dumps({"type": "error", "message": "UPLOAD_FAILED"}))
             
             elif t == "move_curriculum_file":
                 if current_profile and current_profile.get("role") == "ADMIN":
@@ -12580,7 +12974,8 @@ Coach Reflection on Session {session_id}:
                         results = await night_school_curriculum.run_ingestion(d.get("categories"))
                         await websocket.send(json.dumps({"type": "ingestion_complete", "results": results}))
                     except Exception as e:
-                        await websocket.send(json.dumps({"type": "error", "message": str(e)}))
+                        print(f">>> [ERROR] Curriculum ingestion failed: {e}")
+                        await websocket.send(json.dumps({"type": "error", "message": "INGESTION_FAILED"}))
             
             elif t == "get_curriculum_wisdom":
                 if current_profile and current_profile.get("role") in ["ADMIN", "COACH"]:
@@ -12727,7 +13122,7 @@ Coach Reflection on Session {session_id}:
                     if not family_id:
                         # Auto-create family if head of household and top tier
                         plan = (current_profile.get("subscription_plan") or current_profile.get("tier") or "").upper()
-                        if "TOP" in plan or "SOVEREIGN" in plan or "FAMILY" in plan:
+                        if "TOP" in plan or "SOVEREIGN" in plan or "STANDARD" in plan:
                             family_id = f"FAM_{str(_uuid.uuid4())[:8].upper()}"
                             registry = load_registry()
                             for k, v in registry.items():
@@ -12969,14 +13364,15 @@ Coach Reflection on Session {session_id}:
             elif t in ("change_subscription", "upgrade_subscription"):
                 if current_profile:
                     new_plan = (d.get("plan") or "").strip().upper()
-                    valid_plans = ["TRIAL", "STANDARD", "TOP_TIER", "FAMILY"]
-                    plan_hierarchy = {"TRIAL": 0, "COACH_ONLY": 0, "STANDARD": 1, "TOP_TIER": 2, "FAMILY": 3}
-                    plan_names = {"TRIAL": "Threshold", "STANDARD": "Inner Chamber", "TOP_TIER": "Sovereign Circle", "FAMILY": "Family Sovereign"}
+                    valid_plans = ["COACH_ONLY", "TRIAL", "STANDARD", "TOP_TIER"]
+                    plan_hierarchy = {"COACH_ONLY": 0, "TRIAL": 0, "STANDARD": 1, "TOP_TIER": 2}
+                    plan_names = {"COACH_ONLY": "Coach Only", "TRIAL": "Threshold", "STANDARD": "Inner Chamber", "TOP_TIER": "Sovereign Circle"}
+                    # Aligned with config/standing_orders_seed.json
                     plan_details = {
+                        "COACH_ONLY": {"tokens": 0, "price": 0},
                         "TRIAL": {"tokens": 10000, "price": 0},
                         "STANDARD": {"tokens": 50000, "price": 49},
                         "TOP_TIER": {"tokens": 200000, "price": 149},
-                        "FAMILY": {"tokens": 300000, "price": 299},
                     }
 
                     if new_plan not in valid_plans:
@@ -13219,7 +13615,7 @@ Coach Reflection on Session {session_id}:
                     user_name = d.get("name", "there")
                     if user_name:
                         help_text = f"(User's name is {user_name}.) {help_text}"
-                    print(f">>> [HELP] {help_role} query: {help_text[:80]}")
+                    print(f">>> [HELP] {help_role} query received ({len(help_text)} chars)")
                     try:
                         import aiohttp as _aio_help
                         async with _aio_help.ClientSession() as _help_session:
@@ -13270,7 +13666,7 @@ Coach Reflection on Session {session_id}:
                         print(f">>> [HELP] Error: {e}")
                         await websocket.send(json.dumps({
                             "type": "error",
-                            "message": f"Help query failed: {str(e)}"
+                            "message": "HELP_QUERY_FAILED"
                         }))
 
             # =================================================================
@@ -13666,6 +14062,44 @@ Coach Reflection on Session {session_id}:
                             "success": False
                         }))
             
+            elif t == "set_onboarding_seen":
+                target_uid = (data.get("user_id") or uid or "").toString()
+                if target_uid:
+                    try:
+                        registry = load_registry()
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == target_uid:
+                                v["profile"]["has_seen_onboarding"] = True
+                                save_registry(registry)
+                                if current_profile and (current_profile.get("hardware_id") == target_uid):
+                                    current_profile["has_seen_onboarding"] = True
+                                break
+                        await websocket.send(json.dumps({"type": "onboarding_seen_set", "success": True}))
+                        print(f"[Onboarding] has_seen_onboarding set for {target_uid}")
+                    except Exception as e:
+                        print(f"[Onboarding] Error set_onboarding_seen: {e}")
+                else:
+                    await websocket.send(json.dumps({"type": "onboarding_seen_set", "success": False, "message": "user_id required"}))
+            
+            elif t == "set_paid_onboarding_seen":
+                target_uid = (data.get("user_id") or uid or "").toString()
+                if target_uid:
+                    try:
+                        registry = load_registry()
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == target_uid:
+                                v["profile"]["has_seen_paid_onboarding"] = True
+                                save_registry(registry)
+                                if current_profile and (current_profile.get("hardware_id") == target_uid):
+                                    current_profile["has_seen_paid_onboarding"] = True
+                                break
+                        await websocket.send(json.dumps({"type": "paid_onboarding_seen_set", "success": True}))
+                        print(f"[Onboarding] has_seen_paid_onboarding set for {target_uid}")
+                    except Exception as e:
+                        print(f"[Onboarding] Error set_paid_onboarding_seen: {e}")
+                else:
+                    await websocket.send(json.dumps({"type": "paid_onboarding_seen_set", "success": False, "message": "user_id required"}))
+            
             elif t == "sanctuary_get_or_create":
                 """
                 Smart handler that:
@@ -13678,13 +14112,22 @@ Coach Reflection on Session {session_id}:
                         "type": "error",
                         "message": "Not authenticated"
                     }))
-                elif (current_profile.get("subscription_plan") or "").upper() == "COACH_ONLY" or current_profile.get("can_access_nate") == False:
-                    await websocket.send(json.dumps({
-                        "type": "error",
-                        "message": "COACH_ONLY_NO_AI",
-                        "detail": "Your plan is scheduling-only. Sanctuary is not available."
-                    }))
-                    continue
+                else:
+                    _sanc_plan = (current_profile.get("subscription_plan") or "").upper()
+                    if _sanc_plan in ("COACH_ONLY",) or current_profile.get("can_access_nate") == False:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "COACH_ONLY_NO_AI",
+                            "detail": "Your plan is scheduling-only. Sanctuary is not available."
+                        }))
+                        continue
+                    if _sanc_plan not in ("STANDARD", "INNER_CHAMBER", "TOP_TIER", "SOVEREIGN_CIRCLE"):
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "FAMILY_SANCTUARY_UPGRADE_REQUIRED",
+                            "detail": "Family Sanctuary requires Inner Chamber ($49/mo) or Sovereign Circle ($149/mo) subscription."
+                        }))
+                        continue
                 
                 family_id = current_profile.get('family_id')
                 member_id = current_profile.get('hardware_id')
@@ -15195,7 +15638,7 @@ IMPORTANT:
                         } for name in member_names},
                         "overall_progress": 5,
                         "recommended_next_steps": ["Schedule a follow-up family discussion", "Consider live coaching session"],
-                        "coach_notes": f"AI summary failed: {str(e)}. Manual review recommended."
+                        "coach_notes": "AI summary unavailable. Manual review recommended."
                     }
                 
                 # ============================================
@@ -15572,14 +16015,69 @@ IMPORTANT:
                         """
                         sanctuary_id = d.get('sanctuary_id')
                         member_wants_continue = d.get('continue', False)
-                        
-                        # Record member's response
-                        # TODO: Implement extension voting logic
-                        
-                        await websocket.send(json.dumps({
-                            "type": "sanctuary_extend_recorded",
-                            "message": "Your response has been recorded. Waiting for other members..."
-                        }))
+                        member_id = uid
+
+                        # Record member's vote in sanctuary state
+                        sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
+                        if sanctuary_data:
+                            if "extension_votes" not in sanctuary_data:
+                                sanctuary_data["extension_votes"] = {}
+                            sanctuary_data["extension_votes"][member_id] = member_wants_continue
+
+                            # Check if all active members have voted
+                            active_members = [
+                                m["user_id"] for m in sanctuary_data.get("members", [])
+                                if m.get("status") not in ("EXITED",)
+                            ]
+                            votes = sanctuary_data["extension_votes"]
+                            all_voted = all(mid in votes for mid in active_members)
+
+                            if all_voted and active_members:
+                                yes_count = sum(1 for v in votes.values() if v)
+                                majority = yes_count > len(active_members) / 2
+
+                                if majority:
+                                    # Extend the session — reset timer
+                                    sanctuary_data["extension_votes"] = {}
+                                    sanctuary_data.setdefault("extensions", 0)
+                                    sanctuary_data["extensions"] += 1
+                                    await sanctuary_engine.broadcast_to_sanctuary(
+                                        sanctuary_id=sanctuary_id,
+                                        message_data={
+                                            "type": "sanctuary_extended",
+                                            "message": "The family has voted to continue. Sanctuary extended for another 24 hours.",
+                                            "extensions": sanctuary_data["extensions"],
+                                            "votes": {"yes": yes_count, "no": len(active_members) - yes_count},
+                                        }
+                                    )
+                                else:
+                                    # Majority voted no — complete the session
+                                    await sanctuary_engine.broadcast_to_sanctuary(
+                                        sanctuary_id=sanctuary_id,
+                                        message_data={
+                                            "type": "sanctuary_extension_declined",
+                                            "message": "The family has decided to wrap up. Thank you for this time together.",
+                                            "votes": {"yes": yes_count, "no": len(active_members) - yes_count},
+                                        }
+                                    )
+                                    try:
+                                        await sanctuary_engine.complete_session(sanctuary_id)
+                                    except Exception as comp_err:
+                                        print(f">>> [SANCTUARY] Extension-decline completion error: {comp_err}")
+                            else:
+                                # Still waiting for other members
+                                voted_count = len([mid for mid in active_members if mid in votes])
+                                await websocket.send(json.dumps({
+                                    "type": "sanctuary_extend_recorded",
+                                    "message": f"Your response has been recorded. Waiting for other members ({voted_count}/{len(active_members)})...",
+                                    "voted": voted_count,
+                                    "total": len(active_members),
+                                }))
+                        else:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "message": "Sanctuary session not found."
+                            }))
 
             elif t == "sanctuary_coaching_decline":
                 """
@@ -16114,13 +16612,553 @@ IMPORTANT:
                         Request live coach escalation
                         """
                         sanctuary_id = d.get('sanctuary_id')
-                        
-                        # TODO: Generate coach summary and notify coach
-                        
+
+                        # Notify coaches via NotificationSystem + Email
+                        try:
+                            sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
+                            requester_name = current_profile.get('name', 'A member') if current_profile else 'A member'
+                            family_size = len(sanctuary_data.get("members", [])) if sanctuary_data else 0
+
+                            notification_system.create_notification(
+                                user_id="ALL_COACHES",
+                                notification_type="coach_escalation",
+                                title="Family Sanctuary Coach Request",
+                                message=f"{requester_name} requests live coach support ({family_size} members).",
+                                priority="HIGH",
+                                data={"sanctuary_id": sanctuary_id},
+                            )
+
+                            try:
+                                from app.services.notifications_service import EmailService
+                                email_svc = EmailService()
+                                await email_svc.send_crisis_alert(
+                                    to_email=None,
+                                    client_name=requester_name,
+                                    alert_type="SANCTUARY_COACH_REQUEST",
+                                    details=f"Sanctuary {sanctuary_id}: coach support requested for {family_size} members.",
+                                )
+                            except Exception as email_err:
+                                print(f">>> [SANCTUARY] Coach email error: {email_err}")
+                        except Exception as notify_err:
+                            print(f">>> [SANCTUARY] Coach notify error: {notify_err}")
+
                         await websocket.send(json.dumps({
                             "type": "coach_notified",
                             "message": "A coach will be notified within 24 hours."
-                        }))                     
+                        }))
+
+            # =================================================================
+            # NATE NUDGE — Proactive Notification Handlers
+            # =================================================================
+
+            elif t == "get_pending_nudges":
+                try:
+                    from app.services.nate_nudge import NateNudgeService
+                    nudge_svc = NateNudgeService(db_pool)
+                    user_uuid = None
+                    if current_profile:
+                        try:
+                            from uuid import UUID as _UUID
+                            user_uuid = _UUID(current_profile.get("id", ""))
+                        except Exception:
+                            pass
+                    if user_uuid:
+                        nudges = await nudge_svc.get_pending_nudges(user_uuid)
+                        # Mark them as sent once delivered over WebSocket
+                        for n in nudges:
+                            if n.get("status") == "pending":
+                                try:
+                                    await nudge_svc.mark_sent(_UUID(n["id"]))
+                                    n["status"] = "sent"
+                                except Exception:
+                                    pass
+                        # Push through notification system too
+                        try:
+                            for n in nudges:
+                                await notification_system._push_to_websocket(uid, {
+                                    "type": "nate_nudge",
+                                    "nudge": n,
+                                })
+                        except Exception:
+                            pass
+                        await websocket.send(json.dumps({
+                            "type": "pending_nudges",
+                            "nudges": nudges,
+                            "count": len(nudges),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "pending_nudges",
+                            "nudges": [],
+                            "count": 0,
+                            "error": "no_user_context",
+                        }))
+                except Exception as nudge_err:
+                    print(f">>> [SOCKET] get_pending_nudges error: {nudge_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "get_pending_nudges",
+                        "message": str(nudge_err),
+                    }))
+
+            elif t == "nudge_mark_opened":
+                try:
+                    from app.services.nate_nudge import NateNudgeService
+                    from uuid import UUID as _UUID
+                    nudge_svc = NateNudgeService(db_pool)
+                    nudge_id = _UUID(d.get("nudge_id", ""))
+                    await nudge_svc.mark_opened(nudge_id)
+                    await websocket.send(json.dumps({
+                        "type": "nudge_updated",
+                        "nudge_id": str(nudge_id),
+                        "status": "opened",
+                    }))
+                except Exception as nudge_err:
+                    print(f">>> [SOCKET] nudge_mark_opened error: {nudge_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "nudge_mark_opened",
+                        "message": str(nudge_err),
+                    }))
+
+            elif t == "nudge_dismiss":
+                try:
+                    from app.services.nate_nudge import NateNudgeService
+                    from uuid import UUID as _UUID
+                    nudge_svc = NateNudgeService(db_pool)
+                    nudge_id = _UUID(d.get("nudge_id", ""))
+                    await nudge_svc.dismiss(nudge_id)
+                    await websocket.send(json.dumps({
+                        "type": "nudge_updated",
+                        "nudge_id": str(nudge_id),
+                        "status": "dismissed",
+                    }))
+                except Exception as nudge_err:
+                    print(f">>> [SOCKET] nudge_dismiss error: {nudge_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "nudge_dismiss",
+                        "message": str(nudge_err),
+                    }))
+
+            # =================================================================
+            # AI MODES — TriCorder / Archivist / Guardian / Supervisor
+            # =================================================================
+
+            elif t == "ai_mode_activate":
+                try:
+                    from app.services.ai_modes import (
+                        TriCorderMode, ArchivistMode, GuardianMode, SupervisorMode,
+                    )
+                    from uuid import UUID as _UUID
+                    mode_name = d.get("mode", "").lower()
+                    session_id = _UUID(d.get("session_id", ""))
+                    mode_map = {
+                        "tri_corder": TriCorderMode,
+                        "archivist": ArchivistMode,
+                        "guardian": GuardianMode,
+                        "supervisor": SupervisorMode,
+                    }
+                    mode_cls = mode_map.get(mode_name)
+                    if not mode_cls:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "handler": "ai_mode_activate",
+                            "message": f"Unknown mode: {mode_name}",
+                            "available": list(mode_map.keys()),
+                        }))
+                    else:
+                        mode_instance = mode_cls(db_pool=db_pool)
+                        result = await mode_instance.activate(
+                            session_id=session_id,
+                            user_id=uid if uid != "GUEST" else None,
+                            **{k: v for k, v in d.items()
+                               if k not in ("type", "mode", "session_id")},
+                        )
+                        # Store in connection state for subsequent process/output calls
+                        if not hasattr(websocket, "_ai_modes"):
+                            websocket._ai_modes = {}
+                        websocket._ai_modes[str(session_id)] = mode_instance
+                        await websocket.send(json.dumps({
+                            "type": "ai_mode_activated",
+                            "mode": mode_name,
+                            "session_id": str(session_id),
+                            "result": result,
+                        }))
+                except Exception as aim_err:
+                    print(f">>> [SOCKET] ai_mode_activate error: {aim_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "ai_mode_activate",
+                        "message": str(aim_err),
+                    }))
+
+            elif t == "ai_mode_process":
+                try:
+                    from uuid import UUID as _UUID
+                    session_id = str(d.get("session_id", ""))
+                    modes = getattr(websocket, "_ai_modes", {})
+                    mode_instance = modes.get(session_id)
+                    if not mode_instance:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "handler": "ai_mode_process",
+                            "message": "No active mode for this session. Activate first.",
+                        }))
+                    else:
+                        payload = d.get("data", {})
+                        result = await mode_instance.process(payload)
+                        await websocket.send(json.dumps({
+                            "type": "ai_mode_processed",
+                            "session_id": session_id,
+                            "mode": mode_instance.MODE_NAME,
+                            "result": result,
+                        }))
+                except Exception as aim_err:
+                    print(f">>> [SOCKET] ai_mode_process error: {aim_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "ai_mode_process",
+                        "message": str(aim_err),
+                    }))
+
+            elif t == "ai_mode_get_output":
+                try:
+                    session_id = str(d.get("session_id", ""))
+                    modes = getattr(websocket, "_ai_modes", {})
+                    mode_instance = modes.get(session_id)
+                    if not mode_instance:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "handler": "ai_mode_get_output",
+                            "message": "No active mode for this session.",
+                        }))
+                    else:
+                        output = await mode_instance.generate_output()
+                        await websocket.send(json.dumps({
+                            "type": "ai_mode_output",
+                            "session_id": session_id,
+                            "mode": mode_instance.MODE_NAME,
+                            "output": output,
+                        }))
+                except Exception as aim_err:
+                    print(f">>> [SOCKET] ai_mode_get_output error: {aim_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "ai_mode_get_output",
+                        "message": str(aim_err),
+                    }))
+
+            elif t == "ai_mode_deactivate":
+                try:
+                    session_id = str(d.get("session_id", ""))
+                    modes = getattr(websocket, "_ai_modes", {})
+                    mode_instance = modes.get(session_id)
+                    if mode_instance:
+                        result = mode_instance.deactivate()
+                        del modes[session_id]
+                        await websocket.send(json.dumps({
+                            "type": "ai_mode_deactivated",
+                            "session_id": session_id,
+                            "result": result,
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "ai_mode_deactivated",
+                            "session_id": session_id,
+                            "result": {"status": "no_active_mode"},
+                        }))
+                except Exception as aim_err:
+                    print(f">>> [SOCKET] ai_mode_deactivate error: {aim_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "ai_mode_deactivate",
+                        "message": str(aim_err),
+                    }))
+
+            # =================================================================
+            # ADMIN: LIVE SESSIONS (from LIVE_SESSION_TRACKER)
+            # =================================================================
+
+            elif t == "admin_get_live_sessions":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        live = []
+                        for sid, sess in LIVE_SESSION_TRACKER.items():
+                            live.append({
+                                "session_id": sid,
+                                "client_id": sess.get("client_id", ""),
+                                "started_at": sess.get("started_at", ""),
+                                "session_type": sess.get("session_type", "ai"),
+                                "mood": sess.get("mood_at_start", ""),
+                            })
+                        await websocket.send(json.dumps({
+                            "type": "live_sessions",
+                            "sessions": live,
+                            "count": len(live),
+                        }))
+                    except Exception as ls_err:
+                        print(f">>> [SOCKET] admin_get_live_sessions error: {ls_err}")
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "handler": "admin_get_live_sessions",
+                            "message": str(ls_err),
+                        }))
+                else:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "admin_get_live_sessions",
+                        "message": "Admin access required",
+                    }))
+
+            # =================================================================
+            # SWARM RELAY — trigger swarm services on the FastAPI process
+            # =================================================================
+
+            elif t == "swarm_request":
+                try:
+                    action = d.get("action", "")
+                    payload = d.get("payload", {})
+                    if swarm_relay:
+                        result = await swarm_relay.request(action, payload)
+                        await websocket.send(json.dumps({
+                            "type": "swarm_response",
+                            "action": action,
+                            "result": result,
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "swarm_response",
+                            "action": action,
+                            "result": {"status": "unavailable", "message": "Swarm relay not connected"},
+                        }))
+                except Exception as sr_err:
+                    print(f">>> [SOCKET] swarm_request error: {sr_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "handler": "swarm_request",
+                        "message": str(sr_err),
+                    }))
+
+            # =================================================================
+            # ZEFCP Layer 1 — Mobile Fragment Transport (Phase 7)
+            # =================================================================
+
+            elif t == "zefcp_fragment":
+                # Mobile device uploads a captured BLE fragment
+                try:
+                    fragment_data = d.get("fragment", {})
+                    endpoint_id = d.get("endpoint_id", uid)
+                    if swarm_relay:
+                        result = await swarm_relay.request("zefcp_fragment_ingest", {
+                            "fragment": fragment_data,
+                            "endpoint_id": endpoint_id,
+                            "source_uid": uid,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_fragment_ack",
+                            "status": result.get("status", "received"),
+                            "fragment_id": fragment_data.get("fragment_id"),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_fragment_ack",
+                            "status": "buffered",
+                            "fragment_id": fragment_data.get("fragment_id"),
+                        }))
+                except Exception as zf_err:
+                    print(f">>> [SOCKET] zefcp_fragment error: {zf_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "zefcp_fragment",
+                        "message": str(zf_err),
+                    }))
+
+            elif t == "zefcp_assembly":
+                # Mobile requests assembly status for a given observation
+                try:
+                    observation_id = d.get("observation_id", "")
+                    endpoint_id = d.get("endpoint_id", uid)
+                    if swarm_relay:
+                        result = await swarm_relay.request("zefcp_assembly_status", {
+                            "observation_id": observation_id,
+                            "endpoint_id": endpoint_id,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_assembly_status",
+                            "observation_id": observation_id,
+                            **result,
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_assembly_status",
+                            "observation_id": observation_id,
+                            "status": "unavailable",
+                        }))
+                except Exception as za_err:
+                    print(f">>> [SOCKET] zefcp_assembly error: {za_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "zefcp_assembly",
+                        "message": str(za_err),
+                    }))
+
+            elif t == "zefcp_capacity":
+                # Mobile queries available BLE transport capacity
+                try:
+                    endpoint_id = d.get("endpoint_id", uid)
+                    if swarm_relay:
+                        result = await swarm_relay.request("zefcp_capacity_query", {
+                            "endpoint_id": endpoint_id,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_capacity_report",
+                            **result,
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_capacity_report",
+                            "capacity": "unknown", "status": "relay_unavailable",
+                        }))
+                except Exception as zc_err:
+                    print(f">>> [SOCKET] zefcp_capacity error: {zc_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "zefcp_capacity",
+                        "message": str(zc_err),
+                    }))
+
+            elif t == "zefcp_embed_request":
+                # Mobile requests fragments to embed in outbound BLE advertising
+                try:
+                    fibre_id = d.get("fibre_id", uid)
+                    max_fragments = d.get("max_fragments", 10)
+                    if swarm_relay:
+                        result = await swarm_relay.request("zefcp_embed_queue", {
+                            "fibre_id": fibre_id,
+                            "max_fragments": max_fragments,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_embed_payload",
+                            "fibre_id": fibre_id,
+                            "fragments": result.get("fragments", []),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "zefcp_embed_payload",
+                            "fibre_id": fibre_id,
+                            "fragments": [],
+                        }))
+                except Exception as ze_err:
+                    print(f">>> [SOCKET] zefcp_embed_request error: {ze_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "zefcp_embed_request",
+                        "message": str(ze_err),
+                    }))
+
+            # =================================================================
+            # Quakete Layer 8 — Mobile Solidarity Transport (Phase 7)
+            # =================================================================
+
+            elif t == "trail_emission":
+                # Mobile Fibre emits a trail (heartbeat with coherence data)
+                try:
+                    emission_data = d.get("emission", {})
+                    fibre_id = emission_data.get("fibre_id", uid)
+                    if swarm_relay:
+                        result = await swarm_relay.request("quakete_trail_emission", {
+                            "emission": emission_data,
+                            "source_uid": uid,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "trail_emission_ack",
+                            "fibre_id": fibre_id,
+                            "status": result.get("status", "received"),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "trail_emission_ack",
+                            "fibre_id": fibre_id,
+                            "status": "buffered",
+                        }))
+                except Exception as te_err:
+                    print(f">>> [SOCKET] trail_emission error: {te_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "trail_emission",
+                        "message": str(te_err),
+                    }))
+
+            elif t == "quakete_mode_update":
+                # Mobile updates its Quakete operational mode
+                try:
+                    new_mode = d.get("mode", "dormant")
+                    fibre_id = d.get("fibre_id", uid)
+                    if swarm_relay:
+                        result = await swarm_relay.request("quakete_mode_update", {
+                            "fibre_id": fibre_id,
+                            "mode": new_mode,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "quakete_mode_ack",
+                            "fibre_id": fibre_id,
+                            "mode": new_mode,
+                            "status": result.get("status", "updated"),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "quakete_mode_ack",
+                            "fibre_id": fibre_id,
+                            "mode": new_mode,
+                            "status": "buffered",
+                        }))
+                except Exception as qm_err:
+                    print(f">>> [SOCKET] quakete_mode_update error: {qm_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "quakete_mode_update",
+                        "message": str(qm_err),
+                    }))
+
+            elif t == "distress_beacon":
+                # Mobile sends an emergency distress beacon (Quakete Ramp-Up trigger)
+                try:
+                    fibre_id = d.get("fibre_id", uid)
+                    severity = d.get("severity", "critical")
+                    reason = d.get("reason", "mobile_distress")
+                    if swarm_relay:
+                        result = await swarm_relay.request("quakete_distress_beacon", {
+                            "fibre_id": fibre_id,
+                            "severity": severity,
+                            "reason": reason,
+                            "source_uid": uid,
+                        })
+                        await websocket.send(json.dumps({
+                            "type": "distress_beacon_ack",
+                            "fibre_id": fibre_id,
+                            "status": result.get("status", "escalated"),
+                            "response_eta": result.get("response_eta"),
+                        }))
+                    else:
+                        await websocket.send(json.dumps({
+                            "type": "distress_beacon_ack",
+                            "fibre_id": fibre_id,
+                            "status": "relay_unavailable",
+                        }))
+                    print(f">>> [DISTRESS] Beacon from fibre={fibre_id} severity={severity}")
+                except Exception as db_err:
+                    print(f">>> [SOCKET] distress_beacon error: {db_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error", "handler": "distress_beacon",
+                        "message": str(db_err),
+                    }))
+
+            # =================================================================
+            # UNKNOWN MESSAGE TYPE — catch-all
+            # =================================================================
+
+            else:
+                print(f">>> [SOCKET] Unknown message type: {t} from uid={uid}")
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "message": f"Unknown message type: {t}",
+                    "hint": "Check the API documentation for valid message types.",
+                }))
 
     except websockets.exceptions.ConnectionClosed:
         print(f">>> [SOCKET] Connection closed for {uid}")
@@ -16136,10 +17174,23 @@ IMPORTANT:
         # #region agent log
         print(f">>> [DBG-H2] handle_client FINALLY uid={uid} unregistering socket, sockets_before={len(cortex.sockets.get(uid, set()))}")
         # #endregion
+        if _connections_per_ip.get(client_ip, 0) > 0:
+            _connections_per_ip[client_ip] -= 1
+        else:
+            _connections_per_ip.pop(client_ip, None)
         cortex.unregister(uid, websocket)
         notification_system.unregister_connection(uid, websocket)
         nevedal_handler.cleanup_connection(websocket)
-        
+
+        # Clean up sanctuary websocket registrations (prevent stale sends)
+        try:
+            for sanc_id in list(sanctuary_engine._websocket_registry.keys()):
+                if uid in sanctuary_engine._websocket_registry.get(sanc_id, {}):
+                    sanctuary_engine.member_disconnect(sanc_id, uid)
+                    print(f"[Sanctuary] Unregistered {uid} from sanctuary {sanc_id}")
+        except Exception as sanc_cleanup_err:
+            print(f"[Sanctuary] Disconnect cleanup error: {sanc_cleanup_err}")
+
         # Clean up coach connection for classroom notifications
         if uid and uid in connected_coaches:
             connected_coaches.pop(uid, None)
@@ -16157,19 +17208,104 @@ IMPORTANT:
             pass
 
 
+swarm_relay = None  # Initialized in main()
+
 async def main():
     """Start the WebSocket server"""
+    global db_pool, swarm_relay, _pg_user_store, _registry_cache
+
     print(f"[*] Starting Sovereign Bridge v16.1 on {HOST}:{PORT}")
     print(f"[*] Azure Endpoint: {AZURE_ENDPOINT[:50]}...")
     print(f"[*] Data Directory: {DATA_DIR}")
-    
+    print(f"[*] PostgreSQL Registry: {'ENABLED' if _use_pg_registry else 'DISABLED (JSON fallback)'}")
+
+    # ── Create asyncpg database pool for services that need SQL access ──
+    database_url = os.environ.get("DATABASE_URL")
+    if database_url:
+        try:
+            import asyncpg
+            db_pool = await asyncpg.create_pool(
+                database_url,
+                min_size=2,
+                max_size=10,
+                command_timeout=30,
+            )
+            print(f"[*] Database pool created ({db_pool.get_size()} connections)")
+            billing_system.db_pool = db_pool  # Founding member eligibility (platform_config)
+            # B5: Vault integration for chat file uploads/previews
+            try:
+                from .vault_bridge import VaultBridge
+                bridge_context.vault_bridge = VaultBridge(db_pool)
+                print(f"[*] VaultBridge initialized for chat file interactions")
+            except Exception as vb_err:
+                print(f"[!] VaultBridge init failed: {vb_err}")
+                bridge_context.vault_bridge = None
+        except Exception as db_err:
+            print(f"[!] Database pool creation failed: {db_err}")
+            print(f"[!] NateNudge and AI Mode handlers will be unavailable")
+            db_pool = None
+    else:
+        print(f"[!] DATABASE_URL not set — NateNudge and AI Mode handlers unavailable")
+        db_pool = None
+
+    # ── Initialize PostgreSQL-backed UserStore ──
+    if _use_pg_registry and db_pool:
+        try:
+            from .user_store import UserStore
+        except ImportError:
+            try:
+                from user_store import UserStore
+            except ImportError:
+                from app.websocket.user_store import UserStore
+
+        _pg_user_store = UserStore(db_pool, json_path=REGISTRY_FILE)
+        pg_registry = await _pg_user_store.initialize()
+
+        if _pg_user_store.is_ready:
+            if pg_registry:
+                _registry_cache = pg_registry
+                print(f"[*] UserStore ready: {len(_registry_cache)} users loaded from PostgreSQL")
+            else:
+                # PG is empty — seed from JSON registry
+                json_registry = load_json_file(REGISTRY_FILE, {}) or {}
+                backend_registry = load_json_file(BACKEND_REGISTRY_FILE, {}) or {}
+                merged = dict(backend_registry)
+                merged.update(json_registry)
+                if merged:
+                    saved = await _pg_user_store.save_all(merged)
+                    _registry_cache = merged
+                    print(f"[*] UserStore seeded from JSON: {saved} users imported to PostgreSQL")
+                else:
+                    _registry_cache = {}
+                    print(f"[*] UserStore ready (empty — no users in JSON or PostgreSQL)")
+        else:
+            print(f"[!] UserStore initialization failed — falling back to JSON registry")
+    else:
+        if _use_pg_registry:
+            print(f"[!] USE_POSTGRES_REGISTRY=true but no db_pool — falling back to JSON")
+
+    # ── Swarm Relay Client — allows bridge to invoke FastAPI swarm services ──
+    redis_url = os.environ.get("REDIS_URL", "redis://redis:6379")
+    try:
+        from app.services.swarm_relay import SwarmRelayClient
+        swarm_relay = SwarmRelayClient(redis_url)
+        await swarm_relay.connect()
+        print(f"[*] Swarm Relay Client connected (bridge → API swarm services)")
+    except Exception as sr_err:
+        print(f"[!] Swarm Relay Client failed: {sr_err}")
+        swarm_relay = None
+
     # Run Night School on startup (async background task)
     asyncio.create_task(night_school.start_session())
+
+    # Start periodic stale WebSocket connection cleanup
+    asyncio.create_task(_ws_stale_cleanup_loop())
     
     async with websockets.serve(
         handle_client, HOST, PORT,
         ping_interval=20,   # Send ping every 20 seconds
         ping_timeout=10,    # Wait 10 seconds for pong before closing
+        max_size=1_048_576,  # 1MB max message size — prevents memory exhaustion DoS
     ):
         print(f"[*] Bridge Online. Awaiting connections... (ping_interval=20s, ping_timeout=10s)")
         await asyncio.Future()  # Run forever

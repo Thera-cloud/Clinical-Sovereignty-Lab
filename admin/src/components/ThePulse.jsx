@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = window.location.origin.replace(':3000', ':8000');
+const API_BASE = process.env.REACT_APP_API_BASE_URL || window.location.origin.replace(':3000', ':8000');
 const POLL_INTERVAL = 30000;
 
 /* ─── Design Tokens ─── */

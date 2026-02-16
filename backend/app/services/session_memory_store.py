@@ -15,9 +15,12 @@ The store integrates with:
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+logger = logging.getLogger("session_memory_store")
 
 
 class SessionMemoryStore:
@@ -56,7 +59,8 @@ class SessionMemoryStore:
             try:
                 with open(self.index_path, 'r') as f:
                     return json.load(f)
-            except:
+            except Exception as e:
+                logger.debug(f"Load memory index: {e}")
                 pass
         
         return {
@@ -265,7 +269,8 @@ class SessionMemoryStore:
             try:
                 with open(refs_path, 'r') as f:
                     refs = json.load(f)
-            except:
+            except Exception as e:
+                logger.debug(f"Load memory references: {e}")
                 refs = []
         
         refs.append({
@@ -301,9 +306,10 @@ class SessionMemoryStore:
         try:
             with open(index_path, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception as e:
+            logger.debug(f"Get session memory record: {e}")
             return None
-    
+
     def get_session_transcript(self, session_id: str) -> Optional[str]:
         """Get transcript for a session."""
         path = self.memories_dir / session_id / "transcript.vtt"
@@ -314,9 +320,10 @@ class SessionMemoryStore:
         try:
             with open(path, 'r') as f:
                 return f.read()
-        except:
+        except Exception as e:
+            logger.debug(f"Get session transcript: {e}")
             return None
-    
+
     def get_session_analysis(self, session_id: str) -> Optional[Dict]:
         """Get analysis for a session."""
         path = self.memories_dir / session_id / "analysis.json"
@@ -327,9 +334,10 @@ class SessionMemoryStore:
         try:
             with open(path, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception as e:
+            logger.debug(f"Get session analysis: {e}")
             return None
-    
+
     def get_for_dojo(
         self,
         coach_id: str,
@@ -390,9 +398,10 @@ class SessionMemoryStore:
             try:
                 with open(obs_path, 'r') as f:
                     result["observations"] = json.load(f)
-            except:
+            except Exception as e:
+                logger.debug(f"Load observations for classroom: {e}")
                 pass
-        
+
         # Load biometrics summary
         bio_path = self.memories_dir / session_id / "biometrics.json"
         if bio_path.exists():
@@ -409,11 +418,12 @@ class SessionMemoryStore:
                         "max_c_emo": max(c_emo_values) if c_emo_values else 0.5,
                         "min_c_emo": min(c_emo_values) if c_emo_values else 0.5,
                     }
-            except:
+            except Exception as e:
+                logger.debug(f"Load biometrics for classroom: {e}")
                 pass
-        
+
         return result
-    
+
     def get_for_client_context(
         self,
         client_id: str,
@@ -438,9 +448,10 @@ class SessionMemoryStore:
             with open(refs_path, 'r') as f:
                 refs = json.load(f)
             return refs[-limit:]
-        except:
+        except Exception as e:
+            logger.debug(f"Get client context memory refs: {e}")
             return []
-    
+
     def get_for_family_context(
         self,
         family_id: str,
@@ -493,13 +504,16 @@ class SessionMemoryStore:
         query_lower = query.lower()
         results = []
         
-        # Get candidate sessions
+        # SECURITY: Require at least one of coach_id or client_id to prevent
+        # cross-user data exposure. Global searches are no longer permitted.
+        if not client_id and not coach_id:
+            return []
+        
+        # Get candidate sessions scoped to the specified user
         if client_id:
             session_ids = self._index.get("by_client", {}).get(client_id, [])
-        elif coach_id:
-            session_ids = self._index.get("by_coach", {}).get(coach_id, [])
         else:
-            session_ids = [m["session_id"] for m in self._index.get("memories", [])]
+            session_ids = self._index.get("by_coach", {}).get(coach_id, [])
         
         for sid in reversed(session_ids):
             memory = self.get_session(sid)

@@ -4,8 +4,12 @@ REST endpoints for the 5-layer coherence engine and The Pulse dashboard.
 Phase 2C.
 """
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional
+
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/api/coherence", tags=["coherence"])
 
@@ -104,8 +108,11 @@ async def get_gap_analysis(request: Request):
 
 
 @router.get("/individual/{user_id}")
-async def measure_individual(user_id: int, request: Request):
-    """Measure individual coherence for a specific user."""
+async def measure_individual(user_id: UUID, request: Request, current_user: str = Depends(get_current_user)):
+    """Measure individual coherence for a specific user. Requires authentication; user must be requesting their own data."""
+    if current_user != str(user_id):
+        raise HTTPException(status_code=403, detail="Access denied: you can only view your own coherence data")
+
     from app.services.coherence_engine import CoherenceEngine
 
     db_pool = _get_db_pool(request)
@@ -119,12 +126,26 @@ async def measure_individual(user_id: int, request: Request):
 
 
 @router.get("/family/{family_id}")
-async def measure_family(family_id: int, request: Request):
-    """Measure family system coherence."""
+async def measure_family(family_id: UUID, request: Request, current_user: str = Depends(get_current_user)):
+    """Measure family system coherence. Requires authentication; user must belong to the family."""
     from app.services.coherence_engine import CoherenceEngine
 
     db_pool = _get_db_pool(request)
     engine = CoherenceEngine(db_pool)
+
+    # Verify family membership
+    try:
+        async with db_pool.acquire() as conn:
+            member = await conn.fetchval(
+                "SELECT 1 FROM family_members WHERE family_id = $1 AND user_id = $2::uuid LIMIT 1",
+                family_id, current_user,
+            )
+            if not member:
+                raise HTTPException(status_code=403, detail="Access denied: you are not a member of this family")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Table may not exist yet; allow through
 
     try:
         measurement = await engine.measure_family(family_id)

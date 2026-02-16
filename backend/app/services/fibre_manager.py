@@ -27,6 +27,7 @@ from app.services.exceptions import (
     FibreSpawnException,
 )
 from app.fibres.base_fibre import BaseFibre
+from app.swarm_config import swarm_settings
 
 
 class FibreManager:
@@ -43,22 +44,23 @@ class FibreManager:
 
     # Minimum time at each autonomy level before eligible for upgrade
     AUTONOMY_MIN_HOURS = {
-        AutonomyLevel.OBSERVATION: 48,
-        AutonomyLevel.RESTRICTED: 168,   # 1 week
+        AutonomyLevel.OBSERVATION: swarm_settings.AUTONOMY_MIN_HOURS_OBSERVATION,
+        AutonomyLevel.RESTRICTED: swarm_settings.AUTONOMY_MIN_HOURS_RESTRICTED,
         AutonomyLevel.AUTONOMOUS: None,  # terminal level
     }
 
     # Alignment thresholds for autonomy upgrade
     ALIGNMENT_THRESHOLDS = {
-        "ethical": 0.8,
-        "strategic": 0.7,
-        "statistical": 0.7,
+        "ethical": swarm_settings.ALIGNMENT_THRESHOLD_ETHICAL,
+        "strategic": swarm_settings.ALIGNMENT_THRESHOLD_STRATEGIC,
+        "statistical": swarm_settings.ALIGNMENT_THRESHOLD_STATISTICAL,
     }
 
-    def __init__(self, db_pool, identity_service=None, wisdom_mesh=None):
+    def __init__(self, db_pool, identity_service=None, wisdom_mesh=None, sovereign_immunity=None):
         self.db_pool = db_pool
         self.identity_service = identity_service
         self.wisdom_mesh = wisdom_mesh
+        self.sovereign_immunity = sovereign_immunity
         self._active_fibres: Dict[UUID, BaseFibre] = {}
         self._fibre_registry: Dict[FibreType, Type[BaseFibre]] = {}
 
@@ -109,6 +111,8 @@ class FibreManager:
             db_pool=self.db_pool,
             identity_record=identity_record,
             private_key_pem=private_key_pem,
+            wisdom_mesh=self.wisdom_mesh,
+            immunity_service=self.sovereign_immunity,
         )
         if identity_record:
             fibre.fibre_id = identity_record.entity_id
@@ -268,10 +272,29 @@ class FibreManager:
         if current == AutonomyLevel.AUTONOMOUS:
             return {"fibre_id": str(fibre_id), "result": "already_autonomous"}
 
-        # Check minimum time
+        # Check minimum time at current level via fibre_evolution_journal
         min_hours = self.AUTONOMY_MIN_HOURS.get(current, 48)
-        # For now, time check is simplified — would track actual spawn/promotion time
-        # In production, compare against fibre.created_at or last promotion timestamp
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Find the most recent autonomy-relevant event for this fibre
+                last_event = await conn.fetchval(
+                    """SELECT MAX(created_at) FROM fibre_evolution_journal
+                       WHERE fibre_id = $1 AND event_type IN ('spawned', 'autonomy_upgrade')""",
+                    fibre_id,
+                )
+                if last_event:
+                    from datetime import datetime, timezone
+                    hours_at_level = (datetime.now(timezone.utc) - last_event).total_seconds() / 3600
+                    if hours_at_level < min_hours:
+                        return {
+                            "fibre_id": str(fibre_id),
+                            "result": "time_insufficient",
+                            "hours_at_level": round(hours_at_level, 1),
+                            "required_hours": min_hours,
+                        }
+        except Exception as e:
+            print(f">>> [FIBRE MANAGER] Time check fallback (journal query failed): {e}")
+            # Graceful fallback — allow upgrade if journal is unavailable
 
         # Check alignment
         report = fibre.check_alignment()
@@ -539,6 +562,120 @@ class FibreManager:
               f"{len(team_fibres)} Fibre(s)")
 
         return team
+
+    async def get_team(self, team_id: UUID) -> Optional[Dict[str, Any]]:
+        """Retrieve a Human-Swarm team by its team_id."""
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM swarm_teams WHERE team_id = $1", team_id
+            )
+        if not row:
+            return None
+        return {
+            "team_id": str(row["team_id"]),
+            "team_name": row["team_name"],
+            "human_id": row["human_id"],
+            "human_role": row["human_role"],
+            "fibre_ids": [str(fid) for fid in (row["fibre_ids"] or [])],
+            "active": row["active"],
+            "metadata": row["metadata"] if row["metadata"] else {},
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+
+    async def list_teams(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """List all Human-Swarm teams, optionally filtering to active ones."""
+        async with self.db_pool.acquire() as conn:
+            if active_only:
+                rows = await conn.fetch(
+                    "SELECT * FROM swarm_teams WHERE active = TRUE ORDER BY created_at DESC"
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM swarm_teams ORDER BY created_at DESC"
+                )
+        return [
+            {
+                "team_id": str(r["team_id"]),
+                "team_name": r["team_name"],
+                "human_id": r["human_id"],
+                "human_role": r["human_role"],
+                "fibre_ids": [str(fid) for fid in (r["fibre_ids"] or [])],
+                "active": r["active"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+    async def update_team(
+        self, team_id: UUID, updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update a team's configuration: name, human_role, add/remove Fibre IDs,
+        or update metadata.
+        """
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM swarm_teams WHERE team_id = $1", team_id
+            )
+            if not row:
+                raise FibreException(f"Team {team_id} not found")
+
+            new_name = updates.get("team_name", row["team_name"])
+            new_role = updates.get("human_role", row["human_role"])
+            current_fibres = list(row["fibre_ids"] or [])
+
+            # Add new Fibre IDs
+            for fid in updates.get("add_fibre_ids", []):
+                uid = UUID(fid) if isinstance(fid, str) else fid
+                if uid not in current_fibres:
+                    current_fibres.append(uid)
+
+            # Remove Fibre IDs
+            for fid in updates.get("remove_fibre_ids", []):
+                uid = UUID(fid) if isinstance(fid, str) else fid
+                if uid in current_fibres:
+                    current_fibres.remove(uid)
+
+            new_meta = {**(row["metadata"] or {}), **updates.get("metadata", {})}
+
+            await conn.execute(
+                """UPDATE swarm_teams
+                   SET team_name = $2, human_role = $3, fibre_ids = $4,
+                       metadata = $5, updated_at = NOW()
+                   WHERE team_id = $1""",
+                team_id, new_name, new_role, current_fibres,
+                json.dumps(new_meta),
+            )
+
+        print(f">>> [FIBRE MANAGER] Team '{new_name}' updated")
+        return await self.get_team(team_id)
+
+    async def dissolve_team(self, team_id: UUID, prune_fibres: bool = False) -> Dict[str, Any]:
+        """
+        Gracefully dissolve a Human-Swarm team.
+        Optionally prune the team's Fibres.
+        """
+        team = await self.get_team(team_id)
+        if not team:
+            raise FibreException(f"Team {team_id} not found")
+
+        if prune_fibres:
+            for fid_str in team.get("fibre_ids", []):
+                try:
+                    await self.prune(UUID(fid_str), reason=f"Team '{team['team_name']}' dissolved")
+                except Exception as e:
+                    print(f">>> [FIBRE MANAGER] Could not prune {fid_str}: {e}")
+
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE swarm_teams SET active = FALSE, updated_at = NOW() WHERE team_id = $1",
+                team_id,
+            )
+
+        print(f">>> [FIBRE MANAGER] Team '{team['team_name']}' dissolved "
+              f"(fibres pruned: {prune_fibres})")
+        return {"team_id": str(team_id), "dissolved": True, "fibres_pruned": prune_fibres}
 
     # ── Private Helpers ──
 

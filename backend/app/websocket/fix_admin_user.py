@@ -1,22 +1,26 @@
 import json
 import hashlib
 import secrets
+import os
+import shutil
+import datetime as datetime_module
 from datetime import datetime, timedelta
 
 # Load existing registry
 try:
     with open("data/user_registry.json", "r") as f:
         registry = json.load(f)
-except:
+except Exception:
     registry = {}
 
 # Create password hash EXACTLY like hash_password() does
-password = "admin123"
+password = os.environ.get("ADMIN_PASSWORD")
+if not password:
+    print("ERROR: ADMIN_PASSWORD env var is required. Exiting.")
+    import sys; sys.exit(1)
 salt = secrets.token_hex(16)
 hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
 hashed_password = f"{salt}:{hashed.hex()}"
-
-print(f"Generated password hash: {hashed_password[:60]}...")
 
 # Create admin user with EXACT structure
 new_profile = {
@@ -62,9 +66,15 @@ for key in keys_to_remove:
 
 registry["admin_admin1"] = admin_user
 
+# Backup before destructive write (only if file exists)
+if os.path.exists("data/user_registry.json"):
+    backup_path = f"data/user_registry.json.bak.{datetime_module.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    shutil.copy2("data/user_registry.json", backup_path)
+    print(f"Backup created: {backup_path}")
+
 with open("data/user_registry.json", "w") as f:
     json.dump(registry, f, indent=2)
 
 print(f"\n✅ Created: admin_admin1")
 print(f"   Username: admin1")
-print(f"   Password: admin123")
+print(f"   Password: [set via ADMIN_PASSWORD env var]")

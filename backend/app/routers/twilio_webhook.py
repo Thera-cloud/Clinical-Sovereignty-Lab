@@ -11,17 +11,44 @@ Brand: BN3309563dc845ee9667a111ad2a3f0ffe
 Customer Profile: BU8c4a7586c4f6ffce4a93afb4098bdc02
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
 from pathlib import Path
-from fastapi import APIRouter, Form, Response
+from fastapi import APIRouter, Request, Response
 from typing import Optional
+
+# Optional IP whitelisting for webhook providers (WH-M9)
+WEBHOOK_IP_WHITELIST_ENABLED = os.getenv("WEBHOOK_IP_WHITELIST_ENABLED", "false").lower() == "true"
+STRIPE_IP_RANGES = [x.strip() for x in os.getenv("STRIPE_WEBHOOK_IPS", "").split(",") if x.strip()]
+TWILIO_IP_RANGES = [x.strip() for x in os.getenv("TWILIO_WEBHOOK_IPS", "").split(",") if x.strip()]
+
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_WEBHOOK_URL = os.getenv("TWILIO_WEBHOOK_URL", "")  # The full public URL of the webhook
+
+
+def verify_twilio_signature(request_url: str, params: dict, signature: str) -> bool:
+    """Verify Twilio webhook signature."""
+    if not TWILIO_AUTH_TOKEN:
+        print(">>> [TWILIO] WARNING: TWILIO_AUTH_TOKEN not set — skipping signature verification")
+        return True  # Allow in dev mode
+    # Build the data string: URL + sorted POST params
+    data = request_url
+    for key in sorted(params.keys()):
+        data += key + params[key]
+    # HMAC-SHA1
+    mac = hmac.new(TWILIO_AUTH_TOKEN.encode('utf-8'), data.encode('utf-8'), hashlib.sha1)
+    computed = base64.b64encode(mac.digest()).decode('utf-8')
+    return hmac.compare_digest(computed, signature)
 
 router = APIRouter(prefix="/webhook/twilio", tags=["twilio"])
 
 # Shared data directory — same location as NotificationSystem's sms_opt_out.json
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
+from app.config import settings as _settings
+DATA_DIR = Path(_settings.DATA_DIR)
 OPT_OUT_FILE = DATA_DIR / "sms_opt_out.json"
 
 # Standard STOP keywords recognized by CTIA / Twilio A2P
@@ -60,26 +87,40 @@ def _save_opt_outs(numbers: set):
 
 
 @router.post("/incoming")
-async def handle_incoming_sms(
-    From: str = Form(default=""),
-    Body: str = Form(default=""),
-    To: str = Form(default=""),
-    MessageSid: Optional[str] = Form(default=None),
-):
+async def handle_incoming_sms(request: Request):
     """Handle incoming SMS from Twilio (STOP, START, HELP).
 
     Twilio's Advanced Opt-Out for 10DLC campaigns auto-replies to
     STOP/START at the carrier level. This webhook syncs the local
     opt-out list so the app also blocks sends.
     """
-    keyword = Body.strip().upper()
+    # IP whitelisting (when enabled)
+    if WEBHOOK_IP_WHITELIST_ENABLED and TWILIO_IP_RANGES:
+        client_ip = request.client.host if request.client else ""
+        if client_ip not in TWILIO_IP_RANGES:
+            print(f">>> [TWILIO] Rejected request from non-whitelisted IP: {client_ip}")
+            return Response(content="Forbidden", status_code=403)
+
+    form_data = await request.form()
+    params = {k: v for k, v in form_data.items()}
+
+    # Verify Twilio signature
+    signature = request.headers.get("X-Twilio-Signature", "")
+    webhook_url = TWILIO_WEBHOOK_URL or str(request.url)
+    if not verify_twilio_signature(webhook_url, params, signature):
+        print(">>> [TWILIO] Invalid signature — request rejected")
+        return Response(content="Unauthorized", status_code=403)
+
+    From = form_data.get("From", "")
+    Body = form_data.get("Body", "")
+    keyword = (Body or "").strip().upper()
     phone = _normalize_phone(From)
 
     if keyword in STOP_KEYWORDS:
         numbers = _load_opt_outs()
         numbers.add(phone)
         _save_opt_outs(numbers)
-        print(f">>> [TWILIO_WEBHOOK] STOP from {phone} — added to opt-out list")
+        print(f">>> [TWILIO_WEBHOOK] STOP received — added to opt-out list")
         # Return empty TwiML — Twilio Advanced Opt-Out already sent its auto-reply
         return Response(
             content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
@@ -90,7 +131,7 @@ async def handle_incoming_sms(
         numbers = _load_opt_outs()
         numbers.discard(phone)
         _save_opt_outs(numbers)
-        print(f">>> [TWILIO_WEBHOOK] START from {phone} — removed from opt-out list")
+        print(f">>> [TWILIO_WEBHOOK] START received — removed from opt-out list")
         return Response(
             content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
             media_type="application/xml",
@@ -104,7 +145,7 @@ async def handle_incoming_sms(
             'Reply STOP to opt out.'
             '</Message></Response>'
         )
-        print(f">>> [TWILIO_WEBHOOK] HELP from {phone}")
+        print(f">>> [TWILIO_WEBHOOK] HELP request received")
         return Response(content=twiml, media_type="application/xml")
 
     # Check for approval protocol keywords (Sovereign Swarm strategy proposals)
@@ -122,7 +163,7 @@ async def handle_incoming_sms(
                     raw_message=Body.strip(),
                     channel="sms",
                 )
-                print(f">>> [TWILIO_WEBHOOK] Approval reply from {phone}: {result.get('decision', '?')}")
+                print(f">>> [TWILIO_WEBHOOK] Approval reply: {result.get('decision', '?')}")
                 twiml_body = f"Received: {result.get('decision', 'UNKNOWN')}"
                 if result.get("proposal_id"):
                     twiml_body += f" for proposal {result['proposal_id'][:8]}..."
@@ -135,7 +176,7 @@ async def handle_incoming_sms(
             print(f">>> [TWILIO_WEBHOOK] Approval handling error: {e}")
 
     # Unknown keyword — acknowledge silently
-    print(f">>> [TWILIO_WEBHOOK] Unhandled message from {phone}: {Body[:50]}")
+    print(f">>> [TWILIO_WEBHOOK] Unhandled message received ({len(Body)} chars)")
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
         media_type="application/xml",

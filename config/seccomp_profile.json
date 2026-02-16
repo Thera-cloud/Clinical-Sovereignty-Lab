@@ -1,0 +1,99 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": ["SCMP_ARCH_X86", "SCMP_ARCH_X32"]
+    },
+    {
+      "architecture": "SCMP_ARCH_AARCH64",
+      "subArchitectures": ["SCMP_ARCH_ARM"]
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "accept", "accept4", "access", "arch_prctl", "bind",
+        "brk", "capget", "capset", "chdir", "chmod", "chown",
+        "clock_getres", "clock_gettime", "clock_nanosleep",
+        "clone", "close", "connect", "copy_file_range",
+        "dup", "dup2", "dup3", "epoll_create", "epoll_create1",
+        "epoll_ctl", "epoll_pwait", "epoll_wait",
+        "eventfd", "eventfd2", "execve", "execveat",
+        "exit", "exit_group", "faccessat", "faccessat2",
+        "fadvise64", "fallocate", "fchdir", "fchmod", "fchmodat",
+        "fchown", "fchownat", "fcntl", "fdatasync",
+        "flock", "fork", "fstat", "fstatfs", "fsync",
+        "ftruncate", "futex", "getcwd", "getdents",
+        "getdents64", "getegid", "geteuid", "getgid",
+        "getgroups", "getpeername", "getpgrp", "getpid",
+        "getppid", "getpriority", "getrandom", "getresgid",
+        "getresuid", "getrlimit", "getrusage", "getsockname",
+        "getsockopt", "gettid", "gettimeofday", "getuid",
+        "inotify_add_watch", "inotify_init", "inotify_init1",
+        "inotify_rm_watch", "ioctl", "kill",
+        "lchown", "link", "linkat", "listen", "lseek",
+        "lstat", "madvise", "membarrier", "memfd_create",
+        "mincore", "mkdir", "mkdirat", "mlock", "mlock2",
+        "mmap", "mprotect", "mremap", "msgctl", "msgget",
+        "msgrcv", "msgsnd", "msync", "munlock", "munmap",
+        "nanosleep", "newfstatat", "open", "openat",
+        "pause", "pipe", "pipe2", "poll", "ppoll",
+        "prctl", "pread64", "preadv", "prlimit64", "pwrite64",
+        "pwritev", "read", "readahead", "readlink", "readlinkat",
+        "readv", "recvfrom", "recvmmsg", "recvmsg",
+        "rename", "renameat", "renameat2", "restart_syscall",
+        "rmdir", "rt_sigaction", "rt_sigpending",
+        "rt_sigprocmask", "rt_sigqueueinfo", "rt_sigreturn",
+        "rt_sigsuspend", "rt_sigtimedwait",
+        "sched_getaffinity", "sched_getattr",
+        "sched_getparam", "sched_get_priority_max",
+        "sched_get_priority_min", "sched_getscheduler",
+        "sched_setaffinity", "sched_setattr",
+        "sched_setparam", "sched_setscheduler",
+        "sched_yield", "seccomp", "select", "semctl",
+        "semget", "semop", "semtimedop",
+        "sendfile", "sendmmsg", "sendmsg", "sendto",
+        "set_robust_list", "set_tid_address",
+        "setgid", "setgroups", "setitimer",
+        "setpgid", "setpriority", "setregid",
+        "setresgid", "setresuid", "setreuid",
+        "setsid", "setsockopt", "setuid",
+        "shmat", "shmctl", "shmdt", "shmget",
+        "shutdown", "sigaltstack", "signalfd",
+        "signalfd4", "socket", "socketpair",
+        "splice", "stat", "statfs", "statx",
+        "symlink", "symlinkat", "sync", "sync_file_range",
+        "sysinfo", "tee", "tgkill", "time",
+        "timer_create", "timer_delete", "timer_getoverrun",
+        "timer_gettime", "timer_settime", "timerfd_create",
+        "timerfd_gettime", "timerfd_settime",
+        "tkill", "truncate", "umask", "uname",
+        "unlink", "unlinkat", "utime", "utimensat",
+        "vfork", "wait4", "waitid", "write", "writev"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    },
+    {
+      "names": [
+        "ptrace", "personality", "mount", "umount2",
+        "pivot_root", "swapon", "swapoff", "reboot",
+        "settimeofday", "stime", "acct", "bpf",
+        "clock_adjtime", "clock_settime",
+        "create_module", "delete_module", "finit_module",
+        "init_module", "ioperm", "iopl",
+        "kexec_file_load", "kexec_load",
+        "keyctl", "lookup_dcookie",
+        "nfsservctl", "open_by_handle_at",
+        "perf_event_open", "query_module",
+        "quotactl", "request_key",
+        "setdomainname", "sethostname",
+        "setns", "unshare", "userfaultfd",
+        "vm86", "vm86old"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1,
+      "comment": "Dangerous syscalls blocked for container security"
+    }
+  ]
+}

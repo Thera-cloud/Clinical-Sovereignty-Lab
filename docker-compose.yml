@@ -25,7 +25,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nate_admin} -d ${POSTGRES_DB:-little_nate}"]
       interval: 10s
@@ -41,13 +41,14 @@ services:
     image: redis:7-alpine
     container_name: nate_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass ${REDIS_PASSWORD:?Redis password required}
     volumes:
       - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -63,13 +64,12 @@ services:
       dockerfile: Dockerfile
     container_name: nate_backend
     restart: unless-stopped
-    user: root
-    command: ["sh", "-c", "pip install --quiet apscheduler sendgrid && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     env_file:
       - .env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
     ports:
       - "${SERVER_PORT:-8000}:8000"
     depends_on:
@@ -101,7 +101,7 @@ services:
       - .env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - DATA_DIR=/app/data
     ports:
       - "${WEBSOCKET_PORT:-8765}:8765"
@@ -114,6 +114,11 @@ services:
       - ./backend/app:/app/app:ro
       - ./data/bridge:/app/data
       - bridge_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',8765)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - nate_network
 
@@ -128,11 +133,17 @@ services:
     restart: unless-stopped
     environment:
       - REACT_APP_API_URL=http://${SERVER_HOST:-10.0.0.81}:${SERVER_PORT:-8000}
+      - REACT_APP_API_BASE_URL=http://${SERVER_HOST:-10.0.0.81}:${SERVER_PORT:-8000}
       - REACT_APP_WS_URL=ws://${SERVER_HOST:-10.0.0.81}:${WEBSOCKET_PORT:-8765}
     ports:
       - "${ADMIN_PORT:-3000}:3000"
     depends_on:
       - backend
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - nate_network
 

@@ -331,18 +331,20 @@ def check_deadman_switch():
     """
 ```
 
-#### Swarm Intelligence
-- Family dynamics correlation detection
-- Cross-member pattern matching
-- Privacy-preserving insights (no specifics shared)
+#### Swarm Intelligence (Transgenerational Pattern Detection)
+- Family dynamics correlation detection via the **Pattern Engine** (`pattern_engine.py`)
+- Cross-member emotional theme correlation, coping inheritance classification, trigger mapping
+- Privacy-preserving insights (no individual content shared across family members)
+- Powered by the broader Sovereign Swarm Intelligence (SSI) multi-agent architecture — see `docs/THEORETICAL_FRAMEWORK.md` §4-5
 
 ```python
 def detect_family_correlations(family_id):
     """
-    Analyze session data across family members.
-    Detect: same-day stress topics, correlated anxiety spikes,
-    breakthrough keywords appearing across members.
+    Analyze session data across family members via PatternEngineService.
+    Detect: emotional theme correlation, coping mechanism inheritance,
+    trigger pattern mapping, coherence trajectory correlation.
     Output confidence scores without revealing individual content.
+    Uses: pattern_engine.full_transgenerational_analysis(family_id)
     """
 ```
 
@@ -584,7 +586,7 @@ WS   /ws/research/nevedal/stream/{session_id}
 ### Phase 4: Nate Features (Weeks 7-8)
 - [ ] Implement sc_06 Nate Features
 - [ ] Build Deadman Switch cron job
-- [ ] Build Swarm Intelligence correlation engine
+- [ ] Build Swarm Intelligence correlation engine (Pattern Engine — transgenerational analysis)
 - [ ] Implement AI mode configurations
 
 ### Phase 5: Nevedal Lab (Weeks 9-12)
@@ -594,6 +596,85 @@ WS   /ws/research/nevedal/stream/{session_id}
 - [ ] Build CEE window detection algorithm
 - [ ] Create report generation system
 - [ ] Build longitudinal analysis queries
+
+---
+
+## 💬 BIG NATE CHAT — 8-Mode Command Interface
+
+### Overview
+
+Big Nate Chat is the primary human-AI command interface between Big Nate (admin/creator) and Little Nate (AI companion). It is available in two locations:
+
+- **SkyEye Dashboard** (`dashboard/skyeye.html`, "Big Nate Chat" tab) — HTML dashboard interface
+- **Sovereign Command Admin Console** (`admin/src/components/BigNateChat.jsx`) — React admin component
+
+Both frontends use a **single unified backend**: `POST /api/skyeye/chat` and `GET /api/skyeye/chat`, powered by `SkyEyeChatService` in `backend/app/services/skyeye_chat.py`.
+
+### 8 Conversation Modes
+
+| Mode | Triggers | Authority | Description |
+|------|----------|-----------|-------------|
+| **Strategy** (default) | General conversation | Swarm | Brainstorming, insights, performance discussion. Proposes actions with `[PROPOSAL: type]` markers. |
+| **Command** | "approved", "go for it", "reject", "hold" | Swarm | Approve/reject pending proposals. Executes via Marketing Brain command protocol. |
+| **Briefing** | "briefing", "brief me", "status report", "sitrep" | Swarm | Sovereign briefing from all 6 strategic memory layers (L1-L6). |
+| **Inquiry** | "how many", "show me", "analytics", "stats" | Swarm | Data questions routed to platform metrics, campaign stats, and specific services. |
+| **Swarm** | "swarm", "fibres", "spawn", "prune", "mesh health" | Swarm | Fibre inventory, Wisdom Mesh health, convergence alerts, spawn/prune commands. |
+| **Marketing** | "marketing", "campaign", "playbook", "funnel", "audience" | Marketing | Full marketing authority: playbook review, pending actions, funnel stats, content strategy. |
+| **Defense** | "defense", "security", "threat", "hive", "attack" | Defense | Full defense authority: Hive Defense v4 readiness, threat alerts, Guardian Fibre status. |
+| **Admin** | "admin", "billing", "revenue", "subscription", "audit log" | Admin | Full admin authority: user stats, subscription billing, tier breakdown, audit log. |
+
+### Three Authorities
+
+**Marketing Authority** — Big Nate can:
+- Review and update the marketing playbook (content pillars, audiences, content mix)
+- View and decide on pending marketing actions (approve/reject/defer)
+- Monitor funnel stats (prospects, conversions, by platform, by audience)
+- Discuss campaign strategy with full context enrichment from MarketingBrain
+
+**Defense Authority** — Big Nate can:
+- Monitor Hive Defense v4 service readiness (GuardianFibre, PipelineDrum, SentinelMesh, etc.)
+- View active threat alerts and recent security incidents (24h window)
+- Check Guardian Fibre events and behavioral telemetry
+- Review webhook fortress verification stats
+- Recommend defensive actions (execution requires separate admin action)
+
+**Administration Authority** — Big Nate can:
+- View user statistics (total, active, by role, by tier)
+- Monitor subscription and billing data (active, past due, canceled)
+- Access recent audit log entries
+- Discuss system health and administrative decisions
+- Recommend admin actions (execution requires separate admin action)
+
+### API Contract
+
+```
+GET  /api/skyeye/chat?limit=50     — Retrieve persistent chat history
+POST /api/skyeye/chat               — Send message, get AI response
+     Body: { "message": "...", "mode": "strategy" }
+     Response: { "id", "sender", "message", "mode", "created_at", "follow_up_suggestions" }
+```
+
+The `mode` field is optional. When provided, it overrides auto-detection. When omitted, the service uses keyword-based mode detection from the message content.
+
+### Backend Architecture
+
+```
+BigNateChat.jsx / skyeye.html
+        ↓ POST /api/skyeye/chat { message, mode }
+    skyeye_api.py router
+        ↓
+    SkyEyeChatService (skyeye_chat.py)
+        ├── Mode Detection (8 modes)
+        ├── Context Enrichment
+        │   ├── Strategy/Briefing/Swarm → StrategicMemoryService
+        │   ├── Marketing → MarketingBrain (playbook, actions, funnel)
+        │   ├── Defense → Hive Defense tables (status, alerts, events)
+        │   └── Admin → Users, subscriptions, audit_log tables
+        ├── Marketing Context (appended to all modes)
+        └── Azure OpenAI Realtime WebSocket → AI response
+```
+
+Messages are persisted in the `skyeye_chat` PostgreSQL table with sender, message, and metadata (including detected mode).
 
 ---
 

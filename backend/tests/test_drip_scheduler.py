@@ -1,0 +1,62 @@
+"""
+Tests for DripScheduler — background job scheduler.
+"""
+
+import pytest
+from unittest.mock import patch, MagicMock
+
+from app.services.drip_scheduler import DripScheduler
+
+
+# ─── Tests ─────────────────────────────────────────────────────────────────────
+
+class TestDripSchedulerInit:
+    @patch("app.services.drip_scheduler.AsyncIOScheduler")
+    def test_initialization_creates_scheduler(self, mock_scheduler_cls, fake_pool):
+        """DripScheduler should create an AsyncIOScheduler instance."""
+        mock_scheduler_cls.return_value = MagicMock()
+
+        scheduler = DripScheduler(db_pool=fake_pool)
+
+        assert scheduler.db_pool is fake_pool
+        assert scheduler.scheduler is not None
+        mock_scheduler_cls.assert_called_once()
+
+
+class TestDripSchedulerStart:
+    @patch("app.services.drip_scheduler.AsyncIOScheduler")
+    def test_start_registers_expected_jobs(self, mock_scheduler_cls, fake_pool):
+        """start() should register 8 scheduled jobs."""
+        mock_scheduler = MagicMock()
+        mock_scheduler_cls.return_value = mock_scheduler
+
+        scheduler = DripScheduler(db_pool=fake_pool)
+        scheduler.start()
+
+        # Should have called add_job 8 times (per source: prints "8 jobs")
+        assert mock_scheduler.add_job.call_count == 8
+        mock_scheduler.start.assert_called_once()
+
+        # Verify job IDs that were registered
+        job_ids = [
+            call.kwargs.get("id") or call[1].get("id", "")
+            for call in mock_scheduler.add_job.call_args_list
+        ]
+        # Flatten — add_job is called with keyword args
+        registered_ids = set()
+        for call in mock_scheduler.add_job.call_args_list:
+            _, kwargs = call
+            if "id" in kwargs:
+                registered_ids.add(kwargs["id"])
+
+        expected_ids = {
+            "check_pending_drips",
+            "check_sms_fallbacks",
+            "check_ticket_reminders",
+            "check_expired_tickets",
+            "update_analytics",
+            "check_approval_auto_exec",
+            "run_foresight_engine",
+            "run_coherence_pulse",
+        }
+        assert registered_ids == expected_ids

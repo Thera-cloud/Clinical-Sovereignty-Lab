@@ -6,12 +6,30 @@ Analyzes cross-generational family session data to identify:
     - Trigger pattern mapping
     - Coherence trajectory correlation
 
+Theoretical Basis:
+    - Multigenerational Transmission Process (Bowen, 1978) — patterns of emotional
+      functioning transmitted across generations through the family emotional system.
+    - Intergenerational Trauma (van der Kolk, 2014) — traumatic experiences propagate
+      through attachment patterns and coping mechanisms.
+    - Structural Family Therapy (Minuchin, 1974) — family structure, boundaries, and
+      subsystems as determinants of individual functioning.
+    - Epigenetic Inheritance (Yehuda et al., 2016) — biological mechanisms by which
+      environmental exposures affect gene expression across generations.
+
+    References:
+        Bowen, M. (1978). Family Therapy in Clinical Practice. Jason Aronson.
+        Minuchin, S. (1974). Families and Family Therapy. Harvard University Press.
+        van der Kolk, B. (2014). The Body Keeps the Score. Viking.
+        Yehuda, R. et al. (2016). Holocaust Exposure Induced Intergenerational Effects
+            on FKBP5 Methylation. Biological Psychiatry, 80(5), 372-380.
+
 Phase 4A — Code Guidelines Section VI.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -21,6 +39,8 @@ import numpy as np
 
 from app.services.exceptions import LegacyVaultException, InsufficientDataException
 
+logger = logging.getLogger(__name__)
+
 
 class TransgenerationalPatternEngine:
     """
@@ -28,9 +48,10 @@ class TransgenerationalPatternEngine:
     emotional patterns, coping mechanisms, and transformation opportunities.
     """
 
-    # Minimum data thresholds
-    MIN_SESSIONS_PER_MEMBER = 3
-    MIN_FAMILY_MEMBERS = 2
+    # Minimum data thresholds (from centralized swarm config)
+    from app.swarm_config import swarm_settings as _cfg
+    MIN_SESSIONS_PER_MEMBER = _cfg.PATTERN_MIN_SESSIONS_PER_MEMBER
+    MIN_FAMILY_MEMBERS = _cfg.PATTERN_MIN_FAMILY_MEMBERS
     MIN_GENERATIONS = 1  # ideally 2+ for true transgenerational analysis
 
     def __init__(self, db_pool):
@@ -80,7 +101,10 @@ class TransgenerationalPatternEngine:
                     pats = i["patterns"]
                     if isinstance(pats, str):
                         import json as _json
-                        pats = _json.loads(pats)
+                        try:
+                            pats = _json.loads(pats)
+                        except (ValueError, TypeError):
+                            pats = None
                     if isinstance(pats, list):
                         for p in pats:
                             if isinstance(p, str):
@@ -108,10 +132,13 @@ class TransgenerationalPatternEngine:
             unique = [t for t in set(themes) if len(all_themes.get(t, [])) == 1]
             unique_by_member[uid] = unique
 
-        # Correlation score: how much themes overlap across family
-        total_themes = sum(len(t) for t in member_themes.values())
-        shared_count = sum(len(uids) for uids in shared.values())
-        correlation = shared_count / max(total_themes, 1)
+        # Jaccard-like correlation coefficient (PhD Spec §4.1):
+        # J(Family) = |⋂ themes shared by ≥2 members| / |⋃ all unique themes|
+        union_themes = set()
+        for themes in member_themes.values():
+            union_themes.update(themes)
+        intersection_count = len(shared)  # themes present in ≥2 members
+        correlation = intersection_count / max(len(union_themes), 1)
 
         return {
             "family_id": family_id,
@@ -156,23 +183,74 @@ class TransgenerationalPatternEngine:
                 mechanisms = [i["strength"] or i["growth_area"] or "unclassified" for i in insights]
                 coping_data[uid] = mechanisms
 
-        # Classify: inherited (shared with parent), adapted (similar), novel (unique)
+        # Classify per PhD Spec §4.2:
+        #   - Inherited: identical mechanism shared by ≥2 members
+        #   - Adapted: partial keyword overlap with another member's mechanism (≥50% word overlap)
+        #   - Novel: unique to one member, no significant overlap
         all_mechanisms = set()
         for mechs in coping_data.values():
             all_mechanisms.update(mechs)
 
-        shared_across = {}
+        inherited = {}
+        adapted = {}
+        novel = {}
+
         for mech in all_mechanisms:
             holders = [uid for uid, mechs in coping_data.items() if mech in mechs]
             if len(holders) >= 2:
-                shared_across[mech] = holders
+                # Inherited: exact match across members
+                inherited[mech] = holders
+            else:
+                # Check for adapted: partial keyword overlap with other members' mechanisms
+                mech_words = set(mech.lower().split())
+                is_adapted = False
+                adapted_with = []
+                holder_uid = holders[0] if holders else None
+
+                for other_uid, other_mechs in coping_data.items():
+                    if other_uid == holder_uid:
+                        continue
+                    for other_mech in other_mechs:
+                        other_words = set(other_mech.lower().split())
+                        if mech_words and other_words:
+                            overlap = len(mech_words & other_words) / max(
+                                min(len(mech_words), len(other_words)), 1
+                            )
+                            if overlap >= 0.5:
+                                is_adapted = True
+                                adapted_with.append({"member": other_uid, "similar_to": other_mech})
+
+                if is_adapted:
+                    adapted[mech] = {
+                        "holder": holder_uid,
+                        "adapted_from": adapted_with,
+                    }
+                else:
+                    novel[mech] = holder_uid
+
+        total_classified = len(inherited) + len(adapted) + len(novel)
 
         return {
             "family_id": family_id,
             "members_analyzed": len(coping_data),
-            "inherited_mechanisms": {k: [str(u) for u in v] for k, v in shared_across.items()},
+            "inherited_mechanisms": {k: [str(u) for u in v] for k, v in inherited.items()},
+            "adapted_mechanisms": {
+                k: {"holder": str(v["holder"]), "adapted_from": [
+                    {"member": str(a["member"]), "similar_to": a["similar_to"]}
+                    for a in v["adapted_from"]
+                ]}
+                for k, v in adapted.items()
+            },
+            "novel_mechanisms": {k: str(v) for k, v in novel.items()},
             "total_mechanisms": len(all_mechanisms),
-            "inheritance_rate": round(len(shared_across) / max(len(all_mechanisms), 1), 4),
+            "classification_summary": {
+                "inherited": len(inherited),
+                "adapted": len(adapted),
+                "novel": len(novel),
+            },
+            "inheritance_rate": round(len(inherited) / max(total_classified, 1), 4),
+            "adaptation_rate": round(len(adapted) / max(total_classified, 1), 4),
+            "novelty_rate": round(len(novel) / max(total_classified, 1), 4),
             "analyzed_at": datetime.utcnow().isoformat(),
         }
 
@@ -209,7 +287,10 @@ class TransgenerationalPatternEngine:
                     bio = m["biometrics"] or {}
                     if isinstance(bio, str):
                         import json as _json
-                        bio = _json.loads(bio)
+                        try:
+                            bio = _json.loads(bio)
+                        except (ValueError, TypeError):
+                            bio = {}
                     voice_stress = None
                     for subject_key in ["subject_a", "subject_b"]:
                         subject = bio.get(subject_key, {})
@@ -235,14 +316,14 @@ class TransgenerationalPatternEngine:
                     try:
                         t1 = datetime.fromisoformat(events[i]["when"])
                         t2 = datetime.fromisoformat(events[j]["when"])
-                        if abs((t1 - t2).total_seconds()) < 172800:  # 48 hours
+                        if abs((t1 - t2).total_seconds()) < self._cfg.PATTERN_TRIGGER_CORRELATION_WINDOW:
                             correlated_triggers.append({
                                 "member_a": events[i]["name"],
                                 "member_b": events[j]["name"],
                                 "time_diff_hours": round(abs((t1 - t2).total_seconds()) / 3600, 1),
                             })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Timestamp parse in trigger correlation: %s", e)
 
         return {
             "family_id": family_id,
@@ -352,6 +433,117 @@ class TransgenerationalPatternEngine:
 
         results["analyzed_at"] = datetime.utcnow().isoformat()
         return results
+
+    # =========================================================================
+    # SWARM INTELLIGENCE — Family Correlation Detection
+    # =========================================================================
+
+    async def detect_family_correlations(
+        self, family_id, days: int = 84
+    ) -> Dict[str, Any]:
+        """
+        Cross-reference family member C_emo trends to detect correlations.
+        Returns a correlation matrix showing which members' emotional states
+        track together, plus identified co-occurring patterns.
+
+        Documented in SOVEREIGN_COMMAND_README.md (SC_07 Swarm Intelligence).
+        """
+        members = await self._get_family_members(family_id)
+        if len(members) < 2:
+            return {
+                "family_id": str(family_id),
+                "status": "insufficient_members",
+                "message": "At least 2 family members needed for correlation analysis",
+            }
+
+        # Gather C_emo time-series per member
+        member_series: Dict[str, List[float]] = {}
+        member_names: Dict[str, str] = {}
+
+        async with self.db_pool.acquire() as conn:
+            for member in members:
+                uid = member["id"]
+                member_names[str(uid)] = member.get("name") or "Unknown"
+                rows = await conn.fetch(
+                    """SELECT c_emo, recorded_at FROM nevedal_metrics
+                       WHERE user_id = $1
+                         AND recorded_at > NOW() - ($2 || ' days')::interval
+                       ORDER BY recorded_at""",
+                    uid, str(days),
+                )
+                member_series[str(uid)] = [float(r["c_emo"] or 0) for r in rows]
+
+        # Build pairwise correlation matrix
+        ids = list(member_series.keys())
+        correlations = {}
+        co_patterns = []
+
+        for i, id_a in enumerate(ids):
+            for id_b in ids[i + 1:]:
+                series_a = member_series[id_a]
+                series_b = member_series[id_b]
+
+                # Compute Pearson correlation (simplified — length-aligned)
+                min_len = min(len(series_a), len(series_b))
+                if min_len < 3:
+                    corr = 0.0
+                else:
+                    a = series_a[:min_len]
+                    b = series_b[:min_len]
+                    mean_a = sum(a) / min_len
+                    mean_b = sum(b) / min_len
+                    num = sum((a[j] - mean_a) * (b[j] - mean_b) for j in range(min_len))
+                    den_a = sum((a[j] - mean_a) ** 2 for j in range(min_len)) ** 0.5
+                    den_b = sum((b[j] - mean_b) ** 2 for j in range(min_len)) ** 0.5
+                    corr = num / (den_a * den_b) if den_a * den_b > 0 else 0.0
+
+                pair_key = f"{member_names[id_a]} <-> {member_names[id_b]}"
+                correlations[pair_key] = round(corr, 4)
+
+                # Detect co-occurring patterns
+                if corr > 0.7:
+                    co_patterns.append({
+                        "members": [member_names[id_a], member_names[id_b]],
+                        "correlation": round(corr, 4),
+                        "pattern": "strong_positive",
+                        "interpretation": (
+                            f"{member_names[id_a]} and {member_names[id_b]} show strongly "
+                            f"correlated emotional states — their C_emo values rise and fall "
+                            f"together (r={round(corr, 2)})."
+                        ),
+                    })
+                elif corr < -0.5:
+                    co_patterns.append({
+                        "members": [member_names[id_a], member_names[id_b]],
+                        "correlation": round(corr, 4),
+                        "pattern": "inverse",
+                        "interpretation": (
+                            f"{member_names[id_a]} and {member_names[id_b]} show inverse "
+                            f"emotional patterns — when one improves, the other declines "
+                            f"(r={round(corr, 2)}). This may indicate an enmeshed dynamic."
+                        ),
+                    })
+
+        # Compute family coherence index
+        corr_values = list(correlations.values())
+        family_coherence = sum(corr_values) / len(corr_values) if corr_values else 0
+
+        return {
+            "family_id": str(family_id),
+            "period_days": days,
+            "member_count": len(members),
+            "correlation_matrix": correlations,
+            "co_occurring_patterns": co_patterns,
+            "family_coherence_index": round(family_coherence, 4),
+            "members": {
+                str(m["id"]): {
+                    "name": m.get("name"),
+                    "data_points": len(member_series.get(str(m["id"]), [])),
+                }
+                for m in members
+            },
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
 
     # =========================================================================
     # HELPERS

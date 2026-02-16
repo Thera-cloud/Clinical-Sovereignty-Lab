@@ -196,8 +196,14 @@
         setupDragDrop();
         document.getElementById('fileInput').addEventListener('change', e => handleFiles(e.target.files));
 
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+
         function connectWebSocket() {
-            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws = new WebSocket(getWsUrl());
             ws.onopen = () => {
                 updateConnectionStatus(true);
                 ws.send(JSON.stringify({ type: "auth", token: sessionStorage.getItem("token"), hardware_id: profile.hardware_id }));

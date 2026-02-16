@@ -3,6 +3,12 @@ SOVEREIGN SWARM — Approval Protocol Service
 Wires strategy proposals to SendGrid email + Twilio SMS notifications
 with inbound reply parsing for APPROVE/HOLD/REJECT/MODIFY.
 
+Implements the PhD-architecture 4-category approval system:
+    OBSERVE  — log only, no approval needed
+    SUGGEST  — auto-execute after timeout (implicit approval)
+    ACT      — explicit single-party human approval
+    CRITICAL — multi-party approval + cooling period + dead-man switch
+
 Phase 1D — integrates with existing drip_scheduler.py scheduling pattern.
 """
 
@@ -15,6 +21,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from app.config import settings
+from app.models.strategy import ApprovalCategory, ProposalRisk
 from app.services.exceptions import (
     ApprovalTimeoutException,
     AutoExecuteBlockedException,
@@ -23,21 +30,138 @@ from app.services.exceptions import (
 )
 
 
+# ─── Category Classification Rules ───
+# Maps (risk, action_type_prefix) → ApprovalCategory
+# More specific rules checked first; fallback to risk-only mapping.
+
+_RISK_TO_CATEGORY: Dict[str, ApprovalCategory] = {
+    "low": ApprovalCategory.SUGGEST,
+    "medium": ApprovalCategory.ACT,
+    "high": ApprovalCategory.ACT,
+    "critical": ApprovalCategory.CRITICAL,
+}
+
+_OBSERVE_ACTION_TYPES = frozenset({
+    "log_insight", "record_metric", "update_cache", "emit_event",
+})
+
+_CRITICAL_ACTION_TYPES = frozenset({
+    "delete_user_data", "modify_ethical_core", "override_standing_order",
+    "mass_campaign", "fibre_prune_all", "change_subscription_tier",
+})
+
+
 class ApprovalProtocolService:
     """
     Manages the lifecycle of strategy proposal approvals.
 
-    Flow:
-        1. Proposal created → status = 'pending_approval'
-        2. Notification sent via SendGrid + Twilio
-        3. Inbound reply parsed → APPROVE / HOLD / REJECT / MODIFY
-        4. If no reply and risk == 'low' → auto-execute after window
+    Four-category approval flow (PhD Architecture §7.3):
+        OBSERVE  — Fibre logs the action; no approval gate.
+        SUGGEST  — Auto-execute after timeout window (default 4h for low-risk).
+        ACT      — Requires explicit human APPROVE before execution.
+        CRITICAL — Requires N-of-M validators, mandatory cooling period,
+                   and dead-man switch (revert to OBSERVATION if unresponsive).
+
+    Dead-man switch:
+        If no approval system interaction occurs within the configured
+        watchdog window (default 24h), all Fibres are forced back to
+        OBSERVATION autonomy level until a human heartbeat is received.
     """
 
-    def __init__(self, db_pool):
+    # Dead-man switch: hours without human activity before reverting Fibres
+    DEADMAN_WINDOW_HOURS = 24
+    # Default required approvers for CRITICAL proposals
+    CRITICAL_REQUIRED_APPROVERS = 2
+    # Mandatory cooling period (hours) after multi-party approval before execution
+    CRITICAL_COOLING_HOURS = 4
+    # Escalation timeout (hours) — if no response, escalate to next authority
+    ESCALATION_TIMEOUT_HOURS = 8
+
+    def __init__(self, db_pool, wisdom_mesh=None):
         self.db_pool = db_pool
         self._sendgrid_client = None
         self._twilio_client = None
+        self._wisdom_mesh = wisdom_mesh  # For veto feedback to Fibres
+        # Track last human interaction for dead-man switch
+        self._last_human_heartbeat: datetime = datetime.utcnow()
+
+    # ─── Category Classification ───
+
+    @staticmethod
+    def classify_category(
+        risk: str,
+        action_type: str,
+    ) -> ApprovalCategory:
+        """
+        Determine the approval category for a proposal based on its risk
+        level and action type.
+
+        Classification rules:
+            1. Certain action types always classify as OBSERVE (logging only).
+            2. Certain action types always classify as CRITICAL regardless of risk.
+            3. Otherwise, map risk → category using the standard mapping.
+        """
+        action_lower = action_type.lower()
+
+        # Rule 1: Observe-only action types
+        if action_lower in _OBSERVE_ACTION_TYPES:
+            return ApprovalCategory.OBSERVE
+
+        # Rule 2: Forced-critical action types
+        if action_lower in _CRITICAL_ACTION_TYPES:
+            return ApprovalCategory.CRITICAL
+
+        # Rule 3: Risk-based mapping
+        return _RISK_TO_CATEGORY.get(risk, ApprovalCategory.ACT)
+
+    def configure_proposal_for_category(
+        self,
+        proposal: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Enrich a proposal dict with category-specific fields before persisting.
+
+        Sets approval_category, required_approvers, cooling_period_hours,
+        and auto_execute_after based on the classified category.
+        """
+        category = self.classify_category(
+            proposal.get("risk", "medium"),
+            proposal.get("action_type", ""),
+        )
+        proposal["approval_category"] = category.value
+
+        if category == ApprovalCategory.OBSERVE:
+            # No approval needed — mark as auto_executed immediately
+            proposal["status"] = "auto_executed"
+            proposal["executed_at"] = datetime.utcnow().isoformat()
+            proposal["required_approvers"] = 0
+            proposal["cooling_period_hours"] = 0
+
+        elif category == ApprovalCategory.SUGGEST:
+            # Auto-execute after a timeout window
+            proposal["status"] = "pending_approval"
+            proposal["required_approvers"] = 1
+            proposal["cooling_period_hours"] = 0
+            if not proposal.get("auto_execute_after"):
+                proposal["auto_execute_after"] = (
+                    datetime.utcnow() + timedelta(hours=4)
+                ).isoformat()
+
+        elif category == ApprovalCategory.ACT:
+            # Requires explicit single-party approval
+            proposal["status"] = "pending_approval"
+            proposal["required_approvers"] = 1
+            proposal["cooling_period_hours"] = 0
+            proposal["auto_execute_after"] = None
+
+        elif category == ApprovalCategory.CRITICAL:
+            # Multi-party + cooling period
+            proposal["status"] = "pending_approval"
+            proposal["required_approvers"] = self.CRITICAL_REQUIRED_APPROVERS
+            proposal["cooling_period_hours"] = self.CRITICAL_COOLING_HOURS
+            proposal["auto_execute_after"] = None
+
+        return proposal
 
     # ─── SendGrid ───
 
@@ -213,12 +337,21 @@ Proposal ID: {proposal.get('proposal_id', 'N/A')}
         self, raw_message: str,
         channel: str = "sms",
         proposal_id: Optional[UUID] = None,
+        approver_identity: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Process an inbound approval reply from SMS webhook or email parse.
         If proposal_id is not provided, applies to the most recent pending proposal.
+
+        For CRITICAL proposals with multi-party approval, each approver is
+        tracked individually. The proposal only reaches 'approved' status
+        once the required number of distinct approvers have responded.
         """
+        # Record human heartbeat for dead-man switch
+        self._last_human_heartbeat = datetime.utcnow()
+
         parsed = self.parse_reply(raw_message)
+        approver = approver_identity or f"inbound_{channel}"
 
         async with self.db_pool.acquire() as conn:
             if proposal_id:
@@ -239,22 +372,91 @@ Proposal ID: {proposal.get('proposal_id', 'N/A')}
             proposal = dict(row)
             pid = proposal["proposal_id"]
             decision = parsed["decision"]
+            meta = proposal.get("metadata") or {}
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+
+            # Retrieve multi-party state
+            approver_list = meta.get("approver_list", [])
+            required_approvers = meta.get("required_approvers", 1)
+            # Prefer the DB column; fall back to metadata for legacy rows
+            approval_category = proposal.get("approval_category") or meta.get("approval_category", "act")
 
             if decision == "APPROVE":
-                await conn.execute("""
-                    UPDATE strategy_proposals
-                    SET status = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
-                    WHERE proposal_id = $1
-                """, pid, f"inbound_{channel}")
-                print(f">>> [APPROVAL] Proposal {pid} APPROVED via {channel}")
+                # Multi-party check for CRITICAL proposals
+                if approval_category == ApprovalCategory.CRITICAL.value:
+                    if approver not in approver_list:
+                        approver_list.append(approver)
+                    meta["approver_list"] = approver_list
+
+                    if len(approver_list) >= required_approvers:
+                        # All required approvers reached — approved (with cooling period)
+                        cooling_hours = meta.get("cooling_period_hours", self.CRITICAL_COOLING_HOURS)
+                        execute_after = datetime.utcnow() + timedelta(hours=cooling_hours)
+                        await conn.execute("""
+                            UPDATE strategy_proposals
+                            SET status = 'approved', approved_by = $2, approved_at = NOW(),
+                                auto_execute_after = $3, metadata = metadata || $4,
+                                updated_at = NOW()
+                            WHERE proposal_id = $1
+                        """, pid, f"multi-party ({len(approver_list)}/{required_approvers})",
+                            execute_after,
+                            json.dumps({"approver_list": approver_list}))
+                        print(f">>> [APPROVAL] CRITICAL proposal {pid} fully approved "
+                              f"({len(approver_list)}/{required_approvers}), "
+                              f"cooling until {execute_after.isoformat()}")
+                    else:
+                        # Partial approval — still waiting for more approvers
+                        await conn.execute("""
+                            UPDATE strategy_proposals
+                            SET metadata = metadata || $2, updated_at = NOW()
+                            WHERE proposal_id = $1
+                        """, pid, json.dumps({
+                            "approver_list": approver_list,
+                            "partial_approval": f"{len(approver_list)}/{required_approvers}",
+                        }))
+                        print(f">>> [APPROVAL] CRITICAL proposal {pid} partial: "
+                              f"{len(approver_list)}/{required_approvers}")
+                else:
+                    # Standard single-party approval (ACT or SUGGEST)
+                    await conn.execute("""
+                        UPDATE strategy_proposals
+                        SET status = 'approved', approved_by = $2, approved_at = NOW(), updated_at = NOW()
+                        WHERE proposal_id = $1
+                    """, pid, approver)
+                    print(f">>> [APPROVAL] Proposal {pid} APPROVED via {channel}")
 
             elif decision == "REJECT":
+                rejection_reason = f"Rejected via {channel}: {raw_message}"
                 await conn.execute("""
                     UPDATE strategy_proposals
                     SET status = 'rejected', rejection_reason = $2, updated_at = NOW()
                     WHERE proposal_id = $1
-                """, pid, f"Rejected via {channel}: {raw_message}")
+                """, pid, rejection_reason)
                 print(f">>> [APPROVAL] Proposal {pid} REJECTED via {channel}")
+
+                # PhD Spec §10.3: Push rejection reason back to proposing Fibre via Mesh
+                if self._wisdom_mesh and proposal.get("proposed_by"):
+                    try:
+                        from uuid import uuid4 as _uuid4
+                        from app.services.wisdom_mesh import MeshMessage
+                        veto_msg = MeshMessage(
+                            message_id=_uuid4(),
+                            sender_id=_uuid4(),  # System sender
+                            body=json.dumps({
+                                "type": "proposal_rejected",
+                                "proposal_id": str(pid),
+                                "rejection_reason": rejection_reason,
+                                "channel": channel,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }),
+                            tier="strategic",
+                            domain_tags=["approval", "veto_feedback"],
+                            priority=8,
+                        )
+                        await self._wisdom_mesh.send_message(veto_msg)
+                    except Exception as veto_err:
+                        print(f">>> [APPROVAL] Veto feedback via Mesh failed: {veto_err}")
 
             elif decision == "HOLD":
                 await conn.execute("""
@@ -276,10 +478,28 @@ Proposal ID: {proposal.get('proposal_id', 'N/A')}
                 }))
                 print(f">>> [APPROVAL] Proposal {pid} MODIFY requested via {channel}")
 
+            # PhD Spec §10.4: Immutable approval-decisions audit trail
+            await conn.execute("""
+                INSERT INTO approval_decisions_audit
+                    (proposal_id, decision, channel, approver, approval_category,
+                     raw_message, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """, pid, decision, channel, approver,
+                 approval_category,
+                 raw_message[:1000] if raw_message else "",
+                 json.dumps({
+                     "approver_count": len(approver_list),
+                     "required_approvers": required_approvers,
+                     "modifier_text": parsed.get("modifier_text"),
+                 }))
+
             return {
                 "proposal_id": str(pid),
                 "decision": decision,
                 "channel": channel,
+                "approval_category": approval_category,
+                "approver_count": len(approver_list),
+                "required_approvers": required_approvers,
                 "modifier_text": parsed.get("modifier_text"),
             }
 
@@ -288,10 +508,14 @@ Proposal ID: {proposal.get('proposal_id', 'N/A')}
     async def check_auto_executions(self) -> List[Dict]:
         """
         Find proposals past their auto-execute window and execute them.
-        Only low-risk proposals are eligible for auto-execution.
+
+        Eligible proposals:
+            - SUGGEST category: auto-execute after timeout (any risk == 'low')
+            - CRITICAL category: auto-execute after cooling period if fully approved
         """
         async with self.db_pool.acquire() as conn:
-            rows = await conn.fetch("""
+            # SUGGEST / low-risk auto-execute
+            rows_suggest = await conn.fetch("""
                 UPDATE strategy_proposals
                 SET status = 'auto_executed', executed_at = NOW(), updated_at = NOW()
                 WHERE status = 'pending_approval'
@@ -300,7 +524,132 @@ Proposal ID: {proposal.get('proposal_id', 'N/A')}
                   AND risk = 'low'
                 RETURNING *
             """)
-            results = [dict(r) for r in rows]
+
+            # CRITICAL approved proposals past their cooling period
+            rows_critical = await conn.fetch("""
+                UPDATE strategy_proposals
+                SET status = 'auto_executed', executed_at = NOW(), updated_at = NOW()
+                WHERE status = 'approved'
+                  AND auto_execute_after IS NOT NULL
+                  AND auto_execute_after <= NOW()
+                RETURNING *
+            """)
+
+            results = [dict(r) for r in rows_suggest] + [dict(r) for r in rows_critical]
             if results:
-                print(f">>> [APPROVAL] Auto-executed {len(results)} low-risk proposals")
+                print(f">>> [APPROVAL] Auto-executed {len(results)} proposals "
+                      f"({len(rows_suggest)} suggest, {len(rows_critical)} critical-cooled)")
             return results
+
+    # ─── Dead-Man Switch ───
+
+    def record_human_heartbeat(self) -> None:
+        """Record a human interaction to keep the dead-man switch alive."""
+        self._last_human_heartbeat = datetime.utcnow()
+
+    async def check_deadman_switch(self, fibre_manager=None) -> Dict[str, Any]:
+        """
+        Dead-man switch: if no human heartbeat has been received within
+        DEADMAN_WINDOW_HOURS, revert all Fibres to OBSERVATION autonomy level.
+
+        This ensures the swarm cannot operate autonomously indefinitely
+        without human oversight. Called by the scheduler.
+
+        Returns:
+            Dict with deadman status and any actions taken.
+        """
+        now = datetime.utcnow()
+        elapsed = now - self._last_human_heartbeat
+        elapsed_hours = elapsed.total_seconds() / 3600.0
+
+        result = {
+            "last_heartbeat": self._last_human_heartbeat.isoformat(),
+            "hours_since_heartbeat": round(elapsed_hours, 2),
+            "threshold_hours": self.DEADMAN_WINDOW_HOURS,
+            "triggered": False,
+            "fibres_reverted": 0,
+        }
+
+        if elapsed_hours >= self.DEADMAN_WINDOW_HOURS:
+            result["triggered"] = True
+            print(f">>> [DEADMAN] ⚠ Dead-man switch TRIGGERED — "
+                  f"{elapsed_hours:.1f}h without human heartbeat. "
+                  f"Reverting all Fibres to OBSERVATION.")
+
+            if fibre_manager:
+                try:
+                    from app.models.fibre import AutonomyLevel
+                    reverted = 0
+                    for fid, fibre in fibre_manager._active_fibres.items():
+                        if hasattr(fibre, '_autonomy_level') and \
+                                fibre._autonomy_level != AutonomyLevel.OBSERVATION:
+                            fibre._autonomy_level = AutonomyLevel.OBSERVATION
+                            reverted += 1
+                    result["fibres_reverted"] = reverted
+                    print(f">>> [DEADMAN] Reverted {reverted} Fibres to OBSERVATION")
+                except Exception as e:
+                    print(f">>> [DEADMAN] Error reverting Fibres: {e}")
+                    result["error"] = str(e)
+
+            # Also log to the ethical audit trail
+            # Schema: ethical_audit_log(fibre_id, check_type, passed, scores, details)
+            # fibre_id is nullable FK; use NULL for system-level events
+            if self.db_pool:
+                try:
+                    async with self.db_pool.acquire() as conn:
+                        await conn.execute("""
+                            INSERT INTO ethical_audit_log
+                                (fibre_id, check_type, passed, scores, details)
+                            VALUES (NULL, 'deadman_switch_triggered', FALSE, '{}'::jsonb, $1)
+                        """, json.dumps(result))
+                except Exception as e:
+                    print(f">>> [DEADMAN] Failed to log audit: {e}")
+
+        return result
+
+    # ─── Escalation Check ───
+
+    async def check_escalation_timeouts(self) -> List[Dict]:
+        """
+        Find proposals that have been pending_approval longer than
+        ESCALATION_TIMEOUT_HOURS and flag them for escalation.
+
+        For CRITICAL proposals, this means re-notifying at higher urgency.
+        For ACT proposals, this means sending a reminder.
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=self.ESCALATION_TIMEOUT_HOURS)
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM strategy_proposals
+                WHERE status = 'pending_approval'
+                  AND created_at < $1
+                  AND (metadata->>'escalated') IS NULL
+            """, cutoff)
+
+            escalated = []
+            for row in rows:
+                proposal = dict(row)
+                pid = proposal["proposal_id"]
+                risk = proposal.get("risk", "medium")
+
+                # Mark as escalated
+                await conn.execute("""
+                    UPDATE strategy_proposals
+                    SET metadata = metadata || $2, updated_at = NOW()
+                    WHERE proposal_id = $1
+                """, pid, json.dumps({
+                    "escalated": True,
+                    "escalated_at": datetime.utcnow().isoformat(),
+                    "escalation_reason": f"No response after {self.ESCALATION_TIMEOUT_HOURS}h",
+                }))
+
+                # Re-send notification with escalation flag
+                proposal["title"] = f"[ESCALATED] {proposal['title']}"
+                await self.send_email_notification(proposal)
+                await self.send_sms_notification(proposal)
+
+                escalated.append({"proposal_id": str(pid), "risk": risk})
+                print(f">>> [APPROVAL] ESCALATED proposal {pid} (no response after "
+                      f"{self.ESCALATION_TIMEOUT_HOURS}h)")
+
+            return escalated

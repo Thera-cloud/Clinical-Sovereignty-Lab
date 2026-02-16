@@ -454,16 +454,15 @@
 
         function connect() {
             var uname = sessionStorage.getItem("username");
-            var pwd = sessionStorage.getItem("password");
-            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            var token = sessionStorage.getItem("token");
+            if (!uname || !token) { window.location.href = "index.html"; return; }
             socket = new WebSocket(getWsUrl());
             socket.onopen = () => {
                 const profile = JSON.parse(sessionStorage.getItem('profile') || '{}');
                 socket.send(JSON.stringify({
-                    type: 'login_request',
-                    username: sessionStorage.getItem("username") || profile.name,
-                    password: sessionStorage.getItem('password'),
-                    expected_role: profile.role || 'COACH'
+                    type: 'auth',
+                    token: token,
+                    hardware_id: profile.hardware_id || 'WEB_ADMIN'
                 }));
             };
             socket.onmessage = handleMessage;
@@ -472,7 +471,7 @@
         function handleMessage(event) {
             const data = JSON.parse(event.data);
             
-            if (data.type === 'login_success') {
+            if (data.type === 'login_success' || data.type === 'auth_success') {
                 requestBrief();
             } else if (data.type === 'presession_brief') {
                 renderBrief(data.brief);

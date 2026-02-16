@@ -10,6 +10,8 @@ import json
 import datetime
 import secrets
 import os
+
+FOUNDING_COUPON_ID = os.getenv("STRIPE_FOUNDING_COUPON_ID", "FOUNDING_20PCT")
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
@@ -25,51 +27,71 @@ except ImportError:
 class StripeBillingSystem:
     """Complete Stripe billing integration."""
     
-    # Plan configurations
+    # Plan configurations — aligned with config/standing_orders_seed.json
+    # coach_sessions = max bookable per billing period (client pays coach; platform takes 30%, min $30)
+    # ai_minutes = -1 means unlimited
     PLANS = {
-        "STANDARD": {
-            "name": "Standard Plan",
-            "tokens": 50000,
-            "coach_sessions": 0,
-            "price_monthly": 29,
-            "price_yearly": 290,
-            "features": ["Unlimited AI sessions", "50,000 tokens/month", "Basic analytics"]
-        },
-        "TOP_TIER": {
-            "name": "Top Tier Plan", 
-            "tokens": 200000,
-            "coach_sessions": 4,
-            "price_monthly": 199,
-            "price_yearly": 1990,
-            "features": ["Unlimited AI sessions", "200,000 tokens/month", "4 coach sessions/month", "Advanced analytics", "Priority support"]
-        },
-        "FAMILY": {
-            "name": "Family Plan",
-            "tokens": 300000,
-            "coach_sessions": 6,
-            "price_monthly": 299,
-            "price_yearly": 2990,
-            "features": ["Unlimited AI sessions", "300,000 tokens/month", "6 coach sessions/month", "Up to 5 family members", "Family dashboard"]
+        "COACH_ONLY": {
+            "name": "Coach Only",
+            "tokens": 0,
+            "ai_minutes": 0,
+            "coach_sessions": -1,
+            "price_monthly": 0,
+            "price_yearly": 0,
+            "can_access_nate": False,
+            "features": ["Coach sessions only", "No AI access"]
         },
         "TRIAL": {
-            "name": "Free Trial",
-            "tokens": 10000,
+            "name": "Threshold (Trial)",
+            "tokens": 50000,
+            "ai_minutes": 300,
+            "week1_ai_minutes": 300,
+            "week2_ai_minutes_per_day": 30,
             "coach_sessions": 0,
             "price_monthly": 0,
             "price_yearly": 0,
             "duration_days": 14,
-            "features": ["14-day free trial", "10,000 tokens", "Basic AI sessions"]
-        }
+            "features": [
+                "14-day free trial",
+                "Week 1: 300 AI minutes full access",
+                "Week 2: 30 AI min/day + coherence upgrade prompt",
+                "50,000 tokens"
+            ]
+        },
+        "STANDARD": {
+            "name": "Inner Chamber",
+            "tokens": 50000,
+            "ai_minutes": 300,
+            "coach_sessions": 4,
+            "price_monthly": 49,
+            "price_yearly": 490,
+            "family_sanctuary": True,
+            "legacy_vault_gb": 1,
+            "features": ["300 AI minutes/month", "50,000 tokens/month", "4 coach sessions/month", "Family Sanctuary", "1 GB Legacy Vault"]
+        },
+        "TOP_TIER": {
+            "name": "Sovereign Circle",
+            "tokens": 200000,
+            "ai_minutes": -1,
+            "coach_sessions": 8,
+            "price_monthly": 149,
+            "price_yearly": 1490,
+            "family_sanctuary": True,
+            "me2me": True,
+            "legacy_vault_gb": 50,
+            "features": ["Unlimited AI", "200,000 tokens/month", "8 coach sessions/month", "Me2Me avatars", "50 GB Legacy Vault", "Family Sanctuary"]
+        },
     }
     
     def __init__(self, data_dir, stripe_key=None, webhook_secret=None, 
-                 registry_loader=None, registry_saver=None):
+                 registry_loader=None, registry_saver=None, db_pool=None):
         self.data_dir = Path(data_dir)
         self.billing_file = self.data_dir / "billing.json"
         self.transactions_file = self.data_dir / "transactions.json"
         self.webhook_secret = webhook_secret
         self.registry_loader = registry_loader
         self.registry_saver = registry_saver
+        self.db_pool = db_pool  # Optional: for founding member eligibility (platform_config)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize Stripe
@@ -81,10 +103,12 @@ class StripeBillingSystem:
         else:
             print(">>> [BILLING] Stripe disabled - using local billing only")
         
-        # Load price IDs from environment
+        # Load price IDs from environment (monthly + yearly subscriptions)
         self.price_ids = {
             "STANDARD_MONTHLY": os.getenv("STRIPE_PRICE_STANDARD"),
+            "STANDARD_YEARLY": os.getenv("STRIPE_PRICE_STANDARD_YEARLY"),
             "TOP_TIER_MONTHLY": os.getenv("STRIPE_PRICE_TOP_TIER"),
+            "TOP_TIER_YEARLY": os.getenv("STRIPE_PRICE_TOP_TIER_YEARLY"),
             "FAMILY_MONTHLY": os.getenv("STRIPE_PRICE_FAMILY_MEMBER"),
             "COACHING_SINGLE": os.getenv("STRIPE_PRICE_COACHING_SINGLE"),
             "COACHING_4PACK": os.getenv("STRIPE_PRICE_COACHING_4PACK"),
@@ -217,39 +241,68 @@ class StripeBillingSystem:
         if not customer_id:
             return None
         
-        # Get price ID
-        price_key = f"{plan.upper()}_MONTHLY"  # TODO: Add yearly support
+        # Get price ID — supports both monthly and yearly billing cycles
+        cycle = billing_cycle.upper() if billing_cycle else "MONTHLY"
+        if cycle not in ("MONTHLY", "YEARLY"):
+            cycle = "MONTHLY"
+        price_key = f"{plan.upper()}_{cycle}"
         price_id = self.price_ids.get(price_key)
+        
+        # Fallback: if yearly price not configured, use monthly
+        if not price_id and cycle == "YEARLY":
+            print(f">>> [BILLING] No yearly price for {plan}, falling back to monthly")
+            price_key = f"{plan.upper()}_MONTHLY"
+            price_id = self.price_ids.get(price_key)
+            cycle = "MONTHLY"
         
         if not price_id:
             print(f">>> [BILLING] No price ID for plan: {plan}")
             return None
         
+        # Founding member eligibility (first 100 paying members get 20% off for life)
+        founding_eligible = False
+        if self.db_pool and plan.upper() in ("STANDARD", "TOP_TIER"):
+            try:
+                row = await self.db_pool.fetchrow(
+                    "SELECT value FROM platform_config WHERE key = 'founding_member_count'"
+                )
+                if row and row.get("value"):
+                    cfg = row["value"] if isinstance(row["value"], dict) else json.loads(str(row["value"]))
+                    count = int(cfg.get("count", 0) or 0)
+                    max_count = int(cfg.get("max", 100) or 100)
+                    if count < max_count:
+                        # Check user not already founding member (user_id may be hardware_id; users.id may differ)
+                        existing = await self.db_pool.fetchval(
+                            """SELECT 1 FROM users WHERE (id::text = $1 OR stripe_customer_id IN (
+                                SELECT stripe_customer_id FROM users WHERE id::text = $1
+                            )) AND is_founding_member = TRUE""",
+                            user_id
+                        )
+                        if not existing:
+                            existing_by_hwid = await self.db_pool.fetchval(
+                                "SELECT is_founding_member FROM users WHERE id = $1", user_id
+                            )
+                            if not existing_by_hwid:
+                                founding_eligible = True
+            except Exception as e:
+                print(f">>> [BILLING] Founding member check failed: {e}")
+        
         try:
-            # Create checkout session
-            session = stripe.checkout.Session.create(
-                customer=customer_id,
-                payment_method_types=["card"],
-                line_items=[{
-                    "price": price_id,
-                    "quantity": 1
-                }],
-                mode="subscription",
-                success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-                cancel_url=cancel_url,
-                metadata={
-                    "user_id": user_id,
-                    "plan": plan,
-                    "billing_cycle": billing_cycle
-                },
-                subscription_data={
-                    "metadata": {
-                        "user_id": user_id,
-                        "plan": plan
-                    }
-                },
-                allow_promotion_codes=True
-            )
+            session_params = {
+                "customer": customer_id,
+                "payment_method_types": ["card"],
+                "line_items": [{"price": price_id, "quantity": 1}],
+                "mode": "subscription",
+                "success_url": success_url + "?session_id={CHECKOUT_SESSION_ID}",
+                "cancel_url": cancel_url,
+                "metadata": {"user_id": user_id, "plan": plan, "billing_cycle": billing_cycle},
+                "subscription_data": {"metadata": {"user_id": user_id, "plan": plan}},
+                "allow_promotion_codes": True,
+            }
+            if founding_eligible:
+                session_params["discounts"] = [{"coupon": FOUNDING_COUPON_ID}]
+            
+            session = stripe.checkout.Session.create(**session_params)
             
             print(f">>> [BILLING] Created checkout session: {session.id}")
             return session.url

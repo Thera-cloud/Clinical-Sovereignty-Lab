@@ -1058,6 +1058,9 @@
         <div class="nav-tab" data-tab="skyeye" onclick="window.location.href='skyeye.html'">
             <span>👁️</span> SkyEye
         </div>
+        <div class="nav-tab" data-tab="hive" onclick="window.location.href='hive_defense.html'">
+            <span>🛡️</span> Hive Defense
+        </div>
     </nav>
 
     <!-- COMMAND TAB -->
@@ -1503,10 +1506,9 @@
                     
                     // Authenticate
                     socket.send(JSON.stringify({
-                        type: 'login_request',
-                        username: sessionStorage.getItem("username") || profile.name,
-                        password: sessionStorage.getItem('password'),
-                        expected_role: profile.role || 'ADMIN'
+                        type: 'auth',
+                        token: token,
+                        hardware_id: profile.hardware_id || 'WEB_ADMIN'
                     }));
                 };
 
@@ -1530,6 +1532,8 @@
 
                 switch(data.type) {
                     case 'login_success':
+                    case 'auth_success':
+                        if (data.profile) { profile = data.profile; sessionStorage.setItem('profile', JSON.stringify(profile)); }
                         loadDashboard();
                         break;
                     case 'admin_stats':

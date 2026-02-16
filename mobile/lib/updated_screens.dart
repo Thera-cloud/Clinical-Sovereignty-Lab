@@ -26,7 +26,16 @@ import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanc
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
+import 'screens/billing_screens.dart';
 import 'services/export_service.dart';
+import 'config/app_config.dart';
+import 'widgets/vault_attachment_button.dart';
+import 'widgets/upload_progress_indicator.dart';
+
+/// Debug-only print: suppressed in production builds.
+// ignore: avoid_print
+void _debugLog(Object? message) { if (kDebugMode) print(message); }
+
 
 // =============================================================================
 // LITTLE NATE - UPDATED SCREENS WITH METRICS
@@ -1244,6 +1253,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
   VoiceState _voiceState = VoiceState.idle;
   double _mouthOpenness = 0.0;
 
+  // ── Nate Nudge state ──
+  List<Map<String, dynamic>> _pendingNudges = [];
+  bool _nudgeBannerDismissed = false;
+
+  // ── AI Modes state ──
+  String? _activeAiMode;  // 'tri_corder', 'archivist', 'guardian', 'supervisor'
+  Map<String, dynamic>? _aiModeOutput;
+
+  // ── Sovereign Vault upload progress ──
+  UploadProgressState _uploadProgressState = UploadProgressState.idle();
+
   @override
   void initState() {
     super.initState();
@@ -1295,13 +1315,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
-          if (kDebugMode) print("Neural socket error: $e");
-          if(mounted) setState(() => _connectionStatus = "ERROR: $e");
-          _addSystemMsg("Connection Died: $e");
+          _debugLog("Neural socket error: $e");
+          if(mounted) setState(() => _connectionStatus = "Connection interrupted. Reconnecting...");
           _scheduleReconnect();
         },
         onDone: () {
-          if(mounted) setState(() => _connectionStatus = "DISCONNECTED");
+          if(mounted) setState(() => _connectionStatus = "Reconnecting...");
           _scheduleReconnect();
         }
       );
@@ -1315,7 +1334,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       }));
 
     } catch (e) {
-      _addSystemMsg("Fatal Connection Error: $e");
+      _debugLog("Connection error: $e");
       _scheduleReconnect();
     }
 
@@ -1357,6 +1376,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         
         // Request full metrics
         _requestMetrics();
+
+        // Request pending nudges from Nate
+        _socket?.sink.add(jsonEncode({"type": "get_pending_nudges"}));
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
@@ -1449,14 +1471,257 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
           Navigator.of(context).pop();
         }
       }
+      // ── Nate Nudges ──
+      else if (data['type'] == 'pending_nudges') {
+        final nudges = (data['nudges'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        setState(() {
+          _pendingNudges = nudges;
+          _nudgeBannerDismissed = false;
+        });
+      }
+      else if (data['type'] == 'nate_nudge') {
+        // Real-time incoming nudge
+        final nudge = Map<String, dynamic>.from(data);
+        setState(() {
+          _pendingNudges.insert(0, nudge);
+          _nudgeBannerDismissed = false;
+        });
+      }
+      // ── AI Mode responses ──
+      else if (data['type'] == 'ai_mode_activated') {
+        setState(() => _activeAiMode = data['mode']);
+        _addSystemMsg("AI Mode activated: ${data['mode']?.toString().toUpperCase() ?? 'UNKNOWN'}");
+      }
+      else if (data['type'] == 'ai_mode_output') {
+        setState(() => _aiModeOutput = Map<String, dynamic>.from(data));
+        _showAiModeOutputSheet();
+      }
+      else if (data['type'] == 'ai_mode_deactivated') {
+        setState(() {
+          _activeAiMode = null;
+          _aiModeOutput = null;
+        });
+      }
+      // ── Swarm Relay responses ──
+      else if (data['type'] == 'swarm_response') {
+        // Handle swarm responses if needed in UI
+        if (kDebugMode) print("Swarm response: ${data['action']} → ${data['result']}");
+      }
       else if (data['type'] == 'error') {
         // General errors (not login-related) — show in system messages
         final msg = (data['message'] ?? data['error'] ?? 'An error occurred').toString();
         _addSystemMsg(msg);
       }
     } catch (e) {
-      if (kDebugMode) print("Parse Error: $e");
+      _debugLog("Parse Error: $e");
     }
+  }
+
+  // ── Nudge Actions ──
+
+  void _markNudgeOpened(String nudgeId) {
+    _socket?.sink.add(jsonEncode({"type": "nudge_mark_opened", "nudge_id": nudgeId}));
+    setState(() {
+      _pendingNudges.removeWhere((n) => n['nudge_id'] == nudgeId);
+    });
+  }
+
+  void _dismissNudge(String nudgeId) {
+    _socket?.sink.add(jsonEncode({"type": "nudge_dismiss", "nudge_id": nudgeId}));
+    setState(() {
+      _pendingNudges.removeWhere((n) => n['nudge_id'] == nudgeId);
+    });
+  }
+
+  void _showNudgesSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0A0A0A),
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        maxChildSize: 0.85,
+        expand: false,
+        builder: (_, scrollCtrl) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(Icons.auto_awesome, color: Color(0xFFC9A962)),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'MESSAGES FROM NATE',
+                    style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  Text('${_pendingNudges.length}', style: const TextStyle(color: Colors.white54)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollCtrl,
+                itemCount: _pendingNudges.length,
+                itemBuilder: (_, idx) {
+                  final nudge = _pendingNudges[idx];
+                  final title = nudge['title']?.toString() ?? 'From Nate';
+                  final body = nudge['body']?.toString() ?? nudge['message']?.toString() ?? '';
+                  final nudgeId = nudge['nudge_id']?.toString() ?? '';
+                  final urgency = nudge['urgency']?.toString() ?? 'normal';
+                  final color = urgency == 'high' ? Colors.red : urgency == 'gentle' ? const Color(0xFF4ECDC4) : const Color(0xFFC9A962);
+
+                  return Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111111),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: color.withOpacity(0.3)),
+                    ),
+                    child: ListTile(
+                      leading: Icon(Icons.auto_awesome, color: color, size: 28),
+                      title: Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(body, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4)),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.check_circle_outline, color: Colors.green),
+                        onPressed: () {
+                          _markNudgeOpened(nudgeId);
+                          if (_pendingNudges.isEmpty) Navigator.pop(ctx);
+                        },
+                      ),
+                      onTap: () {
+                        _markNudgeOpened(nudgeId);
+                        Navigator.pop(ctx);
+                        // If the nudge has an action, handle it
+                        final action = nudge['action']?.toString();
+                        if (action == 'start_session') {
+                          _addSystemMsg("Nate says: $body");
+                        }
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── AI Mode Actions ──
+
+  void _activateAiMode(String mode) {
+    _socket?.sink.add(jsonEncode({
+      "type": "ai_mode_activate",
+      "mode": mode,
+      "session_id": widget.currentUserProfile?['hardware_id'] ?? 'default',
+    }));
+  }
+
+  void _deactivateAiMode() {
+    if (_activeAiMode == null) return;
+    _socket?.sink.add(jsonEncode({
+      "type": "ai_mode_deactivate",
+      "session_id": widget.currentUserProfile?['hardware_id'] ?? 'default',
+    }));
+  }
+
+  void _showAiModeOutputSheet() {
+    if (_aiModeOutput == null) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollCtrl) => SingleChildScrollView(
+          controller: scrollCtrl,
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.psychology, color: Color(0xFF9D4EDD)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'AI MODE: ${_activeAiMode?.toUpperCase() ?? ""}',
+                    style: const TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _aiModeOutput?['output']?.toString() ?? _aiModeOutput?['result']?.toString() ?? 'Processing...',
+                style: const TextStyle(color: Colors.white70, fontFamily: 'DM Sans', fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.close, size: 16),
+                label: const Text('DEACTIVATE'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red.withOpacity(0.3)),
+                onPressed: () {
+                  _deactivateAiMode();
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAiModePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0A0A0A),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'AI INTELLIGENCE MODES',
+                style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            _aiModeTile(ctx, 'tri_corder', 'Tri-Corder', 'Deep diagnostic scan of emotional patterns', Icons.radar, const Color(0xFF4ECDC4)),
+            _aiModeTile(ctx, 'archivist', 'Archivist', 'Narrative synthesis of therapeutic journey', Icons.auto_stories, const Color(0xFF9D4EDD)),
+            _aiModeTile(ctx, 'guardian', 'Guardian', 'Protective monitoring for risk indicators', Icons.shield, const Color(0xFFEF4444)),
+            _aiModeTile(ctx, 'supervisor', 'Supervisor', 'Clinical quality oversight and recommendations', Icons.supervisor_account, const Color(0xFFE8D5A3)),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _aiModeTile(BuildContext ctx, String mode, String title, String subtitle, IconData icon, Color color) {
+    final isActive = _activeAiMode == mode;
+    return ListTile(
+      leading: Icon(icon, color: isActive ? color : color.withOpacity(0.5)),
+      title: Text(title, style: TextStyle(color: isActive ? color : Colors.white, fontWeight: FontWeight.bold)),
+      subtitle: Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+      trailing: isActive
+          ? const Icon(Icons.check_circle, color: Colors.green)
+          : const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 14),
+      onTap: () {
+        Navigator.pop(ctx);
+        if (isActive) {
+          _deactivateAiMode();
+        } else {
+          _activateAiMode(mode);
+        }
+      },
+    );
   }
 
   void _updateMetricsFromProfile(Map<String, dynamic> profile) {
@@ -1508,7 +1773,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         ..addAll(decoded.map(_VocabEntry.tryFromJson).whereType<_VocabEntry>());
       if (mounted) setState(() {});
     } catch (e) {
-      print('Vocab load error: $e');
+      _debugLog('Vocab load error: $e');
     }
   }
 
@@ -1518,7 +1783,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       final raw = jsonEncode(_customVocab.map((e) => e.toJson()).toList());
       await prefs.setString(_prefsVocabKey, raw);
     } catch (e) {
-      print('Vocab save error: $e');
+      _debugLog('Vocab save error: $e');
     }
   }
 
@@ -1818,7 +2083,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     } catch (e) {
       if (mounted) setState(() => _isSpeaking = false);
       _addSystemMsg('Read back failed. If on web, click the speaker icon once to allow audio.');
-      print('TTS speak error: $e');
+      _debugLog('TTS speak error: $e');
     }
   }
 
@@ -1871,11 +2136,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     try {
       _speechAvailable = await _speech.initialize(
         onError: (error) {
-          print('Speech error: ${error.errorMsg}');
+          _debugLog('Speech error: ${error.errorMsg}');
           if (mounted) setState(() => _isListening = false);
         },
         onStatus: (status) {
-          print('Speech status: $status');
+          _debugLog('Speech status: $status');
           if (status == 'done' || status == 'notListening') {
             if (mounted) setState(() => _isListening = false);
             // Keep dictation continuous for accessibility: if the user pauses and
@@ -1888,7 +2153,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       );
       if (mounted) setState(() {});
     } catch (e) {
-      print('Speech init error: $e');
+      _debugLog('Speech init error: $e');
       _speechAvailable = false;
     }
   }
@@ -2858,6 +3123,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     return premiumTiers.contains(tier) || premiumTiers.contains(subscriptionPlan);
   }
 
+  /// Check if user has Sovereign Vault access (Inner Chamber / STANDARD+ tiers)
+  bool _canUseVault() {
+    if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
+    final tier = (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
+    final plan = (widget.currentUserProfile?['subscription_plan'] ?? '').toString().toUpperCase();
+    const vaultTiers = {'STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'};
+    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
+  }
+
   /// Toggle avatar mode on/off
   void _toggleAvatarMode(bool enabled) {
     if (!_canUseAvatarMode()) {
@@ -3004,7 +3278,35 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
             },
             tooltip: "Family Sanctuary",
           ),
-          // NEW: Metrics button
+          // AI Modes button
+          IconButton(
+            icon: Icon(
+              _activeAiMode != null ? Icons.psychology : Icons.psychology_outlined,
+              color: _activeAiMode != null ? const Color(0xFF9D4EDD) : Colors.white54,
+            ),
+            onPressed: _showAiModePicker,
+            tooltip: _activeAiMode != null ? 'AI Mode: ${_activeAiMode!.toUpperCase()}' : 'AI Modes',
+          ),
+          // Nudge badge button
+          if (_pendingNudges.isNotEmpty)
+            Stack(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_active, color: Color(0xFFC9A962)),
+                  onPressed: _showNudgesSheet,
+                  tooltip: 'Nate Nudges',
+                ),
+                Positioned(
+                  right: 6, top: 6,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                    child: Text('${_pendingNudges.length}', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          // Metrics button
           IconButton(
             icon: const Icon(Icons.analytics, color: Colors.cyanAccent),
             onPressed: _showMetricsSheet,
@@ -3187,6 +3489,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
               );
             },
           ),
+          // Upload progress (compact, above input)
+          if (_uploadProgressState.isVisible)
+            UploadProgressIndicator(
+              state: _uploadProgressState,
+              onCancel: () => setState(() => _uploadProgressState = UploadProgressState.idle()),
+              onDismiss: () => setState(() => _uploadProgressState = UploadProgressState.idle()),
+            ),
           // Input bar - always at bottom, never overlapped
           Container(
             color: const Color(0xFF050505),
@@ -3210,6 +3519,19 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                       ? 'Speech not available'
                       : (_dictationArmed ? 'Stop dictation' : 'Speak your message'),
                 ),
+                if (AppConfig.ENABLE_SOVEREIGN_VAULT && _canUseVault()) ...[
+                  const SizedBox(width: 4),
+                  VaultAttachmentButton(
+                    profile: widget.currentUserProfile,
+                    socket: _socket,
+                    onVaultItemSelected: (itemId) {
+                      if (itemId != null && itemId.isNotEmpty) {
+                        _chatController.text = '${_chatController.text}[Vault:$itemId] '.trim();
+                      }
+                    },
+                    onUploadProgress: (s) => setState(() => _uploadProgressState = s),
+                  ),
+                ],
                 const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
@@ -3397,7 +3719,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _connectToBridge() {
-    print(">>> COACH DASHBOARD: WS URL = $_serverUrl");
+    _debugLog(">>> COACH DASHBOARD: WS URL = $_serverUrl");
     setState(() => _statusMessage = "Connecting to HQ...\n$_serverUrl");
     
     try {
@@ -3409,17 +3731,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
-          print("Coach Socket Error: $e");
+          _debugLog("Coach Socket Error: $e");
           if (mounted) setState(() => _statusMessage = "Connection Failed\n$_serverUrl");
         },
         onDone: () {
-          print("Coach Socket Closed");
+          _debugLog("Coach Socket Closed");
           if (mounted) setState(() => _statusMessage = "Disconnected\n$_serverUrl");
         },
         cancelOnError: true,
       );
 
-      print(">>> COACH DASHBOARD: Sending Login...");
+      _debugLog(">>> COACH DASHBOARD: Sending Login...");
       _socket!.sink.add(jsonEncode({
         "type": "login_request",
         "username": widget.username,
@@ -3428,7 +3750,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       }));
 
     } catch (e) {
-      print("Fatal Connection Error: $e");
+      _debugLog("Fatal Connection Error: $e");
     }
   }
 
@@ -4187,7 +4509,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final data = jsonDecode(message);
 
       if (data['type'] == 'login_success') {
-        print(">>> COACH AUTHENTICATED. Fetching Data...");
+        _debugLog(">>> COACH AUTHENTICATED. Fetching Data...");
         // Capture auth info for WebView hybrid pages
         _authToken = data['token']?.toString();
         final profile = data['profile'] as Map<String, dynamic>?;
@@ -4616,15 +4938,48 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           );
         }
       }
+      // ===== AI MODE RESPONSES (COACH) =====
+      else if (data['type'] == 'ai_mode_activated') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("AI Mode activated: ${data['mode']?.toString().toUpperCase() ?? 'UNKNOWN'}"),
+              backgroundColor: const Color(0xFF9D4EDD),
+            ),
+          );
+        }
+      }
+      else if (data['type'] == 'ai_mode_output') {
+        if (mounted) {
+          _showAiModeOutputDialog(Map<String, dynamic>.from(data));
+        }
+      }
+      else if (data['type'] == 'ai_mode_deactivated') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("AI Mode deactivated"), backgroundColor: Color(0xFF4ECDC4)),
+          );
+        }
+      }
       else if (data['type'] == 'error') {
         if (mounted) {
           setState(() {
             _notesLoading = false;
             _dojoBusy = false;
             final msg = (data['message'] ?? 'Unknown error').toString();
+            final lowerMsg = msg.toLowerCase();
             // Check if this is a Dojo-related error
-            if (msg.toLowerCase().contains('dojo') || msg.toLowerCase().contains('persona')) {
+            if (lowerMsg.contains('dojo') || lowerMsg.contains('persona')) {
               _dojoError = msg;
+            } else if (lowerMsg.contains('not available') || lowerMsg.contains('unavailable') || lowerMsg.contains('module not')) {
+              // Graceful degradation for unavailable modules — show non-alarming message
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('This feature is currently being prepared. Please try again later.'),
+                  backgroundColor: const Color(0xFF8B7355),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(msg)),
@@ -4634,8 +4989,257 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         }
       }
     } catch (e) {
-      print("Error parsing socket message: $e");
+      _debugLog("Error parsing socket message: $e");
     }
+  }
+
+  // ── AI Mode Output Dialog (Coach) ──
+  void _showAiModeOutputDialog(Map<String, dynamic> data) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Row(
+          children: [
+            const Icon(Icons.psychology, color: Color(0xFF9D4EDD)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'AI MODE: ${data['mode']?.toString().toUpperCase() ?? "OUTPUT"}',
+                style: const TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Text(
+            data['output']?.toString() ?? data['result']?.toString() ?? 'No output',
+            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('CLOSE', style: TextStyle(color: Color(0xFFC9A962))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── AI Mode Trigger (Coach) ──
+  void _showCoachAiModePicker(String clientId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0A0A0A),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'AI INTELLIGENCE MODES',
+                style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.radar, color: Color(0xFF4ECDC4)),
+              title: const Text('Tri-Corder', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: const Text('Deep diagnostic scan of emotional patterns', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () { Navigator.pop(ctx); _activateCoachAiMode('tri_corder', clientId); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_stories, color: Color(0xFF9D4EDD)),
+              title: const Text('Archivist', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: const Text('Narrative synthesis of therapeutic journey', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () { Navigator.pop(ctx); _activateCoachAiMode('archivist', clientId); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.shield, color: Color(0xFFEF4444)),
+              title: const Text('Guardian', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: const Text('Protective monitoring for risk indicators', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () { Navigator.pop(ctx); _activateCoachAiMode('guardian', clientId); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.supervisor_account, color: Color(0xFFE8D5A3)),
+              title: const Text('Supervisor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: const Text('Clinical quality oversight and recommendations', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () { Navigator.pop(ctx); _activateCoachAiMode('supervisor', clientId); },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _activateCoachAiMode(String mode, String clientId) {
+    _socket?.sink.add(jsonEncode({
+      "type": "ai_mode_activate",
+      "mode": mode,
+      "session_id": clientId,
+    }));
+  }
+
+  // ── Nevedal Report Generator (Coach) ──
+  void _showNevedalReportDialog() {
+    String reportType = 'individual_coherence';
+    String? targetClientId;
+    bool generating = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (sCtx, setLocal) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF111111),
+            title: const Text(
+              'NEVEDAL COHERENCE REPORT',
+              style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 18),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("Report Type", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: reportType,
+                    dropdownColor: const Color(0xFF111118),
+                    items: const [
+                      DropdownMenuItem(value: "individual_coherence", child: Text("Individual Coherence", style: TextStyle(color: Colors.white))),
+                      DropdownMenuItem(value: "dyad_comparison", child: Text("Dyad Comparison", style: TextStyle(color: Colors.white))),
+                      DropdownMenuItem(value: "family_dynamics", child: Text("Family Dynamics", style: TextStyle(color: Colors.white))),
+                      DropdownMenuItem(value: "longitudinal_trends", child: Text("Longitudinal Trends", style: TextStyle(color: Colors.white))),
+                      DropdownMenuItem(value: "coach_efficacy", child: Text("Coach Efficacy", style: TextStyle(color: Colors.white))),
+                    ],
+                    onChanged: (v) => setLocal(() => reportType = v ?? reportType),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.06),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text("Client", style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: targetClientId,
+                    dropdownColor: const Color(0xFF111118),
+                    hint: const Text("Select client...", style: TextStyle(color: Colors.white38)),
+                    items: _clients.map<DropdownMenuItem<String>>((c) {
+                      final id = (c['hardware_id'] ?? c['id'] ?? '').toString();
+                      final name = (c['name'] ?? id).toString();
+                      return DropdownMenuItem(value: id, child: Text(name, style: const TextStyle(color: Colors.white)));
+                    }).toList(),
+                    onChanged: (v) => setLocal(() => targetClientId = v),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.06),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  if (generating)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 16),
+                      child: Center(child: CircularProgressIndicator(color: Color(0xFFC9A962))),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+                onPressed: generating ? null : () async {
+                  if (targetClientId == null || targetClientId!.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Please select a client"), backgroundColor: Colors.orange),
+                    );
+                    return;
+                  }
+                  setLocal(() => generating = true);
+                  try {
+                    final uri = Uri.parse('$_apiBaseUrl/api/research/nevedal/reports/generate');
+                    final resp = await http.post(
+                      uri,
+                      headers: {'Content-Type': 'application/json'},
+                      body: jsonEncode({
+                        'report_type': reportType,
+                        'user_ids': [targetClientId],
+                      }),
+                    );
+                    setLocal(() => generating = false);
+                    if (resp.statusCode == 200) {
+                      final result = jsonDecode(resp.body);
+                      Navigator.pop(ctx);
+                      _showNevedalReportResult(result);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Report failed: ${resp.statusCode}"), backgroundColor: Colors.red),
+                      );
+                    }
+                  } catch (e) {
+                    setLocal(() => generating = false);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+                    );
+                  }
+                },
+                child: const Text('GENERATE', style: TextStyle(color: Colors.black)),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  void _showNevedalReportResult(Map<String, dynamic> result) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Row(
+          children: [
+            const Icon(Icons.science, color: Color(0xFF9D4EDD)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                result['report_type']?.toString().replaceAll('_', ' ').toUpperCase() ?? 'REPORT',
+                style: const TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (result['summary'] != null)
+                  Text(result['summary'].toString(), style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5)),
+                const SizedBox(height: 12),
+                if (result['data'] != null)
+                  Text(
+                    const JsonEncoder.withIndent('  ').convert(result['data']),
+                    style: const TextStyle(color: Colors.white54, fontFamily: 'Courier', fontSize: 11),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CLOSE', style: TextStyle(color: Color(0xFFC9A962)))),
+        ],
+      ),
+    );
   }
 
   void _showClientBriefSheet() {
@@ -5682,6 +6286,49 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Intelligence Actions ──
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.psychology, size: 18),
+                  label: const Text("AI MODES", style: TextStyle(fontSize: 11)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF9D4EDD).withOpacity(0.2),
+                    foregroundColor: const Color(0xFF9D4EDD),
+                    side: const BorderSide(color: Color(0xFF9D4EDD), width: 0.5),
+                  ),
+                  onPressed: () {
+                    // Select client first then show AI mode picker
+                    final clientId = _getFilteredClients().isNotEmpty
+                        ? (_getFilteredClients().first['hardware_id'] ?? _getFilteredClients().first['id'] ?? '').toString()
+                        : '';
+                    if (clientId.isNotEmpty) {
+                      _showCoachAiModePicker(clientId);
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("No clients available"), backgroundColor: Colors.orange),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.science, size: 18),
+                  label: const Text("NEVEDAL REPORT", style: TextStyle(fontSize: 11)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFC9A962).withOpacity(0.2),
+                    foregroundColor: const Color(0xFFC9A962),
+                    side: const BorderSide(color: Color(0xFFC9A962), width: 0.5),
+                  ),
+                  onPressed: _showNevedalReportDialog,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           // Quick stats
           Row(
             children: [
@@ -7056,13 +7703,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageStarted: (String url) {
-              print('>>> Dojo WebView loading: $url');
+              _debugLog('>>> Dojo WebView loading: $url');
             },
             onPageFinished: (String url) {
-              print('>>> Dojo WebView loaded: $url');
+              _debugLog('>>> Dojo WebView loaded: $url');
             },
             onWebResourceError: (WebResourceError error) {
-              print('>>> Dojo WebView error: ${error.description}');
+              _debugLog('>>> Dojo WebView error: ${error.description}');
             },
           ),
         )
@@ -7076,7 +7723,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     try {
       launchDojoUrl(url);
     } catch (e) {
-      print('>>> Dojo launch error: $e');
+      _debugLog('>>> Dojo launch error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -7927,7 +8574,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final bytes = await File(file.path!).readAsBytes();
       
       // Upload via HTTP multipart
-      final uri = Uri.parse('$_apiBaseUrl/api/sessions/api/classroom/upload-video');
+      final uri = Uri.parse('$_apiBaseUrl/api/classroom/upload-video');
       final request = http.MultipartRequest('POST', uri);
       request.fields['coach_id'] = widget.currentUserProfile?['hardware_id'] ?? '';
       request.fields['client_id'] = _clients.isNotEmpty ? (_clients.first['id'] ?? '').toString() : '';
@@ -10120,7 +10767,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
       }));
 
     } catch (e) {
-      print("Fatal Connection Error: $e");
+      _debugLog("Fatal Connection Error: $e");
     }
   }
 
@@ -10296,12 +10943,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
         }
       }
     } catch (e) {
-      print("Parse error: $e");
+      _debugLog("Parse error: $e");
     }
   }
 
   void _approveCoach(String coachId) {
-    print("[Admin] Approving coach: $coachId");
+    _debugLog("[Admin] Approving coach: $coachId");
     _socket?.sink.add(jsonEncode({
       "type": "admin_approve_coach",
       "coach_id": coachId
@@ -10720,7 +11367,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
           alert: alert,
           onResolve: () => _resolveCrisis(alert['id'] ?? ''),
           onViewProfile: () {
-            // TODO: Navigate to user profile
+            // Navigate to user detail view
+            final userId = alert['user_id'] ?? alert['client_id'] ?? '';
+            if (userId.isNotEmpty) {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: Text('User: $userId')),
+                    body: Center(child: Text('Profile for $userId', style: const TextStyle(fontSize: 18))),
+                  ),
+                ),
+              );
+            }
           },
         );
       },

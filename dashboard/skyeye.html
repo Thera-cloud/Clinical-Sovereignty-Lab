@@ -213,6 +213,31 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .chat-typing{padding:8px 20px;font-size:11px;color:var(--t3);font-style:italic;display:none}
 .chat-typing.show{display:block}
 
+/* Chat Mode Bar */
+.chat-mode-bar{display:flex;align-items:center;gap:6px;padding:10px 20px;border-bottom:1px solid var(--bdr);overflow-x:auto;flex-shrink:0}
+.chat-mode-btn{padding:6px 14px;border-radius:20px;font-size:11px;font-weight:600;font-family:var(--sans);cursor:pointer;border:1px solid var(--bdr);background:transparent;color:var(--t3);transition:all .2s;white-space:nowrap}
+.chat-mode-btn:hover{border-color:var(--bdr2);color:var(--t1);background:rgba(255,255,255,0.04)}
+.chat-mode-btn.active{background:rgba(0,229,160,0.12);border-color:rgba(0,229,160,0.25);color:var(--green)}
+.chat-mode-btn.mode-marketing.active{background:var(--amberg);border-color:rgba(255,184,0,0.25);color:var(--amber)}
+.chat-mode-btn.mode-defense.active{background:var(--redg);border-color:rgba(255,59,92,0.25);color:var(--red)}
+.chat-mode-btn.mode-admin.active{background:var(--goldg);border-color:rgba(201,169,98,0.25);color:var(--gold)}
+
+/* Chat Mode Badge */
+.chat-mode-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px}
+.chat-mode-badge.m-strategy{background:rgba(0,229,160,0.12);color:var(--green)}
+.chat-mode-badge.m-command{background:var(--blueg);color:var(--blue)}
+.chat-mode-badge.m-briefing{background:var(--purpleg);color:var(--purple)}
+.chat-mode-badge.m-inquiry{background:var(--blueg);color:var(--blue)}
+.chat-mode-badge.m-swarm{background:var(--goldg);color:var(--gold)}
+.chat-mode-badge.m-marketing{background:var(--amberg);color:var(--amber)}
+.chat-mode-badge.m-defense{background:var(--redg);color:var(--red)}
+.chat-mode-badge.m-admin{background:var(--goldg);color:var(--gold)}
+
+/* Chat Follow-up Suggestions */
+.chat-followups{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chat-followup-btn{padding:4px 10px;border-radius:12px;font-size:10px;font-weight:500;cursor:pointer;border:1px solid rgba(0,229,160,0.15);background:rgba(0,229,160,0.06);color:var(--green);transition:all .2s}
+.chat-followup-btn:hover{background:rgba(0,229,160,0.15);border-color:rgba(0,229,160,0.3)}
+
 /* EXPRESSION CARD */
 .expr-card{background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--bdr);border-radius:var(--r);padding:20px;transition:.3s;margin-bottom:12px}
 .expr-card:hover{border-color:var(--bdr2)}
@@ -358,6 +383,10 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     </div>
     <div class="nav-item" data-tab="swarm" onclick="switchTab('swarm',this)">
       <span class="nav-icon">🐝</span><span class="nav-label">Swarm</span>
+    </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" onclick="window.location.href='hive_defense.html'">
+      <span class="nav-icon">🛡️</span><span class="nav-label">Hive Defense</span>
     </div>
   </aside>
 
@@ -515,7 +544,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       <div class="glass chat-wrap">
         <div class="glass-header">
           <div class="glass-title">💬 Big Nate ↔ Little Nate Chat</div>
-          <span style="font-size:11px;color:var(--t3)">Strategic coordination channel</span>
+          <span style="font-size:11px;color:var(--t3)">8-mode strategic coordination channel</span>
+        </div>
+        <!-- Mode Selector Bar -->
+        <div class="chat-mode-bar" id="chat-mode-bar">
+          <button class="chat-mode-btn active" data-mode="strategy" onclick="setChatMode('strategy',this)">Strategy</button>
+          <button class="chat-mode-btn" data-mode="command" onclick="setChatMode('command',this)">Command</button>
+          <button class="chat-mode-btn" data-mode="briefing" onclick="setChatMode('briefing',this)">Briefing</button>
+          <button class="chat-mode-btn" data-mode="inquiry" onclick="setChatMode('inquiry',this)">Inquiry</button>
+          <button class="chat-mode-btn" data-mode="swarm" onclick="setChatMode('swarm',this)">Swarm</button>
+          <span style="width:1px;height:20px;background:var(--bdr2);flex-shrink:0"></span>
+          <button class="chat-mode-btn mode-marketing" data-mode="marketing" onclick="setChatMode('marketing',this)">Marketing</button>
+          <button class="chat-mode-btn mode-defense" data-mode="defense" onclick="setChatMode('defense',this)">Defense</button>
+          <button class="chat-mode-btn mode-admin" data-mode="admin" onclick="setChatMode('admin',this)">Admin</button>
         </div>
         <div class="chat-messages" id="chat-messages">
           <div class="loader"><div class="spinner"></div> Loading messages...</div>
@@ -952,7 +993,10 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 // =============================================================================
 // API CONFIG
 // =============================================================================
-const API = (window.location.hostname === 'app.sovereignsanctuary.net') ? '' : 'https://app.sovereignsanctuary.net';
+// Use relative paths for same-origin API calls; fall back to explicit host only for local dev
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : '';
 
 async function apiFetch(path) {
   try {
@@ -1120,6 +1164,11 @@ function switchTab(tabId, el) {
     case 'big-nate-chat': loadChat(); break;
     case 'expressions-wall': loadExpressions(); break;
     case 'content-queue': loadContentQueueTab(); break;
+    case 'growth-dashboard': refreshGrowthData(); break;
+    case 'marketing-brain': refreshPlaybook(); break;
+    case 'funnel-pipeline': refreshFunnelPipeline(); break;
+    case 'quiz-factory': break;
+    case 'showcase': break;
     case 'swarm': loadSwarmOverview(); break;
   }
 }
@@ -1602,9 +1651,33 @@ async function loadHistory() {
 }
 
 // =============================================================================
-// TAB 8: BIG NATE CHAT
+// TAB 8: BIG NATE CHAT (8-mode)
 // =============================================================================
 let chatLoaded = false;
+let chatMode = 'strategy';
+
+function setChatMode(mode, btnEl) {
+  chatMode = mode;
+  document.querySelectorAll('.chat-mode-btn').forEach(b => b.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+}
+
+function modeBadgeHtml(mode) {
+  if (!mode) return '';
+  return `<span class="chat-mode-badge m-${mode}">${mode}</span>`;
+}
+
+function followUpHtml(suggestions) {
+  if (!suggestions || !suggestions.length) return '';
+  return `<div class="chat-followups">${suggestions.map(s =>
+    `<button class="chat-followup-btn" onclick="useSuggestion(this)">${escapeHtml(s)}</button>`
+  ).join('')}</div>`;
+}
+
+function useSuggestion(btn) {
+  const input = document.getElementById('chat-input');
+  if (input) { input.value = btn.textContent; input.focus(); }
+}
 
 async function loadChat() {
   const data = await apiFetch('/api/skyeye/chat');
@@ -1615,7 +1688,7 @@ async function loadChat() {
       <div style="text-align:center;padding:40px;color:var(--t3)">
         <div style="font-size:32px;margin-bottom:12px">💬</div>
         <div style="font-size:14px;margin-bottom:4px">Big Nate ↔ Little Nate Chat</div>
-        <div style="font-size:12px">Send a message to start the conversation</div>
+        <div style="font-size:12px">Select a mode and send a message to start</div>
       </div>
     `;
     chatLoaded = true;
@@ -1625,7 +1698,12 @@ async function loadChat() {
   el.innerHTML = data.map(m => {
     const sender = (m.sender || m.from || '').toLowerCase();
     const isBig = sender.includes('big') || sender === 'user' || sender === 'admin';
-    return `<div class="chat-msg ${isBig ? 'big-nate' : 'little-nate'}">${m.message || m.content || m.text || ''}</div>`;
+    const meta = m.metadata || {};
+    const mode = meta.mode || '';
+    return `<div class="chat-msg ${isBig ? 'big-nate' : 'little-nate'}">
+      ${!isBig ? modeBadgeHtml(mode) : ''}
+      ${m.message || m.content || m.text || ''}
+    </div>`;
   }).join('');
 
   chatLoaded = true;
@@ -1642,7 +1720,6 @@ async function sendChat() {
   const msg = input.value.trim();
   if (!msg) return;
 
-  // Add user message immediately
   const messagesEl = document.getElementById('chat-messages');
   if (!chatLoaded) {
     messagesEl.innerHTML = '';
@@ -1652,19 +1729,22 @@ async function sendChat() {
   input.value = '';
   scrollChatToBottom();
 
-  // Show typing indicator
   const typing = document.getElementById('chat-typing');
   typing.classList.add('show');
 
-  // Send to API
-  const result = await apiPost('/api/skyeye/chat', { message: msg });
+  const result = await apiPost('/api/skyeye/chat', { message: msg, mode: chatMode });
 
-  // Hide typing
   typing.classList.remove('show');
 
   if (result) {
     const reply = result.message || result.response || result.content || result.text || 'No response';
-    messagesEl.innerHTML += `<div class="chat-msg little-nate">${reply}</div>`;
+    const detectedMode = result.mode || chatMode;
+    const suggestions = result.follow_up_suggestions || [];
+    messagesEl.innerHTML += `<div class="chat-msg little-nate">
+      ${modeBadgeHtml(detectedMode)}
+      ${reply}
+      ${followUpHtml(suggestions)}
+    </div>`;
   } else {
     messagesEl.innerHTML += `<div class="chat-msg little-nate" style="opacity:.5">Unable to get response. Please try again.</div>`;
   }
@@ -2177,9 +2257,9 @@ setInterval(() => {
 async function refreshGrowthData() {
   try {
     const [results, funnel, actions] = await Promise.all([
-      fetch(`${API}/marketing/results`).then(r => r.json()),
-      fetch(`${API}/marketing/funnel-stats?days=7`).then(r => r.json()),
-      fetch(`${API}/marketing/actions?limit=15`).then(r => r.json())
+      fetch(`${API}/api/marketing/results`).then(r => r.json()),
+      fetch(`${API}/api/marketing/funnel-stats?days=7`).then(r => r.json()),
+      fetch(`${API}/api/marketing/actions?limit=15`).then(r => r.json())
     ]);
 
     // KPI cards
@@ -2231,7 +2311,7 @@ async function refreshGrowthData() {
 
 async function refreshPlaybook() {
   try {
-    const pb = await fetch(`${API}/marketing/playbook`).then(r => r.json());
+    const pb = await fetch(`${API}/api/marketing/playbook`).then(r => r.json());
 
     // Render pillars
     const pillarGrid = document.getElementById('pillar-grid');
@@ -2274,7 +2354,7 @@ async function refreshPlaybook() {
     }
 
     // Render pending proposals
-    const proposals = await fetch(`${API}/marketing/actions?status=proposed`).then(r => r.json());
+    const proposals = await fetch(`${API}/api/marketing/actions?status=proposed`).then(r => r.json());
     const proposalsList = document.getElementById('proposals-list');
     if (Array.isArray(proposals) && proposals.length > 0) {
       proposalsList.innerHTML = proposals.map(p => `
@@ -2299,7 +2379,7 @@ async function refreshPlaybook() {
 
 async function approveAction(id) {
   try {
-    await fetch(`${API}/marketing/actions/${id}/decide`, {
+    await fetch(`${API}/api/marketing/actions/${id}/decide`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({decision:'approved'})
     });
@@ -2311,7 +2391,7 @@ async function approveAction(id) {
 async function rejectAction(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   try {
-    await fetch(`${API}/marketing/actions/${id}/decide`, {
+    await fetch(`${API}/api/marketing/actions/${id}/decide`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({decision:'rejected', reason})
     });
@@ -2324,7 +2404,7 @@ async function runStrategyReview() {
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
   try {
-    const result = await fetch(`${API}/marketing/playbook/review`, {method:'POST'}).then(r => r.json());
+    const result = await fetch(`${API}/api/marketing/playbook/review`, {method:'POST'}).then(r => r.json());
     alert('Strategy Review Complete!\n\nTop Insight: ' + (result.top_insight || 'Review completed'));
     refreshPlaybook();
   } catch(e) {
@@ -2337,7 +2417,7 @@ async function runStrategyReview() {
 
 async function refreshFunnelPipeline() {
   try {
-    const data = await fetch(`${API}/marketing/funnel-stats?days=7`).then(r => r.json());
+    const data = await fetch(`${API}/api/marketing/funnel-stats?days=7`).then(r => r.json());
 
     // Overall stats
     const overall = data.overall || {};
@@ -2390,7 +2470,7 @@ async function generateQuiz() {
   resultEl.innerHTML = '<div style="padding:16px;color:var(--amber)">Generating quiz with AI...</div>';
 
   try {
-    const data = await fetch(`${API}/marketing/quiz-factory/generate`, {
+    const data = await fetch(`${API}/api/marketing/quiz-factory/generate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({audience, topic, question_count: count})
     }).then(r => r.json());
@@ -2419,7 +2499,7 @@ async function generateShowcase(scenario) {
   contentEl.innerHTML = '<div style="padding:20px;color:var(--amber)">Generating showcase...</div>';
 
   try {
-    const data = await fetch(`${API}/marketing/showcase/generate`, {
+    const data = await fetch(`${API}/api/marketing/showcase/generate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({scenario, format:'html'})
     }).then(r => r.json());
@@ -2473,7 +2553,7 @@ async function generateShowcase(scenario) {
 
 async function loadSwarmOverview() {
   try {
-    const res = await fetch(`${API}/coherence/pulse`);
+    const res = await fetch(`${API}/api/coherence/pulse`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -2527,7 +2607,7 @@ async function loadSwarmOverview() {
 
   // Load fibre list from fibre API
   try {
-    const res = await fetch(`${API}/fibres`);
+    const res = await fetch(`${API}/api/fibres`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const listEl = document.getElementById('swarm-fibre-list');
@@ -2547,7 +2627,7 @@ async function loadSwarmOverview() {
 
   // Load mesh health
   try {
-    const res = await fetch(`${API}/mesh/health`);
+    const res = await fetch(`${API}/api/mesh/health`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const meshEl = document.getElementById('swarm-mesh-health');
@@ -2564,16 +2644,6 @@ async function loadSwarmOverview() {
     console.warn('Mesh health unavailable:', e);
   }
 }
-
-// Auto-load data when switching to these tabs
-const _origSwitchTab = switchTab;
-switchTab = function(tabId, el) {
-  _origSwitchTab(tabId, el);
-  if (tabId === 'growth-dashboard') refreshGrowthData();
-  else if (tabId === 'marketing-brain') refreshPlaybook();
-  else if (tabId === 'funnel-pipeline') refreshFunnelPipeline();
-  else if (tabId === 'swarm') loadSwarmOverview();
-};
 
 // =============================================================================
 // INIT

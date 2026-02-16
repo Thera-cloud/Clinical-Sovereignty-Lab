@@ -1,8 +1,12 @@
 """
-FAMILY SANCTUARY WEBSOCKET HANDLERS
-Add these handlers to bridge_server.py handle_client() function
+FAMILY SANCTUARY WEBSOCKET HANDLERS — REFERENCE TEMPLATE
 
-Insert after line 2947 (after "ask_nate_coaching" handler)
+NOTE: This file is NOT imported or executed. It is a design reference only.
+All sanctuary handlers are implemented directly in bridge_server.py.
+
+Do NOT import this module. It references variables (current_profile, d, websocket,
+notification_system, sanctuary_engine) that only exist inside bridge_server's
+handle_client() scope.
 """
 
 # ============================================================================
@@ -12,12 +16,13 @@ Insert after line 2947 (after "ask_nate_coaching" handler)
 elif t == "sanctuary_create":
     """
     Create new Family Sanctuary session
-    Restricted to: TOP_TIER Head of Household only
+    Restricted to: STANDARD (Inner Chamber) or TOP_TIER (Sovereign Circle)
     """
-    if current_profile.get('subscription_plan') != 'TOP_TIER':
+    _plan = (current_profile.get('subscription_plan') or '').upper()
+    if _plan not in ('STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'):
         await websocket.send(json.dumps({
             "type": "error",
-            "message": "Family Sanctuary requires TOP_TIER subscription"
+            "message": "Family Sanctuary requires Inner Chamber or Sovereign Circle subscription"
         }))
         continue
     
@@ -56,10 +61,25 @@ elif t == "sanctuary_create":
         }))
         continue
     
-    # Send invitations to family members
+    # Send in-app push notifications to invited family members
     for member_id in invited_members:
-        # TODO: Send push notifications
-        pass
+        try:
+            notification_system.create_notification(
+                user_id=member_id,
+                notification_type="sanctuary_invitation",
+                title="Family Sanctuary Invitation",
+                message=f"{current_profile.get('name', 'Your family')} has started a Family Sanctuary session. Tap to join.",
+                priority="HIGH",
+                data={"sanctuary_id": sanctuary_id, "inviter": current_profile.get('hardware_id')},
+            )
+            await notification_system._push_to_websocket(member_id, {
+                "type": "sanctuary_invitation",
+                "sanctuary_id": sanctuary_id,
+                "inviter_name": current_profile.get('name', 'Your family'),
+                "message": "You've been invited to a Family Sanctuary session.",
+            })
+        except Exception as push_err:
+            print(f">>> [SANCTUARY] Push notification error for {member_id}: {push_err}")
     
     await websocket.send(json.dumps({
         "type": "sanctuary_created",
@@ -320,14 +340,61 @@ elif t == "sanctuary_extend":
     """
     sanctuary_id = d.get('sanctuary_id')
     member_wants_continue = d.get('continue', False)
-    
-    # Record member's response
-    # TODO: Implement extension voting logic
-    
-    await websocket.send(json.dumps({
-        "type": "sanctuary_extend_recorded",
-        "message": "Your response has been recorded. Waiting for other members..."
-    }))
+    member_id = current_profile['hardware_id']
+
+    # Record member's vote
+    sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
+    if sanctuary_data:
+        if "extension_votes" not in sanctuary_data:
+            sanctuary_data["extension_votes"] = {}
+        sanctuary_data["extension_votes"][member_id] = member_wants_continue
+
+        active_members = [
+            m["user_id"] for m in sanctuary_data.get("members", [])
+            if m.get("status") not in ("EXITED",)
+        ]
+        votes = sanctuary_data["extension_votes"]
+        all_voted = all(mid in votes for mid in active_members)
+
+        if all_voted and active_members:
+            yes_count = sum(1 for v in votes.values() if v)
+            majority = yes_count > len(active_members) / 2
+
+            if majority:
+                sanctuary_data["extension_votes"] = {}
+                sanctuary_data.setdefault("extensions", 0)
+                sanctuary_data["extensions"] += 1
+                await sanctuary_engine.broadcast_to_sanctuary(
+                    sanctuary_id=sanctuary_id,
+                    message_data={
+                        "type": "sanctuary_extended",
+                        "message": "The family has voted to continue. Sanctuary extended for another 24 hours.",
+                        "extensions": sanctuary_data["extensions"],
+                    }
+                )
+            else:
+                await sanctuary_engine.broadcast_to_sanctuary(
+                    sanctuary_id=sanctuary_id,
+                    message_data={
+                        "type": "sanctuary_extension_declined",
+                        "message": "The family has decided to wrap up. Thank you for this time together.",
+                    }
+                )
+                try:
+                    await sanctuary_engine.complete_session(sanctuary_id)
+                except Exception:
+                    pass
+        else:
+            voted_count = len([mid for mid in active_members if mid in votes])
+            await websocket.send(json.dumps({
+                "type": "sanctuary_extend_recorded",
+                "message": f"Your response has been recorded ({voted_count}/{len(active_members)})...",
+            }))
+    else:
+        await websocket.send(json.dumps({
+            "type": "error",
+            "message": "Sanctuary session not found."
+        }))
 
 elif t == "sanctuary_complete":
     """
@@ -377,9 +444,39 @@ elif t == "sanctuary_request_coach":
     Request live coach escalation
     """
     sanctuary_id = d.get('sanctuary_id')
-    
-    # TODO: Generate coach summary and notify coach
-    
+
+    # Notify available coaches via NotificationSystem + Email
+    try:
+        sanctuary_data = sanctuary_engine.get_session(sanctuary_id)
+        requester_name = current_profile.get('name', 'A family member')
+        family_size = len(sanctuary_data.get("members", [])) if sanctuary_data else 0
+
+        # In-app notification to all coaches
+        notification_system.create_notification(
+            user_id="ALL_COACHES",
+            notification_type="coach_escalation",
+            title="Family Sanctuary Coach Request",
+            message=f"{requester_name} is requesting live coach support for a family sanctuary session ({family_size} members).",
+            priority="HIGH",
+            data={"sanctuary_id": sanctuary_id, "requester": current_profile.get('hardware_id')},
+        )
+
+        # Email notification to coaches
+        try:
+            from app.services.notifications_service import EmailService
+            email_svc = EmailService()
+            # Notify the system admin / on-call coach
+            await email_svc.send_crisis_alert(
+                to_email=None,  # Uses default admin email
+                client_name=requester_name,
+                alert_type="SANCTUARY_COACH_REQUEST",
+                details=f"Sanctuary {sanctuary_id}: {requester_name} is requesting live coaching support for {family_size} family members.",
+            )
+        except Exception as email_err:
+            print(f">>> [SANCTUARY] Coach escalation email error: {email_err}")
+    except Exception as notify_err:
+        print(f">>> [SANCTUARY] Coach notification error: {notify_err}")
+
     await websocket.send(json.dumps({
         "type": "coach_notified",
         "message": "A coach will be notified within 24 hours."

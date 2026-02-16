@@ -353,7 +353,7 @@
     (function() {
         "use strict";
         var username = sessionStorage.getItem("username");
-        var password = sessionStorage.getItem("password");
+        var token = sessionStorage.getItem("token");
         var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
         if (!username) { window.location.href = "index.html"; return; }
 
@@ -377,7 +377,7 @@
         function connect() {
             ws = new WebSocket(getWsUrl());
             ws.onopen = function() {
-                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: "ADMIN", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+                ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             ws.onmessage = function(event) {
                 var data; try { data = JSON.parse(event.data); } catch(e) { return; }

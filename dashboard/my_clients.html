@@ -187,8 +187,8 @@
         // =====================================================================
         function init() {
             var uname = sessionStorage.getItem("username");
-            var pwd = sessionStorage.getItem("password");
-            if (!uname || !pwd) { window.location.href = "index.html"; return; }
+            var token = sessionStorage.getItem("token");
+            if (!uname || !token) { window.location.href = "index.html"; return; }
             connect();
         }
 
@@ -198,10 +198,9 @@
                 var profileStr = sessionStorage.getItem("profile");
                 var profile = profileStr ? JSON.parse(profileStr) : {};
                 socket.send(JSON.stringify({
-                    type: "login_request",
-                    username: sessionStorage.getItem("username"),
-                    password: sessionStorage.getItem("password"),
-                    expected_role: profile.role || "COACH"
+                    type: "auth",
+                    token: sessionStorage.getItem("token"),
+                    hardware_id: profile.hardware_id || "WEB_ADMIN"
                 }));
             };
             socket.onmessage = handleMessage;
@@ -211,7 +210,7 @@
         function handleMessage(event) {
             var data = JSON.parse(event.data);
             console.log("Received:", data.type);
-            if (data.type === "login_success") {
+            if (data.type === "login_success" || data.type === "auth_success") {
                 socket.send(JSON.stringify({ type: "coach_get_clients" }));
             } else if (data.type === "coach_clients") {
                 allClients = data.clients || [];
@@ -332,10 +331,14 @@
         }
 
         // =====================================================================
-        // ACTION: START SESSION (placeholder)
+        // ACTION: START SESSION
         // =====================================================================
         function startSession() {
-            if (selectedClient) alert("Starting session with " + selectedClient.name);
+            if (!selectedClient) return;
+            if (!confirm("Start a new session with " + selectedClient.name + "?")) return;
+            // Redirect to the sanctuary session page with the client preselected
+            var sessionUrl = "/?client=" + encodeURIComponent(selectedClient.id) + "&action=start_session";
+            window.location.href = sessionUrl;
         }
 
         // =====================================================================

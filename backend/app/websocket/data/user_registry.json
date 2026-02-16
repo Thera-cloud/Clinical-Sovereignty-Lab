@@ -2,7 +2,7 @@
   "client_client1b": {
     "credentials": {
       "username": "client1b",
-      "password": "test123"
+      "password": "93f7ea8987403d56a0d6a6ea90fae26e:32611b76bfc0b6d58c854e594d714f199ad02cb69cb8da340236768597b60485"
     },
     "profile": {
       "role": "CLIENT",
@@ -26,10 +26,10 @@
   "coach1": {
     "credentials": {
       "username": "coach1",
-      "password": "test123"
+      "password": "93f7ea8987403d56a0d6a6ea90fae26e:32611b76bfc0b6d58c854e594d714f199ad02cb69cb8da340236768597b60485"
     },
     "username": "coach1",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "role": "COACH",
@@ -56,7 +56,7 @@
   },
   "coach2": {
     "username": "coach2",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "name": "Dr. Chen",
@@ -79,7 +79,7 @@
   },
   "coach3": {
     "username": "coach3",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "name": "Marcus Thompson",
@@ -102,7 +102,7 @@
   },
   "coach4": {
     "username": "coach4",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "name": "Dr. Williams",
@@ -125,7 +125,7 @@
   },
   "coach5": {
     "username": "coach5",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "name": "Dr. Amanda Wells",
@@ -149,7 +149,7 @@
   "client_client1": {
     "credentials": {
       "username": "client1",
-      "password": "test123"
+      "password": "93f7ea8987403d56a0d6a6ea90fae26e:32611b76bfc0b6d58c854e594d714f199ad02cb69cb8da340236768597b60485"
     },
     "profile": {
       "role": "CLIENT",
@@ -172,7 +172,7 @@
   },
   "client2": {
     "username": "client2",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Sarah M.",
@@ -189,7 +189,7 @@
   },
   "client3": {
     "username": "client3",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Lisa P.",
@@ -206,7 +206,7 @@
   },
   "client4": {
     "username": "client4",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Alex C.",
@@ -223,7 +223,7 @@
   },
   "client5": {
     "username": "client5",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Maria G.",
@@ -240,7 +240,7 @@
   },
   "client6": {
     "username": "client6",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Kevin R.",
@@ -257,7 +257,7 @@
   },
   "client7": {
     "username": "client7",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Emma T.",
@@ -274,7 +274,7 @@
   },
   "client8": {
     "username": "client8",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Michael R.",
@@ -291,7 +291,7 @@
   },
   "client9": {
     "username": "client9",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "CLIENT",
     "profile": {
       "name": "Thompson Fam",
@@ -309,10 +309,10 @@
   "coach_freeindeed": {
     "credentials": {
       "username": "coach_freeindeed",
-      "password": "3333"
+      "password": "2301e0ad52a23d16cf8acda6432f0b4c:8c28baa75a12e57dfe2862d6d049299c9f10bfc8c7ae493cbb8df3fe6e2130a6"
     },
     "username": "coach_freeindeed",
-    "password_hash": "hashed_password",
+    "password_hash": "DISABLED:account_password_not_set_please_reset",
     "role": "COACH",
     "profile": {
       "role": "COACH",

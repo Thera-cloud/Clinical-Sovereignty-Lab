@@ -17,7 +17,7 @@ import shutil
 # from api_server import get_current_user, require_admin, db
 
 # Import Night School
-from night_school_director import (
+from app.services.night_school_director import (
     NightSchoolDirector,
     WisdomCategory,
     DojoPersona,
@@ -29,7 +29,13 @@ from night_school_director import (
 # ROUTER
 # =============================================================================
 
-router = APIRouter(prefix="/api/night-school", tags=["Night School"])
+from app.services.api_server import require_admin
+
+router = APIRouter(
+    prefix="/api/night-school",
+    tags=["Night School"],
+    dependencies=[Depends(require_admin)],
+)
 
 # Global director instance (initialize in main app)
 _director: Optional[NightSchoolDirector] = None
@@ -278,6 +284,56 @@ async def reject_note(
     if not success:
         raise HTTPException(status_code=404, detail="Note not found")
     return {"success": True}
+
+
+# =============================================================================
+# COMPATIBILITY ALIASES — Sync frontend paths to existing backend endpoints
+# =============================================================================
+
+
+class ReviewNoteRequest(BaseModel):
+    """Unified review endpoint body — dispatches to approve/reject/redact."""
+    action: str  # "approve", "reject", or "redact"
+    reason: str = ""
+    use_redacted: bool = True
+    category: str = "general"
+
+
+@router.post("/snapshot")
+async def create_snapshot_alias(
+    data: CreateSnapshotRequest = CreateSnapshotRequest(),
+    director: NightSchoolDirector = Depends(get_director),
+):
+    """Alias for /versions/snapshot — matches frontend path."""
+    return await create_snapshot(data, director)
+
+
+@router.post("/notes/{note_id}/review")
+async def review_note_unified(
+    note_id: str,
+    data: ReviewNoteRequest,
+    director: NightSchoolDirector = Depends(get_director),
+):
+    """Unified review endpoint — dispatches to approve, reject, or redact."""
+    action = data.action.lower().strip()
+    if action == "approve":
+        success, entry = director.approve_note(
+            note_id=note_id,
+            approved_by="admin",
+            use_redacted=data.use_redacted,
+            category=WisdomCategory(data.category),
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="Note not found")
+        return {"success": True, "action": "approved", "wisdom_entry_id": entry.id if entry else None}
+    elif action in ("reject", "redact"):
+        success = director.reject_note(note_id, "admin", data.reason or action)
+        if not success:
+            raise HTTPException(status_code=404, detail="Note not found")
+        return {"success": True, "action": action}
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}. Use approve, reject, or redact.")
+
 
 # =============================================================================
 # DOJO ENDPOINTS
@@ -676,11 +732,20 @@ async def upload_curriculum(
             detail=f"File type not allowed. Allowed: {allowed_types}"
         )
     
-    # Save uploaded file
+    # Save uploaded file — sanitize filename to prevent path traversal
     upload_dir = director.curriculum_dir / "uploads"
     upload_dir.mkdir(exist_ok=True)
     
-    file_path = upload_dir / file.filename
+    # Strip directory components and dangerous characters from filename
+    import re
+    safe_name = re.sub(r'[^\w\-.]', '_', Path(file.filename).name) if file.filename else "upload"
+    safe_name = safe_name.lstrip('.')  # prevent hidden files
+    if not safe_name:
+        safe_name = f"upload_{__import__('uuid').uuid4().hex[:8]}{suffix}"
+    file_path = upload_dir / safe_name
+    # Final safety check: ensure resolved path is within upload_dir
+    if not file_path.resolve().is_relative_to(upload_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     with open(file_path, 'wb') as f:
         content = await file.read()
         f.write(content)
@@ -693,7 +758,7 @@ async def upload_curriculum(
     )
     
     return {
-        "filename": file.filename,
+        "filename": safe_name,
         "entries_created": len(entries),
         "category": category,
         "message": f"Created {len(entries)} wisdom entries (pending approval)"

@@ -335,6 +335,16 @@ class StrategicMemoryService:
                  json.dumps(metadata or {}))
             return dict(row)
 
+    async def get_swarm_oversight_log(self, limit: int = 50) -> List[Dict]:
+        """Fetch recent swarm oversight log entries."""
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM swarm_oversight_log
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, limit)
+            return [dict(r) for r in rows]
+
     async def get_swarm_overview(self) -> Dict[str, Any]:
         """Build swarm overview for briefings and the Swarm dashboard tab."""
         async with self.db_pool.acquire() as conn:
@@ -391,3 +401,165 @@ class StrategicMemoryService:
                 "recent_convergences": convergence_list,
                 "mesh_health": None,  # populated by WisdomMesh when available
             }
+
+    # =========================================================================
+    # CROSS-LAYER INTEGRATION (PhD Spec §9.7)
+    # =========================================================================
+
+    async def promote_insights_to_proposals(self, confidence_threshold: float = 0.85) -> List[Dict]:
+        """
+        L2 → L3: High-confidence insights that suggest actionable strategies
+        are automatically promoted to Strategy Proposals for review.
+        """
+        async with self.db_pool.acquire() as conn:
+            insights = await conn.fetch("""
+                SELECT * FROM insight_log
+                WHERE confidence >= $1
+                  AND promoted_to_order = FALSE
+                  AND created_at > NOW() - INTERVAL '7 days'
+                ORDER BY confidence DESC
+                LIMIT 10
+            """, confidence_threshold)
+
+        promoted = []
+        for insight in insights:
+            proposal = await self.create_proposal(
+                title=f"[Auto] {insight['title']}",
+                description=(
+                    f"Auto-generated from high-confidence insight (confidence={insight['confidence']:.2f}).\n\n"
+                    f"{insight['body']}"
+                ),
+                action_type="insight_driven_strategy",
+                proposed_by="sovereign_mind_L2_L3",
+                risk="low",
+                execution_payload={"source_insight_id": str(insight["insight_id"])},
+                metadata={
+                    "cross_layer": "L2→L3",
+                    "source_confidence": float(insight["confidence"]),
+                    "source_tags": list(insight["tags"]) if insight.get("tags") else [],
+                },
+            )
+            promoted.append(proposal)
+
+        return promoted
+
+    async def promote_briefing_to_foresight(self, briefing_id: UUID) -> Optional[Dict]:
+        """
+        L4 → L5: When a Coherence Briefing detects a notable change or
+        gap, auto-create a Foresight Alert for predictive monitoring.
+        """
+        async with self.db_pool.acquire() as conn:
+            briefing = await conn.fetchrow(
+                "SELECT * FROM coherence_briefings WHERE briefing_id = $1",
+                briefing_id,
+            )
+        if not briefing:
+            return None
+
+        # Parse notable changes and gap analysis
+        notable = briefing.get("notable_changes") or {}
+        gap = briefing.get("gap_analysis_summary") or ""
+        if isinstance(notable, str):
+            try:
+                notable = json.loads(notable)
+            except Exception:
+                notable = {"raw": notable}
+
+        # Only create foresight alert if there are notable changes
+        if not notable and not gap:
+            return None
+
+        alert_data = {
+            "signal": f"Coherence briefing flagged: {gap[:200] if gap else 'notable changes detected'}",
+            "confidence": min(0.7, float(briefing.get("global_coherence_index", 0.5))),
+            "horizon_hours": 48,
+            "affected_populations": ["system"],
+            "recommended_actions": briefing.get("recommendations") or [],
+            "alternative_scenarios": [
+                {"label": "status_quo", "description": "No intervention", "probability": 0.4},
+                {"label": "intervene", "description": "Act on briefing recommendations", "probability": 0.6},
+            ],
+            "monitoring_indicators": ["coherence_trend", "engagement_rate"],
+            "source_data_streams": ["coherence_briefings"],
+            "metadata": {
+                "cross_layer": "L4→L5",
+                "source_briefing_id": str(briefing_id),
+            },
+        }
+        return await self.store_foresight_alert(alert_data)
+
+    async def promote_oversight_anomaly_to_order(
+        self, event_id: UUID, directive: Optional[str] = None
+    ) -> Optional[Dict]:
+        """
+        L6 → L1: When Swarm Oversight detects an anomaly or critical event,
+        auto-create a Standing Order to prevent recurrence.
+        """
+        async with self.db_pool.acquire() as conn:
+            event = await conn.fetchrow(
+                "SELECT * FROM swarm_oversight_log WHERE event_id = $1",
+                event_id,
+            )
+        if not event:
+            return None
+
+        event_type = event.get("event_type", "unknown")
+        details = event.get("details")
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except Exception:
+                details = {}
+
+        order_directive = directive or (
+            f"Swarm anomaly detected ({event_type}). "
+            f"Fibre {event.get('fibre_id') or 'unknown'} ({event.get('fibre_type', '?')}) "
+            f"triggered this event. Monitor and apply corrective action."
+        )
+
+        order = await self.create_standing_order(
+            title=f"[Auto-L6] {event_type} response",
+            directive=order_directive,
+            origin="swarm_oversight_L6_L1",
+            domain_tags=[event_type, "anomaly", "auto_generated"],
+            created_by="sovereign_mind",
+        )
+
+        return order
+
+    async def promote_approved_strategy_to_order(self, proposal_id: UUID) -> Optional[Dict]:
+        """
+        L3 → L1: When a Strategy Proposal is approved and executed,
+        its successful strategy becomes a Standing Order for future reference.
+        """
+        async with self.db_pool.acquire() as conn:
+            proposal = await conn.fetchrow(
+                "SELECT * FROM strategy_proposals WHERE proposal_id = $1 AND status = 'approved'",
+                proposal_id,
+            )
+        if not proposal:
+            return None
+
+        order = await self.create_standing_order(
+            title=f"[Strategy] {proposal['title']}",
+            directive=(
+                f"Approved strategy (risk={proposal.get('risk', '?')}): "
+                f"{proposal['description']}"
+            ),
+            origin="strategy_promotion_L3_L1",
+            domain_tags=[proposal.get("action_type", "strategy"), "approved", "auto_promoted"],
+            created_by=proposal.get("approved_by", "sovereign_mind"),
+        )
+
+        # Mark the proposal as promoted
+        async with self.db_pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE strategy_proposals
+                SET metadata = metadata || $2, updated_at = NOW()
+                WHERE proposal_id = $1
+            """, proposal_id, json.dumps({
+                "promoted_to_standing_order": str(order["order_id"]),
+                "promoted_at": datetime.utcnow().isoformat(),
+            }))
+
+        return order

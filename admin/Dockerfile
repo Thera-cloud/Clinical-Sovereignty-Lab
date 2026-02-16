@@ -1,24 +1,33 @@
 # =============================================================================
 # LITTLE NATE — Admin Console (React)
+# Multi-stage: build static assets, then serve with lightweight server
 # =============================================================================
-FROM node:18-alpine
+
+# ─── Stage 1: Build ──────────────────────────────────────────────────────────
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install deps
 COPY package*.json ./
+RUN npm ci --production=false
 
-# Install dependencies
-RUN npm install
-
-# Copy source code
+# Copy source and build
 COPY . .
+RUN npm run build
 
-# Build for production (optional - for dev we use npm start)
-# RUN npm run build
+# ─── Stage 2: Serve ──────────────────────────────────────────────────────────
+FROM node:22-alpine
 
-# Expose port
+WORKDIR /app
+
+# Install serve for static file hosting
+RUN npm install -g serve@14
+
+# Copy built assets from build stage
+COPY --from=build /app/build ./build
+
 EXPOSE 3000
 
-# Start development server
-CMD ["npm", "start"]
+# Serve the production build on port 3000
+CMD ["serve", "-s", "build", "-l", "3000"]

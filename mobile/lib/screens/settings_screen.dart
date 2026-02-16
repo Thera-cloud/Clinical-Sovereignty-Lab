@@ -10,7 +10,11 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../main.dart' show LobbyScreen, defaultWsUrl;
+import 'package:http/http.dart' as http;
+import '../main.dart' show LobbyScreen;
+import 'billing_screens.dart';
+import '../config/app_config.dart';
+import 'vault_browser_screen.dart';
 
 // =============================================================================
 // DESIGN TOKENS
@@ -63,6 +67,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   bool _notifCrisisAlerts = true;
   bool _voiceModeDefault = false;
 
+  // Vault stats (for STANDARD+ tiers)
+  int? _vaultUsageBytes;
+  int? _vaultLimitBytes;
+
   @override
   void initState() {
     super.initState();
@@ -75,6 +83,38 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
     _voiceModeDefault = _profile['voice_mode_default'] ?? false;
+    if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) _loadVaultStats();
+  }
+
+  bool get _hasVaultAccess {
+    final key = _currentPlanKey;
+    return key == 'STANDARD' || key == 'TOP_TIER' || key == 'FAMILY';
+  }
+
+  Future<void> _loadVaultStats() async {
+    final userId = (_profile['hardware_id'] ?? _profile['id'] ?? '').toString();
+    if (userId.isEmpty) return;
+    final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+    try {
+      final uri = Uri.parse('$base/api/v1/vault/stats').replace(queryParameters: {'user_id': userId});
+      final resp = await http.get(
+        uri,
+        headers: {'X-User-Id': userId, 'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 5));
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body) as Map;
+        setState(() {
+          _vaultUsageBytes = data['total_size_bytes'] as int?;
+          _vaultLimitBytes = data['limit_bytes'] as int? ?? (5 * 1024 * 1024 * 1024);
+        });
+      }
+    } catch (_) {}
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   @override
@@ -280,6 +320,26 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     }
   }
 
+  Widget _billingLink(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: _Design.bgVoid,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _Design.border),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, color: _Design.gold, size: 18),
+          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(color: _Design.textSecondary, fontSize: 10)),
+        ]),
+      ),
+    );
+  }
+
   void _saveProfile() {
     _sendWs({
       'type': 'update_profile',
@@ -440,7 +500,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     final completer = Completer<Map<String, dynamic>?>();
 
     try {
-      final wsUrl = defaultWsUrl;
+      final wsUrl = AppConfig.wsUrl;
       inviteSocket = WebSocketChannel.connect(Uri.parse(wsUrl));
 
       sub = inviteSocket.stream.listen((raw) {
@@ -761,8 +821,85 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 onPressed: _showChangePlanSheet,
               ),
             ),
+            const SizedBox(height: 10),
+            // Quick links to billing screens
+            Row(children: [
+              Expanded(child: _billingLink(Icons.credit_card, 'Payments', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => PaymentMethodsScreen(currentUserProfile: _profile),
+                ));
+              })),
+              const SizedBox(width: 8),
+              Expanded(child: _billingLink(Icons.people, 'Family', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => FamilyManagementScreen(
+                    currentUserProfile: _profile,
+                    socket: widget.socket,
+                  ),
+                ));
+              })),
+              const SizedBox(width: 8),
+              Expanded(child: _billingLink(Icons.school, 'Coaching', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => CoachingPackScreen(
+                    currentUserProfile: _profile,
+                    socket: widget.socket,
+                  ),
+                ));
+              })),
+            ]),
           ]),
           const SizedBox(height: 20),
+
+          // --- Sovereign Vault (STANDARD / TOP_TIER only) ---
+          if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) ...[
+            _sectionHeader('SOVEREIGN VAULT', Icons.folder),
+            _settingsCard([
+              if (_vaultUsageBytes != null && _vaultLimitBytes != null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_formatBytes(_vaultUsageBytes!)} of ${_formatBytes(_vaultLimitBytes!)}',
+                      style: const TextStyle(
+                        color: _Design.textSecondary,
+                        fontSize: 12,
+                        fontFamily: 'Courier',
+                      ),
+                    ),
+                    Text(
+                      '${((_vaultUsageBytes! / _vaultLimitBytes!).clamp(0.0, 1.0) * 100).toInt()}%',
+                      style: const TextStyle(color: _Design.gold, fontSize: 12, fontFamily: 'Courier'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (_vaultUsageBytes! / _vaultLimitBytes!).clamp(0.0, 1.0),
+                    minHeight: 6,
+                    backgroundColor: _Design.bgElevated,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      (_vaultUsageBytes! / _vaultLimitBytes!) > 0.9 ? _Design.red : _Design.gold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              _actionRow(Icons.folder_open, 'Browse Vault', 'View and manage your stored items', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => VaultBrowserScreen(profile: _profile),
+                ));
+              }),
+              _actionRow(Icons.diamond, 'Transfer Crystal', 'Import from another source', () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Transfer Crystal flow coming soon'), backgroundColor: _Design.gold),
+                );
+              }),
+            ]),
+            const SizedBox(height: 20),
+          ],
 
           // --- Preferences ---
           _sectionHeader('PREFERENCES', Icons.tune),
@@ -1586,7 +1723,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     final completer = Completer<Map<String, dynamic>?>();
 
     try {
-      final wsUrl = defaultWsUrl;
+      final wsUrl = AppConfig.wsUrl;
       inviteSocket = WebSocketChannel.connect(Uri.parse(wsUrl));
 
       sub = inviteSocket.stream.listen((raw) {
@@ -2118,7 +2255,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
       _ws?.sink.close();
     } catch (_) {}
 
-    final wsUrl = defaultWsUrl;
+    final wsUrl = AppConfig.wsUrl;
     _ws = WebSocketChannel.connect(Uri.parse(wsUrl));
     _ws!.stream.listen(
       (message) {

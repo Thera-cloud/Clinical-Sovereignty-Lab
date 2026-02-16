@@ -38,6 +38,7 @@ class ApprovalAction(BaseModel):
 
 class ChatMessage(BaseModel):
     message: str
+    mode: Optional[str] = None
 
 class ExpressionCapture(BaseModel):
     raw_text: str
@@ -531,7 +532,7 @@ async def send_chat(body: ChatMessage, request: Request):
     """Send a message from Big Nate and get Little Nate's AI response."""
     from app.services.skyeye_chat import SkyEyeChatService
     service = SkyEyeChatService(request.app.state.db_pool)
-    return await service.send_message(body.message)
+    return await service.send_message(body.message, mode_override=body.mode)
 
 
 # =============================================================================

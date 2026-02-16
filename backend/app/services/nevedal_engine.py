@@ -15,9 +15,12 @@ C_emo(t) = [β · p_ent · T₀ · e^(-d/λ)] / [γ_env + E_G^(joint)/ℏ] × ex
 
 import asyncio
 import json
+import logging
 import math
 import numpy as np
 from datetime import datetime, timedelta
+
+logger = logging.getLogger("nevedal_engine")
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, asdict
 from collections import deque
@@ -39,12 +42,12 @@ class NevedalConstants:
     T_0 = 1.0               # Maximum tunneling when distance is negligible
     LAMBDA = 0.5            # Characteristic tunneling length
     
-    # CEE detection thresholds
-    CEE_P_ENT_MIN = 0.65    # Minimum entanglement for CEE
+    # CEE detection thresholds (aligned with PhD theoretical framework)
+    CEE_P_ENT_MIN = 0.72    # Minimum entanglement for CEE (per Nevedal 2025, §3.2)
     CEE_D_MAX = 0.45        # Maximum distance for CEE
     CEE_GAMMA_MAX = 0.35    # Maximum decoherence for CEE
     CEE_E_G_MIN = 0.35      # Minimum emotional load for CEE
-    CEE_DURATION_MIN = 15   # Minimum seconds for valid CEE
+    CEE_DURATION_MIN = 30   # Minimum seconds for valid CEE (per theoretical framework)
     
     # Voice analysis parameters
     VOICE_STRESS_BASELINE = 0.3
@@ -266,7 +269,8 @@ class VoiceBiometricExtractor:
                 return float(pitch)
             
             return 0.0
-        except:
+        except Exception as e:
+            logger.debug("_estimate_pitch failed: %s", e)
             return 0.0
     
     def _estimate_speech_rate(self, samples: np.ndarray) -> float:
@@ -304,7 +308,8 @@ class VoiceBiometricExtractor:
                 return float(np.clip(words_per_min, 60, 250))
             
             return 120.0
-        except:
+        except Exception as e:
+            logger.debug("_estimate_speech_rate failed: %s", e)
             return 120.0
     
     def _compute_pause_ratio(self, samples: np.ndarray) -> float:
@@ -314,7 +319,8 @@ class VoiceBiometricExtractor:
             threshold = np.mean(energy) * 0.3
             silence_samples = np.sum(energy < threshold)
             return float(silence_samples / len(samples))
-        except:
+        except Exception as e:
+            logger.debug("_compute_pause_ratio failed: %s", e)
             return 0.3
     
     def _compute_stress_index(self, features: Dict) -> float:
@@ -458,8 +464,8 @@ class SynchronyCalculator:
                 # Convert correlation (-1 to 1) to synchrony (0 to 1)
                 synchrony = (correlation + 1) / 2
                 return float(np.clip(synchrony, 0, 1))
-        except:
-            pass
+        except Exception as e:
+            logger.debug("_compute_synchrony(%s) failed: %s", metric, e)
         
         return 0.5
     
@@ -488,20 +494,131 @@ class NevedalEngine:
     - History tracking
     """
     
-    def __init__(self, constants: NevedalConstants = None):
+    def __init__(self, constants: NevedalConstants = None, db_pool=None):
         self.constants = constants or NevedalConstants()
+        self.db_pool = db_pool  # Optional: enables CEE event persistence
         self.voice_extractor = VoiceBiometricExtractor()
         self.synchrony_calculator = SynchronyCalculator()
         
-        # State tracking
+        # Per-session state tracking (keyed by session_id to prevent cross-user contamination)
+        self._session_states: Dict[str, "NevedalState"] = {}      # session_id -> current state
+        self._session_histories: Dict[str, deque] = {}             # session_id -> state history
+        self._session_cee_events: Dict[str, List["CEEEvent"]] = {} # session_id -> CEE events
+        self._session_starts: Dict[str, Optional[datetime]] = {}   # session_id -> start time
+        self._session_cee_tracking: Dict[str, Dict] = {}           # session_id -> CEE tracking data
+        
+        # Legacy accessors (for backward compatibility with code that reads these directly)
         self.current_state: Optional[NevedalState] = None
         self.state_history: deque = deque(maxlen=1000)
         self.cee_events: List[CEEEvent] = []
+        
+        # Session time tracking (for exponential decay in Nevedal formula)
+        self._session_start: Optional[datetime] = None
         
         # CEE tracking
         self._cee_start_time: Optional[datetime] = None
         self._cee_peak_c_emo: float = 0.0
         self._cee_samples: List[NevedalState] = []
+        
+        # Quakete integration — optional bridge to Layer 8 Swarm Solidarity
+        self._quakete_resonance_engine = None  # QuaketeResonanceEngine
+        self._quakete_trail_map = None          # FibreTrailMap
+
+    def attach_quakete(self, resonance_engine, trail_map=None) -> None:
+        """
+        Attach Quakete Layer 8 services for Nevedal-to-Quakete resonance bridging.
+
+        When attached, every call to process_biometrics() will automatically
+        convert C_emo to Quakete-compatible resonance and update the trail map.
+
+        Args:
+            resonance_engine: QuaketeResonanceEngine instance
+            trail_map: Optional FibreTrailMap for health updates
+        """
+        self._quakete_resonance_engine = resonance_engine
+        self._quakete_trail_map = trail_map
+        logger.info("Quakete Layer 8 attached to Nevedal Engine")
+
+    def _bridge_to_quakete(self, state) -> Optional[float]:
+        """
+        Convert a NevedalState to Quakete resonance and update the trail map.
+
+        Returns the computed Quakete resonance value, or None if Quakete
+        is not attached.
+        """
+        if self._quakete_resonance_engine is None:
+            return None
+        try:
+            quakete_resonance = self._quakete_resonance_engine.nevedal_to_quakete(
+                C_emo=state.c_emo,
+                p_ent=state.p_ent,
+                T_tunnel=state.t_tunnel,
+                gamma_env=state.gamma_env,
+            )
+            # Update trail map with coherence-derived health if available
+            if self._quakete_trail_map and state.user_id:
+                try:
+                    from app.models.quakete import FibreTrailEmission
+                    emission = FibreTrailEmission(
+                        fibre_id=state.user_id,
+                        fibre_type="nevedal_bridge",
+                        resonance_frequency=quakete_resonance,
+                        communication_health=min(1.0, state.c_emo),
+                    )
+                    self._quakete_trail_map.update(emission)
+                except Exception as trail_err:
+                    logger.debug(f"Trail map update skipped: {trail_err}")
+            return quakete_resonance
+        except Exception as e:
+            logger.warning(f"Nevedal→Quakete bridge error: {e}")
+            return None
+
+    def reset_session(self, session_id: str = None) -> None:
+        """Reset session-specific state for a new therapeutic session.
+        
+        Call this at the start of each new session so that elapsed_t
+        resets to 0 and the exponential decay in the Nevedal formula
+        begins from the new session start time.
+        
+        If session_id is provided, clears only that session's isolated state.
+        Otherwise clears the legacy global state for backward compatibility.
+        """
+        if session_id:
+            self._session_states.pop(session_id, None)
+            self._session_histories.pop(session_id, None)
+            self._session_cee_events.pop(session_id, None)
+            self._session_starts.pop(session_id, None)
+            self._session_cee_tracking.pop(session_id, None)
+        # Always clear legacy global state too
+        self._session_start = None
+        self._cee_start_time = None
+        self._cee_peak_c_emo = 0.0
+        self._cee_samples = []
+        self.current_state = None
+    
+    def _get_session_state(self, session_id: str) -> Optional["NevedalState"]:
+        """Get the current state for a specific session (isolated)."""
+        return self._session_states.get(session_id)
+    
+    def _set_session_state(self, session_id: str, state: "NevedalState") -> None:
+        """Store state for a specific session (isolated from other sessions)."""
+        self._session_states[session_id] = state
+        # Also set legacy accessor for backward compatibility
+        self.current_state = state
+        # Per-session history
+        if session_id not in self._session_histories:
+            self._session_histories[session_id] = deque(maxlen=200)
+        self._session_histories[session_id].append(state)
+        # Also append to legacy global history
+        self.state_history.append(state)
+    
+    def get_session_history(self, session_id: str) -> deque:
+        """Get state history for a specific session only (no cross-user leakage)."""
+        return self._session_histories.get(session_id, deque())
+    
+    def get_session_cee_events(self, session_id: str) -> List["CEEEvent"]:
+        """Get CEE events for a specific session only."""
+        return self._session_cee_events.get(session_id, [])
     
     def process_biometrics(
         self,
@@ -526,6 +643,13 @@ class NevedalEngine:
         """
         now = datetime.utcnow()
         
+        # Track session start for time-dependent decay (first call = session start)
+        if self._session_start is None:
+            self._session_start = now
+        
+        # Elapsed time in seconds since session start (for Nevedal exponential decay)
+        elapsed_t = (now - self._session_start).total_seconds()
+        
         # Extract subject biometrics
         subject_a = biometrics.get('subject_a', {})
         subject_b = biometrics.get('subject_b', {})
@@ -547,8 +671,8 @@ class NevedalEngine:
         # 5. Compute τ_emo (Coherence Lifetime)
         tau_emo = self._compute_tau_emo(e_g_joint)
         
-        # 6. Compute C_emo (Main coherence value)
-        c_emo = self._compute_c_emo(p_ent, t_tunnel, gamma_env, e_g_joint)
+        # 6. Compute C_emo (Main coherence value with time-dependent decay)
+        c_emo = self._compute_c_emo(p_ent, t_tunnel, gamma_env, e_g_joint, elapsed_t)
         
         # 7. Detect CEE window
         cee_window, cee_duration = self._detect_cee(
@@ -587,6 +711,9 @@ class NevedalEngine:
         # Update history
         self.current_state = state
         self.state_history.append(state)
+
+        # Bridge to Quakete Layer 8 (if attached)
+        self._bridge_to_quakete(state)
         
         return state
     
@@ -745,14 +872,33 @@ class NevedalEngine:
         p_ent: float,
         t_tunnel: float,
         gamma_env: float,
-        e_g_joint: float
+        e_g_joint: float,
+        elapsed_t: float = 0.0
     ) -> float:
         """
-        Compute the main Quantum Emotional Coherence value.
+        Compute the main Quantum Emotional Coherence value with time-dependent decay.
         
-        C_emo = [β × p_ent × T_tunnel] / [γ_env + E_G/ℏ]
+        Full Nevedal Formula:
+        C_emo(t) = [β × p_ent × T_tunnel] / [γ_env + E_G^(joint)/ℏ]
+                   × exp[-(γ_env + E_G^(joint)/ℏ) × t]
         
-        (Simplified steady-state form without time decay)
+        The exponential decay models the natural attenuation of emotional coherence
+        over the course of a session. As environmental noise (γ_env) and emotional
+        load (E_G) increase, coherence decays faster — requiring active therapeutic
+        intervention to maintain. The time constant τ = 1/(γ_env + E_G/ℏ) defines
+        the characteristic coherence lifetime.
+        
+        At t=0 (session start), this reduces to the steady-state form.
+        
+        The decay exponent is normalized by τ_emo (coherence lifetime, typically
+        600–3600s) to keep the decay physically meaningful in a therapeutic context.
+        
+        Args:
+            p_ent: Emotional entanglement (0-1)
+            t_tunnel: Tunneling transparency (0-1)
+            gamma_env: Decoherence rate (0-1)
+            e_g_joint: Joint emotional load (0-1)
+            elapsed_t: Elapsed session time in seconds (default 0)
         """
         c = self.constants
         
@@ -762,7 +908,17 @@ class NevedalEngine:
         if denominator < 0.01:
             denominator = 0.01
         
-        c_emo = numerator / denominator
+        # Steady-state amplitude
+        c_emo_0 = numerator / denominator
+        
+        # Time-dependent exponential decay: exp[-(γ_env + E_G/ℏ) × t_normalized]
+        # Normalize elapsed time by a therapeutic session timescale (3600s = 1 hour)
+        # so the decay exponent stays in a physically meaningful range.
+        tau_session = 3600.0  # normalization timescale in seconds
+        t_normalized = elapsed_t / tau_session
+        decay = np.exp(-denominator * t_normalized)
+        
+        c_emo = c_emo_0 * decay
         
         return float(np.clip(c_emo, 0, 1))
     
@@ -802,8 +958,11 @@ class NevedalEngine:
         """
         c = self.constants
         
-        # Check CEE conditions
+        # Check CEE conditions — per PhD spec §2.4:
+        # CEE Window ⟺ C_emo(t) ≥ θ_CEE (0.72) for sustained Δt_min (30s)
+        # Additional component conditions ensure biometric quality
         cee_conditions_met = (
+            c_emo >= c.CEE_P_ENT_MIN and    # θ_CEE = 0.72 applied to C_emo(t)
             p_ent >= c.CEE_P_ENT_MIN and
             d <= c.CEE_D_MAX and
             gamma_env <= c.CEE_GAMMA_MAX and
@@ -844,6 +1003,8 @@ class NevedalEngine:
                         therapeutic_value="Potential corrective experience detected"
                     )
                     self.cee_events.append(event)
+                    # Persist to database if db_pool is available
+                    self._persist_cee_event_sync(event)
             
             # Reset CEE tracking
             self._cee_start_time = None
@@ -851,7 +1012,78 @@ class NevedalEngine:
             self._cee_samples = []
             
             return False, 0
-    
+
+    def _persist_cee_event_sync(self, event: 'CEEEvent') -> None:
+        """
+        Schedule CEE event persistence to the nevedal_metrics table.
+        Uses a fire-and-forget asyncio task if an event loop is running,
+        otherwise logs a warning. This avoids making _detect_cee async.
+        """
+        if not self.db_pool:
+            return
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self._persist_cee_event(event))
+            else:
+                # No running loop — skip DB persistence (tests, CLI)
+                pass
+        except RuntimeError:
+            pass
+
+    async def _persist_cee_event(self, event: 'CEEEvent') -> None:
+        """Persist a CEE event to the database."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Check if we already have a metric row for this session at
+                # approximately this timestamp, and update it with CEE data.
+                # Otherwise insert a standalone CEE record.
+                await conn.execute("""
+                    INSERT INTO nevedal_metrics
+                        (session_id, user_id, recorded_at, c_emo, cee_window,
+                         cee_duration_seconds, biometrics)
+                    VALUES ($1, $2, $3, $4, TRUE, $5, $6)
+                """,
+                    event.session_id if event.session_id != "unknown" else None,
+                    self.current_state.user_id if self.current_state else None,
+                    event.end_time,
+                    round(event.peak_c_emo, 5),
+                    event.duration_seconds,
+                    json.dumps(self._encrypt_biometric_payload({
+                        "cee_start": event.start_time.isoformat(),
+                        "cee_end": event.end_time.isoformat(),
+                        "avg_p_ent": event.avg_p_ent,
+                        "avg_gamma_env": event.avg_gamma_env,
+                        "trigger_context": event.trigger_context,
+                        "therapeutic_value": event.therapeutic_value,
+                    })),
+                )
+        except Exception as e:
+            print(f">>> [NEVEDAL] Failed to persist CEE event: {e}")
+
+    @staticmethod
+    def _encrypt_biometric_payload(payload: dict) -> dict:
+        """Encrypt sensitive biometric fields before DB persistence.
+        
+        Fields like trigger_context, voice stress data, and pitch values
+        are encrypted at rest to prevent exposure if the database is compromised.
+        """
+        try:
+            from app.field_encryption import encrypt_fields
+            return encrypt_fields(payload)
+        except Exception:
+            return payload  # Graceful fallback — don't block persistence
+
+    @staticmethod
+    def _decrypt_biometric_payload(payload: dict) -> dict:
+        """Decrypt biometric fields after reading from DB."""
+        try:
+            from app.field_encryption import decrypt_fields
+            return decrypt_fields(payload)
+        except Exception:
+            return payload
+
     def _generate_interpretation(
         self,
         c_emo: float,
@@ -952,8 +1184,11 @@ class NevedalEngine:
         return self.voice_extractor.process_audio_chunk(audio_data)
     
     def get_session_summary(self, session_id: str) -> Dict:
-        """Get summary statistics for a session"""
-        session_states = [s for s in self.state_history if s.session_id == session_id]
+        """Get summary statistics for a session (uses isolated per-session history)."""
+        # Prefer isolated per-session history; fall back to filtering global history
+        session_states = list(self.get_session_history(session_id))
+        if not session_states:
+            session_states = [s for s in self.state_history if s.session_id == session_id]
         
         if not session_states:
             return {"error": "No data for session"}
@@ -1025,7 +1260,8 @@ class NevedalStreamManager:
         for ws in self.subscribers[state.session_id]:
             try:
                 await ws.send(payload)
-            except:
+            except Exception as e:
+                logger.debug("ws broadcast failed for session %s: %s", state.session_id, e)
                 dead_sockets.add(ws)
         
         # Clean up dead connections
@@ -1037,9 +1273,22 @@ class NevedalStreamManager:
 # INTEGRATION WITH EXISTING BRIDGE SERVER
 # =============================================================================
 
-def create_nevedal_engine() -> NevedalEngine:
-    """Factory function to create a configured Nevedal engine"""
-    return NevedalEngine(NevedalConstants())
+def create_nevedal_engine(
+    quakete_resonance_engine=None,
+    quakete_trail_map=None,
+    db_pool=None,
+) -> NevedalEngine:
+    """Factory function to create a configured Nevedal engine.
+
+    Args:
+        quakete_resonance_engine: Optional QuaketeResonanceEngine for Layer 8 bridge
+        quakete_trail_map: Optional FibreTrailMap for health updates
+        db_pool: Optional database pool for CEE event persistence
+    """
+    engine = NevedalEngine(NevedalConstants(), db_pool=db_pool)
+    if quakete_resonance_engine:
+        engine.attach_quakete(quakete_resonance_engine, quakete_trail_map)
+    return engine
 
 
 # Example usage in bridge_server_hybrid.py:

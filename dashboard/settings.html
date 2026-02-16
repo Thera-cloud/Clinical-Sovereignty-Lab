@@ -8,8 +8,8 @@
     <style>
         :root {
             --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
-            --border: #252525; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2); --gold-text: #C9A962;
-            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --border: #252525; --gold: #C9A962; --gold-dim: rgba(201, 169, 98, 0.2); --gold-text: #C9A962;
+            --cyan: #4ECDC4; --cyan-dim: rgba(78, 205, 196, 0.1);
             --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
             --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
             --orange: #FF9500; --purple: #9D4EDD;
@@ -100,9 +100,30 @@
         .delete-input:focus { outline: none; border-color: var(--red); }
         .delete-actions { display: flex; gap: 8px; justify-content: flex-end; }
         .btn-delete { padding: 10px 20px; background: var(--red); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+
+        /* ── Connection Status ── */
+        .ws-status { position: fixed; top: 8px; right: 8px; padding: 4px 10px; border-radius: 12px; font-size: 10px; z-index: 999; display: none; }
+        .ws-status.disconnected { display: block; background: rgba(255, 59, 59, 0.2); color: #FF3B3B; }
+        .ws-status.reconnecting { display: block; background: rgba(255, 149, 0, 0.2); color: #FF9500; }
+
+        /* ── Mobile Responsive ── */
+        @media (max-width: 768px) {
+            .header { padding: 10px 12px; flex-wrap: wrap; }
+            .main { padding: 16px; }
+            .field-row { flex-direction: column; gap: 4px; }
+            .field-label { width: auto; }
+            .field-input { width: 100%; }
+            .section { padding: 16px; }
+        }
+        @media (max-width: 480px) {
+            .header { padding: 8px; }
+            .logo-text { font-size: 14px; letter-spacing: 1px; }
+            .section-title { font-size: 14px; }
+        }
     </style>
 </head>
 <body>
+    <div id="wsStatus" class="ws-status"></div>
     <header class="header">
         <div class="header-left">
             <div class="logo">
@@ -297,9 +318,9 @@
     (function() {
         "use strict";
         var username = sessionStorage.getItem("username");
-        var password = sessionStorage.getItem("password");
+        var token = sessionStorage.getItem("token");
         var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
-        if (!username) { window.location.href = "index.html"; return; }
+        if (!token) { window.location.href = "index.html"; return; }
 
         var ws = null, authenticated = false;
 
@@ -313,7 +334,8 @@
         function connect() {
             ws = new WebSocket(getWsUrl());
             ws.onopen = function() {
-                ws.send(JSON.stringify({ type: "login_request", username: username, password: password, expected_role: profile.role || "COACH", hardware_id: profile.hardware_id || "WEB_ADMIN" }));
+                document.getElementById('wsStatus').className = 'ws-status';
+                ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             ws.onmessage = function(event) {
                 var data; try { data = JSON.parse(event.data); } catch(e) { return; }
@@ -328,7 +350,13 @@
                     populateSettings();
                 }
             };
-            ws.onclose = function() { authenticated = false; setTimeout(connect, 3000); };
+            ws.onclose = function() {
+                authenticated = false;
+                var el = document.getElementById('wsStatus');
+                el.className = 'ws-status reconnecting';
+                el.textContent = 'Reconnecting...';
+                setTimeout(connect, 3000);
+            };
         }
 
         function populateSettings() {

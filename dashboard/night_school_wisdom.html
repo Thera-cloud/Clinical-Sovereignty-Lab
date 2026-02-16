@@ -303,10 +303,16 @@
         }
         
         // === WEBSOCKET ===
+        function getWsUrl() {
+            const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
+            if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
+            return `${proto}://${h}:8765`;
+        }
+
         function connectWebSocket() {
             document.getElementById("connectionStatus").textContent = "Connecting...";
             
-            ws = new WebSocket("wss://api.sovereignsanctuary.net/ws");
+            ws = new WebSocket(getWsUrl());
             
             ws.onopen = function() {
                 console.log("[Wisdom] WebSocket connected");

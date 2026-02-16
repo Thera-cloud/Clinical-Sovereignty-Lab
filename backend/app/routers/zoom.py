@@ -31,11 +31,15 @@ logger = logging.getLogger("zoom_integration")
 
 router = APIRouter(prefix="/api/zoom", tags=["zoom"])
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
+from app.config import settings as _settings
+DATA_DIR = Path(_settings.DATA_DIR)
 ZOOM_EVENTS_FILE = DATA_DIR / "zoom_events.json"
 ZOOM_MEETING_MAP_FILE = DATA_DIR / "zoom_meeting_map.json"  # meeting_id -> internal session metadata
 ZOOM_WEBHOOK_ERRORS_FILE = DATA_DIR / "zoom_webhook_errors.json"
 ZOOM_INGESTED_FILE = DATA_DIR / "zoom_ingested_sessions.json"  # ingested transcripts log
+
+# In-memory dedup for recording events (WH-M10)
+_processed_zoom_events: set = set()
 
 
 def _load_json(path: Path, default: Any):
@@ -57,8 +61,16 @@ def _append_json_list(path: Path, item: Any, cap: int = 3000) -> None:
     """
     Best-effort append to a JSON list on disk.
     Used for webhook diagnostics; never raises.
+    L9: File size check and rotation when too large.
     """
     try:
+        # L9: Refuse to append if file exceeds 50MB
+        if path.exists() and path.stat().st_size > 50_000_000:
+            # Rotate: rename to .old and start fresh
+            try:
+                path.rename(path.with_suffix(path.suffix + ".old"))
+            except Exception:
+                pass
         items = _load_json(path, []) or []
         if not isinstance(items, list):
             items = []
@@ -147,6 +159,8 @@ async def zoom_webhook(
     x_zm_request_timestamp: Optional[str] = Header(default=None),
     x_zm_signature: Optional[str] = Header(default=None),
 ):
+    if not settings.ENABLE_ZOOM:
+        raise HTTPException(status_code=404, detail="Not Found")
     raw = await request.body()
     secret = (settings.ZOOM_WEBHOOK_SECRET_TOKEN or "").strip()
 
@@ -278,6 +292,13 @@ async def zoom_webhook(
     # task to download transcript and feed through MetricsEngine.
     # =========================================================================
     if event in ("recording.completed", "phone.recording_completed"):
+        dedup_key = f"{meeting_id}_{event}"
+        if dedup_key in _processed_zoom_events:
+            return {"status": "already_processed"}
+        _processed_zoom_events.add(dedup_key)
+        if len(_processed_zoom_events) > 10000:
+            _processed_zoom_events.clear()
+
         session_source = "zoom_phone" if "phone" in event else "zoom_meeting"
         try:
             asyncio.create_task(

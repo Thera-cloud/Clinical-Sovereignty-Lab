@@ -35,6 +35,25 @@ class ProposalRisk(str, Enum):
     CRITICAL = "critical"  # requires multi-factor confirmation
 
 
+class ApprovalCategory(str, Enum):
+    """
+    Four-tier approval category system (PhD Architecture §7.3).
+
+    Each proposal is classified into one of these categories based on
+    its risk level and action type. The category determines the approval
+    workflow:
+
+        OBSERVE   — Pure logging, no approval needed. Fibre acts autonomously.
+        SUGGEST   — Implicit approval with auto-execute after timeout.
+        ACT       — Explicit single-party human approval required.
+        CRITICAL  — Multi-party approval + mandatory cooling period + dead-man switch.
+    """
+    OBSERVE = "observe"      # No approval needed (log only)
+    SUGGEST = "suggest"      # Auto-execute after timeout window
+    ACT = "act"              # Requires explicit human approval
+    CRITICAL = "critical"    # Multi-party approval + cooling period
+
+
 class InsightDomain(str, Enum):
     CLINICAL = "clinical"
     MARKETING = "marketing"
@@ -105,6 +124,7 @@ class StrategyProposal(BaseModel):
     action_type: str  # create_quiz, shift_content_mix, campaign_launch, etc.
     proposed_by: str = "sovereign_mind"
     risk: ProposalRisk = ProposalRisk.MEDIUM
+    approval_category: ApprovalCategory = ApprovalCategory.ACT
     status: ProposalStatus = ProposalStatus.PROPOSED
 
     # Execution
@@ -116,6 +136,11 @@ class StrategyProposal(BaseModel):
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
+
+    # Multi-party approval (for CRITICAL category)
+    required_approvers: int = Field(default=1, ge=1)
+    approver_list: List[str] = Field(default_factory=list)  # who has approved so far
+    cooling_period_hours: int = Field(default=0, ge=0)  # mandatory wait after approval before execution
 
     # Results
     execution_result: Optional[Dict[str, Any]] = None
@@ -189,3 +214,52 @@ class SwarmOversightEntry(BaseModel):
     total_tokens_consumed: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
+# APPROVAL DECISIONS AUDIT (Migration 020, PhD Spec §10.4)
+# =============================================================================
+
+class ApprovalDecisionAudit(BaseModel):
+    """Immutable audit trail entry for every approval decision. Append-only."""
+    audit_id: UUID = Field(default_factory=uuid4)
+    proposal_id: UUID
+    decision: str  # APPROVE | REJECT | HOLD | MODIFY
+    channel: Optional[str] = None  # email | sms | api | admin_panel
+    approver: Optional[str] = None
+    approval_category: Optional[str] = None  # observe | suggest | act | critical
+    raw_message: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# FIBRE BEHAVIORAL BASELINES (Migration 020, PhD Spec §8.5)
+# =============================================================================
+
+class FibreBehavioralBaseline(BaseModel):
+    """Statistical baseline for a Fibre's behavioral metrics (anomaly detection)."""
+    baseline_id: UUID = Field(default_factory=uuid4)
+    fibre_id: UUID
+    metric_name: str  # msg_rate_per_min | topic_spread | token_usage | conclusion_diversity
+    baseline_mean: float
+    baseline_std: float = 0.0
+    sample_count: int = 0
+    window_hours: int = 24
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# =============================================================================
+# LEGACY VAULT CONSENT (Extended — Migration 020, PhD Spec §11.3)
+# =============================================================================
+
+class LegacyVaultConsent(BaseModel):
+    """Granular consent record for Legacy Vault data sharing."""
+    user_id: UUID
+    family_id: UUID
+    consented: bool = False
+    data_types: Optional[List[str]] = None  # null = all types; e.g. ["emotional_themes", "coping_mechanisms"]
+    is_minor: bool = False
+    guardian_id: Optional[UUID] = None
+    sharing_restricted: bool = False
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

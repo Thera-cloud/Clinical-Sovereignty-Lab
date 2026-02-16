@@ -6,6 +6,18 @@
 	<string>We need access to your microphone for speech-to-text</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>We need access to speech recognition for accessibility</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Sovereign Sanctuary uses Bluetooth to maintain the ZEFCP solidarity mesh and Quakete emotional support network.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Sovereign Sanctuary uses Bluetooth to share wellness signals with nearby members of your support network.</string>
+	<key>NSNFCReaderUsageDescription</key>
+	<string>Sovereign Sanctuary uses NFC to securely provision your device into the swarm network.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

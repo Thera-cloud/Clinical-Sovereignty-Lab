@@ -3,7 +3,7 @@ Scheduling & Session Management API Routes
 Handles appointment booking, calendar management, and session tracking
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 
 from app.config import settings
+from app.auth import get_current_user
 from app.services.zoom_client import ZoomClient
 from app.services.blob_storage import upload_bytes
 
@@ -33,8 +34,9 @@ except ImportError:
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
-WORKBOOKS_DIR = Path(os.getenv("WORKBOOKS_DIR", "/app/workbooks"))
+from app.config import settings as _settings
+DATA_DIR = Path(_settings.DATA_DIR)
+WORKBOOKS_DIR = Path(_settings.WORKBOOKS_DIR)
 
 # Initialize classroom analyzer for auto-analysis
 _classroom_analyzer = None
@@ -163,16 +165,45 @@ class CoachAvailabilityRequest(BaseModel):
     timezone: str = "America/New_York"
 
 # Helpers
+def _get_fernet():
+    """Get Fernet cipher for encrypting session files at rest."""
+    try:
+        from app.field_encryption import _get_fernet as _gf
+        return _gf()
+    except Exception:
+        return None
+
 def load_json(filepath: Path, default=None):
     if default is None: default = {}
     if not filepath.exists(): return default
     try:
-        with open(filepath, 'r') as f: return json.load(f)
-    except: return default
+        raw = filepath.read_bytes()
+        # Try decrypting if it looks like an encrypted payload (starts with gAAAAA)
+        fernet = _get_fernet()
+        if fernet and raw and not raw.startswith(b'[') and not raw.startswith(b'{'):
+            try:
+                decrypted = fernet.decrypt(raw)
+                return json.loads(decrypted)
+            except Exception:
+                pass  # Not encrypted, try plain JSON
+        return json.loads(raw)
+    except Exception:
+        return default
 
 def save_json(filepath: Path, data):
     filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, 'w') as f: json.dump(data, f, indent=2, default=str)
+    payload = json.dumps(data, indent=2, default=str).encode('utf-8')
+    # Encrypt session files at rest if encryption key is available
+    fernet = _get_fernet()
+    if fernet and 'sessions' in str(filepath):
+        payload = fernet.encrypt(payload)
+    with open(filepath, 'wb') as f:
+        f.write(payload)
+    # Restrict file permissions (owner read/write only)
+    try:
+        filepath.chmod(0o600)
+    except Exception:
+        pass
 
 def generate_session_id():
     return f"SES_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(6).upper()}"
@@ -364,10 +395,15 @@ async def schedule_session(req: ScheduleSessionRequest):
     return resp
 
 @router.get("/client/{client_id}")
-async def get_client_sessions(client_id: str, status: str = None, limit: int = 20):
-    """Get sessions for a client"""
+async def get_client_sessions(client_id: str, current_user: str = Depends(get_current_user), status: str = None, limit: int = 20):
+    """Get sessions for a client. Requires authentication; user must be the client or their coach."""
     sessions = load_json(DATA_DIR / "sessions.json", [])
     client_sessions = [s for s in sessions if s.get("client_id") == client_id]
+    # Ownership check: user must be the client, or a coach assigned to one of their sessions
+    if current_user != client_id:
+        is_assigned_coach = any(s.get("coach_id") == current_user for s in client_sessions)
+        if not is_assigned_coach:
+            raise HTTPException(403, "Access denied: you are not this client or their assigned coach")
     
     if status:
         client_sessions = [s for s in client_sessions if s.get("status") == status]
@@ -376,8 +412,10 @@ async def get_client_sessions(client_id: str, status: str = None, limit: int = 2
     return {"sessions": client_sessions[:limit]}
 
 @router.get("/coach/{coach_id}")
-async def get_coach_sessions(coach_id: str, status: str = None, limit: int = 50):
-    """Get sessions for a coach"""
+async def get_coach_sessions(coach_id: str, current_user: str = Depends(get_current_user), status: str = None, limit: int = 50):
+    """Get sessions for a coach. Requires authentication; user must be the coach."""
+    if current_user != coach_id:
+        raise HTTPException(403, "Access denied: you can only view your own sessions")
     sessions = load_json(DATA_DIR / "sessions.json", [])
     coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
     
@@ -388,8 +426,10 @@ async def get_coach_sessions(coach_id: str, status: str = None, limit: int = 50)
     return {"sessions": coach_sessions[:limit]}
 
 @router.get("/upcoming/{user_id}")
-async def get_upcoming_sessions(user_id: str, days: int = 7):
-    """Get upcoming sessions for a user (as client or coach)"""
+async def get_upcoming_sessions(user_id: str, current_user: str = Depends(get_current_user), days: int = 7):
+    """Get upcoming sessions for a user (as client or coach). Requires authentication."""
+    if current_user != user_id:
+        raise HTTPException(403, "Access denied: you can only view your own upcoming sessions")
     sessions = load_json(DATA_DIR / "sessions.json", [])
     now = datetime.now(timezone.utc)
     cutoff = now + timedelta(days=days)
@@ -411,21 +451,25 @@ async def get_upcoming_sessions(user_id: str, days: int = 7):
     return {"sessions": upcoming}
 
 @router.get("/{session_id}")
-async def get_session(session_id: str):
-    """Get session details"""
+async def get_session(session_id: str, current_user: str = Depends(get_current_user)):
+    """Get session details. Requires authentication; user must be the client or coach for this session."""
     sessions = load_json(DATA_DIR / "sessions.json", [])
     for s in sessions:
         if s.get("session_id") == session_id:
+            if current_user not in (s.get("client_id"), s.get("coach_id")):
+                raise HTTPException(403, "Access denied: you are not a participant in this session")
             return {"session": s}
     raise HTTPException(404, "Session not found")
 
 @router.post("/start/{session_id}")
-async def start_session(session_id: str):
-    """Mark session as started"""
+async def start_session(session_id: str, current_user: str = Depends(get_current_user)):
+    """Mark session as started. Requires authentication; user must be the coach."""
     sessions = load_json(DATA_DIR / "sessions.json", [])
     
     for s in sessions:
         if s.get("session_id") == session_id:
+            if current_user not in (s.get("client_id"), s.get("coach_id")):
+                raise HTTPException(403, "Access denied: you are not a participant in this session")
             s["status"] = "active"
             s["actual_start"] = str(datetime.now())
             save_json(DATA_DIR / "sessions.json", sessions)
@@ -434,12 +478,14 @@ async def start_session(session_id: str):
     raise HTTPException(404, "Session not found")
 
 @router.post("/end/{session_id}")
-async def end_session(session_id: str, mood_at_end: str = "", summary: str = ""):
-    """Mark session as ended"""
+async def end_session(session_id: str, current_user: str = Depends(get_current_user), mood_at_end: str = "", summary: str = ""):
+    """Mark session as ended. Requires authentication; user must be a participant."""
     sessions = load_json(DATA_DIR / "sessions.json", [])
     
     for s in sessions:
         if s.get("session_id") == session_id:
+            if current_user not in (s.get("client_id"), s.get("coach_id")):
+                raise HTTPException(403, "Access denied: you are not a participant in this session")
             s["status"] = "completed"
             s["actual_end"] = str(datetime.now())
             s["mood_at_end"] = mood_at_end
@@ -942,12 +988,14 @@ async def archive_zoom_transcript(
     }
 
 @router.put("/{session_id}")
-async def update_session(session_id: str, req: UpdateSessionRequest):
-    """Update session details"""
+async def update_session(session_id: str, req: UpdateSessionRequest, current_user: str = Depends(get_current_user)):
+    """Update session details. Requires authentication; user must be the coach."""
     sessions = load_json(DATA_DIR / "sessions.json", [])
     
     for s in sessions:
         if s.get("session_id") == session_id:
+            if current_user != s.get("coach_id"):
+                raise HTTPException(403, "Access denied: only the assigned coach can update session details")
             if req.status: s["status"] = req.status
             if req.coach_notes: s["coach_notes"] = req.coach_notes
             if req.topics_covered: s["topics_covered"] = req.topics_covered
@@ -959,8 +1007,8 @@ async def update_session(session_id: str, req: UpdateSessionRequest):
     raise HTTPException(404, "Session not found")
 
 @router.delete("/{session_id}")
-async def cancel_session(session_id: str, reason: str = "", hard_delete: bool = False):
-    """Cancel or delete a session.
+async def cancel_session(session_id: str, current_user: str = Depends(get_current_user), reason: str = "", hard_delete: bool = False):
+    """Cancel or delete a session. Requires authentication; user must be a participant.
     
     Args:
         session_id: The session ID to cancel/delete
@@ -971,6 +1019,8 @@ async def cancel_session(session_id: str, reason: str = "", hard_delete: bool = 
     
     for i, s in enumerate(sessions):
         if s.get("session_id") == session_id:
+            if current_user not in (s.get("client_id"), s.get("coach_id")):
+                raise HTTPException(403, "Access denied: you are not a participant in this session")
             if hard_delete:
                 # Permanently remove the session
                 deleted_session = sessions.pop(i)
