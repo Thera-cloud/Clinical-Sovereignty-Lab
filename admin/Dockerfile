@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Copy package files and install deps
 COPY package*.json ./
-RUN npm ci --production=false
+RUN npm install
 
 # Copy source and build
 COPY . .
