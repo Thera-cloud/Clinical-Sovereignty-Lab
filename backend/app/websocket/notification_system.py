@@ -854,6 +854,269 @@ class NotificationSystem:
         else:
             return await self.send_sms(contact, msg)
 
+    # =========================================================================
+    # ACCOUNT LIFECYCLE NOTIFICATIONS (Deletion, Freeze, Recovery)
+    # =========================================================================
+
+    async def send_account_deletion_scheduled(self, to_email: str, name: str,
+                                               phone: str = None) -> bool:
+        """Notify user their account is scheduled for deletion in 30 days."""
+        content = f"""
+        <h2 style="color: #f59e0b;">Account Deletion Scheduled</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>Your Sovereign Sanctuary account has been scheduled for deletion.
+        Your data will be permanently removed in <strong>30 days</strong>.</p>
+        
+        <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; 
+                    margin: 20px 0; border-left: 4px solid #f59e0b;">
+            <p style="color: #fbbf24; margin: 0 0 10px 0;"><strong>Changed your mind?</strong></p>
+            <p style="color: #94a3b8; margin: 0;">Simply sign back in to your account within 30 days 
+            and it will be automatically restored. No data will be lost.</p>
+        </div>
+        
+        <p style="color: #94a3b8;">After 30 days, all personal data (conversations, sessions, 
+        vault contents, and analytics) will be permanently destroyed with no recovery available.</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="https://app.sovereignsanctuary.net" 
+               style="background: linear-gradient(135deg, #C9A962, #8B7355); 
+                      color: #050505; padding: 12px 30px; border-radius: 8px; 
+                      text-decoration: none; font-weight: bold;">
+                Sign In to Cancel Deletion
+            </a>
+        </div>
+        
+        <p style="color: #64748b; font-size: 12px;">
+            If you did not request this deletion, please sign in immediately to secure your account.
+        </p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Your Sovereign Sanctuary account is scheduled for deletion",
+            content=content,
+            notification_type="warning"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Your account is scheduled for deletion in 30 days. "
+                f"Sign back in to cancel. If you did not request this, sign in now to secure your account."
+            )
+
+        return email_sent
+
+    async def send_account_restored(self, to_email: str, name: str,
+                                     phone: str = None) -> bool:
+        """Notify user their account was restored from pending deletion."""
+        content = f"""
+        <h2 style="color: #22c55e;">Account Restored</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>Welcome back! Your account has been successfully restored. 
+        The scheduled deletion has been cancelled and all your data is safe.</p>
+        
+        <p style="color: #94a3b8;">You can continue using Sovereign Sanctuary normally.</p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Your Sovereign Sanctuary account has been restored",
+            content=content,
+            notification_type="success"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Welcome back, {name}! Your account has been restored "
+                f"and the deletion has been cancelled."
+            )
+
+        return email_sent
+
+    async def send_account_frozen_nonpayment(self, to_email: str, name: str,
+                                              phone: str = None) -> bool:
+        """Notify user their account is frozen due to payment issues."""
+        content = f"""
+        <h2 style="color: #f59e0b;">Account Frozen — Payment Issue</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>Your Sovereign Sanctuary account has been temporarily frozen because we 
+        were unable to process your subscription payment.</p>
+        
+        <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; 
+                    margin: 20px 0; border-left: 4px solid #f59e0b;">
+            <p style="color: #fbbf24; margin: 0 0 10px 0;"><strong>Your data is safe.</strong></p>
+            <p style="color: #94a3b8; margin: 0;">Your account is NOT deleted. All conversations, 
+            sessions, and vault contents are preserved. Simply update your payment method to 
+            restore full access.</p>
+        </div>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="https://app.sovereignsanctuary.net" 
+               style="background: linear-gradient(135deg, #C9A962, #8B7355); 
+                      color: #050505; padding: 12px 30px; border-radius: 8px; 
+                      text-decoration: none; font-weight: bold;">
+                Update Payment Method
+            </a>
+        </div>
+        
+        <p style="color: #64748b; font-size: 12px;">
+            If you need help, please contact support@sovereignsanctuary.net.
+        </p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Action Required: Your account is frozen due to a payment issue",
+            content=content,
+            notification_type="warning"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Your account is temporarily frozen due to a payment issue. "
+                f"Your data is safe. Update your payment at app.sovereignsanctuary.net to restore access."
+            )
+
+        return email_sent
+
+    async def send_account_frozen_policy(self, to_email: str, name: str,
+                                          phone: str = None) -> bool:
+        """Notify user their account is frozen due to policy violations."""
+        content = f"""
+        <h2 style="color: #ef4444;">Account Frozen — Policy Review</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>Activities on your Sovereign Sanctuary account have triggered a freeze 
+        due to policy violations. Your account access has been temporarily suspended 
+        while we review the activity.</p>
+        
+        <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; 
+                    margin: 20px 0; border-left: 4px solid #ef4444;">
+            <p style="color: #fca5a5; margin: 0 0 10px 0;"><strong>Your data is safe.</strong></p>
+            <p style="color: #94a3b8; margin: 0;">Your account is not deleted. Your data 
+            will not be removed unless you are notified otherwise.</p>
+        </div>
+        
+        <p style="color: #94a3b8;">If you believe this freeze was applied in error, you may 
+        respond to this email with an explanation. Our team will review your response within 
+        5 business days.</p>
+        
+        <p style="color: #64748b; font-size: 12px;">
+            Per your consent agreement, account access may be restricted when policy 
+            violations are detected. This is not a permanent action unless determined 
+            otherwise after review.
+        </p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Your Sovereign Sanctuary account has been frozen for review",
+            content=content,
+            notification_type="error"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Your account has been frozen due to policy violations. "
+                f"Your data is safe. Reply to the email we sent for more information or to contest."
+            )
+
+        return email_sent
+
+    async def send_cooling_checkin(self, to_email: str, name: str,
+                                    checkin_type: str, days_remaining: int,
+                                    phone: str = None) -> bool:
+        """Send a cooling period check-in (24h, midpoint, final) during account deletion."""
+        stage_labels = {
+            "24h": "24 hours",
+            "midpoint": "15 days",
+            "final": "3 days"
+        }
+        stage = stage_labels.get(checkin_type, checkin_type)
+
+        content = f"""
+        <h2 style="color: #f59e0b;">Deletion Check-In ({stage})</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>It has been {stage} since your account deletion request. 
+        Your data will be permanently deleted in <strong>{days_remaining} days</strong>.</p>
+        
+        <div style="background-color: #0f172a; padding: 20px; border-radius: 8px; 
+                    margin: 20px 0; border-left: 4px solid #f59e0b;">
+            <p style="color: #fbbf24; margin: 0;">To cancel deletion, simply sign back in.</p>
+        </div>
+        
+        <p style="color: #94a3b8;">After the cooling period, all data will be permanently 
+        destroyed with no possibility of recovery.</p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject=f"Account Deletion Reminder: {days_remaining} days remaining",
+            content=content,
+            notification_type="warning"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Your account will be permanently deleted in {days_remaining} days. "
+                f"Sign in to cancel."
+            )
+
+        return email_sent
+
+    async def send_account_permanently_deleted(self, to_email: str, name: str,
+                                                phone: str = None) -> bool:
+        """Final notification that account data has been permanently destroyed."""
+        content = f"""
+        <h2 style="color: #ef4444;">Account Permanently Deleted</h2>
+        
+        <p>Hi {name},</p>
+        
+        <p>Your Sovereign Sanctuary account and all associated data have been 
+        permanently deleted as requested. This action cannot be undone.</p>
+        
+        <p>Data destroyed includes:</p>
+        <ul style="color: #94a3b8;">
+            <li>All conversations with Little Nate</li>
+            <li>Session records and analytics</li>
+            <li>Vault contents and personal files</li>
+            <li>Account profile and preferences</li>
+        </ul>
+        
+        <p style="color: #94a3b8;">If you ever wish to return, you are welcome to 
+        create a new account at any time.</p>
+        """
+
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Your Sovereign Sanctuary account has been permanently deleted",
+            content=content,
+            notification_type="error"
+        )
+
+        if phone:
+            await self.send_sms(
+                phone,
+                f"Sovereign Sanctuary: Your account and all data have been permanently deleted. "
+                f"This cannot be undone. Thank you for being part of Sovereign Sanctuary."
+            )
+
+        return email_sent
+
     async def send_coach_invite_client(self, contact: str, coach_name: str,
                                        invite_token: str, client_name: str = "",
                                        tier: str = "STANDARD") -> bool:

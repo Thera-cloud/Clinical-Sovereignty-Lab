@@ -153,6 +153,29 @@
             } else if (data.type === "password_reset_done") {
                 alert("Password updated for user.");
                 socket.send(JSON.stringify({ type: "admin_get_users" }));
+            } else if (data.type === "admin_delete_user_result") {
+                if (data.success) {
+                    alert("User " + (data.name || data.target_uid) + " has been deleted.");
+                    socket.send(JSON.stringify({ type: "admin_get_users" }));
+                } else {
+                    alert("Deletion failed.");
+                }
+            } else if (data.type === "admin_ban_user_result") {
+                if (data.success) {
+                    alert("User banned successfully. Ban expires in 30 days.");
+                    socket.send(JSON.stringify({ type: "admin_get_users" }));
+                } else {
+                    alert("Ban failed.");
+                }
+            } else if (data.type === "user_discipline_data") {
+                handleDisciplineData(data);
+            } else if (data.type === "admin_reinstate_result") {
+                if (data.success) {
+                    alert("User reinstated. Strikes reset.");
+                    socket.send(JSON.stringify({ type: "admin_get_users" }));
+                } else {
+                    alert("Reinstate failed.");
+                }
             } else if (data.type === "error" && data.message) {
                 alert("Error: " + data.message);
             }
@@ -180,6 +203,61 @@
                 user_id: selectedUser.id,
                 new_password: p1
             }));
+        }
+
+        function banUserAccount() {
+            if (!selectedUser || !selectedUser.id) { alert("Select a user first."); return; }
+            var reason = prompt("Reason for ban:");
+            if (reason === null) return;
+            if (!confirm("Ban " + (selectedUser.name || selectedUser.id) + "? This will apply a 30-day ban.")) return;
+            socket.send(JSON.stringify({
+                type: "admin_ban_user",
+                target_uid: selectedUser.id,
+                reason: reason,
+                violation_type: "HARASSMENT"
+            }));
+            alert("Ban request sent for " + (selectedUser.name || selectedUser.id));
+        }
+
+        function deleteUserAccount() {
+            if (!selectedUser || !selectedUser.id) { alert("Select a user first."); return; }
+            var reason = prompt("Reason for deletion:");
+            if (reason === null) return;
+            if (!confirm("PERMANENTLY DELETE " + (selectedUser.name || selectedUser.id) + "? This will:\n- Remove all vault data\n- Anonymize their records\n- Send deletion notification\n\nThis cannot be undone.")) return;
+            if (!confirm("Are you absolutely sure? Type the user's name to confirm.")) return;
+            socket.send(JSON.stringify({
+                type: "admin_delete_user",
+                target_uid: selectedUser.id,
+                reason: reason
+            }));
+        }
+
+        function viewViolationsForUser() {
+            if (!selectedUser || !selectedUser.id) { alert("Select a user first."); return; }
+            socket.send(JSON.stringify({
+                type: "get_user_discipline",
+                target_uid: selectedUser.id
+            }));
+        }
+
+        // Handle discipline data response
+        function handleDisciplineData(data) {
+            var disc = data.discipline || {};
+            var strikes = disc.strikes || 0;
+            var warnings = disc.warnings || [];
+            var holdUntil = disc.hold_until || "None";
+            var banUntil = disc.ban_until || "None";
+            var msg = "=== Discipline Record ===\n";
+            msg += "Strikes: " + strikes + "\n";
+            msg += "Hold Until: " + holdUntil + "\n";
+            msg += "Ban Until: " + banUntil + "\n\n";
+            msg += "=== Violation History ===\n";
+            for (var i = 0; i < warnings.length; i++) {
+                var w = warnings[i];
+                msg += (i + 1) + ". [" + (w.type || "?") + "] " + (w.reason || "No reason") + " (" + (w.timestamp || "?") + ")\n";
+            }
+            if (warnings.length === 0) msg += "No violations recorded.";
+            alert(msg);
         }
 
         function renderUserList() {
@@ -318,8 +396,9 @@
             html += "<div class='identity-action' onclick=\"resetPasswordForUser()\"><div class='icon'>🔑</div><div class='label'>Reset Password</div></div>";
             html += "<div class='identity-action' onclick=\"alert('Reset biometrics')\"><div class='icon'>👆</div><div class='label'>Reset Biometrics</div></div>";
             html += "<div class='identity-action' onclick=\"alert('Force logout')\"><div class='icon'>📱</div><div class='label'>Force Logout</div></div>";
-            html += "<div class='identity-action' onclick=\"alert('Wipe memory')\"><div class='icon'>🧹</div><div class='label'>Wipe Memory</div></div>";
-            html += "<div class='identity-action' onclick=\"alert('Ban account')\"><div class='icon'>🚫</div><div class='label'>Ban Account</div></div>";
+            html += "<div class='identity-action' onclick=\"viewViolationsForUser()\"><div class='icon'>📋</div><div class='label'>View Violations</div></div>";
+            html += "<div class='identity-action' onclick=\"banUserAccount()\"><div class='icon'>🚫</div><div class='label'>Ban Account</div></div>";
+            html += "<div class='identity-action' style='border-color:#ef4444' onclick=\"deleteUserAccount()\"><div class='icon'>🗑️</div><div class='label'>Delete Account</div></div>";
             html += "</div></div></div>";
             content.innerHTML = html;
         }

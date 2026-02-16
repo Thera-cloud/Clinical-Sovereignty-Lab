@@ -1636,7 +1636,146 @@ async def lifespan(app: FastAPI):
         except Exception as dm_err:
             print(f"   ⚠️  Deadman Switch init failed: {dm_err}")
 
-        print("   ✅ Hive Defense v4.0-v4.3 initialized (25 services, 8 background loops)")
+        # ── Account Purge Job — Destroys data for expired staged_deletions ──
+        _purge_task = None
+        try:
+            import asyncio as _asyncio_purge
+
+            async def _account_purge_loop():
+                """Every 6 hours, check for staged_deletions past their cooling period and purge."""
+                while True:
+                    try:
+                        if db_pool:
+                            async with db_pool.acquire() as _pc:
+                                # Find deletions whose cooling period has expired
+                                expired = await _pc.fetch(
+                                    """SELECT id, user_id, data_type, data_id
+                                    FROM staged_deletions
+                                    WHERE NOT executed AND NOT cancelled
+                                      AND executes_at <= NOW()"""
+                                )
+
+                                for row in expired:
+                                    _del_uid = row["user_id"]
+                                    _del_type = row["data_type"]
+
+                                    if _del_type == "account":
+                                        # Hard purge: remove user data from DB
+                                        try:
+                                            await _pc.execute(
+                                                "DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE hardware_id = $1)",
+                                                _del_uid,
+                                            )
+                                            await _pc.execute(
+                                                "DELETE FROM nate_nudges WHERE user_id = (SELECT id FROM users WHERE hardware_id = $1)",
+                                                _del_uid,
+                                            )
+                                            await _pc.execute(
+                                                "DELETE FROM nevedal_metrics WHERE user_id = (SELECT id FROM users WHERE hardware_id = $1)",
+                                                _del_uid,
+                                            )
+                                            await _pc.execute(
+                                                "UPDATE users SET deleted_at = NOW(), name = 'Deleted User', "
+                                                "email = NULL, phone = NULL, profile_data = '{}' "
+                                                "WHERE hardware_id = $1",
+                                                _del_uid,
+                                            )
+                                        except Exception as _purge_db_err:
+                                            print(f">>> [PURGE] DB cleanup error for {_del_uid}: {_purge_db_err}")
+
+                                        # Send final notification (best effort)
+                                        try:
+                                            from app.websocket.bridge_server import load_registry
+                                            _reg = load_registry()
+                                            for _rk, _rv in _reg.items():
+                                                if _rv.get("profile", {}).get("hardware_id") == _del_uid:
+                                                    _p_email = _rv["profile"].get("email", "")
+                                                    _p_phone = _rv["profile"].get("phone", "")
+                                                    _p_name = _rv["profile"].get("name", "")
+                                                    if _p_email:
+                                                        from app.websocket.notification_system import NotificationSystem
+                                                        import os as _os_purge
+                                                        _ns = NotificationSystem(
+                                                            _rv.get("data_dir", "data/bridge"),
+                                                            _os_purge.getenv("SENDGRID_API_KEY")
+                                                        )
+                                                        await _ns.send_account_permanently_deleted(
+                                                            _p_email, _p_name, _p_phone or None
+                                                        )
+                                                    break
+                                        except Exception:
+                                            pass
+
+                                    # Mark as executed
+                                    await _pc.execute(
+                                        "UPDATE staged_deletions SET executed = TRUE, executed_at = NOW() WHERE id = $1",
+                                        row["id"],
+                                    )
+
+                                    # Audit log
+                                    await _pc.execute(
+                                        """INSERT INTO audit_log
+                                            (action_type, target_id, description, ip_address)
+                                        VALUES ('ACCOUNT_PURGED', $1, $2, '0.0.0.0'::inet)""",
+                                        _del_uid,
+                                        f"Account data permanently purged after 30-day cooling period",
+                                    )
+
+                                if expired:
+                                    print(f">>> [PURGE] Purged {len(expired)} expired staged deletion(s)")
+
+                            # Also send cooling check-in reminders
+                            async with db_pool.acquire() as _cc:
+                                # 24h check-in (requested_at ~ 24h ago, not yet checked in)
+                                _24h_due = await _cc.fetch(
+                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
+                                    WHERE NOT sd.executed AND NOT sd.cancelled
+                                      AND NOT sd.checkin_24h
+                                      AND sd.requested_at <= NOW() - INTERVAL '24 hours'"""
+                                )
+                                for _ci in _24h_due:
+                                    await _cc.execute(
+                                        "UPDATE staged_deletions SET checkin_24h = TRUE WHERE id = $1",
+                                        _ci["id"],
+                                    )
+
+                                # Midpoint check-in (15 days)
+                                _mid_due = await _cc.fetch(
+                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
+                                    WHERE NOT sd.executed AND NOT sd.cancelled
+                                      AND NOT sd.checkin_midpoint
+                                      AND sd.requested_at <= NOW() - INTERVAL '15 days'"""
+                                )
+                                for _ci in _mid_due:
+                                    await _cc.execute(
+                                        "UPDATE staged_deletions SET checkin_midpoint = TRUE WHERE id = $1",
+                                        _ci["id"],
+                                    )
+
+                                # Final check-in (27 days = 3 days before purge)
+                                _final_due = await _cc.fetch(
+                                    """SELECT sd.id, sd.user_id FROM staged_deletions sd
+                                    WHERE NOT sd.executed AND NOT sd.cancelled
+                                      AND NOT sd.checkin_final
+                                      AND sd.requested_at <= NOW() - INTERVAL '27 days'"""
+                                )
+                                for _ci in _final_due:
+                                    await _cc.execute(
+                                        "UPDATE staged_deletions SET checkin_final = TRUE WHERE id = $1",
+                                        _ci["id"],
+                                    )
+
+                    except Exception as _purge_err:
+                        print(f">>> [PURGE] Background purge check failed: {_purge_err}")
+                    await _asyncio_purge.sleep(6 * 3600)  # 6 hours
+
+            _purge_task = _asyncio_purge.create_task(_account_purge_loop())
+            app.state._purge_task = _purge_task
+            print("   ✅ Account Purge Job started (6h interval, 30-day cooling enforcement)")
+        except Exception as purge_err:
+            print(f"   ⚠️  Account Purge Job init failed: {purge_err}")
+
+        print("   ✅ Hive Defense v4.0-v4.3 initialized (25 services, 9 background loops)")
         print("      All 8 Windows Closed | Billing Fortress | Guardian Fibre | Sentinel Mesh")
         print("      Pipeline Drum | HEPA Filter | Sovereign Layer | Zero Knowledge")
         print("      Upstream Canary | Webhook Rate Limit | Therapeutic Integrity | Deadman Switch")
@@ -1760,6 +1899,12 @@ async def lifespan(app: FastAPI):
     if _dm_task and not _dm_task.done():
         _dm_task.cancel()
         print("   ✅ Deadman Switch stopped")
+
+    # Stop Account Purge background loop
+    _pg_task = getattr(app.state, "_purge_task", None)
+    if _pg_task and not _pg_task.done():
+        _pg_task.cancel()
+        print("   ✅ Account Purge Job stopped")
 
     # SECURITY: Persist in-memory sessions and memory index BEFORE stopping anything
     # This prevents data loss on restart/crash.

@@ -63,9 +63,10 @@ fpdf2~=2.7.9
 # Excel Generation (for PM DOJO exports)
 openpyxl~=3.1.2
 
-# 2FA (TOTP for secure search)
+# 2FA (TOTP for secure search + admin protection)
 pyotp~=2.9.0
 qrcode~=7.4.2
+py_webauthn~=2.1.0
 
 # Utilities
 python-dotenv~=1.0.0

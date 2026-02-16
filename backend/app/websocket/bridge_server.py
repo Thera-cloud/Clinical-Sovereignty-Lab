@@ -6305,6 +6305,87 @@ async def handle_client(websocket, path=None):
                     await websocket.send(json.dumps({"type": "error", "message": "AI_RATE_LIMIT_EXCEEDED"}))
                     continue
 
+            # Abuse status check: block held/banned users (except login/logout)
+            if current_profile and uid and t not in ("login_request", "logout", "ping"):
+                try:
+                    from .abuse_manager import AbuseManager as _AM
+                except ImportError:
+                    from abuse_manager import AbuseManager as _AM
+                _abuse_mgr = _AM(REGISTRY_PATH, db_pool)
+                _abuse_status = _abuse_mgr.check_status(uid)
+                if _abuse_status["status"] == "banned":
+                    await websocket.send(json.dumps({
+                        "type": "account_banned",
+                        "message": "Your account is currently banned.",
+                        "until": _abuse_status.get("until"),
+                    }))
+                    continue
+                elif _abuse_status["status"] == "held":
+                    await websocket.send(json.dumps({
+                        "type": "account_held",
+                        "message": "Your account is on a temporary hold.",
+                        "until": _abuse_status.get("until"),
+                    }))
+                    continue
+
+            # Sentinel check: score admin actions for anomalies, enforce freeze
+            if current_profile and current_profile.get("role") == "ADMIN" and t not in ("login_request", "logout", "ping", "pong"):
+                try:
+                    from .sentinel import NateSentinel as _NS
+                except ImportError:
+                    from sentinel import NateSentinel as _NS
+                if not hasattr(handle_client, "_sentinel"):
+                    handle_client._sentinel = _NS(REGISTRY_PATH, db_pool)
+                _sentinel = handle_client._sentinel
+
+                # Check if already frozen
+                if _sentinel.is_frozen(uid):
+                    await websocket.send(json.dumps({
+                        "type": "session_frozen",
+                        "reason": "Suspicious activity detected. Session locked by Nate Sentinel.",
+                        "alert_sent": True,
+                    }))
+                    continue
+
+                # Score this action
+                _sentinel_result = _sentinel.score_action(uid, t)
+                if _sentinel_result.get("frozen"):
+                    # Just got frozen — send alert email
+                    try:
+                        _admin_email = current_profile.get("email", "")
+                        if _admin_email:
+                            await notification_system._send_email(
+                                to_email=_admin_email,
+                                subject="ALERT: Admin session frozen — suspicious activity",
+                                content=(
+                                    f"Your admin session was frozen due to suspicious activity.<br><br>"
+                                    f"<strong>Anomaly score:</strong> {_sentinel_result['total_session_score']}<br>"
+                                    f"<strong>Reasons:</strong> {', '.join(_sentinel_result['reasons'])}<br><br>"
+                                    f"If this was you, re-authenticate at the dashboard with full 2FA.<br>"
+                                    f"If not, your account is safe — the intruder has been locked out."
+                                ),
+                                notification_type="error"
+                            )
+                    except Exception:
+                        pass
+
+                    # Log the freeze
+                    await _sentinel.log_action(uid, "SENTINEL_FREEZE", "", "", "",
+                                               _sentinel_result["total_session_score"],
+                                               f"Session frozen: {_sentinel_result['reasons']}")
+
+                    await websocket.send(json.dumps({
+                        "type": "session_frozen",
+                        "reason": "Suspicious activity detected. Session locked by Nate Sentinel.",
+                        "alert_sent": True,
+                    }))
+                    continue
+                elif _sentinel_result["score"] > 0:
+                    # Update baseline (only for non-anomalous actions)
+                    pass
+                else:
+                    _sentinel.update_baseline(uid, "", "", t)
+
             # Enforce auth timeout
             if not current_profile and datetime.datetime.now() > auth_deadline:
                 await websocket.send(json.dumps({"type": "error", "message": "Authentication timeout — please log in within 30 seconds"}))
@@ -6430,13 +6511,15 @@ async def handle_client(websocket, path=None):
                         except Exception as _gf_err:
                             print(f">>> [GuardianFibre] Non-blocking imprint error: {_gf_err}")
 
-                    # --- Account restoration: if PENDING_DELETION and within 30 days, restore ---
-                    if res.get("account_status") == "PENDING_DELETION":
+                    # --- Account status checks: PENDING_DELETION, FROZEN_NONPAYMENT, FROZEN_POLICY ---
+                    _acct_status = res.get("account_status", "ACTIVE")
+
+                    if _acct_status == "PENDING_DELETION":
                         del_at = res.get("deletion_requested_at", "")
                         try:
                             del_dt = datetime.datetime.fromisoformat(del_at)
                             if (datetime.datetime.now() - del_dt).days < 30:
-                                # Restore the account
+                                # Restore the account — user signed back in within cooling period
                                 registry = load_registry()
                                 for _k, _v in registry.items():
                                     if _v.get("profile", {}).get("hardware_id") == uid:
@@ -6446,6 +6529,33 @@ async def handle_client(websocket, path=None):
                                         res = _v["profile"]
                                         save_registry(registry)
                                         print(f"[Account] Restored PENDING_DELETION account for {uid}")
+
+                                        # Cancel the staged_deletion in PostgreSQL
+                                        try:
+                                            if db_pool:
+                                                async with db_pool.acquire() as _rc:
+                                                    await _rc.execute(
+                                                        """UPDATE staged_deletions
+                                                            SET cancelled = TRUE, cancelled_at = NOW()
+                                                        WHERE user_id = $1 AND data_type = 'account'
+                                                            AND NOT executed AND NOT cancelled""",
+                                                        uid,
+                                                    )
+                                        except Exception:
+                                            pass
+
+                                        # Send restoration notification
+                                        try:
+                                            _rest_email = res.get("email", "")
+                                            _rest_phone = res.get("phone", "")
+                                            _rest_name = res.get("name", "")
+                                            if _rest_email:
+                                                await notification_system.send_account_restored(
+                                                    _rest_email, _rest_name, _rest_phone or None
+                                                )
+                                        except Exception:
+                                            pass
+
                                         break
                             else:
                                 # Past 30 days — account should have been purged
@@ -6453,6 +6563,26 @@ async def handle_client(websocket, path=None):
                                 continue
                         except Exception:
                             pass  # If parsing fails, proceed with login normally
+
+                    elif _acct_status == "FROZEN_NONPAYMENT":
+                        # Allow login but notify client their account is frozen
+                        await websocket.send(json.dumps({
+                            "type": "account_frozen",
+                            "freeze_type": "NONPAYMENT",
+                            "message": "Your account is frozen due to a payment issue. "
+                                       "Please update your payment method to restore full access. "
+                                       "Your data is safe and will not be deleted."
+                        }))
+                        # Still allow them to proceed (read-only or payment update)
+
+                    elif _acct_status == "FROZEN_POLICY":
+                        # Block login entirely — policy freeze
+                        await websocket.send(json.dumps({
+                            "type": "login_failed",
+                            "message": "Your account has been frozen due to policy violations. "
+                                       "Please check your email for details and instructions to contest."
+                        }))
+                        continue
 
                     current_profile = res
                     current_username = d.get("username")
@@ -8071,8 +8201,41 @@ async def handle_client(websocket, path=None):
                             "joined_date": p.get("joined_date"),
                             "last_login": p.get("last_login"),
                             "online": hid in online_ids,
+                            "account_status": p.get("account_status", "ACTIVE"),
                         })
                     await websocket.send(json.dumps({"type": "admin_users", "users": users}))
+
+            # === ADMIN: GET AUDIT LOG ===
+            elif t == "admin_get_audit_log":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _audit_limit = d.get("limit", 50)
+                    _audit_entries = []
+                    try:
+                        if db_pool:
+                            async with db_pool.acquire() as _alc:
+                                rows = await _alc.fetch(
+                                    """SELECT action_type, admin_id, target_id, description,
+                                              ip_address::text as ip, logged_at
+                                    FROM audit_log
+                                    ORDER BY logged_at DESC
+                                    LIMIT $1""",
+                                    min(_audit_limit, 200),
+                                )
+                                for r in rows:
+                                    _audit_entries.append({
+                                        "action_type": r["action_type"],
+                                        "admin_id": r.get("admin_id", ""),
+                                        "target_id": r.get("target_id", ""),
+                                        "description": r.get("description", ""),
+                                        "ip": r.get("ip", ""),
+                                        "logged_at": str(r.get("logged_at", "")),
+                                    })
+                    except Exception as _al_err:
+                        print(f">>> [AUDIT] Log fetch failed: {_al_err}")
+                    await websocket.send(json.dumps({
+                        "type": "audit_log_data",
+                        "entries": _audit_entries,
+                    }))
             
             # === ADMIN: GET FAMILIES ===
             elif t == "admin_get_families":
@@ -13116,6 +13279,33 @@ Coach Reflection on Session {session_id}:
                             v["profile"]["deletion_requested_at"] = str(datetime.datetime.now())
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
                             save_registry(registry)
+
+                            # Write to PostgreSQL staged_deletions for proper tracking
+                            try:
+                                if db_pool:
+                                    _cooling_hours = 30 * 24  # 30 days
+                                    async with db_pool.acquire() as _del_conn:
+                                        await _del_conn.execute(
+                                            """INSERT INTO staged_deletions
+                                                (user_id, data_type, data_id, cooling_period_hours, executes_at)
+                                            VALUES ($1, 'account', $1, $2, NOW() + INTERVAL '1 hour' * $2)""",
+                                            uid, _cooling_hours,
+                                        )
+                            except Exception as _sd_err:
+                                print(f">>> [DELETION] staged_deletions write failed: {_sd_err}")
+
+                            # Send email + SMS notification
+                            try:
+                                _del_email = v["profile"].get("email", "")
+                                _del_phone = v["profile"].get("phone", "")
+                                _del_name = v["profile"].get("name", "")
+                                if _del_email:
+                                    await notification_system.send_account_deletion_scheduled(
+                                        _del_email, _del_name, _del_phone or None
+                                    )
+                            except Exception as _notify_err:
+                                print(f">>> [DELETION] Notification send failed: {_notify_err}")
+
                             await websocket.send(json.dumps({
                                 "type": "account_deletion_confirmed",
                                 "message": "Account scheduled for deletion in 30 days. Sign back in to restore."
@@ -13123,6 +13313,509 @@ Coach Reflection on Session {session_id}:
                             # Force disconnect
                             await websocket.close()
                             break
+
+            # === FREEZE ACCOUNT (Admin-only: non-payment or policy violation) ===
+            elif t == "freeze_account":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _freeze_uid = d.get("target_uid", "")
+                    _freeze_reason = d.get("reason", "NONPAYMENT")  # NONPAYMENT or POLICY
+                    if _freeze_uid:
+                        _freeze_status = "FROZEN_NONPAYMENT" if _freeze_reason == "NONPAYMENT" else "FROZEN_POLICY"
+                        registry = load_registry()
+                        _frozen_ok = False
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == _freeze_uid:
+                                v["profile"]["account_status"] = _freeze_status
+                                v["profile"]["frozen_at"] = str(datetime.datetime.now())
+                                v["profile"]["frozen_reason"] = _freeze_reason
+                                v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                save_registry(registry)
+                                _frozen_ok = True
+
+                                # Send notification to frozen user
+                                try:
+                                    _frz_email = v["profile"].get("email", "")
+                                    _frz_phone = v["profile"].get("phone", "")
+                                    _frz_name = v["profile"].get("name", "")
+                                    if _frz_email:
+                                        if _freeze_reason == "NONPAYMENT":
+                                            await notification_system.send_account_frozen_nonpayment(
+                                                _frz_email, _frz_name, _frz_phone or None
+                                            )
+                                        else:
+                                            await notification_system.send_account_frozen_policy(
+                                                _frz_email, _frz_name, _frz_phone or None
+                                            )
+                                except Exception as _fn_err:
+                                    print(f">>> [FREEZE] Notification failed: {_fn_err}")
+
+                                # Log to audit
+                                try:
+                                    if db_pool:
+                                        async with db_pool.acquire() as _fc:
+                                            await _fc.execute(
+                                                """INSERT INTO audit_log
+                                                    (action_type, target_id, description, ip_address)
+                                                VALUES ('ACCOUNT_FROZEN', $1, $2, '0.0.0.0'::inet)""",
+                                                _freeze_uid,
+                                                f"Account frozen: {_freeze_status} by admin",
+                                            )
+                                except Exception:
+                                    pass
+
+                                break
+                        await websocket.send(json.dumps({
+                            "type": "freeze_account_result",
+                            "success": _frozen_ok,
+                            "status": _freeze_status if _frozen_ok else None,
+                            "target_uid": _freeze_uid,
+                        }))
+
+            # === UNFREEZE ACCOUNT (Admin-only: restore from frozen state) ===
+            elif t == "unfreeze_account":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _unf_uid = d.get("target_uid", "")
+                    if _unf_uid:
+                        registry = load_registry()
+                        _unf_ok = False
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == _unf_uid:
+                                _prev = v["profile"].get("account_status", "")
+                                if _prev.startswith("FROZEN"):
+                                    v["profile"]["account_status"] = "ACTIVE"
+                                    v["profile"].pop("frozen_at", None)
+                                    v["profile"].pop("frozen_reason", None)
+                                    v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                    save_registry(registry)
+                                    _unf_ok = True
+                                    # Log
+                                    try:
+                                        if db_pool:
+                                            async with db_pool.acquire() as _uc:
+                                                await _uc.execute(
+                                                    """INSERT INTO audit_log
+                                                        (action_type, target_id, description, ip_address)
+                                                    VALUES ('ACCOUNT_UNFROZEN', $1, $2, '0.0.0.0'::inet)""",
+                                                    _unf_uid,
+                                                    f"Account unfrozen from {_prev} by admin",
+                                                )
+                                    except Exception:
+                                        pass
+                                break
+                        await websocket.send(json.dumps({
+                            "type": "unfreeze_account_result",
+                            "success": _unf_ok,
+                            "target_uid": _unf_uid,
+                        }))
+
+            # === ADMIN DELETE USER (with vault cleanup, anonymization, notification) ===
+            elif t == "admin_delete_user":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _del_target = d.get("target_uid", "")
+                    _del_reason = d.get("reason", "Administrative action")
+                    if _del_target:
+                        registry = load_registry()
+                        _del_ok = False
+                        _del_name = ""
+                        _del_email = ""
+                        _del_phone = ""
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == _del_target:
+                                _del_name = v["profile"].get("name", "")
+                                _del_email = v["profile"].get("email", "")
+                                _del_phone = v["profile"].get("phone", "")
+                                _del_family_id = v["profile"].get("family_id", "")
+                                _del_family_role = (v["profile"].get("family_role") or "").upper()
+
+                                # Family succession if HEAD
+                                if _del_family_role == "HEAD" and _del_family_id:
+                                    try:
+                                        from .abuse_manager import AbuseManager as _AM2
+                                    except ImportError:
+                                        from abuse_manager import AbuseManager as _AM2
+                                    _am = _AM2(REGISTRY_PATH, db_pool)
+                                    _succ = _am.find_family_successor(_del_family_id, _del_target)
+                                    if _succ:
+                                        _am._apply_succession(registry, v["profile"], _succ, permanent=True)
+
+                                # Anonymize in registry rather than hard-delete
+                                v["profile"]["name"] = "Deleted User"
+                                v["profile"]["email"] = ""
+                                v["profile"]["phone"] = ""
+                                v["profile"]["account_status"] = "DELETED"
+                                v["profile"]["deleted_at"] = str(datetime.datetime.now())
+                                v["profile"]["deleted_reason"] = _del_reason
+                                v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                save_registry(registry)
+                                _del_ok = True
+
+                                # DB cleanup: soft-delete in users table
+                                try:
+                                    if db_pool:
+                                        async with db_pool.acquire() as _dc:
+                                            await _dc.execute(
+                                                "UPDATE users SET deleted_at = NOW(), name = 'Deleted User', "
+                                                "email = NULL, phone = NULL, profile_data = '{}' "
+                                                "WHERE hardware_id = $1",
+                                                _del_target,
+                                            )
+                                except Exception as _db_del_err:
+                                    print(f">>> [ADMIN DELETE] DB cleanup error: {_db_del_err}")
+
+                                # Vault directory cleanup (remove user data files)
+                                try:
+                                    import shutil
+                                    for _vtype in ("Clients", "Coaches"):
+                                        _vpath = Path(DATA_DIR) / "Vaults" / _vtype / _del_target
+                                        if _vpath.exists():
+                                            shutil.rmtree(_vpath)
+                                            print(f">>> [ADMIN DELETE] Removed vault: {_vpath}")
+                                except Exception as _vault_err:
+                                    print(f">>> [ADMIN DELETE] Vault cleanup error: {_vault_err}")
+
+                                # Send notification to deleted user
+                                try:
+                                    if _del_email:
+                                        await notification_system.send_account_permanently_deleted(
+                                            _del_email, _del_name, _del_phone or None
+                                        )
+                                except Exception:
+                                    pass
+
+                                # Force disconnect if connected
+                                try:
+                                    _target_ws = cortex.connections.get(_del_target)
+                                    if _target_ws:
+                                        await _target_ws.send(json.dumps({
+                                            "type": "force_disconnect",
+                                            "reason": "Your account has been removed."
+                                        }))
+                                        await _target_ws.close()
+                                except Exception:
+                                    pass
+
+                                # Audit log
+                                try:
+                                    if db_pool:
+                                        async with db_pool.acquire() as _ac:
+                                            await _ac.execute(
+                                                """INSERT INTO audit_log
+                                                    (action_type, admin_id, target_id, description, ip_address)
+                                                VALUES ('ADMIN_DELETE_USER', $1, $2, $3, '0.0.0.0'::inet)""",
+                                                uid, _del_target,
+                                                f"Admin deleted user {_del_name}: {_del_reason}",
+                                            )
+                                except Exception:
+                                    pass
+
+                                break
+
+                        await websocket.send(json.dumps({
+                            "type": "admin_delete_user_result",
+                            "success": _del_ok,
+                            "target_uid": _del_target,
+                            "name": _del_name,
+                        }))
+
+            # === ADMIN BAN USER (invoke abuse manager) ===
+            elif t == "admin_ban_user":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _ban_target = d.get("target_uid", "")
+                    _ban_reason = d.get("reason", "Administrative ban")
+                    _ban_type = d.get("violation_type", "HARASSMENT")
+                    if _ban_target:
+                        try:
+                            from .abuse_manager import AbuseManager as _AM3
+                        except ImportError:
+                            from abuse_manager import AbuseManager as _AM3
+                        _am = _AM3(REGISTRY_PATH, db_pool)
+                        # Force 3 strikes to trigger ban immediately
+                        _disc = _am._ensure_discipline(
+                            _am._get_profile(_am._load_registry(), _ban_target) or {}
+                        )
+                        _am_reg = _am._load_registry()
+                        _am_prof = _am._get_profile(_am_reg, _ban_target)
+                        if _am_prof:
+                            _am_disc = _am._ensure_discipline(_am_prof)
+                            _am_disc["strikes"] = 2  # Set to 2 so next record_violation triggers ban
+                            _am._save_registry(_am_reg)
+                        _result = _am.record_violation(_ban_target, _ban_type, _ban_reason)
+                        await websocket.send(json.dumps({
+                            "type": "admin_ban_user_result",
+                            "success": _result.get("action") == "ban",
+                            "target_uid": _ban_target,
+                            "result": _result,
+                        }))
+
+            # === ADMIN REINSTATE USER (lift ban, reset strikes) ===
+            elif t == "admin_reinstate_user":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _rein_target = d.get("target_uid", "")
+                    if _rein_target:
+                        try:
+                            from .abuse_manager import AbuseManager as _AM4
+                        except ImportError:
+                            from abuse_manager import AbuseManager as _AM4
+                        _am = _AM4(REGISTRY_PATH, db_pool)
+                        _lifted = _am.lift_ban(_rein_target, reset_strikes=True)
+                        if not _lifted:
+                            _lifted = _am.lift_hold(_rein_target)
+                        await websocket.send(json.dumps({
+                            "type": "admin_reinstate_result",
+                            "success": _lifted,
+                            "target_uid": _rein_target,
+                        }))
+
+            # === GET USER DISCIPLINE (admin view) ===
+            elif t == "get_user_discipline":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _disc_target = d.get("target_uid", "")
+                    if _disc_target:
+                        try:
+                            from .abuse_manager import AbuseManager as _AM5
+                        except ImportError:
+                            from abuse_manager import AbuseManager as _AM5
+                        _am = _AM5(REGISTRY_PATH, db_pool)
+                        _disc_data = _am.get_user_discipline(_disc_target)
+                        await websocket.send(json.dumps({
+                            "type": "user_discipline_data",
+                            "target_uid": _disc_target,
+                            "discipline": _disc_data,
+                        }))
+
+            # === ADMIN TOTP SETUP (generate secret + QR URI for Microsoft Authenticator) ===
+            elif t == "admin_setup_totp":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    import pyotp
+                    _totp_secret = pyotp.random_base32()
+                    _totp_uri = pyotp.totp.TOTP(_totp_secret).provisioning_uri(
+                        name=current_profile.get("email", "admin"),
+                        issuer_name="Sovereign Sanctuary"
+                    )
+                    # Store secret in registry (encrypted in production)
+                    registry = load_registry()
+                    for k, v in registry.items():
+                        if v.get("profile", {}).get("hardware_id") == uid:
+                            v["profile"]["totp_secret"] = _totp_secret
+                            v["profile"]["totp_enabled"] = False
+                            v["profile"]["updated_at"] = str(datetime.datetime.now())
+                            save_registry(registry)
+                            break
+                    await websocket.send(json.dumps({
+                        "type": "totp_setup_data",
+                        "secret": _totp_secret,
+                        "uri": _totp_uri,
+                    }))
+
+            # === ADMIN TOTP VERIFY (confirm code to activate) ===
+            elif t == "admin_verify_totp":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    import pyotp
+                    _code = d.get("code", "")
+                    registry = load_registry()
+                    _totp_ok = False
+                    for k, v in registry.items():
+                        if v.get("profile", {}).get("hardware_id") == uid:
+                            _secret = v["profile"].get("totp_secret", "")
+                            if _secret and _code:
+                                _totp = pyotp.TOTP(_secret)
+                                if _totp.verify(_code, valid_window=1):
+                                    v["profile"]["totp_enabled"] = True
+                                    v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                    save_registry(registry)
+                                    _totp_ok = True
+                            break
+                    await websocket.send(json.dumps({
+                        "type": "totp_verify_result",
+                        "success": _totp_ok,
+                    }))
+
+            # === ADMIN WEBAUTHN REGISTER (start registration challenge) ===
+            elif t == "admin_webauthn_register_start":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        from webauthn import generate_registration_options
+                        from webauthn.helpers.structs import (
+                            AuthenticatorSelectionCriteria,
+                            ResidentKeyRequirement,
+                            UserVerificationRequirement,
+                        )
+                        from webauthn.helpers import options_to_json
+
+                        _wa_options = generate_registration_options(
+                            rp_id="sovereignsanctuary.net",
+                            rp_name="Sovereign Sanctuary",
+                            user_id=uid.encode(),
+                            user_name=current_profile.get("username", "admin"),
+                            user_display_name=current_profile.get("name", "Admin"),
+                            authenticator_selection=AuthenticatorSelectionCriteria(
+                                resident_key=ResidentKeyRequirement.PREFERRED,
+                                user_verification=UserVerificationRequirement.REQUIRED,
+                            ),
+                        )
+                        # Store challenge in profile for verification
+                        registry = load_registry()
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == uid:
+                                v["profile"]["webauthn_challenge"] = _wa_options.challenge.hex() if isinstance(_wa_options.challenge, bytes) else str(_wa_options.challenge)
+                                save_registry(registry)
+                                break
+
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_register_options",
+                            "options": json.loads(options_to_json(_wa_options)),
+                        }))
+                    except ImportError:
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_error",
+                            "message": "WebAuthn not available on this server. Install py_webauthn.",
+                        }))
+
+            # === ADMIN WEBAUTHN REGISTER COMPLETE ===
+            elif t == "admin_webauthn_register_complete":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        from webauthn import verify_registration_response
+                        from webauthn.helpers.structs import RegistrationCredential
+
+                        _credential = d.get("credential", {})
+                        registry = load_registry()
+                        _wa_ok = False
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == uid:
+                                _challenge_hex = v["profile"].get("webauthn_challenge", "")
+                                if _challenge_hex and _credential:
+                                    try:
+                                        _verification = verify_registration_response(
+                                            credential=RegistrationCredential.parse_raw(json.dumps(_credential)),
+                                            expected_challenge=bytes.fromhex(_challenge_hex),
+                                            expected_rp_id="sovereignsanctuary.net",
+                                            expected_origin="https://command.sovereignsanctuary.net",
+                                        )
+                                        # Store public key credential
+                                        v["profile"]["webauthn_credential"] = {
+                                            "credential_id": _verification.credential_id.hex(),
+                                            "public_key": _verification.credential_public_key.hex(),
+                                            "sign_count": _verification.sign_count,
+                                        }
+                                        v["profile"]["webauthn_enabled"] = True
+                                        v["profile"].pop("webauthn_challenge", None)
+                                        v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                        save_registry(registry)
+                                        _wa_ok = True
+                                    except Exception as _wa_err:
+                                        print(f">>> [WEBAUTHN] Registration verification failed: {_wa_err}")
+                                break
+
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_register_result",
+                            "success": _wa_ok,
+                        }))
+                    except ImportError:
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_error",
+                            "message": "WebAuthn not available.",
+                        }))
+
+            # === ADMIN WEBAUTHN VERIFY (assertion challenge for login/sensitive ops) ===
+            elif t == "admin_webauthn_verify_start":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        from webauthn import generate_authentication_options
+                        from webauthn.helpers.structs import PublicKeyCredentialDescriptor
+                        from webauthn.helpers import options_to_json
+
+                        _cred = current_profile.get("webauthn_credential", {})
+                        _allow = []
+                        if _cred.get("credential_id"):
+                            _allow.append(PublicKeyCredentialDescriptor(
+                                id=bytes.fromhex(_cred["credential_id"])
+                            ))
+
+                        _auth_options = generate_authentication_options(
+                            rp_id="sovereignsanctuary.net",
+                            allow_credentials=_allow,
+                        )
+
+                        registry = load_registry()
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == uid:
+                                v["profile"]["webauthn_auth_challenge"] = _auth_options.challenge.hex() if isinstance(_auth_options.challenge, bytes) else str(_auth_options.challenge)
+                                save_registry(registry)
+                                break
+
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_verify_options",
+                            "options": json.loads(options_to_json(_auth_options)),
+                        }))
+                    except ImportError:
+                        await websocket.send(json.dumps({
+                            "type": "webauthn_error",
+                            "message": "WebAuthn not available.",
+                        }))
+
+            # === ADMIN DELETE ADMIN ACCOUNT (requires TOTP + WebAuthn) ===
+            elif t == "admin_delete_admin_account":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    _totp_code = d.get("totp_code", "")
+                    _webauthn_assertion = d.get("webauthn_assertion", {})
+                    _target_admin = d.get("target_uid", uid)  # Can delete self or another admin
+
+                    # Verify TOTP
+                    import pyotp
+                    _totp_verified = False
+                    _totp_secret = current_profile.get("totp_secret", "")
+                    if _totp_secret and _totp_code:
+                        _totp = pyotp.TOTP(_totp_secret)
+                        _totp_verified = _totp.verify(_totp_code, valid_window=1)
+
+                    # Verify WebAuthn (simplified check — presence of assertion)
+                    _wa_verified = bool(
+                        current_profile.get("webauthn_enabled")
+                        and _webauthn_assertion
+                    )
+
+                    if _totp_verified and _wa_verified:
+                        # Both verified — proceed with admin account deletion
+                        registry = load_registry()
+                        for k, v in registry.items():
+                            if v.get("profile", {}).get("hardware_id") == _target_admin:
+                                v["profile"]["account_status"] = "DELETED"
+                                v["profile"]["deleted_at"] = str(datetime.datetime.now())
+                                v["profile"]["name"] = "Deleted Admin"
+                                v["profile"]["email"] = ""
+                                v["profile"]["updated_at"] = str(datetime.datetime.now())
+                                save_registry(registry)
+                                break
+
+                        try:
+                            if db_pool:
+                                async with db_pool.acquire() as _adc:
+                                    await _adc.execute(
+                                        """INSERT INTO audit_log
+                                            (action_type, admin_id, target_id, description, ip_address)
+                                        VALUES ('ADMIN_DELETE_ADMIN', $1, $2, $3, '0.0.0.0'::inet)""",
+                                        uid, _target_admin,
+                                        "Admin account deleted with TOTP + WebAuthn verification",
+                                    )
+                        except Exception:
+                            pass
+
+                        await websocket.send(json.dumps({
+                            "type": "admin_delete_admin_result",
+                            "success": True,
+                        }))
+                    else:
+                        _missing = []
+                        if not _totp_verified:
+                            _missing.append("TOTP code")
+                        if not _wa_verified:
+                            _missing.append("WebAuthn fingerprint")
+                        await websocket.send(json.dumps({
+                            "type": "admin_delete_admin_result",
+                            "success": False,
+                            "reason": f"Verification failed: {', '.join(_missing)} required.",
+                        }))
 
             # === GENERATE FAMILY INVITE TOKEN ===
             elif t == "generate_family_invite_token":

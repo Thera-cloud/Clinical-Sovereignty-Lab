@@ -1422,6 +1422,64 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Banned / Held Users -->
+            <div class="card" style="grid-column: span 2;">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon" style="color: #ef4444;">🚫</div>
+                        Banned &amp; Held Users
+                    </div>
+                    <button class="card-action" onclick="loadBannedUsers()">Refresh</button>
+                </div>
+                <div class="card-body" id="bannedUsersBody">
+                    <div class="empty-state">
+                        <div class="icon">✅</div>
+                        <p>No banned or held users</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Audit Log Viewer -->
+            <div class="card" style="grid-column: span 2;">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon" style="color: #9D4EDD;">📜</div>
+                        Admin Audit Log
+                    </div>
+                    <button class="card-action" onclick="loadAuditLog()">Refresh</button>
+                </div>
+                <div class="card-body" id="auditLogBody" style="max-height:400px;overflow-y:auto;">
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>No audit entries</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sentinel Status -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        <div class="icon" style="color: #4ECDC4;">🛡️</div>
+                        Nate Sentinel
+                    </div>
+                </div>
+                <div class="card-body" id="sentinelBody">
+                    <div class="stat-box" style="margin-bottom:12px;">
+                        <div class="stat-value green">ACTIVE</div>
+                        <div class="stat-label">Intrusion Protection</div>
+                    </div>
+                    <div class="stat-box" style="margin-bottom:12px;">
+                        <div class="stat-value cyan" id="sentinelScore">0</div>
+                        <div class="stat-label">Session Anomaly Score</div>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <button class="card-action" onclick="setupAdminTOTP()" style="width:100%;margin-bottom:8px;">Setup TOTP (Authenticator)</button>
+                        <button class="card-action" onclick="setupAdminWebAuthn()" style="width:100%;">Setup Fingerprint (WebAuthn)</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -2316,8 +2374,119 @@
             `;
         }
 
+        // =====================================================================
+        // BANNED USERS, AUDIT LOG, SENTINEL
+        // =====================================================================
+
+        function loadBannedUsers() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        function renderBannedUsers(users) {
+            var body = document.getElementById("bannedUsersBody");
+            if (!body) return;
+            var banned = (users || []).filter(function(u) {
+                var st = (u.account_status || "").toUpperCase();
+                return st === "BANNED" || st === "HELD" || st.startsWith("FROZEN");
+            });
+            if (banned.length === 0) {
+                body.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>No banned or held users</p></div>';
+                return;
+            }
+            var html = '<div style="display:flex;flex-direction:column;gap:8px;">';
+            banned.forEach(function(u) {
+                var st = (u.account_status || "UNKNOWN").toUpperCase();
+                var color = st === "BANNED" ? "#ef4444" : st === "HELD" ? "#f59e0b" : "#f59e0b";
+                html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px;background:var(--bg-dark);border-radius:8px;border-left:3px solid ' + color + ';">';
+                html += '<div><strong style="color:' + color + ';">' + (u.name || u.id) + '</strong>';
+                html += '<br><span style="font-size:11px;color:var(--text-secondary);">' + st + '</span></div>';
+                html += '<div style="display:flex;gap:6px;">';
+                html += '<button style="padding:4px 10px;background:var(--green);color:#000;border:none;border-radius:4px;cursor:pointer;font-size:11px;" onclick="reinstateUser(\'' + u.id + '\')">Reinstate</button>';
+                html += '<button style="padding:4px 10px;background:#ef4444;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;" onclick="deleteFromBanned(\'' + u.id + '\')">Delete</button>';
+                html += '</div></div>';
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        function reinstateUser(uid) {
+            if (!confirm("Reinstate this user? Strikes will be reset to 0.")) return;
+            ws.send(JSON.stringify({ type: "admin_reinstate_user", target_uid: uid }));
+        }
+
+        function deleteFromBanned(uid) {
+            if (!confirm("PERMANENTLY DELETE this user?")) return;
+            ws.send(JSON.stringify({ type: "admin_delete_user", target_uid: uid, reason: "Admin removal from banned list" }));
+        }
+
+        function loadAuditLog() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: "admin_get_audit_log", limit: 50 }));
+        }
+
+        function renderAuditLog(entries) {
+            var body = document.getElementById("auditLogBody");
+            if (!body) return;
+            if (!entries || entries.length === 0) {
+                body.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No audit entries</p></div>';
+                return;
+            }
+            var html = '<div style="font-family:monospace;font-size:12px;">';
+            entries.forEach(function(e) {
+                var color = "#94a3b8";
+                var at = (e.action_type || "").toUpperCase();
+                if (at.indexOf("DELETE") >= 0 || at.indexOf("BAN") >= 0 || at.indexOf("FREEZE") >= 0) color = "#ef4444";
+                else if (at.indexOf("SENTINEL") >= 0 || at.indexOf("SUSPICIOUS") >= 0) color = "#f59e0b";
+                else if (at.indexOf("DEADMAN") >= 0) color = "#f59e0b";
+                html += '<div style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start;">';
+                html += '<span style="color:var(--text-secondary);min-width:140px;font-size:10px;">' + (e.logged_at || "").substring(0, 19) + '</span>';
+                html += '<span style="color:' + color + ';min-width:180px;font-size:11px;font-weight:600;">' + (e.action_type || "") + '</span>';
+                html += '<span style="color:var(--text-secondary);font-size:11px;">' + (e.description || "").substring(0, 120) + '</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+            body.innerHTML = html;
+        }
+
+        function setupAdminTOTP() {
+            ws.send(JSON.stringify({ type: "admin_setup_totp" }));
+        }
+
+        function setupAdminWebAuthn() {
+            ws.send(JSON.stringify({ type: "admin_webauthn_register_start" }));
+        }
+
+        // Handle additional message types
+        var _origOnMessage = ws ? ws.onmessage : null;
+        function extendedMessageHandler(event) {
+            if (_origOnMessage) _origOnMessage(event);
+            try {
+                var data = JSON.parse(event.data);
+                if (data.type === "admin_users" && data.users) {
+                    renderBannedUsers(data.users);
+                } else if (data.type === "audit_log_data") {
+                    renderAuditLog(data.entries || []);
+                } else if (data.type === "totp_setup_data") {
+                    alert("TOTP Secret: " + data.secret + "\n\nScan the QR code in Microsoft Authenticator:\n" + data.uri);
+                } else if (data.type === "totp_verify_result") {
+                    alert(data.success ? "TOTP verified and activated!" : "TOTP verification failed. Try again.");
+                } else if (data.type === "webauthn_register_options") {
+                    alert("WebAuthn registration initiated. Use your browser's biometric prompt to complete setup.");
+                } else if (data.type === "session_frozen") {
+                    alert("SESSION FROZEN: " + data.reason);
+                } else if (data.type === "admin_reinstate_result") {
+                    if (data.success) { alert("User reinstated."); loadBannedUsers(); }
+                } else if (data.type === "admin_delete_user_result") {
+                    if (data.success) { alert("User deleted: " + (data.name || "")); loadBannedUsers(); }
+                }
+            } catch(e) {}
+        }
+
         // Initialize
         init();
+        // Load banned users and audit log after connection
+        setTimeout(function() { loadBannedUsers(); loadAuditLog(); }, 3000);
     </script>
 </body>
 </html>
