@@ -1593,10 +1593,53 @@ async def lifespan(app: FastAPI):
         except Exception as ti_err:
             print(f"   ⚠️  Therapeutic Integrity background failed: {ti_err}")
 
-        print("   ✅ Hive Defense v4.0-v4.3 initialized (24 services, 7 background loops)")
+        # ── Deadman Switch — Client Silence Monitor ──
+        _deadman_task = None
+        try:
+            from app.services.deadman_switch import DeadmanSwitchService
+            import asyncio as _asyncio
+
+            _deadman_switch = DeadmanSwitchService(db_pool)
+            app.state.hive_v4["deadman_switch"] = _deadman_switch
+
+            async def _deadman_loop():
+                """Run client silence, coach gap, and suspicious account checks every 4 hours."""
+                while True:
+                    try:
+                        # 1. Client silence monitor
+                        result = await _deadman_switch.check_all_clients()
+                        checked = result.get("clients_checked", 0)
+                        alerts = result.get("alerts_generated", 0)
+                        skipped = result.get("skipped_no_engagement", 0)
+                        if alerts > 0:
+                            print(f">>> [DEADMAN] {alerts} silence alert(s) generated ({checked} clients checked, {skipped} skipped)")
+
+                        # 2. Coach session gap monitor
+                        coach_result = await _deadman_switch.check_coaches_without_sessions()
+                        coach_alerts = coach_result.get("alerts_generated", 0)
+                        if coach_alerts > 0:
+                            print(f">>> [DEADMAN] {coach_alerts} coach gap alert(s) ({coach_result.get('coaches_checked', 0)} coaches checked)")
+
+                        # 3. Suspicious / probe account detection
+                        suspicious = await _deadman_switch.check_suspicious_accounts()
+                        flagged = suspicious.get("flagged", 0)
+                        if flagged > 0:
+                            print(f">>> [DEADMAN] {flagged} suspicious account(s) flagged")
+
+                    except Exception as _dm_err:
+                        print(f">>> [DEADMAN] Check failed: {_dm_err}")
+                    await _asyncio.sleep(4 * 3600)  # 4 hours
+
+            _deadman_task = _asyncio.create_task(_deadman_loop())
+            app.state._deadman_switch_task = _deadman_task
+            print("   ✅ Deadman Switch started (client silence monitor, 4h interval)")
+        except Exception as dm_err:
+            print(f"   ⚠️  Deadman Switch init failed: {dm_err}")
+
+        print("   ✅ Hive Defense v4.0-v4.3 initialized (25 services, 8 background loops)")
         print("      All 8 Windows Closed | Billing Fortress | Guardian Fibre | Sentinel Mesh")
         print("      Pipeline Drum | HEPA Filter | Sovereign Layer | Zero Knowledge")
-        print("      Upstream Canary | Webhook Rate Limit | Therapeutic Integrity")
+        print("      Upstream Canary | Webhook Rate Limit | Therapeutic Integrity | Deadman Switch")
     except Exception as v4_err:
         import traceback
         print(f"   ⚠️  Hive Defense v4.x initialization failed: {v4_err}")
@@ -1629,7 +1672,7 @@ async def lifespan(app: FastAPI):
         "mirror_prediction", "coach_integrity_shield", "legal_compulsion",
         "sovereign_stripe_proxy", "family_session_guardian", "zero_knowledge_vault",
         "sovereign_keys", "succession_protocol", "recovery_drill", "heritage_vault",
-        "upstream_canary",
+        "upstream_canary", "deadman_switch",
     ]
     for svc_name in _hive_services:
         _service_checks.append((f"hive:{svc_name}", _hv4.get(svc_name) is not None))
@@ -1711,7 +1754,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ Recovery Drill stopped")
         except Exception as _rd_err:
             print(f"   ⚠️  Recovery Drill shutdown: {_rd_err}")
-    
+
+    # Stop Deadman Switch background loop
+    _dm_task = getattr(app.state, "_deadman_switch_task", None)
+    if _dm_task and not _dm_task.done():
+        _dm_task.cancel()
+        print("   ✅ Deadman Switch stopped")
+
     # SECURITY: Persist in-memory sessions and memory index BEFORE stopping anything
     # This prevents data loss on restart/crash.
     

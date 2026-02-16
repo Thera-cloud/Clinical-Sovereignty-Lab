@@ -5303,6 +5303,17 @@ class AzureCortex:
                     # Save to memory
                     session_id = self.active_sessions.get(uid)
                     self.mem.memorize(profile, user_text, full_response, session_id)
+
+                    # Stamp last_nate_message_at for Deadman Switch activity tracking
+                    try:
+                        if db_pool:
+                            async with db_pool.acquire() as _ts_conn:
+                                await _ts_conn.execute(
+                                    "UPDATE users SET last_nate_message_at = NOW() WHERE hardware_id = $1",
+                                    uid
+                                )
+                    except Exception:
+                        pass  # Non-blocking — never break chat for a timestamp
                             
                     # Update metrics
                     analysis = self.metrics.analyze_and_update(profile, user_text, full_response)
