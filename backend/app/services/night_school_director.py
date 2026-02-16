@@ -372,13 +372,20 @@ class PIIDetector:
             matches = self.detect(text)
         
         if not matches:
-            return text
+            result = text
+        else:
+            # Work backwards to preserve positions
+            result = text
+            for match in reversed(matches):
+                replacement = f"[{match.type.value}_REDACTED]"
+                result = result[:match.start] + replacement + result[match.end:]
         
-        # Work backwards to preserve positions
-        result = text
-        for match in reversed(matches):
-            replacement = f"[{match.type.value}_REDACTED]"
-            result = result[:match.start] + replacement + result[match.end:]
+        # Admin Contact Shield: also redact protected admin contacts
+        try:
+            from app.services.security.admin_contact_shield import get_shield
+            result = get_shield().redact(result)
+        except Exception:
+            pass
         
         return result
     

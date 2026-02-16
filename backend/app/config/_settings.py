@@ -16,12 +16,12 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Network
     # -------------------------------------------------------------------------
-    SERVER_HOST: str = "10.0.0.81"
+    SERVER_HOST: str = "0.0.0.0"
     SERVER_PORT: int = 8000
     WEBSOCKET_PORT: int = 8765
     ADMIN_PORT: int = 3000
-    BASE_URL: str = "http://10.0.0.81:8000"
-    WS_URL: str = "ws://10.0.0.81:8765"
+    BASE_URL: str = "http://localhost:8000"
+    WS_URL: str = "ws://localhost:8765"
     DOMAIN: Optional[str] = None
     PUBLIC_BASE_URL: str = ""  # Public-facing API URL (e.g. https://api.sovereignsanctuary.net) for OAuth redirects
     
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Database
     # -------------------------------------------------------------------------
-    POSTGRES_HOST: str = "10.0.0.81"
+    POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "little_nate"
     POSTGRES_USER: str = "nate_admin"
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Redis
     # -------------------------------------------------------------------------
-    REDIS_HOST: str = "10.0.0.81"
+    REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_URL: Optional[str] = None
     
@@ -125,8 +125,14 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Security
     # -------------------------------------------------------------------------
-    CORS_ORIGINS: str = "http://10.0.0.81:3000,http://localhost:3000,https://app.sovereignsanctuary.net,https://coach.sovereignsanctuary.net,https://command.sovereignsanctuary.net"
+    CORS_ORIGINS: str = "http://localhost:3000,https://app.sovereignsanctuary.net,https://coach.sovereignsanctuary.net,https://command.sovereignsanctuary.net"
     RATE_LIMIT_PER_MINUTE: int = 60
+    
+    # Admin Contact Shield — protected PII (comma-separated, loaded from env)
+    ADMIN_PROTECTED_EMAILS: str = ""
+    ADMIN_PROTECTED_PHONES: str = ""
+    ADMIN_ALERT_PHONE: str = ""
+    ADMIN_ALERT_EMAILS: str = ""
     
     # -------------------------------------------------------------------------
     # Secure Internet Search (DOJO)

@@ -328,6 +328,18 @@ class ImmuneResponseOrchestrator:
                 )
             await self._broadcast_threat_alert(assessment, fingerprint)
 
+        # Admin Contact Shield: SMS alert for HIGH+ threats
+        if assessment.threat_level >= ThreatLevel.HIGH:
+            try:
+                from app.services.security.admin_contact_shield import get_shield
+                await get_shield().alert_admin(
+                    f"THREAT: {assessment.threat_level.name} — {assessment.attack_type.value}",
+                    f"Attacker {str(assessment.attacker_profile_id)[:8]} detected. "
+                    f"Tier {assessment.recommended_tier} response deployed."
+                )
+            except Exception as _e:
+                logger.warning("Shield alert failed: %s", _e)
+
         logger.info(
             "Tier 1: Logged + alerted swarm for attacker %s",
             assessment.attacker_profile_id,

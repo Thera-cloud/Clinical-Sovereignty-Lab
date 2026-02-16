@@ -375,6 +375,19 @@ class DuressCodeManager:
             len(event.holders_alerted),
         )
 
+        # Admin Contact Shield: EMERGENCY SMS on duress code activation
+        try:
+            from app.services.security.admin_contact_shield import get_shield
+            await get_shield().alert_admin(
+                "EMERGENCY: DURESS CODE ACTIVATED",
+                f"Shard holder {holder_id} triggered duress response. "
+                f"Keys rotated: {event.key_rotation_initiated}. "
+                f"DEFCON 1 escalated: {event.defcon_escalated}. "
+                f"DO NOT participate in any ceremony until all-clear."
+            )
+        except Exception:
+            pass
+
         return event
 
     # ------------------------------------------------------------------

@@ -28,7 +28,7 @@ except ImportError: pass
 class TrialManager:
     def __init__(self):
         self.ledger_path = Path("./trial_ledger.json")
-        self.subscribers = ["NATHAN_ADMIN_IPHONE", "MOBILE_CLIENT_V1"] 
+        self.subscribers = ["ADMIN_PRIMARY_DEVICE", "MOBILE_CLIENT_V1"] 
         self.load_ledger()
 
     def load_ledger(self):

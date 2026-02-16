@@ -49,6 +49,13 @@ def _redact_value(key: str, value: Any) -> Any:
     for pattern, replacement in _PII_PATTERNS:
         result = pattern.sub(replacement, result)
 
+    # Admin Contact Shield: redact protected admin contacts
+    try:
+        from app.services.security.admin_contact_shield import get_shield
+        result = get_shield().redact(result)
+    except Exception:
+        pass
+
     return result
 
 

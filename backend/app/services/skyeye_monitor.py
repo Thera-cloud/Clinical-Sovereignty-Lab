@@ -66,7 +66,12 @@ DATA_EXTRACTION_PATTERNS = re.compile(
     r'(admin.*?(email|phone|contact|name)|'
     r'support.*?email|contact.*?info|'
     r'user\s+data|client\s+list|subscriber\s+count|'
-    r'how\s+to\s+reach|get\s+in\s+touch\s+with\s+your)',
+    r'how\s+to\s+reach|get\s+in\s+touch\s+with\s+your|'
+    r'nathan.*?(email|phone|contact|number)|'
+    r'nevedal.*?(email|phone|contact)|'
+    r'developer.*?(email|phone|contact)|'
+    r'founder.*?(email|phone|contact)|'
+    r'who\s+(?:do\s+I|can\s+I)\s+(?:contact|call|text|email))',
     re.IGNORECASE
 )
 

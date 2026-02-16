@@ -1407,6 +1407,15 @@ except Exception:
     from stripe_billing import StripeBillingSystem
 
 notification_system = NotificationSystem(DATA_DIR, SENDGRID_API_KEY)
+
+# Admin Contact Shield — PII protection + defense alert dispatch
+try:
+    from app.services.security.admin_contact_shield import get_shield as _get_shield
+except Exception:
+    from ..services.security.admin_contact_shield import get_shield as _get_shield
+_admin_shield = _get_shield()
+_admin_shield.set_notification_system(notification_system)
+
 billing_system = StripeBillingSystem(
     DATA_DIR, 
     STRIPE_SECRET_KEY, 
@@ -6124,6 +6133,8 @@ class AzureCortex:
 
     async def _send(self, uid: str, text: str):
         """Send message to all connected sockets for user"""
+        # Admin Contact Shield: redact protected PII before transmission
+        text = _admin_shield.redact(text)
         if uid in self.sockets:
             # #region agent log
             _socket_count = len(self.sockets[uid])
@@ -6305,6 +6316,26 @@ async def handle_client(websocket, path=None):
                     await websocket.send(json.dumps({"type": "error", "message": "AI_RATE_LIMIT_EXCEEDED"}))
                     continue
 
+            # Admin Contact Shield: detect extraction attempts in user messages
+            if t in ("nate_query", "chat_message", "coach_nate_query", "voice_query"):
+                _user_text = data.get("text", "") or data.get("query", "") or data.get("message", "")
+                _extraction_score = _admin_shield.score_extraction_attempt(_user_text)
+                if _extraction_score >= 0.7:
+                    _shield_uid = uid or "unknown"
+                    print(f">>> [SHIELD] Extraction attempt score={_extraction_score:.1f} uid={_shield_uid}")
+                    if db_pool:
+                        try:
+                            async with db_pool.acquire() as _sc:
+                                await _sc.execute(
+                                    """INSERT INTO audit_log (action_type, target_id, description, ip_address)
+                                    VALUES ('ADMIN_PII_EXTRACTION_ATTEMPT', $1, $2, $3)""",
+                                    _shield_uid,
+                                    f"Extraction attempt (score {_extraction_score:.2f}): {_user_text[:100]}",
+                                    (remote_ip or "0.0.0.0") + "::inet",
+                                )
+                        except Exception:
+                            pass
+
             # Abuse status check: block held/banned users (except login/logout)
             if current_profile and uid and t not in ("login_request", "logout", "ping"):
                 try:
@@ -6350,22 +6381,14 @@ async def handle_client(websocket, path=None):
                 # Score this action
                 _sentinel_result = _sentinel.score_action(uid, t)
                 if _sentinel_result.get("frozen"):
-                    # Just got frozen — send alert email
+                    # Just got frozen — send alert email + SMS via Admin Shield
+                    _freeze_reasons = ", ".join(_sentinel_result["reasons"])
                     try:
-                        _admin_email = current_profile.get("email", "")
-                        if _admin_email:
-                            await notification_system._send_email(
-                                to_email=_admin_email,
-                                subject="ALERT: Admin session frozen — suspicious activity",
-                                content=(
-                                    f"Your admin session was frozen due to suspicious activity.<br><br>"
-                                    f"<strong>Anomaly score:</strong> {_sentinel_result['total_session_score']}<br>"
-                                    f"<strong>Reasons:</strong> {', '.join(_sentinel_result['reasons'])}<br><br>"
-                                    f"If this was you, re-authenticate at the dashboard with full 2FA.<br>"
-                                    f"If not, your account is safe — the intruder has been locked out."
-                                ),
-                                notification_type="error"
-                            )
+                        await _admin_shield.alert_admin(
+                            f"SENTINEL FREEZE: Score {_sentinel_result['total_session_score']}",
+                            f"Admin session frozen. Reasons: {_freeze_reasons}. "
+                            f"If this wasn't you, the intruder is locked out."
+                        )
                     except Exception:
                         pass
 
@@ -6380,9 +6403,15 @@ async def handle_client(websocket, path=None):
                         "alert_sent": True,
                     }))
                     continue
-                elif _sentinel_result["score"] > 0:
-                    # Update baseline (only for non-anomalous actions)
-                    pass
+                elif _sentinel_result["total_session_score"] >= 50:
+                    # Warning threshold — SMS alert but don't freeze
+                    try:
+                        await _admin_shield.alert_admin(
+                            f"SENTINEL WARNING: Score {_sentinel_result['total_session_score']}",
+                            f"Anomalous admin activity detected. Reasons: {', '.join(_sentinel_result['reasons'])}."
+                        )
+                    except Exception:
+                        pass
                 else:
                     _sentinel.update_baseline(uid, "", "", t)
 

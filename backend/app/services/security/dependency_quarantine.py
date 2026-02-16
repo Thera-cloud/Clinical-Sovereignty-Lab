@@ -44,8 +44,7 @@ AZURE_NETWORK_WHITELIST: List[str] = [
     # Azure Monitor
     "*.monitor.azure.com",
     # Internal services
-    "10.0.0.81",
-    "68.183.168.75",
+    # Internal and production IPs are loaded from env vars, not hardcoded
 ]
 
 # DNS-over-HTTPS resolvers permitted (block all others)

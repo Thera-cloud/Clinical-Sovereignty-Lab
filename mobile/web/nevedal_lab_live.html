@@ -336,7 +336,7 @@
 
         function getWsUrl() {
             const proto = (location.protocol === "https:") ? "wss" : "ws";
-            const host = location.hostname || "10.0.0.81";
+            const host = location.hostname || "localhost";
             return `${proto}://${host}:8765`;
         }
 

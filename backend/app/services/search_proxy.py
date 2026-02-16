@@ -57,7 +57,7 @@ COMPILED_INJECTION_PATTERNS = [
 # =============================================================================
 BLOCKED_DOMAINS = {
     "localhost", "127.0.0.1", "0.0.0.0",
-    "10.0.0.81",  # Server internal IP
+    # Internal IPs blocked dynamically via env config
     "169.254.169.254",  # Cloud metadata
     "metadata.google.internal",
     "nate_backend", "nate_bridge", "redis", "postgres", "db",  # Docker

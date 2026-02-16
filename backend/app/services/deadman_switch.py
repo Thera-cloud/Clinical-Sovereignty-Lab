@@ -204,6 +204,18 @@ class DeadmanSwitchService:
 
                         alerts_generated += 1
 
+                        # Admin Contact Shield: SMS for HIGH/CRITICAL risk silence
+                        if risk_level in ("HIGH", "CRITICAL"):
+                            try:
+                                from app.services.security.admin_contact_shield import get_shield
+                                await get_shield().alert_admin(
+                                    f"DEADMAN: {risk_level} risk client silent {silence_hours}h",
+                                    f"Client '{client['name'] or 'unnamed'}' (risk: {risk_level}) "
+                                    f"silent for {silence_hours} hours. Last active: {last_active.isoformat()}."
+                                )
+                            except Exception:
+                                pass
+
         return {
             "clients_checked": clients_checked,
             "skipped_no_engagement": skipped_no_engagement,

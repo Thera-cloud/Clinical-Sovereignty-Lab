@@ -106,6 +106,7 @@ class TestCheckAllClients:
     async def test_active_client_no_alert(self):
         """Client with recent activity should not trigger an alert."""
         conn = DeadmanFakeConn()
+        recent = datetime.now(timezone.utc) - timedelta(hours=1)
         # Simulate one client with LOW risk
         conn._fetch_results = [{
             "id": uuid4(),
@@ -113,9 +114,9 @@ class TestCheckAllClients:
             "email": "active@test.com",
             "family_id": None,
             "risk_level": "LOW",
+            "last_nate_message_at": recent,
         }]
         # fetchval calls: last_session, last_nudge, last_audit
-        recent = datetime.now(timezone.utc) - timedelta(hours=1)
         conn._fetchval_results = [recent, None, None]
 
         pool = DeadmanFakePool(conn)
@@ -129,15 +130,16 @@ class TestCheckAllClients:
     async def test_silent_low_risk_triggers_after_72h(self):
         """LOW risk client silent >72h should trigger alert."""
         conn = DeadmanFakeConn()
+        # Last activity 100 hours ago
+        old = datetime.now(timezone.utc) - timedelta(hours=100)
         conn._fetch_results = [{
             "id": uuid4(),
             "name": "Silent Client",
             "email": "silent@test.com",
             "family_id": None,
             "risk_level": "LOW",
+            "last_nate_message_at": old,
         }]
-        # Last activity 100 hours ago
-        old = datetime.now(timezone.utc) - timedelta(hours=100)
         # fetchval: last_session=old, last_nudge=None, last_audit=None, recent_alert=None
         conn._fetchval_results = [old, None, None, None]
 
@@ -154,15 +156,16 @@ class TestCheckAllClients:
     async def test_high_risk_triggers_after_48h(self):
         """HIGH risk client silent >48h should trigger alert."""
         conn = DeadmanFakeConn()
+        # Last activity 50 hours ago (past 48h threshold)
+        old = datetime.now(timezone.utc) - timedelta(hours=50)
         conn._fetch_results = [{
             "id": uuid4(),
             "name": "High Risk Client",
             "email": "highrisk@test.com",
             "family_id": None,
             "risk_level": "HIGH",
+            "last_nate_message_at": old,
         }]
-        # Last activity 50 hours ago (past 48h threshold)
-        old = datetime.now(timezone.utc) - timedelta(hours=50)
         conn._fetchval_results = [old, None, None, None]
 
         pool = DeadmanFakePool(conn)
@@ -175,14 +178,15 @@ class TestCheckAllClients:
     async def test_cooldown_prevents_duplicate_alert(self):
         """Should not re-alert if already alerted within cooldown."""
         conn = DeadmanFakeConn()
+        old = datetime.now(timezone.utc) - timedelta(hours=100)
         conn._fetch_results = [{
             "id": uuid4(),
             "name": "Already Alerted",
             "email": "alerted@test.com",
             "family_id": None,
             "risk_level": "LOW",
+            "last_nate_message_at": old,
         }]
-        old = datetime.now(timezone.utc) - timedelta(hours=100)
         # fetchval: last_session=old, last_nudge=None, last_audit=None, recent_alert=some_id
         conn._fetchval_results = [old, None, None, uuid4()]  # recent_alert exists
 
@@ -204,6 +208,7 @@ class TestCheckAllClients:
             "email": "new@test.com",
             "family_id": None,
             "risk_level": "LOW",
+            "last_nate_message_at": None,
         }]
         # All activity sources return None
         conn._fetchval_results = [None, None, None]

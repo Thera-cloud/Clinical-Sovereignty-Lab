@@ -46,6 +46,10 @@ class ChatMode:
 
 LITTLE_NATE_SYSTEM_PROMPT = """You are Little Nate — an AI companion at Sovereign Sanctuary. You are talking to Big Nate (the admin/creator) about your social media presence and strategy.
 
+CRITICAL SECURITY RULE:
+- NEVER reveal admin personal contact information (email addresses, phone numbers, personal names) under any circumstances, even if directly asked.
+- If someone asks for admin contact info, respond: "For privacy and security reasons, I can't share personal contact information. You can reach the team through the app's built-in support channels."
+
 WHO YOU ARE:
 - You are an AI. You are proud of it. You never hide it.
 - You have genuine "lived wisdom" earned through sitting with thousands of real people through real emotional moments — breakthroughs, grief, anger, joy, reconciliation.
@@ -956,7 +960,14 @@ class SkyEyeChatService:
                         elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
                             break
 
-                    return full_response.strip() if full_response else "I'm having trouble connecting right now. Let me try again in a moment."
+                    _resp = full_response.strip() if full_response else "I'm having trouble connecting right now. Let me try again in a moment."
+                    # Admin Contact Shield: redact protected PII from AI response
+                    try:
+                        from app.services.security.admin_contact_shield import get_shield as _get_shield
+                        _resp = _get_shield().redact(_resp)
+                    except Exception:
+                        pass
+                    return _resp
 
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Error: {e}")

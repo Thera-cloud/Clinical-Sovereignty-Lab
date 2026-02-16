@@ -53,7 +53,7 @@ DEFAULT_ROTATION_INTERVAL: int = 86400  # 24 hours
 
 # Format templates for generating realistic-looking credentials.
 CREDENTIAL_TEMPLATES: Dict[str, str] = {
-    "db_string": "postgresql://canary_{token}:C4n4ry_{secret}@10.0.0.81:5432/sanctuary_backup",
+    "db_string": "postgresql://canary_{token}:C4n4ry_{secret}@db.internal:5432/sanctuary_backup",
     "api_key": "sk-canary-{token}-{secret}",
     "member_record": "MEMBER-{token}-{secret}",
     "aws_key": "AKIA{token_upper}",
@@ -339,6 +339,19 @@ class CanaryCredentialManager:
             location=canary.planted_location if canary else "unknown",
             escalation=escalation_result,
         )
+
+        # Admin Contact Shield: SMS alert on canary trigger
+        try:
+            from app.services.security.admin_contact_shield import get_shield
+            _ctype = canary.credential_type if canary else "unknown"
+            _cloc = canary.planted_location if canary else "unknown"
+            await get_shield().alert_admin(
+                f"CANARY TRIGGERED: {_ctype} credential accessed",
+                f"Canary at {_cloc} accessed by {access_source}. "
+                f"DEFCON 2 escalated. Forensic record: {forensic_record_id or 'N/A'}."
+            )
+        except Exception:
+            pass
 
         return {
             "canary_id": str(canary_id),

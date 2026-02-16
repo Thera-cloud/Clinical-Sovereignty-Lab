@@ -11,33 +11,33 @@ import os
 class NetworkConfig:
     """Read-only network configuration."""
 
-    SERVER_HOST = os.getenv("SERVER_HOST", "10.0.0.81")
+    SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
     WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
     ADMIN_PORT = int(os.getenv("ADMIN_PORT", "3000"))
 
-    BASE_URL = os.getenv("BASE_URL", "http://10.0.0.81:8000")
-    WS_URL = os.getenv("WS_URL", "ws://10.0.0.81:8765")
+    BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+    WS_URL = os.getenv("WS_URL", "ws://localhost:8765")
     APP_URL = os.getenv("APP_URL", "https://app.sovereignsanctuary.net")
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
     DOMAIN = os.getenv("DOMAIN")
 
     CORS_ORIGINS = os.getenv(
         "CORS_ORIGINS",
-        "http://10.0.0.81:3000,http://localhost:3000,"
+        "http://localhost:3000,"
         "https://app.sovereignsanctuary.net,"
         "https://coach.sovereignsanctuary.net,"
         "https://command.sovereignsanctuary.net",
     )
 
     # Database connectivity
-    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "10.0.0.81")
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
     POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
     POSTGRES_DB = os.getenv("POSTGRES_DB", "little_nate")
     POSTGRES_USER = os.getenv("POSTGRES_USER", "nate_admin")
 
     # Redis connectivity (host/port only — no auth secrets)
-    REDIS_HOST = os.getenv("REDIS_HOST", "10.0.0.81")
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
     # Paths

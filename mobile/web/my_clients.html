@@ -122,7 +122,7 @@
     <script>
         function getWsUrl() {
             var proto = (location.protocol === "https:") ? "wss" : "ws";
-            var host = location.hostname || "10.0.0.81";
+            var host = location.hostname || "localhost";
             return proto + "://" + host + ":8765";
         }
 

@@ -8,13 +8,19 @@ This limits the blast radius if any single config module is compromised:
 - thresholds.py — Feature flags, timing, rate limits, scoring parameters
 - canaries.py   — API keys for upstream providers (Azure, Stripe, SendGrid, etc.)
 
-The main Settings class in app/config.py remains the single source of truth,
-but these modules provide scoped access points so that services only import
-the keys they need.
+The Settings class provides the single source of truth for all config values.
 """
 
 from .network import NetworkConfig
 from .thresholds import ThresholdConfig
 from .canaries import CanaryConfig
+from ._settings import Settings, get_settings, settings
 
-__all__ = ["NetworkConfig", "ThresholdConfig", "CanaryConfig"]
+__all__ = [
+    "NetworkConfig",
+    "ThresholdConfig",
+    "CanaryConfig",
+    "Settings",
+    "get_settings",
+    "settings",
+]
