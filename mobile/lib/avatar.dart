@@ -189,9 +189,9 @@ class AvatarAppearanceConfig {
 
 /// Azure Text-to-Speech service with SSML and emotion mapping
 class AzureTTSService {
-  // Azure Speech credentials
-  static const String _speechKey = '***REMOVED***';
-  static const String _region = 'eastus';
+  // Azure Speech credentials — loaded from AppConfig (never hardcode)
+  static String get _speechKey => const String.fromEnvironment('AZURE_SPEECH_KEY', defaultValue: '');
+  static String get _region => const String.fromEnvironment('AZURE_SPEECH_REGION', defaultValue: 'eastus');
   
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _accessToken;
