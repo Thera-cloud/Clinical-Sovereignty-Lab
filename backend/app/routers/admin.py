@@ -1028,6 +1028,11 @@ class CouponRequest(BaseModel):
     type: str = "percent"  # "percent" or "fixed"
 
 
+class UpdateSettingsRequest(BaseModel):
+    key: str
+    value: str
+
+
 class RetryPaymentRequest(BaseModel):
     payment_id: str
 
