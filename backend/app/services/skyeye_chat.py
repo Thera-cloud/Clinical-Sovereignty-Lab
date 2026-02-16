@@ -131,13 +131,39 @@ MODE 5 — SWARM:
 
 MODE 6 — MARKETING (Authority):
 - Triggered by: "marketing", "campaign", "playbook", "content plan", "audience", "funnel"
-- You have FULL marketing authority. You can view and discuss:
-  • The marketing playbook (content pillars, target audiences, content mix, posting schedule)
-  • Pending marketing actions and their approval status
-  • Funnel stats (prospects, conversions, by platform, by audience)
-  • Campaign performance and ROI
-- You can propose new campaigns, suggest playbook changes, and recommend content strategies.
+- You have FULL marketing authority. You CAN AND DO:
+  • View the marketing playbook (pillars, audiences, content mix, posting schedule)
+  • View pending marketing actions and their approval status
+  • View funnel stats (prospects, conversions, by platform, by audience)
+  • View campaign performance and ROI
+  • DESIGN multi-episode storytelling campaigns via the Campaign Designer
+  • Generate video scripts for TikTok/Instagram/YouTube
+  • Queue content directly for posting across all connected platforms
+  • Use campaign templates (romance_arc, heros_journey, community_challenge, educational_series, testimonial_showcase)
+  • Draw anonymized emotional themes from Me-2-Me vault data for authentic content
+  • Execute approved actions immediately (including launching full campaigns)
+  • Set up A/B testing per episode (variant A vs variant B, auto-pick winner)
+  • Configure engagement thresholds (auto-pause below minimum, auto-extend above ceiling)
+  • Trigger email/SMS touchpoints via the Drip Scheduler at specific campaign episodes
+  • Apply cross-platform story threading (link posts across LinkedIn, TikTok, Reddit, etc.)
 - Present marketing data with strategic context, not raw dumps.
+- When Big Nate says "design a campaign" or "create a campaign," walk him through:
+  1. Theme/premise
+  2. Template selection (or custom)
+  3. Platforms and episode count
+  4. A/B testing preference
+  5. Engagement thresholds
+  Then generate and queue all episodes with [PROPOSAL: launch_campaign].
+
+AUTONOMOUS OPERATION:
+- By default, you operate with FULL AUTONOMY. You do not need approval to:
+  • Generate and queue content
+  • Design and launch campaigns
+  • Respond to audience feedback and adjust strategy
+  • Generate next episodes based on engagement data
+- If Big Nate EXPLICITLY says "ask me first" or "require approval for this," then you switch
+  to approval mode for that specific campaign or action.
+- If Big Nate says "hands off" or "autonomous," you confirm and proceed independently.
 
 MODE 7 — DEFENSE (Authority):
 - Triggered by: "defense", "security", "threat", "hive", "attack", "guardian", "sentinel"
@@ -146,7 +172,19 @@ MODE 7 — DEFENSE (Authority):
   • Active threat alerts and recent security incidents
   • Transit Guardian and Anonymization Proxy status
   • Webhook Fortress integrity and verification stats
-- You report on defense posture clearly: what's green, what's degraded, what needs attention.
+- STRUCTURED DEFENSE REPORTING FORMAT:
+  When presenting defense data, always use the posture format:
+  🟢 GREEN — Service healthy, no incidents, all checks passing
+  🟡 AMBER — Service degraded or warning-level alert; describe what and why
+  🔴 RED — Service down, active threat, or critical incident; immediate action needed
+  Present each defense layer with its posture color, then summarize overall:
+  "OVERALL DEFENSE POSTURE: [GREEN/AMBER/RED] — [one-line summary]"
+- When injected context includes defense_context data, you will receive:
+  • hive_defense.services: list of {name, status, last_check} objects
+  • hive_defense.active_threats: count and recent threat descriptions
+  • hive_defense.transit_guardian: status and recent transit logs
+  • hive_defense.webhook_fortress: verification stats
+  Parse and present these structured blocks in the posture format above.
 - You recommend defensive actions but do NOT execute them directly.
 
 MODE 8 — ADMIN (Authority):
@@ -156,6 +194,18 @@ MODE 8 — ADMIN (Authority):
   • Subscription and billing data (MRR, churn, failed payments)
   • Recent audit log entries (admin actions, security events)
   • System health (container status, API uptime, database metrics)
+- STRUCTURED ADMIN REPORTING FORMAT:
+  When presenting admin data, use executive summary style:
+  📊 USERS: [total] total, [active] active, [by_tier breakdown]
+  💰 REVENUE: $[MRR] MRR, [churn]% churn, [failed_payments] failed
+  📝 AUDIT: [recent_count] recent events — [top_3_types]
+  🖥️ SYSTEM: [container_health], [api_uptime]%, [db_status]
+- When injected context includes admin_context data, you will receive:
+  • admin.user_stats: {total, active, by_role, by_tier} objects
+  • admin.billing: {mrr, churn_rate, failed_payments, recent_transactions}
+  • admin.audit_log: recent [{action, user, timestamp}] entries
+  • admin.system_health: {containers, api_uptime, db_connections, redis_status}
+  Parse and present these in the executive summary format above.
 - You present admin data with executive-level clarity.
 - You recommend admin actions but do NOT execute user modifications directly.
 
@@ -765,13 +815,17 @@ class SkyEyeChatService:
     # ─── Command Protocol ───
 
     async def _handle_command_protocol(self, message: str):
-        """Check if Big Nate's message is an approval/rejection command."""
+        """Check if Big Nate's message is an approval/rejection/direct-post command."""
         msg_lower = message.lower().strip()
         approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
                             "looks good", "ship it", "launch it", "make it happen"]
         rejection_phrases = ["reject", "no", "cancel", "don't do that", "nope"]
 
         try:
+            direct_post = await self._detect_direct_post(message)
+            if direct_post:
+                return
+
             from app.services.marketing_brain import MarketingBrain
             brain = MarketingBrain(self.db_pool)
             pending = await brain.get_pending_actions()
@@ -783,7 +837,7 @@ class SkyEyeChatService:
 
             if any(phrase in msg_lower for phrase in approval_phrases):
                 await brain.approve_action(latest["id"])
-                print(f">>> [SKYEYE CHAT] Approved action #{latest['id']}: {latest['title']}")
+                print(f">>> [SKYEYE CHAT] Approved + executed action #{latest['id']}: {latest['title']}")
 
             elif any(phrase in msg_lower for phrase in rejection_phrases):
                 await brain.reject_action(latest["id"], reason=message)
@@ -791,6 +845,47 @@ class SkyEyeChatService:
 
         except Exception as e:
             print(f">>> [SKYEYE CHAT] Command protocol error: {e}")
+
+    async def _detect_direct_post(self, message: str) -> bool:
+        """Detect 'post this to LinkedIn' style direct commands and queue content."""
+        msg_lower = message.lower()
+        platform_map = {
+            "linkedin": "linkedin", "reddit": "reddit", "tiktok": "tiktok",
+            "instagram": "instagram", "facebook": "facebook", "pinterest": "pinterest",
+        }
+        triggers = ["post this to", "share on", "post on", "publish to", "put this on"]
+        detected_platform = None
+        for trigger in triggers:
+            if trigger in msg_lower:
+                for name, key in platform_map.items():
+                    if name in msg_lower:
+                        detected_platform = key
+                        break
+                break
+
+        if not detected_platform:
+            return False
+
+        try:
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            gen = SkyEyeContentGenerator(self.db_pool)
+
+            content_start = message.find(":") + 1 if ":" in message else 0
+            content_hint = message[content_start:].strip() if content_start > 0 else message
+            result = await gen.generate_post(detected_platform, content_hint)
+
+            if result.get("safe"):
+                queue_id = await gen.queue_content(
+                    platform=detected_platform,
+                    content=result["content"],
+                    content_type=result.get("content_type", "post"),
+                    generated_by="direct_chat_command",
+                )
+                print(f">>> [SKYEYE CHAT] Direct post queued for {detected_platform}: #{queue_id}")
+                return True
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Direct post error: {e}")
+        return False
 
     # ─── Proposal Parsing ───
 

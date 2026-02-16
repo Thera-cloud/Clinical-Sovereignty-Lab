@@ -9,7 +9,7 @@ content queue, platform connections, moderation, and content generation.
 
 import json
 from fastapi import APIRouter, HTTPException, Request, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -1422,3 +1422,67 @@ async def emergency_revoke(body: EmergencyRevokeRequest, request: Request):
         "message": "Emergency revoke completed.",
         **summary,
     }
+
+
+# =============================================================================
+# CAMPAIGNS
+# =============================================================================
+
+@router.get("/campaigns")
+async def list_campaigns(request: Request, status: Optional[str] = None):
+    """List all storytelling campaigns, optionally filtered by status."""
+    db_pool = request.app.state.db_pool
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(db_pool)
+    campaigns = await brain.get_campaigns(status=status)
+    return JSONResponse([{k: str(v) if isinstance(v, datetime) else v for k, v in c.items()} for c in campaigns])
+
+
+@router.get("/campaigns/{campaign_id}")
+async def get_campaign(request: Request, campaign_id: int):
+    """Get detailed campaign info including episode posts and feedback."""
+    db_pool = request.app.state.db_pool
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(db_pool)
+    detail = await brain.get_campaign_detail(campaign_id)
+    if detail.get("error"):
+        return JSONResponse({"error": detail["error"]}, status_code=404)
+
+    def serialize(v):
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return v
+
+    return JSONResponse({k: serialize(v) if not isinstance(v, list) else
+                          [{kk: serialize(vv) for kk, vv in p.items()} for p in v] if k == "posts" else v
+                          for k, v in detail.items()})
+
+
+@router.post("/campaigns/{campaign_id}/pause")
+async def pause_campaign(request: Request, campaign_id: int):
+    """Pause an active campaign."""
+    db_pool = request.app.state.db_pool
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(db_pool)
+    ok = await brain.pause_campaign(campaign_id)
+    return {"success": ok}
+
+
+@router.post("/campaigns/{campaign_id}/resume")
+async def resume_campaign(request: Request, campaign_id: int):
+    """Resume a paused campaign."""
+    db_pool = request.app.state.db_pool
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(db_pool)
+    ok = await brain.resume_campaign(campaign_id)
+    return {"success": ok}
+
+
+@router.post("/campaigns/{campaign_id}/extend")
+async def extend_campaign(request: Request, campaign_id: int):
+    """Add 2 more episodes to a running campaign."""
+    db_pool = request.app.state.db_pool
+    from app.services.marketing_brain import MarketingBrain
+    brain = MarketingBrain(db_pool)
+    result = await brain.extend_campaign(campaign_id, extra_episodes=2)
+    return result

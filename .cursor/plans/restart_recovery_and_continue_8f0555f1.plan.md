@@ -4,10 +4,10 @@ overview: "Upon restart: commit all uncommitted work (114 modified + 100+ new fi
 todos:
   - id: commit-all
     content: Stage and commit all 114 modified + 100+ new untracked files with comprehensive message
-    status: in_progress
+    status: completed
   - id: resume-campaign-plan
     content: Resume implementation of nate_campaign_execution_system plan from todo 2 (migration-campaigns) through todo 17 (docs-update)
-    status: pending
+    status: completed
 isProject: false
 ---
 

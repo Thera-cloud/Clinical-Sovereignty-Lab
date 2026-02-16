@@ -1087,6 +1087,68 @@ class DripScheduler:
         if notifications_sent:
             print(f">>> [DRIP] Trial phase sweep: {notifications_sent} Week 2 notification(s) sent")
 
+    # ── Campaign Touchpoint Integration ──────────────────────────────
+
+    async def send_campaign_touchpoint(self, campaign_id: int, episode: int,
+                                        subject: str, body_html: str,
+                                        audience: str = "all_subscribers"):
+        """Send email/SMS touchpoint triggered by a campaign episode.
+
+        Used by the session engine when a campaign's drip_touchpoints config
+        indicates that an episode should trigger outbound communications.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                if audience == "all_subscribers":
+                    subscribers = await conn.fetch("""
+                        SELECT DISTINCT email, first_name, phone
+                        FROM prospects
+                        WHERE status IN ('subscribed', 'active', 'trial')
+                          AND email IS NOT NULL
+                        LIMIT 200
+                    """)
+                else:
+                    subscribers = await conn.fetch("""
+                        SELECT email, first_name, phone FROM prospects
+                        WHERE id = ANY(
+                            SELECT prospect_id FROM prospect_tags WHERE tag = $1
+                        ) AND email IS NOT NULL
+                    """, audience)
+
+                sent_count = 0
+                for sub in subscribers:
+                    try:
+                        if self.sendgrid_client and sub["email"]:
+                            from sendgrid.helpers.mail import Mail, Email, To
+                            msg = Mail(
+                                from_email=Email(settings.FROM_EMAIL, settings.FROM_NAME),
+                                to_emails=To(sub["email"]),
+                            )
+                            msg.subject = subject
+                            name = sub["first_name"] or "Friend"
+                            msg.html_content = body_html.replace("{{first_name}}", name)
+                            response = self.sendgrid_client.send(msg)
+                            if response.status_code in [200, 201, 202]:
+                                sent_count += 1
+
+                        if sub.get("phone") and self.twilio_client:
+                            sms_body = f"{subject}\n{body_html[:300]}"
+                            sms_body = re.sub(r'<[^>]+>', '', sms_body)
+                            await self._send_sms(conn, None, sub["phone"], sms_body)
+
+                    except Exception as e:
+                        logger.warning(f"Campaign touchpoint delivery error: {e}")
+
+                logger.info(
+                    f"Campaign {campaign_id} ep{episode} touchpoint: "
+                    f"{sent_count}/{len(subscribers)} emails sent"
+                )
+                return {"sent": sent_count, "total": len(subscribers)}
+
+        except Exception as e:
+            logger.error(f"Campaign touchpoint error: {e}")
+            return {"error": str(e)}
+
     @staticmethod
     def _normalize_phone(phone: str) -> str:
         """Normalize to E.164 format."""

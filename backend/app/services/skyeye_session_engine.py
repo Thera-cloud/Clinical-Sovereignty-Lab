@@ -380,8 +380,122 @@ class SkyEyeSessionEngine:
                             "mention_count": len(mentions)}
                 )
 
+            # Campaign feedback aggregation
+            await self._aggregate_campaign_feedback(platform, own_posts, comments if 'comments' in dir() else [])
+
         except Exception as e:
             logger.warning(f"Observe phase error on {platform}: {e}")
+
+    async def _aggregate_campaign_feedback(self, platform: str, own_posts, recent_comments):
+        """Check if observed posts belong to campaigns and aggregate feedback."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                campaign_posts = await conn.fetch("""
+                    SELECT cq.id, cq.campaign_id, cq.episode_number, cq.ab_variant,
+                           cq.post_id_external, sc.status as campaign_status,
+                           sc.audience_feedback_enabled
+                    FROM skyeye_content_queue cq
+                    JOIN storytelling_campaigns sc ON cq.campaign_id = sc.id
+                    WHERE cq.campaign_id IS NOT NULL
+                      AND cq.status = 'posted'
+                      AND cq.platform = $1
+                      AND sc.status = 'active'
+                """, platform)
+
+                if not campaign_posts:
+                    return
+
+                for cp in campaign_posts:
+                    if not cp["audience_feedback_enabled"]:
+                        continue
+
+                    comment_count = 0
+                    sentiments = []
+                    if cp["post_id_external"]:
+                        row = await conn.fetchrow("""
+                            SELECT COUNT(*) as cnt,
+                                   array_agg(sentiment) FILTER (WHERE sentiment IS NOT NULL) as sents
+                            FROM skyeye_social_interactions
+                            WHERE platform = $1
+                              AND created_at > NOW() - INTERVAL '48 hours'
+                        """, platform)
+                        if row:
+                            comment_count = row["cnt"] or 0
+                            sentiments = row["sents"] or []
+
+                    engagement = {
+                        "comments": comment_count,
+                        "likes": 0,
+                        "shares": 0,
+                        "platform": platform,
+                        "episode": cp["episode_number"],
+                        "ab_variant": cp["ab_variant"],
+                    }
+
+                    from app.services.marketing_brain import MarketingBrain
+                    brain = MarketingBrain(self.db_pool)
+                    threshold_action = await brain.check_engagement_thresholds(
+                        cp["campaign_id"], engagement
+                    )
+                    if threshold_action == "pause":
+                        logger.warning(f"Campaign {cp['campaign_id']} auto-paused due to low engagement")
+
+                    campaign = await conn.fetchrow(
+                        "SELECT * FROM storytelling_campaigns WHERE id = $1",
+                        cp["campaign_id"],
+                    )
+                    if not campaign:
+                        continue
+
+                    all_ep_posted = await conn.fetchval("""
+                        SELECT NOT EXISTS(
+                            SELECT 1 FROM skyeye_content_queue
+                            WHERE campaign_id = $1 AND episode_number = $2
+                              AND status != 'posted'
+                        )
+                    """, cp["campaign_id"], campaign["current_episode"])
+
+                    if (all_ep_posted
+                            and campaign["current_episode"] < campaign["total_episodes"]
+                            and campaign["status"] == "active"):
+                        last_posted_at = await conn.fetchval("""
+                            SELECT MAX(posted_at) FROM skyeye_content_queue
+                            WHERE campaign_id = $1 AND episode_number = $2
+                        """, cp["campaign_id"], campaign["current_episode"])
+
+                        if last_posted_at:
+                            from datetime import timezone
+                            hours_since = (datetime.now(timezone.utc) - last_posted_at).total_seconds() / 3600
+                            if hours_since >= (campaign["episode_interval_hours"] or 24):
+                                ab_winner = None
+                                if campaign["ab_test_enabled"]:
+                                    ab_winner = await self._pick_ab_winner(conn, cp["campaign_id"], campaign["current_episode"])
+
+                                result = await brain.generate_next_episode(
+                                    cp["campaign_id"],
+                                    audience_feedback=engagement,
+                                    ab_winner=ab_winner,
+                                )
+                                logger.info(f"Auto-generated next episode for campaign {cp['campaign_id']}: {result.get('summary', 'ok')}")
+
+        except Exception as e:
+            logger.warning(f"Campaign feedback aggregation error: {e}")
+
+    async def _pick_ab_winner(self, conn, campaign_id: int, episode: int) -> Optional[str]:
+        """Compare A/B variant engagement and return the winner."""
+        try:
+            rows = await conn.fetch("""
+                SELECT ab_variant, COUNT(*) as post_count
+                FROM skyeye_content_queue
+                WHERE campaign_id = $1 AND episode_number = $2
+                  AND ab_variant IS NOT NULL AND status = 'posted'
+                GROUP BY ab_variant
+            """, campaign_id, episode)
+            if len(rows) < 2:
+                return None
+            return max(rows, key=lambda r: r["post_count"])["ab_variant"]
+        except Exception:
+            return None
 
     async def _engage_phase(self, platform: str, adapter, generator, monitor):
         """Engage with comments — reply to safe, interesting ones."""
@@ -569,7 +683,8 @@ class SkyEyeSessionEngine:
                 status_filter = "draft"
 
             queue_items = await generator.get_queue(
-                status=status_filter, platform=platform, limit=3
+                status=status_filter, platform=platform, limit=3,
+                respect_schedule=True,
             )
 
             for item in queue_items:

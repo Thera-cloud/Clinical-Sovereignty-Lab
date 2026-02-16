@@ -737,5 +737,129 @@ When starting a new session, upload these files:
 
 ---
 
-*Document generated January 21, 2026*
-*Little Nate Project — Sovereign Command Admin Console v2.0*
+---
+
+## 📖 NATE CAMPAIGN EXECUTION SYSTEM
+
+### Overview
+Little Nate has full capability to design, execute, and manage multi-episode interactive storytelling campaigns across all connected social media platforms. This system bridges the gap between Big Nate Chat strategy discussions and real-world content publishing.
+
+### Architecture
+
+```
+Big Nate Chat (strategy discussion)
+        ↓
+   Marketing Brain (design_campaign / execute_approved_action)
+        ↓
+   SkyEye Content Generator (generate posts / video scripts)
+        ↓
+   skyeye_content_queue (DB — with campaign_id, episode_number, sequence_order)
+        ↓
+   SkyEye Session Engine (_post_phase — respects scheduled_for + depends_on_post_id)
+        ↓
+   Platform Adapters (LinkedIn, Reddit, TikTok, Instagram, Facebook, Pinterest)
+```
+
+### Campaign Flow
+1. **Design**: Big Nate or Little Nate (autonomously) calls `design_campaign()` in MarketingBrain
+2. **Template Selection**: Optional use of built-in templates (romance_arc, heros_journey, community_challenge, educational_series, testimonial_showcase)
+3. **AI Episode Generation**: Azure OpenAI generates episode content per platform, adapted to each platform's voice
+4. **Queue**: All posts are queued in `skyeye_content_queue` with `campaign_id`, `episode_number`, `sequence_order`, `scheduled_for`, and `depends_on_post_id`
+5. **Schedule Enforcement**: `get_queue(respect_schedule=True)` ensures posts only publish when their time arrives and their dependency (previous episode) has been posted
+6. **Publishing**: Session engine picks up scheduled posts and publishes via platform adapters
+7. **Feedback Loop**: During `_observe_phase()`, the session engine aggregates audience engagement on campaign posts, checks engagement thresholds, and auto-generates next episodes when ready
+
+### Campaign Templates (DB: `campaign_templates`)
+| Template | Episodes | Interval | Description |
+|----------|----------|----------|-------------|
+| romance_arc | 6 | 24h | Interactive romance with cliff-hangers and audience voting |
+| heros_journey | 5 | 48h | Personal growth following departure → trials → transformation → return |
+| community_challenge | 4 | 72h | Audience participation with tasks and leaderboard energy |
+| educational_series | 6 | 48h | Deep-dive topic exploration with discussion prompts |
+| testimonial_showcase | 4 | 72h | Anonymized client moments woven into narrative |
+
+### A/B Testing
+- When `ab_test_enabled` is true, each episode generates two variant hooks (A and B)
+- Variant A posts to the first half of platforms, variant B to the rest
+- Session engine picks the engagement winner and feeds it to the next episode's AI prompt
+
+### Engagement Thresholds
+- `min_engagement_threshold`: If total engagement (comments + likes + shares) falls below this, the campaign is auto-paused
+- `extend_engagement_threshold`: If engagement exceeds this, the campaign auto-extends by 2 episodes
+
+### Video Script Generation
+- For video platforms (TikTok, Instagram Reels), `generate_video_script()` produces structured JSON:
+  - `voiceover_text`, `shot_descriptions[]`, `on_screen_text[]`, `music_mood`, `duration_estimate_seconds`, `hashtags[]`
+- Scripts are stored in the `video_script` JSONB column on `skyeye_content_queue`
+
+### Me-2-Me Integration
+- `LegacyVaultMe2Me.extract_thematic_content()` provides anonymized emotional themes from:
+  - Imprint entries (emotion distributions)
+  - Identity crystals (relationship patterns, life themes)
+  - Family fabrics (intergenerational dynamics)
+- NO PII, NO user-identifiable data is ever exposed to marketing content
+- Themes enrich campaign storytelling with authentic emotional resonance
+
+### Cross-Platform Story Threading
+- When an episode posts across multiple platforms, each post stores `cross_thread_refs` (JSONB) mapping other platforms to their post IDs
+- This enables "continued on TikTok" / "discussion on Reddit" cross-references
+
+### Email/SMS Drip Integration
+- Campaign `drip_touchpoints` (JSONB) can specify which episodes trigger outbound email/SMS
+- Uses the existing `DripScheduler.send_campaign_touchpoint()` to reach subscribers
+- Example: Episode 3 of a romance_arc triggers an email to all subscribers
+
+### Execution Bridge
+- `MarketingBrain.execute_approved_action()` routes actions by type:
+  - `launch_campaign` → calls `design_campaign()` (full multi-episode generation)
+  - `shift_content_mix` / `adjust_schedule` → updates playbook
+  - Other → generates and queues a single strategic post
+- `approve_action()` now automatically triggers execution (no separate manual step)
+
+### Autonomous Operation
+- Little Nate operates with full autonomy by default
+- Approval is only required when Big Nate explicitly requests it
+- Direct post commands ("post this to LinkedIn") are detected and queued immediately
+
+### SkyEye Dashboard — Campaigns Tab
+- Campaign list with status badges and progress bars
+- Click into any campaign for detailed view:
+  - Episode timeline with post status per platform
+  - Audience feedback history
+  - A/B test results
+  - Pause / Resume / Extend controls
+
+### Defense Posture Reporting
+Little Nate reports defense status using the GREEN/AMBER/RED format:
+- 🟢 GREEN — All systems healthy, no incidents
+- 🟡 AMBER — Degraded service or warning-level alert
+- 🔴 RED — Active threat or critical incident
+Structured context blocks (hive_defense.services, active_threats, transit_guardian, webhook_fortress) are parsed and presented in this format.
+
+### Admin Executive Summaries
+Admin mode presents data in executive summary format:
+- 📊 USERS: total, active, by-tier breakdown
+- 💰 REVENUE: MRR, churn rate, failed payments
+- 📝 AUDIT: recent event count and top types
+- 🖥️ SYSTEM: container health, API uptime, database status
+
+### Database Tables
+| Table | Purpose |
+|-------|---------|
+| `campaign_templates` | Pre-built narrative structures (seeded) |
+| `storytelling_campaigns` | Campaign instances with metadata, thresholds, feedback |
+| `skyeye_content_queue` (extended) | +campaign_id, episode_number, sequence_order, depends_on_post_id, cross_thread_refs, ab_variant, video_script |
+
+### API Endpoints (under `/api/skyeye/`)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/campaigns` | List campaigns (optional `?status=` filter) |
+| GET | `/campaigns/{id}` | Campaign detail with posts and feedback |
+| POST | `/campaigns/{id}/pause` | Pause an active campaign |
+| POST | `/campaigns/{id}/resume` | Resume a paused campaign |
+| POST | `/campaigns/{id}/extend` | Add 2 episodes to a campaign |
+
+---
+
+*Document updated February 15, 2026*
+*Little Nate Project — Sovereign Command Admin Console v3.0 + Campaign Execution System*

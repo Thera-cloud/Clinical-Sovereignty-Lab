@@ -381,6 +381,10 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="nav-item" data-tab="showcase" onclick="switchTab('showcase',this)">
       <span class="nav-icon">🎬</span><span class="nav-label">Showcase Gen</span>
     </div>
+    <div class="nav-item" data-tab="campaigns" onclick="switchTab('campaigns',this)">
+      <span class="nav-icon">📖</span><span class="nav-label">Campaigns</span>
+      <span class="nav-badge" id="campaign-count" style="display:none">0</span>
+    </div>
     <div class="nav-item" data-tab="swarm" onclick="switchTab('swarm',this)">
       <span class="nav-icon">🐝</span><span class="nav-label">Swarm</span>
     </div>
@@ -907,6 +911,74 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </div>
     </section>
 
+    <!-- TAB: CAMPAIGNS -->
+    <section class="tab-content" id="tab-campaigns">
+      <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">Storytelling Campaigns</h2>
+
+      <!-- Campaign Controls -->
+      <div class="glass" style="padding:20px;margin-bottom:24px">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <select id="campaign-status-filter" onchange="loadCampaigns()" style="background:var(--el);color:var(--gold);border:1px solid var(--bdr);padding:8px 16px;border-radius:8px;font-size:14px">
+            <option value="">All Campaigns</option>
+            <option value="active">Active</option>
+            <option value="designing">Designing</option>
+            <option value="paused">Paused</option>
+            <option value="completed">Completed</option>
+          </select>
+          <button onclick="loadCampaigns()" style="background:var(--gold);color:#000;border:none;padding:8px 20px;border-radius:8px;cursor:pointer;font-weight:600">Refresh</button>
+          <span id="campaign-summary" style="color:var(--muted);font-size:13px;margin-left:auto"></span>
+        </div>
+      </div>
+
+      <!-- Campaign List -->
+      <div id="campaign-list" style="display:flex;flex-direction:column;gap:16px"></div>
+
+      <!-- Campaign Detail (shown when a campaign is selected) -->
+      <div id="campaign-detail" style="display:none;margin-top:24px">
+        <div class="glass" style="padding:24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+            <h3 id="cd-title" style="font-family:var(--serif);font-size:22px;color:var(--gold)"></h3>
+            <div style="display:flex;gap:8px">
+              <button id="cd-pause-btn" onclick="campaignAction('pause')" style="background:var(--el);color:#EF4444;border:1px solid #EF4444;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">Pause</button>
+              <button id="cd-resume-btn" onclick="campaignAction('resume')" style="background:var(--el);color:#4ECDC4;border:1px solid #4ECDC4;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;display:none">Resume</button>
+              <button onclick="campaignAction('extend')" style="background:var(--el);color:var(--gold);border:1px solid var(--gold);padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">+2 Episodes</button>
+              <button onclick="closeCampaignDetail()" style="background:var(--el);color:var(--muted);border:1px solid var(--bdr);padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px">Close</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px">
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Status</div>
+              <div id="cd-status" style="font-size:16px;font-weight:600"></div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Progress</div>
+              <div id="cd-progress" style="font-size:16px;font-weight:600;color:var(--gold)"></div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Template</div>
+              <div id="cd-template" style="font-size:14px"></div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="color:var(--muted);font-size:12px;margin-bottom:4px">A/B Testing</div>
+              <div id="cd-ab" style="font-size:14px"></div>
+            </div>
+          </div>
+          <div style="margin-bottom:16px">
+            <div style="color:var(--muted);font-size:13px;margin-bottom:6px">Narrative Premise</div>
+            <div id="cd-premise" style="color:#ccc;font-size:14px;line-height:1.5"></div>
+          </div>
+
+          <!-- Episode Timeline -->
+          <h4 style="color:var(--gold);margin:20px 0 12px;font-family:var(--serif)">Episode Timeline</h4>
+          <div id="cd-episodes" style="display:flex;flex-direction:column;gap:12px"></div>
+
+          <!-- Audience Feedback -->
+          <h4 style="color:var(--gold);margin:20px 0 12px;font-family:var(--serif)">Audience Feedback</h4>
+          <div id="cd-feedback" style="color:#ccc;font-size:14px"></div>
+        </div>
+      </div>
+    </section>
+
     <!-- TAB: SWARM OVERVIEW -->
     <section class="tab-content" id="tab-swarm">
       <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">Sovereign Swarm</h2>
@@ -1169,6 +1241,7 @@ function switchTab(tabId, el) {
     case 'funnel-pipeline': refreshFunnelPipeline(); break;
     case 'quiz-factory': break;
     case 'showcase': break;
+    case 'campaigns': loadCampaigns(); break;
     case 'swarm': loadSwarmOverview(); break;
   }
 }
@@ -2642,6 +2715,147 @@ async function loadSwarmOverview() {
     }
   } catch (e) {
     console.warn('Mesh health unavailable:', e);
+  }
+}
+
+// =============================================================================
+// CAMPAIGNS
+// =============================================================================
+let _selectedCampaignId = null;
+
+async function loadCampaigns() {
+  const statusFilter = document.getElementById('campaign-status-filter')?.value || '';
+  const url = statusFilter
+    ? `${API}/api/skyeye/campaigns?status=${statusFilter}`
+    : `${API}/api/skyeye/campaigns`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const campaigns = await res.json();
+
+    const listEl = document.getElementById('campaign-list');
+    const summaryEl = document.getElementById('campaign-summary');
+    const countBadge = document.getElementById('campaign-count');
+
+    if (summaryEl) summaryEl.textContent = `${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''}`;
+    if (countBadge) {
+      const active = campaigns.filter(c => c.status === 'active').length;
+      if (active > 0) { countBadge.style.display = 'inline'; countBadge.textContent = active; }
+      else { countBadge.style.display = 'none'; }
+    }
+
+    if (!listEl) return;
+    if (!campaigns.length) {
+      listEl.innerHTML = '<div class="glass" style="padding:24px;text-align:center;color:var(--muted)">No campaigns yet. Use Big Nate Chat to design one.</div>';
+      return;
+    }
+
+    const statusColors = { active: '#4ECDC4', designing: '#C9A962', paused: '#EF4444', completed: '#00E5A0' };
+    listEl.innerHTML = campaigns.map(c => {
+      const pct = c.total_episodes > 0 ? Math.round((c.current_episode / c.total_episodes) * 100) : 0;
+      const color = statusColors[c.status] || 'var(--muted)';
+      return `<div class="glass" style="padding:16px;cursor:pointer;transition:border-color 0.2s" onclick="loadCampaignDetail(${c.id})" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--bdr)'">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h4 style="font-family:var(--serif);font-size:18px;color:var(--gold)">${c.title}</h4>
+          <span style="color:${color};font-size:12px;text-transform:uppercase;font-weight:600;padding:3px 10px;border:1px solid ${color};border-radius:20px">${c.status}</span>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:8px">${(c.narrative_premise || '').substring(0, 120)}${(c.narrative_premise || '').length > 120 ? '...' : ''}</div>
+        <div style="display:flex;gap:20px;font-size:12px;color:#888">
+          <span>Episodes: ${c.current_episode}/${c.total_episodes}</span>
+          <span>Template: ${c.template_name || 'custom'}</span>
+          <span>Platforms: ${(c.platforms || []).join(', ')}</span>
+          ${c.ab_test_enabled ? '<span style="color:#9D4EDD">A/B Testing</span>' : ''}
+        </div>
+        <div style="margin-top:8px;background:var(--bg2);border-radius:4px;height:6px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${color};border-radius:4px;transition:width 0.3s"></div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    console.warn('Failed to load campaigns:', e);
+    document.getElementById('campaign-list').innerHTML = '<div class="glass" style="padding:16px;color:var(--muted)">Campaign API unavailable</div>';
+  }
+}
+
+async function loadCampaignDetail(id) {
+  _selectedCampaignId = id;
+  try {
+    const res = await fetch(`${API}/api/skyeye/campaigns/${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const c = await res.json();
+
+    document.getElementById('cd-title').textContent = c.title;
+    document.getElementById('cd-status').textContent = c.status;
+    document.getElementById('cd-status').style.color = { active: '#4ECDC4', paused: '#EF4444', completed: '#00E5A0', designing: '#C9A962' }[c.status] || 'var(--muted)';
+    document.getElementById('cd-progress').textContent = `${c.current_episode} / ${c.total_episodes}`;
+    document.getElementById('cd-template').textContent = c.template_name || 'Custom';
+    document.getElementById('cd-ab').textContent = c.ab_test_enabled ? 'Enabled' : 'Off';
+    document.getElementById('cd-ab').style.color = c.ab_test_enabled ? '#9D4EDD' : 'var(--muted)';
+    document.getElementById('cd-premise').textContent = c.narrative_premise || 'No premise';
+
+    document.getElementById('cd-pause-btn').style.display = c.status === 'active' ? 'inline-block' : 'none';
+    document.getElementById('cd-resume-btn').style.display = c.status === 'paused' ? 'inline-block' : 'none';
+
+    const posts = c.posts || [];
+    const episodes = {};
+    posts.forEach(p => {
+      if (!episodes[p.episode_number]) episodes[p.episode_number] = [];
+      episodes[p.episode_number].push(p);
+    });
+
+    const epEl = document.getElementById('cd-episodes');
+    epEl.innerHTML = Object.entries(episodes).sort((a, b) => a[0] - b[0]).map(([epNum, epPosts]) => {
+      const statusIcon = epPosts.every(p => p.status === 'posted') ? '✅' :
+                          epPosts.some(p => p.status === 'posted') ? '⏳' : '📝';
+      return `<div class="glass" style="padding:14px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:18px">${statusIcon}</span>
+          <span style="font-family:var(--serif);font-size:16px;color:var(--gold)">Episode ${epNum}</span>
+          <span style="color:var(--muted);font-size:12px;margin-left:auto">${epPosts.length} post${epPosts.length !== 1 ? 's' : ''}</span>
+        </div>
+        ${epPosts.map(p => `<div style="padding:6px 0;border-top:1px solid var(--bdr);display:flex;gap:12px;align-items:flex-start">
+          <span style="color:#666;font-size:12px;min-width:80px">${p.platform}</span>
+          <span style="color:#aaa;font-size:13px;flex:1">${(p.content_text || '').substring(0, 100)}...</span>
+          <span style="color:${p.status === 'posted' ? '#4ECDC4' : p.status === 'scheduled' ? '#C9A962' : 'var(--muted)'};font-size:11px">${p.status}</span>
+          ${p.ab_variant ? `<span style="color:#9D4EDD;font-size:11px">Variant ${p.ab_variant}</span>` : ''}
+        </div>`).join('')}
+      </div>`;
+    }).join('');
+
+    const fb = c.audience_feedback || [];
+    const fbEl = document.getElementById('cd-feedback');
+    if (fb.length) {
+      fbEl.innerHTML = fb.map(f =>
+        `<div style="padding:6px 0;border-bottom:1px solid var(--bdr)">
+          <span style="color:var(--gold)">Ep ${f.episode}:</span>
+          <span style="color:#aaa">${JSON.stringify(f.feedback || {}).substring(0, 100)}</span>
+          ${f.ab_winner ? `<span style="color:#9D4EDD;margin-left:8px">Winner: ${f.ab_winner}</span>` : ''}
+        </div>`
+      ).join('');
+    } else {
+      fbEl.innerHTML = '<span style="color:var(--muted)">No feedback collected yet</span>';
+    }
+
+    document.getElementById('campaign-detail').style.display = 'block';
+  } catch (e) {
+    console.warn('Failed to load campaign detail:', e);
+  }
+}
+
+function closeCampaignDetail() {
+  document.getElementById('campaign-detail').style.display = 'none';
+  _selectedCampaignId = null;
+}
+
+async function campaignAction(action) {
+  if (!_selectedCampaignId) return;
+  try {
+    const res = await fetch(`${API}/api/skyeye/campaigns/${_selectedCampaignId}/${action}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadCampaignDetail(_selectedCampaignId);
+    await loadCampaigns();
+  } catch (e) {
+    console.warn(`Campaign ${action} failed:`, e);
   }
 }
 

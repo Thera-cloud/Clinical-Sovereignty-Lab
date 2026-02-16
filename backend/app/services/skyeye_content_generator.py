@@ -365,6 +365,87 @@ class SkyEyeContentGenerator:
         summary = await self._call_azure_openai(user_prompt)
         return summary or "Session completed — summary unavailable."
 
+    # ── Video Script Generation ──────────────────────────────────────
+
+    VIDEO_SCRIPT_PROMPT = """You are Little Nate generating a video script for social media.
+Return ONLY valid JSON with this exact structure:
+{{
+  "voiceover_text": "The full spoken narration",
+  "shot_descriptions": [
+    {{"shot": 1, "visual": "Description of what the viewer sees"}},
+    {{"shot": 2, "visual": "Next visual"}}
+  ],
+  "on_screen_text": [
+    {{"timestamp": "0:00", "text": "Text overlay"}}
+  ],
+  "music_mood": "emotional/upbeat/calm/dramatic",
+  "duration_estimate_seconds": 45,
+  "hashtags": ["#tag1", "#tag2"]
+}}
+
+RULES:
+- Hook the viewer in the first 3 seconds
+- Keep it authentic — you are an AI and proud of it
+- Match the platform voice exactly
+- NEVER include inappropriate content about minors, explicit material, or political endorsements"""
+
+    async def generate_video_script(self, platform: str, topic: str,
+                                     context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Generate a structured video script for TikTok, Instagram Reels, or YouTube Shorts."""
+        platform_specs = {
+            "tiktok": {"max_seconds": 60, "style": "Punchy, hook in first 3 seconds, casual, trend-aware"},
+            "instagram": {"max_seconds": 90, "style": "Story-driven, aesthetic, warm, personal"},
+            "youtube": {"max_seconds": 60, "style": "Educational or emotional, deeper, exploratory"},
+        }
+        spec = platform_specs.get(platform, platform_specs["tiktok"])
+
+        context_section = ""
+        if context:
+            if context.get("episode_number"):
+                context_section += f"\nThis is Episode {context['episode_number']} of a campaign."
+            if context.get("cliff_hanger"):
+                context_section += f"\nEnd with this cliff-hanger hook: {context['cliff_hanger']}"
+
+        user_prompt = (
+            f"{self.VIDEO_SCRIPT_PROMPT}\n\n"
+            f"Platform: {platform}\n"
+            f"Max duration: {spec['max_seconds']} seconds\n"
+            f"Style: {spec['style']}\n"
+            f"Topic: {topic}\n"
+            f"{context_section}\n\n"
+            f"Generate the video script as JSON."
+        )
+
+        raw = await self._call_azure_openai(user_prompt)
+        if not raw:
+            return {"content": "", "error": "AI generation failed", "safe": False}
+
+        raw = strip_pii(raw)
+        is_safe = check_content_safety(raw)
+        if not is_safe:
+            return {"content": raw, "safe": False, "error": "Video script failed safety filter"}
+
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            script = json.loads(raw[start:end]) if start >= 0 else {}
+        except json.JSONDecodeError:
+            script = {}
+
+        caption = script.get("voiceover_text", raw[:150])
+        voice = PLATFORM_VOICE.get(platform, PLATFORM_VOICE.get("tiktok", {}))
+        max_len = voice.get("max_length", 150)
+        if len(caption) > max_len:
+            caption = caption[:max_len - 3] + "..."
+
+        return {
+            "content": caption,
+            "platform": platform,
+            "content_type": "video_script",
+            "video_script": script,
+            "safe": True,
+        }
+
     # ── Private Methods ─────────────────────────────────────────────
 
     async def generate_strategic_post(self, platform: str,
@@ -548,8 +629,19 @@ class SkyEyeContentGenerator:
 
     async def get_queue(self, status: Optional[str] = None,
                         platform: Optional[str] = None,
-                        limit: int = 50) -> List[Dict]:
-        """Get content queue items with optional filters."""
+                        limit: int = 50,
+                        respect_schedule: bool = False) -> List[Dict]:
+        """Get content queue items with optional filters.
+
+        Args:
+            status: Filter by status (draft, scheduled, approved, posted, etc.)
+            platform: Filter by platform name
+            limit: Max items to return
+            respect_schedule: If True, only return items whose scheduled_for
+                has passed (or is NULL) AND whose depends_on_post_id
+                dependency is satisfied (posted or NULL). Used by the
+                session engine to enforce episode sequencing.
+        """
         try:
             async with self.db_pool.acquire() as conn:
                 conditions = []
@@ -565,6 +657,15 @@ class SkyEyeContentGenerator:
                     params.append(platform)
                     idx += 1
 
+                if respect_schedule:
+                    conditions.append(
+                        "(scheduled_for IS NULL OR scheduled_for <= NOW())"
+                    )
+                    conditions.append(
+                        "(depends_on_post_id IS NULL OR depends_on_post_id IN "
+                        "(SELECT id FROM skyeye_content_queue WHERE status = 'posted'))"
+                    )
+
                 where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
                 rows = await conn.fetch(f"""
@@ -577,6 +678,7 @@ class SkyEyeContentGenerator:
                             WHEN 'normal' THEN 2
                             WHEN 'low' THEN 3
                         END,
+                        scheduled_for ASC NULLS LAST,
                         created_at DESC
                     LIMIT ${idx}
                 """, *params, limit)

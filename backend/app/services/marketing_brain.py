@@ -648,7 +648,7 @@ class MarketingBrain:
             return []
 
     async def approve_action(self, action_id: int, approved_by: str = "big_nate") -> bool:
-        """Approve a proposed marketing action."""
+        """Approve a proposed marketing action and trigger execution."""
         try:
             async with self.db_pool.acquire() as conn:
                 await conn.execute("""
@@ -656,7 +656,11 @@ class MarketingBrain:
                     SET status = 'approved', approved_at = NOW(), approved_by = $2
                     WHERE id = $1 AND status = 'proposed'
                 """, action_id, approved_by)
-                return True
+
+            result = await self.execute_approved_action(action_id)
+            if result and not result.get("error"):
+                logger.info(f"Action {action_id} approved and executed: {result.get('summary', 'ok')}")
+            return True
         except Exception as e:
             logger.error(f"Failed to approve action {action_id}: {e}")
             return False
@@ -689,3 +693,568 @@ class MarketingBrain:
         except Exception as e:
             logger.error(f"Failed to complete action {action_id}: {e}")
             return False
+
+    # ── Execution Bridge ──────────────────────────────────────────────
+
+    async def execute_approved_action(self, action_id: int) -> Dict[str, Any]:
+        """Route an approved action to its execution handler."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM marketing_actions WHERE id = $1", action_id
+                )
+                if not row:
+                    return {"error": f"Action {action_id} not found"}
+
+                action_type = row["action_type"]
+                params = json.loads(row["parameters"]) if isinstance(row["parameters"], str) else (row["parameters"] or {})
+
+                await conn.execute(
+                    "UPDATE marketing_actions SET status = 'executing', started_at = NOW() WHERE id = $1",
+                    action_id,
+                )
+
+            if action_type == "launch_campaign":
+                result = await self.design_campaign(action_id)
+            elif action_type in ("shift_content_mix", "adjust_schedule"):
+                await self.update_playbook(params)
+                result = {"summary": f"Playbook updated via {action_type}", "action_id": action_id}
+            else:
+                result = await self._execute_single_post(action_id, row, params)
+
+            await self.complete_action(action_id, result)
+            return result
+        except Exception as e:
+            logger.error(f"Execution bridge error for action {action_id}: {e}")
+            return {"error": str(e)}
+
+    async def _execute_single_post(self, action_id: int, row, params: Dict) -> Dict:
+        """Generate and queue a single strategic post."""
+        try:
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            gen = SkyEyeContentGenerator(self.db_pool)
+
+            platform = params.get("platform", "linkedin")
+            topic = row["description"] or row["title"]
+            result = await gen.generate_strategic_post(platform, context={"strategy_pillar": topic})
+
+            if result.get("safe"):
+                queue_id = await gen.queue_content(
+                    platform=platform,
+                    content=result["content"],
+                    content_type=result.get("content_type", "post"),
+                    generated_by="marketing_brain",
+                )
+                return {"summary": f"Post queued for {platform}", "queue_id": queue_id}
+            return {"error": "Content failed safety check"}
+        except Exception as e:
+            logger.error(f"Single post execution error: {e}")
+            return {"error": str(e)}
+
+    # ── Campaign Designer ─────────────────────────────────────────────
+
+    CAMPAIGN_DESIGN_PROMPT = """You are Little Nate's Campaign Architect.
+Design a multi-episode social media campaign based on the proposal below.
+
+Return ONLY valid JSON with this structure:
+{{
+  "episodes": [
+    {{
+      "episode_number": 1,
+      "title": "Episode title",
+      "cliff_hanger_hook": "The hook that makes people come back",
+      "platforms": [
+        {{
+          "platform": "linkedin",
+          "content_angle": "Professional angle for this episode",
+          "content_type": "post"
+        }},
+        {{
+          "platform": "tiktok",
+          "content_angle": "Casual/visual angle for this episode",
+          "content_type": "video_script"
+        }}
+      ]
+    }}
+  ]
+}}
+
+RULES:
+- Each episode should end with a cliff-hanger or audience question
+- Adapt content angle per platform voice
+- Mark video platforms (tiktok, instagram) as content_type "video_script"
+- Mark text platforms (linkedin, reddit, facebook) as content_type "post"
+"""
+
+    async def design_campaign(self, action_id: int) -> Dict[str, Any]:
+        """Design a full multi-episode campaign from an approved marketing action."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                action = await conn.fetchrow(
+                    "SELECT * FROM marketing_actions WHERE id = $1", action_id
+                )
+                if not action:
+                    return {"error": "Action not found"}
+
+            params = json.loads(action["parameters"]) if isinstance(action["parameters"], str) else (action["parameters"] or {})
+            template_name = params.get("template_name")
+            platforms = params.get("platforms", ["linkedin", "reddit", "tiktok", "instagram"])
+            total_episodes = params.get("total_episodes", 5)
+            interval_hours = params.get("interval_hours", 24)
+            ab_enabled = params.get("ab_test_enabled", False)
+            narrative = action["description"] or action["title"]
+
+            template = None
+            if template_name:
+                template = await self._load_template(template_name)
+                if template:
+                    total_episodes = template.get("default_episode_count", total_episodes)
+                    interval_hours = template.get("default_interval_hours", interval_hours)
+                    platforms = template.get("default_platforms", platforms)
+
+            me2me_themes = await self._get_me2me_themes()
+
+            design_prompt = (
+                f"{self.CAMPAIGN_DESIGN_PROMPT}\n\n"
+                f"PROPOSAL: {narrative}\n"
+                f"PLATFORMS: {', '.join(platforms)}\n"
+                f"TOTAL EPISODES: {total_episodes}\n"
+                f"EMOTIONAL THEMES FROM REAL SESSIONS (anonymized): {me2me_themes}\n"
+            )
+            if template:
+                design_prompt += f"\nTEMPLATE STRUCTURE: {json.dumps(template.get('episode_structure', []))}\n"
+
+            ai_response = await self._call_azure_openai(design_prompt)
+            if not ai_response:
+                return {"error": "AI campaign design failed"}
+
+            try:
+                start = ai_response.find("{")
+                end = ai_response.rfind("}") + 1
+                plan = json.loads(ai_response[start:end]) if start >= 0 else {"episodes": []}
+            except json.JSONDecodeError:
+                plan = {"episodes": []}
+
+            episodes = plan.get("episodes", [])
+            if not episodes:
+                return {"error": "AI returned no episodes"}
+
+            async with self.db_pool.acquire() as conn:
+                campaign_row = await conn.fetchrow("""
+                    INSERT INTO storytelling_campaigns
+                        (title, narrative_premise, campaign_type, template_name,
+                         platforms, total_episodes, episode_interval_hours,
+                         ab_test_enabled, ab_test_config, marketing_action_id,
+                         min_engagement_threshold, extend_engagement_threshold,
+                         drip_touchpoints, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10,
+                            $11, $12, $13::jsonb, 'active')
+                    RETURNING id
+                """,
+                    action["title"], narrative,
+                    "storytelling" if template_name else "standard",
+                    template_name, platforms, len(episodes), interval_hours,
+                    ab_enabled, json.dumps(params.get("ab_config", {})),
+                    action_id,
+                    params.get("min_engagement_threshold", 0),
+                    params.get("extend_engagement_threshold", 0),
+                    json.dumps(params.get("drip_touchpoints", [])),
+                )
+                campaign_id = campaign_row["id"]
+
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            gen = SkyEyeContentGenerator(self.db_pool)
+
+            total_queued = 0
+            prev_episode_last_id = None
+            now = datetime.utcnow()
+
+            for ep in episodes:
+                ep_num = ep.get("episode_number", 1)
+                ep_platforms = ep.get("platforms", [{"platform": p, "content_angle": narrative, "content_type": "post"} for p in platforms])
+                scheduled_time = now + timedelta(hours=interval_hours * (ep_num - 1))
+                ep_queue_ids = []
+
+                for seq_idx, plat_spec in enumerate(ep_platforms):
+                    plat = plat_spec.get("platform", "linkedin")
+                    angle = plat_spec.get("content_angle", narrative)
+                    ctype = plat_spec.get("content_type", "post")
+
+                    if ctype == "video_script":
+                        content_result = await self._generate_video_content(gen, plat, angle, ep)
+                    else:
+                        content_result = await gen.generate_post(plat, angle, context={
+                            "strategy_pillar": narrative,
+                            "episode": ep_num,
+                            "cliff_hanger": ep.get("cliff_hanger_hook", ""),
+                        })
+
+                    if not content_result.get("safe") and not content_result.get("content"):
+                        continue
+
+                    video_script_json = None
+                    content_text = content_result.get("content", "")
+                    if ctype == "video_script" and content_result.get("video_script"):
+                        video_script_json = json.dumps(content_result["video_script"])
+
+                    async with self.db_pool.acquire() as conn:
+                        row = await conn.fetchrow("""
+                            INSERT INTO skyeye_content_queue
+                                (platform, content_text, content_type, status, priority,
+                                 scheduled_for, generated_by, campaign_id, episode_number,
+                                 sequence_order, depends_on_post_id, ab_variant,
+                                 video_script, created_at, updated_at)
+                            VALUES ($1, $2, $3, $4, 'normal', $5, 'campaign_designer',
+                                    $6, $7, $8, $9, $10, $11::jsonb, NOW(), NOW())
+                            RETURNING id
+                        """,
+                            plat, content_text, ctype,
+                            "scheduled" if scheduled_time else "draft",
+                            scheduled_time, campaign_id, ep_num, seq_idx,
+                            prev_episode_last_id,
+                            "A" if (ab_enabled and seq_idx < len(ep_platforms) // 2) else
+                            ("B" if ab_enabled else None),
+                            video_script_json,
+                        )
+                        ep_queue_ids.append(row["id"])
+                        total_queued += 1
+
+                if ep_queue_ids:
+                    await self._apply_cross_thread_refs(ep_queue_ids)
+                    prev_episode_last_id = ep_queue_ids[-1]
+
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE storytelling_campaigns SET current_episode = 1 WHERE id = $1",
+                    campaign_id,
+                )
+
+            result = {
+                "summary": f"Campaign designed: {len(episodes)} episodes, {total_queued} posts queued",
+                "campaign_id": campaign_id,
+                "episodes": len(episodes),
+                "posts_queued": total_queued,
+            }
+            logger.info(f"Campaign {campaign_id} designed: {result['summary']}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Campaign design error: {e}")
+            return {"error": str(e)}
+
+    async def generate_next_episode(self, campaign_id: int,
+                                     audience_feedback: Dict = None,
+                                     ab_winner: str = None) -> Dict[str, Any]:
+        """Generate the next episode for an active campaign using audience feedback."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                campaign = await conn.fetchrow(
+                    "SELECT * FROM storytelling_campaigns WHERE id = $1", campaign_id
+                )
+                if not campaign:
+                    return {"error": "Campaign not found"}
+                if campaign["status"] != "active":
+                    return {"error": f"Campaign is {campaign['status']}, not active"}
+
+                next_ep = campaign["current_episode"] + 1
+                if next_ep > campaign["total_episodes"]:
+                    return {"error": "All episodes completed"}
+
+                prev_posts = await conn.fetch("""
+                    SELECT content_text, platform, episode_number
+                    FROM skyeye_content_queue
+                    WHERE campaign_id = $1 AND episode_number = $2
+                    ORDER BY sequence_order
+                """, campaign_id, campaign["current_episode"])
+
+            prev_summary = "; ".join(
+                f"[{p['platform']}] {p['content_text'][:150]}" for p in prev_posts
+            ) if prev_posts else "No previous content"
+
+            feedback_str = json.dumps(audience_feedback or {}, default=str)[:500]
+            me2me_themes = await self._get_me2me_themes()
+
+            template = None
+            if campaign["template_name"]:
+                template = await self._load_template(campaign["template_name"])
+
+            ep_prompt_template = ""
+            if template and template.get("narrative_prompts", {}).get("episode_prompt_template"):
+                ep_prompt_template = template["narrative_prompts"]["episode_prompt_template"]
+                ep_structure = template.get("episode_structure", [])
+                ep_info = next((e for e in ep_structure if e.get("episode") == next_ep), {})
+                ep_prompt_template = (
+                    ep_prompt_template
+                    .replace("{{episode_number}}", str(next_ep))
+                    .replace("{{total_episodes}}", str(campaign["total_episodes"]))
+                    .replace("{{episode_title}}", ep_info.get("title", f"Episode {next_ep}"))
+                    .replace("{{episode_purpose}}", ep_info.get("purpose", "continue the story"))
+                    .replace("{{previous_episode}}", prev_summary[:300])
+                    .replace("{{audience_feedback}}", feedback_str[:300])
+                    .replace("{{me2me_themes}}", me2me_themes[:300])
+                )
+
+            prompt = ep_prompt_template or (
+                f"Generate Episode {next_ep} of {campaign['total_episodes']} "
+                f"for campaign '{campaign['title']}'.\n"
+                f"Premise: {campaign['narrative_premise']}\n"
+                f"Previous episode content: {prev_summary[:300]}\n"
+                f"Audience feedback: {feedback_str[:300]}\n"
+                f"Emotional themes: {me2me_themes[:300]}\n"
+                f"{'A/B winner approach: ' + ab_winner if ab_winner else ''}\n"
+                f"Write platform-adapted content. End with a cliff-hanger."
+            )
+
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            gen = SkyEyeContentGenerator(self.db_pool)
+
+            platforms = campaign["platforms"] or ["linkedin", "reddit", "tiktok"]
+            now = datetime.utcnow()
+            scheduled_time = now + timedelta(hours=campaign["episode_interval_hours"])
+
+            async with self.db_pool.acquire() as conn:
+                last_posted = await conn.fetchval("""
+                    SELECT MAX(id) FROM skyeye_content_queue
+                    WHERE campaign_id = $1 AND episode_number = $2 AND status = 'posted'
+                """, campaign_id, campaign["current_episode"])
+
+            ep_queue_ids = []
+            for seq_idx, plat in enumerate(platforms):
+                post_result = await gen.generate_post(plat, prompt)
+                if not post_result.get("safe"):
+                    continue
+
+                async with self.db_pool.acquire() as conn:
+                    row = await conn.fetchrow("""
+                        INSERT INTO skyeye_content_queue
+                            (platform, content_text, content_type, status, priority,
+                             scheduled_for, generated_by, campaign_id, episode_number,
+                             sequence_order, depends_on_post_id, ab_variant,
+                             created_at, updated_at)
+                        VALUES ($1, $2, 'post', 'scheduled', 'normal', $3,
+                                'next_episode_gen', $4, $5, $6, $7, $8, NOW(), NOW())
+                        RETURNING id
+                    """,
+                        plat, post_result["content"], scheduled_time,
+                        campaign_id, next_ep, seq_idx, last_posted,
+                        "A" if (campaign["ab_test_enabled"] and seq_idx < len(platforms) // 2) else
+                        ("B" if campaign["ab_test_enabled"] else None),
+                    )
+                    ep_queue_ids.append(row["id"])
+
+            if ep_queue_ids:
+                await self._apply_cross_thread_refs(ep_queue_ids)
+
+            async with self.db_pool.acquire() as conn:
+                existing_feedback = json.loads(campaign["audience_feedback"]) if isinstance(campaign["audience_feedback"], str) else (campaign["audience_feedback"] or [])
+                existing_feedback.append({
+                    "episode": campaign["current_episode"],
+                    "feedback": audience_feedback or {},
+                    "ab_winner": ab_winner,
+                })
+                await conn.execute("""
+                    UPDATE storytelling_campaigns
+                    SET current_episode = $2, audience_feedback = $3::jsonb, updated_at = NOW()
+                    WHERE id = $1
+                """, campaign_id, next_ep, json.dumps(existing_feedback))
+
+            return {
+                "summary": f"Episode {next_ep} generated: {len(ep_queue_ids)} posts queued",
+                "campaign_id": campaign_id,
+                "episode": next_ep,
+                "posts_queued": len(ep_queue_ids),
+            }
+        except Exception as e:
+            logger.error(f"Next episode generation error: {e}")
+            return {"error": str(e)}
+
+    # ── Campaign Management ───────────────────────────────────────────
+
+    async def get_campaigns(self, status: str = None) -> List[Dict]:
+        """List campaigns with optional status filter."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                if status:
+                    rows = await conn.fetch(
+                        "SELECT * FROM storytelling_campaigns WHERE status = $1 ORDER BY created_at DESC",
+                        status,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        "SELECT * FROM storytelling_campaigns ORDER BY created_at DESC"
+                    )
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to get campaigns: {e}")
+            return []
+
+    async def get_campaign_detail(self, campaign_id: int) -> Dict[str, Any]:
+        """Get full campaign detail with episode posts and feedback."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                campaign = await conn.fetchrow(
+                    "SELECT * FROM storytelling_campaigns WHERE id = $1", campaign_id
+                )
+                if not campaign:
+                    return {"error": "Not found"}
+
+                posts = await conn.fetch("""
+                    SELECT id, platform, content_text, content_type, status,
+                           episode_number, sequence_order, ab_variant, scheduled_for,
+                           posted_at, post_url, cross_thread_refs, video_script
+                    FROM skyeye_content_queue
+                    WHERE campaign_id = $1
+                    ORDER BY episode_number, sequence_order
+                """, campaign_id)
+
+                return {
+                    **dict(campaign),
+                    "posts": [dict(p) for p in posts],
+                }
+        except Exception as e:
+            logger.error(f"Failed to get campaign detail: {e}")
+            return {"error": str(e)}
+
+    async def pause_campaign(self, campaign_id: int) -> bool:
+        """Pause an active campaign."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE storytelling_campaigns SET status = 'paused', updated_at = NOW() WHERE id = $1",
+                    campaign_id,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Failed to pause campaign: {e}")
+            return False
+
+    async def resume_campaign(self, campaign_id: int) -> bool:
+        """Resume a paused campaign."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE storytelling_campaigns SET status = 'active', updated_at = NOW() WHERE id = $1",
+                    campaign_id,
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Failed to resume campaign: {e}")
+            return False
+
+    async def extend_campaign(self, campaign_id: int, extra_episodes: int = 2) -> Dict:
+        """Add more episodes to a running campaign."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE storytelling_campaigns
+                    SET total_episodes = total_episodes + $2, updated_at = NOW()
+                    WHERE id = $1
+                """, campaign_id, extra_episodes)
+                return {"extended_by": extra_episodes}
+        except Exception as e:
+            logger.error(f"Failed to extend campaign: {e}")
+            return {"error": str(e)}
+
+    async def check_engagement_thresholds(self, campaign_id: int,
+                                           episode_engagement: Dict) -> Optional[str]:
+        """Check if a campaign should be paused or extended based on engagement.
+
+        Returns: 'pause', 'extend', or None.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                campaign = await conn.fetchrow(
+                    "SELECT * FROM storytelling_campaigns WHERE id = $1", campaign_id
+                )
+                if not campaign:
+                    return None
+
+            total = sum(episode_engagement.get(k, 0) for k in ("comments", "likes", "shares"))
+            min_thresh = campaign["min_engagement_threshold"] or 0
+            ext_thresh = campaign["extend_engagement_threshold"] or 0
+
+            if min_thresh > 0 and total < min_thresh:
+                await self.pause_campaign(campaign_id)
+                logger.warning(f"Campaign {campaign_id} auto-paused: engagement {total} < threshold {min_thresh}")
+                return "pause"
+
+            if ext_thresh > 0 and total > ext_thresh:
+                await self.extend_campaign(campaign_id, extra_episodes=2)
+                logger.info(f"Campaign {campaign_id} auto-extended: engagement {total} > threshold {ext_thresh}")
+                return "extend"
+
+            return None
+        except Exception as e:
+            logger.error(f"Engagement threshold check error: {e}")
+            return None
+
+    # ── Private Helpers ───────────────────────────────────────────────
+
+    async def _load_template(self, name: str) -> Optional[Dict]:
+        """Load a campaign template by name."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM campaign_templates WHERE name = $1", name
+                )
+                if not row:
+                    return None
+                return {
+                    "name": row["name"],
+                    "description": row["description"],
+                    "episode_structure": json.loads(row["episode_structure"]) if isinstance(row["episode_structure"], str) else row["episode_structure"],
+                    "default_platforms": row["default_platforms"],
+                    "default_episode_count": row["default_episode_count"],
+                    "default_interval_hours": row["default_interval_hours"],
+                    "narrative_prompts": json.loads(row["narrative_prompts"]) if isinstance(row["narrative_prompts"], str) else row["narrative_prompts"],
+                }
+        except Exception as e:
+            logger.error(f"Failed to load template {name}: {e}")
+            return None
+
+    async def _get_me2me_themes(self) -> str:
+        """Extract anonymized emotional themes from Me-2-Me for campaign enrichment."""
+        try:
+            from app.services.me2me.legacy_vault_me2me import LegacyVaultMe2Me
+            vault = LegacyVaultMe2Me(self.db_pool)
+            themes = await vault.extract_thematic_content("emotional_themes")
+            return json.dumps(themes, default=str)[:500] if themes else "No themes available"
+        except Exception:
+            return "Me-2-Me themes unavailable"
+
+    async def _generate_video_content(self, gen, platform: str,
+                                       angle: str, episode: Dict) -> Dict:
+        """Generate video script content for a platform."""
+        try:
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            result = await gen.generate_video_script(platform, angle, context={
+                "episode_number": episode.get("episode_number"),
+                "cliff_hanger": episode.get("cliff_hanger_hook", ""),
+            })
+            return result
+        except Exception as e:
+            logger.warning(f"Video script generation failed for {platform}: {e}")
+            return await gen.generate_post(platform, angle)
+
+    async def _apply_cross_thread_refs(self, queue_ids: List[int]):
+        """Link all posts in an episode to each other for cross-platform threading."""
+        if len(queue_ids) < 2:
+            return
+        try:
+            async with self.db_pool.acquire() as conn:
+                posts = await conn.fetch("""
+                    SELECT id, platform FROM skyeye_content_queue WHERE id = ANY($1)
+                """, queue_ids)
+                refs = {str(p["id"]): p["platform"] for p in posts}
+                for post in posts:
+                    other_refs = {
+                        r["platform"]: r["id"]
+                        for r in posts if r["id"] != post["id"]
+                    }
+                    await conn.execute("""
+                        UPDATE skyeye_content_queue
+                        SET cross_thread_refs = $2::jsonb
+                        WHERE id = $1
+                    """, post["id"], json.dumps(other_refs))
+        except Exception as e:
+            logger.error(f"Cross-thread refs error: {e}")

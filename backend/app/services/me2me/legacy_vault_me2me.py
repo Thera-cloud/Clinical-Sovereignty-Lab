@@ -304,3 +304,155 @@ class LegacyVaultMe2Me:
             result["issues"].append(str(e))
 
         return result
+
+    # ── Thematic Content Extraction (for Marketing) ───────────────
+
+    async def extract_thematic_content(self, content_type: str = "emotional_themes") -> Dict[str, Any]:
+        """Extract anonymized thematic content for use in campaign storytelling.
+
+        Returns aggregated emotional themes, relationship patterns, and life
+        transitions — NO PII, NO user-identifiable data.
+
+        Args:
+            content_type: One of 'emotional_themes', 'relationship_patterns',
+                         'life_transitions', 'family_dynamics'
+        """
+        if not self._db:
+            return {"themes": [], "source": "unavailable"}
+
+        try:
+            async with self._db.acquire() as conn:
+                if content_type == "emotional_themes":
+                    return await self._extract_emotional_themes(conn)
+                elif content_type == "relationship_patterns":
+                    return await self._extract_relationship_patterns(conn)
+                elif content_type == "life_transitions":
+                    return await self._extract_life_transitions(conn)
+                elif content_type == "family_dynamics":
+                    return await self._extract_family_dynamics(conn)
+                else:
+                    return {"themes": [], "error": f"Unknown content_type: {content_type}"}
+        except Exception as e:
+            logger.error(f"Thematic extraction error ({content_type}): {e}")
+            return {"themes": [], "error": str(e)}
+
+    async def _extract_emotional_themes(self, conn) -> Dict:
+        """Aggregate emotion distributions across all imprints (fully anonymized)."""
+        try:
+            rows = await conn.fetch("""
+                SELECT emotions FROM me2me_imprint_entries
+                WHERE emotions IS NOT NULL
+                ORDER BY created_at DESC LIMIT 200
+            """)
+            if not rows:
+                return {"themes": ["resilience", "connection", "growth"], "source": "default"}
+
+            emotion_counts: Dict[str, int] = {}
+            for r in rows:
+                emotions = r["emotions"]
+                if isinstance(emotions, str):
+                    import json as _j
+                    try:
+                        emotions = _j.loads(emotions)
+                    except Exception:
+                        continue
+                if isinstance(emotions, dict):
+                    for k, v in emotions.items():
+                        emotion_counts[k] = emotion_counts.get(k, 0) + (int(v) if isinstance(v, (int, float)) else 1)
+                elif isinstance(emotions, list):
+                    for e in emotions:
+                        emotion_counts[str(e)] = emotion_counts.get(str(e), 0) + 1
+
+            top = sorted(emotion_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            return {"themes": [t[0] for t in top], "counts": dict(top), "source": "imprints"}
+        except Exception as e:
+            return {"themes": ["love", "grief", "hope", "anger", "joy"], "source": "fallback", "note": str(e)}
+
+    async def _extract_relationship_patterns(self, conn) -> Dict:
+        """Extract common relationship themes from identity crystals."""
+        try:
+            rows = await conn.fetch("""
+                SELECT life_themes, core_values FROM me2me_identity_crystals
+                WHERE life_themes IS NOT NULL
+                ORDER BY created_at DESC LIMIT 50
+            """)
+            if not rows:
+                return {"patterns": ["trust building", "vulnerability", "repair after conflict"], "source": "default"}
+
+            themes = []
+            for r in rows:
+                lt = r["life_themes"]
+                if isinstance(lt, str):
+                    import json as _j
+                    try:
+                        lt = _j.loads(lt)
+                    except Exception:
+                        continue
+                if isinstance(lt, list):
+                    themes.extend([str(t) for t in lt[:5]])
+                elif isinstance(lt, dict):
+                    themes.extend(list(lt.keys())[:5])
+
+            from collections import Counter
+            top = Counter(themes).most_common(8)
+            return {"patterns": [t[0] for t in top], "source": "crystals"}
+        except Exception:
+            return {"patterns": ["reconnection", "forgiveness", "boundaries"], "source": "fallback"}
+
+    async def _extract_life_transitions(self, conn) -> Dict:
+        """Extract common life transition themes."""
+        try:
+            rows = await conn.fetch("""
+                SELECT themes FROM me2me_imprint_entries
+                WHERE themes IS NOT NULL AND source IN ('session', 'homework')
+                ORDER BY created_at DESC LIMIT 200
+            """)
+            transition_keywords = [
+                "career change", "divorce", "loss", "new baby", "moving",
+                "retirement", "graduation", "marriage", "illness", "recovery",
+                "identity", "coming out", "empty nest", "remarriage",
+            ]
+            found = {}
+            for r in rows:
+                t = str(r["themes"]).lower()
+                for kw in transition_keywords:
+                    if kw in t:
+                        found[kw] = found.get(kw, 0) + 1
+
+            top = sorted(found.items(), key=lambda x: x[1], reverse=True)[:8]
+            return {"transitions": [t[0] for t in top] if top else transition_keywords[:5], "source": "imprints" if top else "default"}
+        except Exception:
+            return {"transitions": ["loss", "identity shift", "new beginnings"], "source": "fallback"}
+
+    async def _extract_family_dynamics(self, conn) -> Dict:
+        """Extract family dynamics themes from family fabrics."""
+        try:
+            rows = await conn.fetch("""
+                SELECT shared_memories FROM me2me_family_fabrics
+                WHERE shared_memories IS NOT NULL
+                ORDER BY created_at DESC LIMIT 30
+            """)
+            if not rows:
+                return {"dynamics": ["intergenerational patterns", "sibling bonds", "parental attachment"], "source": "default"}
+
+            themes = []
+            for r in rows:
+                mem = r["shared_memories"]
+                if isinstance(mem, str):
+                    import json as _j
+                    try:
+                        mem = _j.loads(mem)
+                    except Exception:
+                        continue
+                if isinstance(mem, list):
+                    for m in mem[:5]:
+                        if isinstance(m, dict):
+                            themes.append(m.get("theme", m.get("type", "family")))
+                        else:
+                            themes.append(str(m)[:50])
+
+            from collections import Counter
+            top = Counter(themes).most_common(6)
+            return {"dynamics": [t[0] for t in top], "source": "fabrics"}
+        except Exception:
+            return {"dynamics": ["legacy", "connection", "repair"], "source": "fallback"}
