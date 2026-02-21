@@ -9,7 +9,7 @@ Requires: google-api-python-client
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import httpx
@@ -72,9 +72,13 @@ class YouTubeAdapter(SocialPlatformAdapter):
         self._access_token = tokens["access_token"]
         self._channel_id = tokens.get("account_id")
 
-        # Check expiry
-        if tokens.get("token_expiry") and tokens["token_expiry"] < datetime.utcnow():
-            return await self.refresh_token()
+        token_expiry = tokens.get("token_expiry")
+        if token_expiry:
+            now_utc = datetime.now(timezone.utc)
+            if token_expiry.tzinfo is None:
+                token_expiry = token_expiry.replace(tzinfo=timezone.utc)
+            if token_expiry < now_utc + timedelta(minutes=5):
+                return await self.refresh_token()
 
         # Verify token
         try:
@@ -129,7 +133,7 @@ class YouTubeAdapter(SocialPlatformAdapter):
 
                 if resp.status_code == 200 and "access_token" in data:
                     self._access_token = data["access_token"]
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 3600)
                     )
                     await self._save_tokens(
@@ -187,7 +191,7 @@ class YouTubeAdapter(SocialPlatformAdapter):
                     return False
 
                 self._access_token = data["access_token"]
-                expiry = datetime.utcnow() + timedelta(
+                expiry = datetime.now(timezone.utc) + timedelta(
                     seconds=data.get("expires_in", 3600)
                 )
 

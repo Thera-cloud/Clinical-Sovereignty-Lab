@@ -1,9 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
-
-/// Debug-only print: suppressed in production builds.
-// ignore: avoid_print
-void _debugLog(Object? message) { if (kDebugMode) print(message); }
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
 import 'package:speech_to_text/speech_to_text.dart';
@@ -20,6 +16,10 @@ import 'package:path_provider/path_provider.dart';
 // Conditional import: Web Audio API player for web, no-op stub for mobile
 import 'web_pcm_player_stub.dart'
     if (dart.library.js_util) 'web_pcm_player.dart';
+
+/// Debug-only print: suppressed in production builds.
+// ignore: avoid_print
+void _debugLog(Object? message) { if (kDebugMode) print(message); }
 
 // =============================================================================
 // VAGUS ENGINE - Audio/Voice Handler
@@ -172,7 +172,7 @@ class VagusEngine {
 
   /// Process a complete MP3 audio buffer (from Mini-TTS).
   /// Unlike PCM chunks, MP3 is a single complete file.
-  void processMp3Audio(String base64Data) {
+  Future<void> processMp3Audio(String base64Data) async {
     try {
       final bytes = base64Decode(base64Data);
       if (kIsWeb) {
@@ -323,15 +323,14 @@ class NateVoice {
   bool _isSpeaking = false;
   bool get isSpeaking => _isSpeaking;
 
-  /// Fired when Nate starts speaking (first audio chunk arrives)
   VoidCallback? onStart;
-  /// Fired when Nate finishes speaking (tts_done received AND audio finishes playing)
   VoidCallback? onDone;
 
   bool _ttsDoneReceived = false;
+  String _currentRequestId = "";
+  WebSocketChannel? _lastSocket;
+  int _requestCounter = 0;
 
-  /// Initialize the audio player. Must be called in response to a user gesture
-  /// to satisfy browser autoplay policy.
   void initialize() {
     _audio.initializePlayer();
     _audio.onPlaybackComplete = _onAudioDrained;
@@ -344,23 +343,34 @@ class NateVoice {
     }
   }
 
-  /// Send a TTS request to the bridge server.
-  /// The bridge will open an Azure Realtime session and stream audio back.
   void speak(String text, WebSocketChannel socket) {
     if (text.trim().isEmpty) return;
+
+    // Stop any in-flight speech (local playback + tell backend to cancel)
+    if (_isSpeaking || _currentRequestId.isNotEmpty) {
+      _cancelCurrentTts(socket);
+    }
+
+    _requestCounter++;
+    _currentRequestId = "tts_${DateTime.now().millisecondsSinceEpoch}_$_requestCounter";
+    _lastSocket = socket;
     _ttsDoneReceived = false;
     _isSpeaking = true;
     onStart?.call();
     socket.sink.add(json.encode({
       "type": "tts_speak",
       "text": text,
+      "request_id": _currentRequestId,
     }));
-    _debugLog(">>> [NATE_VOICE] Sent tts_speak: ${text.substring(0, text.length.clamp(0, 50))}...");
+    _debugLog(">>> [NATE_VOICE] Sent tts_speak rid=$_currentRequestId: ${text.substring(0, text.length.clamp(0, 50))}...");
   }
 
-  /// Route incoming `nate_audio_delta` payload here.
-  /// [format] is "pcm" (default, from Realtime API) or "mp3" (from Mini-TTS).
-  void handleAudioDelta(String base64Payload, {String format = "pcm"}) {
+  void handleAudioDelta(String base64Payload, {String format = "pcm", String requestId = ""}) {
+    // Ignore audio from a superseded request
+    if (requestId.isNotEmpty && requestId != _currentRequestId) {
+      _debugLog(">>> [NATE_VOICE] Ignoring stale audio rid=$requestId (current=$_currentRequestId)");
+      return;
+    }
     if (!_isSpeaking) {
       _isSpeaking = true;
       onStart?.call();
@@ -372,23 +382,36 @@ class NateVoice {
     }
   }
 
-  /// Route incoming `tts_done` message here.
-  void handleTtsDone() {
-    _debugLog(">>> [NATE_VOICE] tts_done received");
+  void handleTtsDone({String requestId = ""}) {
+    if (requestId.isNotEmpty && requestId != _currentRequestId) {
+      _debugLog(">>> [NATE_VOICE] Ignoring stale tts_done rid=$requestId");
+      return;
+    }
+    _debugLog(">>> [NATE_VOICE] tts_done received rid=$requestId");
     _ttsDoneReceived = true;
-    // Queue a short trailing silence so the audio doesn't cut off abruptly
     _audio.queueTrailingSilence(durationMs: 400);
-    // _onAudioDrained will fire when all audio (including trailing silence) completes
   }
 
-  /// Stop speaking immediately.
+  void _cancelCurrentTts(WebSocketChannel socket) {
+    _audio.stopPlayback();
+    try {
+      socket.sink.add(json.encode({"type": "tts_cancel"}));
+    } catch (_) {}
+    _debugLog(">>> [NATE_VOICE] Sent tts_cancel (superseding rid=$_currentRequestId)");
+  }
+
   void stop() {
     _audio.stopPlayback();
+    if (_lastSocket != null && _currentRequestId.isNotEmpty) {
+      try {
+        _lastSocket!.sink.add(json.encode({"type": "tts_cancel"}));
+      } catch (_) {}
+    }
     _isSpeaking = false;
     _ttsDoneReceived = false;
+    _currentRequestId = "";
   }
 
-  /// Dispose of resources.
   void dispose() {
     stop();
     _audio.disposeAudio();

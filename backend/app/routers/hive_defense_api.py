@@ -8,12 +8,15 @@ All endpoints require ADMIN role authentication.
 
 from __future__ import annotations
 
+import base64
 import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, Form
+from pydantic import BaseModel
+from typing import List, Optional
 
 from app.services.api_server import require_admin
 
@@ -243,7 +246,8 @@ async def heartbeat_registry(request: Request):
     """Get heartbeat registry status."""
     registry = _get_security(request, "heartbeat_registry")
     entities = list(getattr(registry, "_heartbeats", {}).keys())
-    silent = registry.get_silent_entities() if hasattr(registry, "get_silent_entities") else []
+    DEFAULT_SILENCE_NS = 60_000_000_000  # 60 seconds
+    silent = registry.get_silent_entities(DEFAULT_SILENCE_NS) if hasattr(registry, "get_silent_entities") else []
     return {
         "registered_entities": len(entities),
         "silent_entities": len(silent),
@@ -867,4 +871,520 @@ async def hive_v4_overview(request: Request):
             "webhook_rate_limit": True,
         },
         "counts": v4_counts,
+    }
+
+
+# =============================================================================
+# HIVE INSPECT — Content Analysis Endpoint
+# =============================================================================
+
+class InspectRequest(BaseModel):
+    content: str
+    content_type: str = "text"  # "email", "url", "text", "raw_headers"
+    from_address: str = ""
+    subject: str = ""
+    raw_headers: str = ""
+    attachment_names: List[str] = []
+
+
+@router.post("/v4/inspect")
+async def inspect_content(body: InspectRequest):
+    """
+    Submit any content (email body, URL, suspicious text) for Hive analysis.
+    Runs through: PhishingDetector + AdminContactShield + ContentSentinel.
+    Returns structured verdict with per-system breakdown.
+    """
+    from app.services.security.phishing_detector import analyze as phishing_analyze
+
+    results: dict = {"systems": {}}
+
+    # 1. Phishing Detector
+    phishing_verdict = phishing_analyze(
+        content=body.content,
+        content_type=body.content_type,
+        from_address=body.from_address,
+        subject=body.subject,
+        raw_headers=body.raw_headers,
+        attachment_names=body.attachment_names or None,
+    )
+    results["phishing"] = phishing_verdict.to_dict()
+    results["systems"]["phishing_detector"] = {
+        "verdict": phishing_verdict.verdict,
+        "score": phishing_verdict.score,
+    }
+
+    # 2. Admin Contact Shield — check for extraction attempts
+    try:
+        from app.services.security.admin_contact_shield import get_shield
+        shield = get_shield()
+        extraction_score = shield.score_extraction_attempt(body.content)
+        contains_pii = shield.contains_protected_contact(body.content)
+        results["systems"]["admin_shield"] = {
+            "extraction_attempt_score": extraction_score,
+            "contains_admin_pii": contains_pii,
+            "verdict": "MALICIOUS" if extraction_score >= 0.7 else "SUSPICIOUS" if contains_pii else "CLEAN",
+        }
+    except Exception as e:
+        results["systems"]["admin_shield"] = {"error": str(e)}
+
+    # 3. Content Sentinel — injection / anomaly check (if loaded in hive)
+    try:
+        from uuid import uuid4 as _uuid4
+        hive_v4 = getattr(body, "_request", None)
+        sentinel = None
+        # Try to get from app state if available via request context
+        # Fallback: import and instantiate
+        if sentinel is None:
+            from app.services.security.content_sentinel import ContentSentinel
+            sentinel = ContentSentinel()
+        payload = {"content": body.content, "subject": body.subject, "from": body.from_address}
+        sentinel_result = await sentinel.inspect_payload(
+            entity_id=_uuid4(),  # anonymous inspection
+            payload=payload,
+            entity_type="admin_inspection",
+        )
+        results["systems"]["content_sentinel"] = {
+            "verdict": sentinel_result.verdict.value if hasattr(sentinel_result.verdict, "value") else str(sentinel_result.verdict),
+            "checks_passed": sentinel_result.checks_passed if hasattr(sentinel_result, "checks_passed") else None,
+        }
+    except Exception as e:
+        results["systems"]["content_sentinel"] = {"verdict": "UNAVAILABLE", "note": str(e)[:120]}
+
+    # Compute aggregate verdict
+    verdicts = []
+    verdicts.append(phishing_verdict.verdict)
+    for sys_name, sys_result in results["systems"].items():
+        v = sys_result.get("verdict", "CLEAN")
+        if v in ("MALICIOUS", "REJECT_AND_ALARM", "REJECT_AND_INVESTIGATE"):
+            verdicts.append("MALICIOUS")
+        elif v in ("SUSPICIOUS", "QUARANTINE_FOR_REVIEW", "PASS_WITH_FLAG"):
+            verdicts.append("SUSPICIOUS")
+
+    if "MALICIOUS" in verdicts:
+        aggregate = "MALICIOUS"
+    elif "SUSPICIOUS" in verdicts:
+        aggregate = "SUSPICIOUS"
+    else:
+        aggregate = "CLEAN"
+
+    results["aggregate_verdict"] = aggregate
+    results["aggregate_score"] = phishing_verdict.score
+    results["recommendations"] = phishing_verdict.recommendations
+
+    return results
+
+
+@router.post("/v4/inspect-url")
+async def inspect_url(url: str = ""):
+    """Quick URL-only inspection endpoint (used by Nate Guardian link checks)."""
+    from app.services.security.phishing_detector import analyze as phishing_analyze
+
+    if not url:
+        raise HTTPException(400, "URL required")
+
+    verdict = phishing_analyze(content=url, content_type="url")
+    return verdict.to_dict()
+
+
+# =============================================================================
+# GMAIL HIVE MONITOR — Status & Control
+# =============================================================================
+
+@router.get("/v4/email-monitor/status")
+async def email_monitor_status():
+    """Return current Gmail Hive Monitor status for dashboard."""
+    from app.services.security.gmail_hive_monitor import get_monitor
+    monitor = get_monitor()
+    return monitor.get_status()
+
+
+@router.post("/v4/email-monitor/start")
+async def email_monitor_start():
+    """Start the Gmail Hive Monitor background polling."""
+    from app.services.security.gmail_hive_monitor import get_monitor
+    monitor = get_monitor()
+    if monitor.is_running:
+        return {"status": "already_running", "monitored": monitor.monitored_count}
+    await monitor.start()
+    return {"status": "started", "monitored": monitor.monitored_count}
+
+
+@router.post("/v4/email-monitor/stop")
+async def email_monitor_stop():
+    """Stop the Gmail Hive Monitor."""
+    from app.services.security.gmail_hive_monitor import get_monitor
+    monitor = get_monitor()
+    await monitor.stop()
+    return {"status": "stopped"}
+
+
+# =============================================================================
+# THREAT DROPBOX — Manual submission for hunter pursuit
+# =============================================================================
+
+class ThreatDropboxSubmission(BaseModel):
+    threat_type: str   # "url", "email", "phone", "domain", "raw_text"
+    content: str
+    source_note: str = ""
+    auto_hunt: bool = True
+
+
+@router.post("/v4/threat-dropbox/submit")
+async def threat_dropbox_submit(body: ThreatDropboxSubmission):
+    """
+    Submit suspicious content for hunter analysis and pursuit.
+    All reconnaissance runs inside the isolated Sandbox VPS — never from production.
+    """
+    if not body.content or not body.content.strip():
+        raise HTTPException(400, "Content is required")
+    if body.threat_type not in ("url", "email", "phone", "domain", "raw_text"):
+        raise HTTPException(400, "Invalid threat_type. Must be: url, email, phone, domain, raw_text")
+
+    if body.auto_hunt:
+        result = await _sandbox_request(
+            "POST", "/hunt",
+            json_body={
+                "threat_type": body.threat_type,
+                "content": body.content.strip(),
+                "source_note": body.source_note,
+            },
+            timeout=60,
+        )
+        return {
+            "status": "hunting",
+            "hunt_id": result.get("hunt_id", ""),
+            "message": f"Hunter deployed against {body.threat_type} (Sandbox VPS)",
+        }
+    else:
+        from app.services.security.phishing_detector import analyze as phishing_analyze
+        verdict = phishing_analyze(content=body.content, content_type="text")
+        return {
+            "status": "analyzed_only",
+            "verdict": verdict.verdict,
+            "score": verdict.score,
+            "signals": len(verdict.signals),
+        }
+
+
+@router.get("/v4/threat-dropbox/hunts")
+async def threat_dropbox_hunts():
+    """List all hunt operations (from Sandbox VPS)."""
+    try:
+        result = await _sandbox_request("GET", "/hunts", timeout=10)
+        return result
+    except HTTPException:
+        return {"hunts": []}
+
+
+@router.get("/v4/threat-dropbox/hunt/{hunt_id}")
+async def threat_dropbox_hunt_detail(hunt_id: str):
+    """Get full hunt report (from Sandbox VPS)."""
+    result = await _sandbox_request("GET", f"/hunt/{hunt_id}", timeout=10)
+    return result
+
+
+# =============================================================================
+# DETONATION CHAMBER — Proxied to isolated Sandbox VPS (10.13.13.4)
+# =============================================================================
+
+import os as _os
+
+SANDBOX_URL = _os.environ.get("SANDBOX_URL", "http://10.13.13.4:9090")
+SANDBOX_HMAC_KEY = _os.environ.get("SANDBOX_HMAC_KEY", "")
+_DETONATION_CACHE: dict = {}
+
+
+async def _sandbox_request(method: str, path: str, json_body: dict = None, timeout: int = 30):
+    """Proxy a request to the isolated Sandbox VPS over WireGuard."""
+    import aiohttp
+    headers = {}
+    if SANDBOX_HMAC_KEY:
+        headers["X-Sandbox-Key"] = SANDBOX_HMAC_KEY
+    url = f"{SANDBOX_URL}{path}"
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as session:
+            if method == "POST":
+                async with session.post(url, json=json_body, headers=headers) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise HTTPException(resp.status, f"Sandbox error: {text[:200]}")
+                    return await resp.json()
+            else:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise HTTPException(resp.status, f"Sandbox error: {text[:200]}")
+                    return await resp.json()
+    except aiohttp.ClientError as e:
+        raise HTTPException(503, f"Sandbox VPS unreachable: {e}")
+
+
+class DetonateRequest(BaseModel):
+    url: str
+    inject_decoy: bool = True
+
+
+@router.post("/v4/threat-dropbox/detonate")
+async def threat_dropbox_detonate(body: DetonateRequest):
+    """
+    Detonate a URL in the isolated Sandbox VPS headless browser.
+    Proxied over WireGuard to 10.13.13.4 — never runs in the backend process.
+    """
+    if not body.url or not body.url.strip():
+        raise HTTPException(400, "URL is required")
+
+    url = body.url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+
+    result = await _sandbox_request(
+        "POST", "/detonate",
+        json_body={"url": url, "inject_decoy": body.inject_decoy},
+        timeout=45,
+    )
+    det_id = result.get("detonation_id", "")
+    if det_id:
+        _DETONATION_CACHE[det_id] = result
+    return {
+        "status": result.get("status", "detonating"),
+        "detonation_id": det_id,
+        "message": f"Shell browser deployed to {url} (Sandbox VPS)",
+    }
+
+
+@router.get("/v4/threat-dropbox/detonations")
+async def threat_dropbox_detonations():
+    """List all detonation operations (from Sandbox VPS)."""
+    try:
+        result = await _sandbox_request("GET", "/detonations", timeout=10)
+        return result
+    except HTTPException:
+        return {"detonations": list(_DETONATION_CACHE.values())}
+
+
+@router.get("/v4/threat-dropbox/detonation/{det_id}")
+async def threat_dropbox_detonation_detail(det_id: str):
+    """Get full detonation report with screenshots (from Sandbox VPS)."""
+    result = await _sandbox_request("GET", f"/detonation/{det_id}", timeout=10)
+    _DETONATION_CACHE[det_id] = result
+    return result
+
+
+@router.get("/v4/threat-dropbox/detonation/{det_id}/screenshot/{page_idx}")
+async def threat_dropbox_screenshot(det_id: str, page_idx: int):
+    """Get full screenshot for a specific page in a detonation."""
+    from fastapi.responses import Response
+
+    result = await _sandbox_request("GET", f"/detonation/{det_id}", timeout=10)
+    pages = result.get("pages", [])
+    if page_idx >= len(pages):
+        raise HTTPException(404, f"Page {page_idx} not found")
+
+    page = pages[page_idx]
+    screenshot = page.get("screenshot_b64", "")
+    if not screenshot or screenshot.endswith("..."):
+        raise HTTPException(404, "No full screenshot available")
+
+    img_bytes = base64.b64decode(screenshot)
+    return Response(content=img_bytes, media_type="image/png")
+
+
+ALLOWED_UPLOAD_TYPES = {
+    "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
+    "application/pdf",
+    "text/plain", "text/html", "text/csv",
+    "message/rfc822", "application/octet-stream",
+}
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _extract_text_from_file(file_bytes: bytes, content_type: str, filename: str) -> str:
+    """Extract readable text from uploaded files."""
+    import re
+
+    # Plain text / HTML / EML / CSV
+    if content_type.startswith("text/") or content_type == "message/rfc822" or filename.endswith((".eml", ".txt", ".csv", ".html")):
+        try:
+            return file_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            return file_bytes.decode("latin-1", errors="replace")
+
+    # PDF
+    if content_type == "application/pdf" or filename.endswith(".pdf"):
+        try:
+            import io
+            try:
+                from PyPDF2 import PdfReader
+                reader = PdfReader(io.BytesIO(file_bytes))
+                pages = []
+                for page in reader.pages[:20]:
+                    text = page.extract_text()
+                    if text:
+                        pages.append(text)
+                return "\n".join(pages)
+            except ImportError:
+                pass
+
+            try:
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    pages = []
+                    for page in pdf.pages[:20]:
+                        text = page.extract_text()
+                        if text:
+                            pages.append(text)
+                    return "\n".join(pages)
+            except ImportError:
+                return "[PDF uploaded — install PyPDF2 or pdfplumber for text extraction]"
+        except Exception as e:
+            return f"[PDF parse error: {e}]"
+
+    # Images — OCR with pytesseract if available
+    if content_type.startswith("image/") or filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+        try:
+            import io
+            from PIL import Image
+            import pytesseract
+            img = Image.open(io.BytesIO(file_bytes))
+            text = pytesseract.image_to_string(img)
+            return text if text.strip() else "[Image uploaded — no text detected by OCR]"
+        except ImportError:
+            return "[Image uploaded — install pytesseract + Pillow for OCR extraction]"
+        except Exception as e:
+            return f"[Image OCR error: {e}]"
+
+    # Unknown
+    if filename.endswith(".eml"):
+        try:
+            return file_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            return "[EML file — could not decode]"
+
+    return f"[Unsupported file type: {content_type}]"
+
+
+def _extract_urls_from_text(text: str) -> list:
+    """Pull URLs from extracted text."""
+    import re
+    url_pattern = re.compile(
+        r'https?://[^\s<>"\')\]]+|www\.[^\s<>"\')\]]+',
+        re.I,
+    )
+    urls = url_pattern.findall(text)
+    return list(dict.fromkeys(u.rstrip(".,;:!?)>") for u in urls))
+
+
+def _extract_emails_from_text(text: str) -> list:
+    """Pull email addresses from text."""
+    import re
+    email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+    return list(set(email_pattern.findall(text)))
+
+
+def _extract_phones_from_text(text: str) -> list:
+    """Pull phone numbers from text."""
+    import re
+    phone_pattern = re.compile(r'[\+]?[(]?[0-9]{1,4}[)]?[-\s\./0-9]{7,15}')
+    matches = phone_pattern.findall(text)
+    return list(set(m.strip() for m in matches if len(m.strip()) >= 10))
+
+
+def _extract_domains_from_text(text: str) -> list:
+    """Pull domain names from text."""
+    import re
+    domain_pattern = re.compile(r'(?:[a-zA-Z0-9\-]+\.)+[a-zA-Z]{2,}')
+    domains = set()
+    for m in domain_pattern.findall(text):
+        m = m.lower().strip(".")
+        if "." in m and not m.endswith((".png", ".jpg", ".gif", ".css", ".js")):
+            domains.add(m)
+    return list(domains)
+
+
+@router.post("/v4/threat-dropbox/upload")
+async def threat_dropbox_upload(
+    file: UploadFile = File(...),
+    source_note: str = Form(""),
+    auto_hunt: bool = Form(True),
+):
+    """
+    Accept file uploads (images, PDFs, text, emails) for threat analysis.
+    Extracts text/URLs/emails locally, then proxies recon to the Sandbox VPS.
+    """
+    content_type = file.content_type or "application/octet-stream"
+    filename = file.filename or "unknown"
+
+    if content_type not in ALLOWED_UPLOAD_TYPES and not filename.endswith((".eml", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".csv", ".html")):
+        raise HTTPException(400, f"Unsupported file type: {content_type}. Accepted: images, PDF, text, HTML, EML")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_SIZE:
+        raise HTTPException(400, f"File too large (max {MAX_UPLOAD_SIZE // (1024*1024)} MB)")
+    if len(file_bytes) == 0:
+        raise HTTPException(400, "Empty file")
+
+    extracted_text = _extract_text_from_file(file_bytes, content_type, filename)
+
+    urls = _extract_urls_from_text(extracted_text)
+    emails = _extract_emails_from_text(extracted_text)
+    phones = _extract_phones_from_text(extracted_text)
+    domains = _extract_domains_from_text(extracted_text)
+
+    extraction_summary = {
+        "filename": filename,
+        "content_type": content_type,
+        "file_size": len(file_bytes),
+        "text_length": len(extracted_text),
+        "urls_found": urls[:20],
+        "emails_found": emails[:20],
+        "phones_found": phones[:20],
+        "domains_found": domains[:20],
+        "extracted_preview": extracted_text[:500],
+    }
+
+    hunt_results = []
+
+    if auto_hunt and (urls or emails or domains):
+        hunt_content = extracted_text[:2000]
+        if urls:
+            hunt_content += "\n\nURLs found:\n" + "\n".join(urls[:10])
+        if emails:
+            hunt_content += "\n\nEmails found:\n" + "\n".join(emails[:10])
+
+        if urls:
+            threat_type = "email" if emails else "raw_text"
+        elif emails:
+            threat_type = "email"
+        elif domains:
+            threat_type = "domain"
+        else:
+            threat_type = "raw_text"
+
+        note = f"File: {filename}" + (f" | {source_note}" if source_note else "")
+
+        try:
+            result = await _sandbox_request(
+                "POST", "/hunt",
+                json_body={
+                    "threat_type": threat_type,
+                    "content": hunt_content,
+                    "source_note": note,
+                },
+                timeout=60,
+            )
+            hunt_results.append(result.get("hunt_id", ""))
+        except HTTPException as e:
+            logger.warning("Sandbox hunt failed for uploaded file %s: %s", filename, e.detail)
+
+    return {
+        "status": "processed",
+        "extraction": extraction_summary,
+        "hunts_launched": len(hunt_results),
+        "hunt_ids": hunt_results,
+        "message": (
+            f"Extracted {len(urls)} URLs, {len(emails)} emails, "
+            f"{len(phones)} phones, {len(domains)} domains from {filename}"
+        ),
     }

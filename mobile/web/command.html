@@ -1444,13 +1444,19 @@
                     document.getElementById('serverStatus').classList.add('green');
                     document.getElementById('serverStatusText').textContent = 'Bridge Online';
                     
-                    // Authenticate
-                    socket.send(JSON.stringify({
-                        type: 'login_request',
-                        username: sessionStorage.getItem("username") || profile.name,
-                        password: sessionStorage.getItem('password'),
-                        expected_role: profile.role || 'ADMIN'
-                    }));
+                    // Authenticate via token (never send password over reconnect)
+                    const storedToken = sessionStorage.getItem('token');
+                    const hwId = profile.hardware_id || profile.id || '';
+                    if (storedToken && hwId) {
+                        socket.send(JSON.stringify({
+                            type: 'auth',
+                            hardware_id: hwId,
+                            token: storedToken,
+                        }));
+                    } else {
+                        console.warn('No token/hardware_id for reconnect — redirecting to login');
+                        window.location.href = 'index.html';
+                    }
                 };
 
                 socket.onclose = () => {
@@ -1469,7 +1475,6 @@
         function handleMessage(event) {
             try {
                 const data = JSON.parse(event.data);
-                console.log('Received:', data);
 
                 switch(data.type) {
                     case 'login_success':
@@ -1500,6 +1505,12 @@
                         break;
                     case 'pending_coaches':
                         updatePendingApprovals(data.coaches);
+                        break;
+                    case 'session_frozen':
+                        if (!window._frozenAlerted) {
+                            window._frozenAlerted = true;
+                            alert('SESSION FROZEN by Nate Sentinel: ' + (data.reason || 'Suspicious activity detected.'));
+                        }
                         break;
                 }
             } catch (e) {

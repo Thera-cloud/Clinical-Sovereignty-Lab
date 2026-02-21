@@ -54,6 +54,101 @@ class MarketingBrain:
 
     # ── Playbook CRUD ────────────────────────────────────────────────
 
+    async def ensure_playbook_exists(self) -> bool:
+        """Seed a default playbook if none exists."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM marketing_playbook)"
+                )
+                if exists:
+                    return True
+
+                default_pillars = json.dumps([
+                    {"name": "Emotional Wellness", "weight": 0.35,
+                     "description": "Content about emotional health, self-awareness, and healing"},
+                    {"name": "Relationship Intelligence", "weight": 0.25,
+                     "description": "Family dynamics, couple therapy insights, attachment styles"},
+                    {"name": "AI-Powered Therapy", "weight": 0.20,
+                     "description": "How Little Nate works, AI companion benefits, tech + therapy"},
+                    {"name": "Clinical Research", "weight": 0.10,
+                     "description": "Nevedal formula insights, coherence science, evidence-based approaches"},
+                    {"name": "Community Stories", "weight": 0.10,
+                     "description": "Success stories, testimonials, community engagement"},
+                ])
+                default_audiences = json.dumps([
+                    {"name": "Therapy-Curious Adults", "age_range": "25-45",
+                     "platforms": ["instagram", "tiktok", "youtube"]},
+                    {"name": "Mental Health Professionals", "age_range": "30-55",
+                     "platforms": ["linkedin", "x", "youtube"]},
+                    {"name": "Parents & Families", "age_range": "30-50",
+                     "platforms": ["facebook", "instagram", "pinterest"]},
+                ])
+                default_funnels = json.dumps([
+                    {"name": "Social → Quiz → Trial", "stages": ["awareness", "engagement", "quiz", "trial", "conversion"]},
+                    {"name": "Content → Email Drip → Signup", "stages": ["content", "subscribe", "drip", "signup"]},
+                ])
+                default_benchmarks = json.dumps({
+                    "engagement_rate_target": 0.03,
+                    "follower_growth_weekly": 50,
+                    "quiz_completion_rate": 0.65,
+                    "trial_to_paid_rate": 0.15,
+                })
+                empty_json = json.dumps([])
+                default_content_mix = json.dumps({
+                    "instagram": {
+                        "emotional_wellness": 0.40, "community_stories": 0.25,
+                        "ai_powered_therapy": 0.20, "relationship_intelligence": 0.15,
+                    },
+                    "tiktok": {
+                        "emotional_wellness": 0.45, "community_stories": 0.30,
+                        "ai_powered_therapy": 0.15, "clinical_research": 0.10,
+                    },
+                    "linkedin": {
+                        "clinical_research": 0.35, "ai_powered_therapy": 0.30,
+                        "relationship_intelligence": 0.20, "emotional_wellness": 0.15,
+                    },
+                    "x": {
+                        "emotional_wellness": 0.30, "ai_powered_therapy": 0.30,
+                        "clinical_research": 0.20, "community_stories": 0.20,
+                    },
+                    "youtube": {
+                        "emotional_wellness": 0.30, "relationship_intelligence": 0.25,
+                        "ai_powered_therapy": 0.25, "clinical_research": 0.20,
+                    },
+                    "facebook": {
+                        "community_stories": 0.35, "emotional_wellness": 0.30,
+                        "relationship_intelligence": 0.20, "ai_powered_therapy": 0.15,
+                    },
+                    "reddit": {
+                        "clinical_research": 0.30, "ai_powered_therapy": 0.30,
+                        "emotional_wellness": 0.25, "community_stories": 0.15,
+                    },
+                    "pinterest": {
+                        "emotional_wellness": 0.50, "community_stories": 0.30,
+                        "relationship_intelligence": 0.20,
+                    },
+                })
+
+                await conn.execute("""
+                    INSERT INTO marketing_playbook
+                        (content_pillars, target_audiences, conversion_funnels,
+                         performance_benchmarks, competitive_notes, active_campaigns,
+                         regional_focus, collaboration_targets, content_mix,
+                         posting_schedule, version, updated_at)
+                    VALUES ($1::jsonb, $2::jsonb, $3::jsonb, $4::jsonb,
+                            $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb,
+                            $9::jsonb, $10::jsonb, 1, NOW())
+                """, default_pillars, default_audiences, default_funnels,
+                     default_benchmarks, empty_json, empty_json,
+                     empty_json, empty_json, default_content_mix, empty_json)
+
+                logger.info("Marketing playbook seeded with defaults")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to seed playbook: {e}")
+            return False
+
     async def get_playbook(self) -> Dict[str, Any]:
         """Get the current marketing playbook."""
         import time
@@ -66,6 +161,11 @@ class MarketingBrain:
                 row = await conn.fetchrow(
                     "SELECT * FROM marketing_playbook ORDER BY id LIMIT 1"
                 )
+                if not row:
+                    await self.ensure_playbook_exists()
+                    row = await conn.fetchrow(
+                        "SELECT * FROM marketing_playbook ORDER BY id LIMIT 1"
+                    )
                 if not row:
                     return {}
                 playbook = {
@@ -340,7 +440,9 @@ class MarketingBrain:
         if not playbook or not results:
             return {"status": "skipped", "reason": "No data available"}
 
-        # Build analysis prompt
+        # Enrich with unified wisdom (therapy patterns, coherence data, web insights)
+        unified_wisdom = await self._get_unified_wisdom_for_strategy()
+
         analysis_data = {
             "current_playbook": {
                 "content_pillars": playbook.get("content_pillars", []),
@@ -348,6 +450,7 @@ class MarketingBrain:
                 "target_audiences": playbook.get("target_audiences", {}),
             },
             "performance_7d": results,
+            "unified_wisdom": unified_wisdom,
         }
 
         prompt = (
@@ -589,13 +692,16 @@ class MarketingBrain:
 
     async def _call_azure_openai(self, prompt: str) -> Optional[str]:
         """Call Azure OpenAI chat completions for strategy analysis."""
-        endpoint = getattr(settings, "AZURE_OPENAI_ENDPOINT", "")
+        endpoint = getattr(settings, "AZURE_OPENAI_ENDPOINT", "").rstrip("/")
         api_key = getattr(settings, "AZURE_API_KEY", "")
         deployment = getattr(settings, "AZURE_OPENAI_CHAT_DEPLOYMENT", "")
 
         if not all([endpoint, api_key, deployment]):
             logger.error("Azure OpenAI not configured for marketing brain")
             return None
+
+        if not endpoint.startswith("http"):
+            endpoint = f"https://{endpoint}"
 
         url = (
             f"{endpoint}/openai/deployments/{deployment}"
@@ -607,14 +713,13 @@ class MarketingBrain:
                 {"role": "system", "content": "You are a marketing strategy analyst for an AI therapy platform."},
                 {"role": "user", "content": prompt},
             ],
-            "temperature": 0.7,
-            "max_tokens": 2000,
+            "max_completion_tokens": 4000,
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers,
-                                        timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                                        timeout=aiohttp.ClientTimeout(total=60)) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         choices = data.get("choices", [])
@@ -783,7 +888,8 @@ RULES:
 - Each episode should end with a cliff-hanger or audience question
 - Adapt content angle per platform voice
 - Mark video platforms (tiktok, instagram) as content_type "video_script"
-- Mark text platforms (linkedin, reddit, facebook) as content_type "post"
+- Mark text platforms (linkedin, reddit, facebook, x) as content_type "post"
+- X (Twitter) posts must be under 280 characters — sharp, punchy, thread-ready
 """
 
     async def design_campaign(self, action_id: int) -> Dict[str, Any]:
@@ -798,7 +904,7 @@ RULES:
 
             params = json.loads(action["parameters"]) if isinstance(action["parameters"], str) else (action["parameters"] or {})
             template_name = params.get("template_name")
-            platforms = params.get("platforms", ["linkedin", "reddit", "tiktok", "instagram"])
+            platforms = params.get("platforms", ["linkedin", "reddit", "tiktok", "instagram", "x"])
             total_episodes = params.get("total_episodes", 5)
             interval_hours = params.get("interval_hours", 24)
             ab_enabled = params.get("ab_test_enabled", False)
@@ -1221,6 +1327,86 @@ RULES:
             return json.dumps(themes, default=str)[:500] if themes else "No themes available"
         except Exception:
             return "Me-2-Me themes unavailable"
+
+    async def _get_unified_wisdom_for_strategy(self) -> Dict:
+        """Pull therapy patterns, coherence data, livestream insights, and web
+        wisdom into a unified context for strategic playbook decisions."""
+        wisdom = {}
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Therapy wisdom: what themes are clients working on?
+                try:
+                    therapy = await conn.fetch("""
+                        SELECT insight_type, COUNT(*) as cnt
+                        FROM wisdom_extractions
+                        WHERE created_at > NOW() - INTERVAL '14 days'
+                        GROUP BY insight_type ORDER BY cnt DESC
+                    """)
+                    wisdom["therapy_themes"] = {r["insight_type"]: r["cnt"] for r in therapy}
+                except Exception:
+                    wisdom["therapy_themes"] = {}
+
+                # Nevedal coherence: avg C_emo and CEE rate
+                try:
+                    coh = await conn.fetchrow("""
+                        SELECT AVG(metric_value) as avg_cemo,
+                               COUNT(*) FILTER (WHERE metric_type = 'cee_event') as cee_count
+                        FROM nevedal_metrics
+                        WHERE created_at > NOW() - INTERVAL '7 days'
+                    """)
+                    wisdom["coherence"] = {
+                        "avg_c_emo": round(float(coh["avg_cemo"] or 0), 3),
+                        "cee_events_7d": coh["cee_count"],
+                    }
+                except Exception:
+                    wisdom["coherence"] = {}
+
+                # Livestream: what are viewers asking about?
+                try:
+                    live_q = await conn.fetch("""
+                        SELECT viewer_question FROM livestream_wisdom
+                        WHERE created_at > NOW() - INTERVAL '30 days'
+                        ORDER BY created_at DESC LIMIT 20
+                    """)
+                    wisdom["livestream_questions"] = [r["viewer_question"][:100] for r in live_q]
+                except Exception:
+                    wisdom["livestream_questions"] = []
+
+                # Web wisdom: what external themes are trending?
+                try:
+                    web = await conn.fetch("""
+                        SELECT themes FROM web_wisdom
+                        WHERE fetched_at > NOW() - INTERVAL '7 days'
+                          AND relevance_score > 0.5
+                        ORDER BY relevance_score DESC LIMIT 10
+                    """)
+                    all_themes = []
+                    for r in web:
+                        if r["themes"]:
+                            all_themes.extend(r["themes"] if isinstance(r["themes"], list) else [])
+                    wisdom["trending_external_themes"] = list(set(all_themes))[:10]
+                except Exception:
+                    wisdom["trending_external_themes"] = []
+
+                # Insight journal: top actionable insights
+                try:
+                    insights = await conn.fetch("""
+                        SELECT title, category, impact_score
+                        FROM sovereign_insight_journal
+                        WHERE NOT applied AND created_at > NOW() - INTERVAL '7 days'
+                        ORDER BY impact_score DESC NULLS LAST LIMIT 5
+                    """)
+                    wisdom["actionable_insights"] = [
+                        {"title": r["title"], "category": r["category"],
+                         "impact": r["impact_score"]}
+                        for r in insights
+                    ]
+                except Exception:
+                    wisdom["actionable_insights"] = []
+
+        except Exception as e:
+            logger.warning(f"Unified wisdom gathering error: {e}")
+        return wisdom
 
     async def _generate_video_content(self, gen, platform: str,
                                        angle: str, episode: Dict) -> Dict:

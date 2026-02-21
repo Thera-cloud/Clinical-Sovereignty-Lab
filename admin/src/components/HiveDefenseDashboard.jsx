@@ -112,7 +112,10 @@ function MiniTable({ headers, rows }) {
 
 async function apiFetch(path) {
   try {
-    const resp = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+    const headers = {};
+    const token = sessionStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(`${API_BASE}${path}`, { credentials: 'include', headers });
     if (!resp.ok) throw new Error(`${resp.status}`);
     return await resp.json();
   } catch (e) {
@@ -387,7 +390,19 @@ export default function HiveDefenseDashboard() {
         </Card>
       </div>
 
-      {/* ROW 5: ATTACKERS + FORENSICS */}
+      {/* ROW 5: HIVE INSPECT + EMAIL MONITOR */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <Card>
+          <SectionTitle>Inspect Content</SectionTitle>
+          <InspectPanel />
+        </Card>
+        <Card>
+          <SectionTitle>Email Hive Monitor</SectionTitle>
+          <EmailMonitorPanel />
+        </Card>
+      </div>
+
+      {/* ROW 6: ATTACKERS + FORENSICS */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
         <Card>
           <SectionTitle>Attacker Profiles ({(attackers?.profiles || []).length})</SectionTitle>
@@ -419,6 +434,163 @@ export default function HiveDefenseDashboard() {
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   INSPECT PANEL — Submit text / email / URL for Hive analysis
+   ═══════════════════════════════════════════════════════════════ */
+function InspectPanel() {
+  const [contentType, setContentType] = useState('email');
+  const [fromAddr, setFromAddr] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [rawHeaders, setRawHeaders] = useState('');
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (!body.trim()) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const resp = await fetch(`${API_BASE}/api/hive-defense/v4/inspect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ content: body, content_type: contentType, from_address: fromAddr, subject, raw_headers: rawHeaders, attachment_names: [] }),
+      });
+      if (resp.ok) setResult(await resp.json());
+      else setResult({ error: `HTTP ${resp.status}` });
+    } catch (e) { setResult({ error: e.message }); }
+    setLoading(false);
+  };
+
+  const vc = (v) => v === 'MALICIOUS' ? colors.red : v === 'SUSPICIOUS' ? colors.orange : colors.green;
+  const iStyle = { width: '100%', padding: '6px 10px', fontSize: 12, background: colors.bgElevated, border: `1px solid ${colors.border}`, borderRadius: 6, color: colors.textPrimary, marginBottom: 8, outline: 'none', boxSizing: 'border-box' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {['email', 'url', 'text'].map(t => (
+          <button key={t} onClick={() => setContentType(t)} style={{ padding: '4px 12px', fontSize: 10, borderRadius: 4, cursor: 'pointer', border: `1px solid ${contentType === t ? colors.gold : colors.border}`, background: contentType === t ? `${colors.gold}22` : colors.bgElevated, color: contentType === t ? colors.gold : colors.textSecondary, textTransform: 'uppercase', fontWeight: 600, letterSpacing: 0.5 }}>{t}</button>
+        ))}
+      </div>
+      {contentType === 'email' && (<><input placeholder="From: address" value={fromAddr} onChange={e => setFromAddr(e.target.value)} style={iStyle} /><input placeholder="Subject" value={subject} onChange={e => setSubject(e.target.value)} style={iStyle} /></>)}
+      <textarea placeholder={contentType === 'url' ? 'Paste URL to inspect...' : contentType === 'email' ? 'Paste email body here...' : 'Paste suspicious text...'} value={body} onChange={e => setBody(e.target.value)} rows={4} style={{ ...iStyle, resize: 'vertical', fontFamily: 'monospace' }} />
+      {contentType === 'email' && (<details style={{ marginBottom: 8 }}><summary style={{ fontSize: 10, color: colors.textDim, cursor: 'pointer' }}>Raw headers (optional)</summary><textarea placeholder="Paste raw email headers for SPF/DKIM/DMARC analysis..." value={rawHeaders} onChange={e => setRawHeaders(e.target.value)} rows={3} style={{ ...iStyle, resize: 'vertical', fontFamily: 'monospace', marginTop: 6 }} /></details>)}
+      <button onClick={submit} disabled={loading || !body.trim()} style={{ width: '100%', padding: '8px 0', fontSize: 12, fontWeight: 700, borderRadius: 6, cursor: loading ? 'wait' : 'pointer', border: `1px solid ${colors.gold}55`, background: loading ? colors.bgElevated : `${colors.gold}22`, color: loading ? colors.textDim : colors.gold, textTransform: 'uppercase', letterSpacing: 1 }}>{loading ? 'Analyzing...' : 'Run Hive Inspection'}</button>
+
+      {result && !result.error && (
+        <div style={{ marginTop: 12, padding: 12, background: colors.bgElevated, borderRadius: 8, border: `1px solid ${colors.border}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Badge text={result.aggregate_verdict || 'UNKNOWN'} color={vc(result.aggregate_verdict)} />
+            <span style={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 700, color: vc(result.aggregate_verdict) }}>{result.aggregate_score ?? '--'}/100</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {Object.entries(result.systems || {}).map(([n, s]) => (
+              <div key={n} style={{ padding: '4px 8px', background: colors.bgCard, borderRadius: 4, fontSize: 10 }}><span style={{ color: colors.textDim }}>{n}: </span><Badge text={s.verdict || 'N/A'} color={vc(s.verdict)} /></div>
+            ))}
+          </div>
+          {(result.phishing?.signals || []).length > 0 && (
+            <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              {result.phishing.signals.map((s, i) => (
+                <div key={i} style={{ padding: '4px 0', borderBottom: `1px solid ${colors.border}15`, fontSize: 11 }}>
+                  <span style={{ color: vc(s.severity === 'critical' || s.severity === 'high' ? 'MALICIOUS' : 'SUSPICIOUS') }}>[{s.severity?.toUpperCase()}]</span>{' '}
+                  <span style={{ color: colors.textSecondary }}>{s.detail}</span>
+                  {s.evidence && <span style={{ fontFamily: 'monospace', fontSize: 10, color: colors.textDim, marginLeft: 6 }}>&mdash; {s.evidence}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {(result.recommendations || []).length > 0 && (
+            <div style={{ marginTop: 8, padding: 8, background: `${colors.gold}08`, borderRadius: 6 }}>
+              <div style={{ fontSize: 10, color: colors.gold, fontWeight: 600, marginBottom: 4 }}>RECOMMENDATIONS</div>
+              {result.recommendations.map((r, i) => (<div key={i} style={{ fontSize: 10, color: colors.textSecondary, padding: '2px 0' }}>&bull; {r}</div>))}
+            </div>
+          )}
+        </div>
+      )}
+      {result?.error && (<div style={{ marginTop: 8, padding: 8, background: colors.redDim, borderRadius: 6, fontSize: 11, color: colors.red }}>Error: {result.error}</div>)}
+    </div>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   EMAIL MONITOR PANEL — Gmail Hive Monitor status + controls
+   ═══════════════════════════════════════════════════════════════ */
+function EmailMonitorPanel() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    const data = await apiFetch('/api/hive-defense/v4/email-monitor/status');
+    setStatus(data);
+  }, []);
+
+  useEffect(() => { fetchStatus(); const iv = setInterval(fetchStatus, 30000); return () => clearInterval(iv); }, [fetchStatus]);
+
+  const toggleMonitor = async () => {
+    setLoading(true);
+    const action = status?.running ? 'stop' : 'start';
+    try { await fetch(`${API_BASE}/api/hive-defense/v4/email-monitor/${action}`, { method: 'POST', credentials: 'include' }); } catch (e) { console.warn('Toggle error:', e); }
+    setTimeout(fetchStatus, 1000);
+    setLoading(false);
+  };
+
+  if (!status) return <div style={{ textAlign: 'center', padding: 20, color: colors.textDim }}>Loading...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: status.running ? colors.green : colors.red, boxShadow: status.running ? `0 0 6px ${colors.green}` : 'none' }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: status.running ? colors.green : colors.red }}>{status.running ? 'MONITORING' : 'STOPPED'}</span>
+        </div>
+        <button onClick={toggleMonitor} disabled={loading} style={{ padding: '4px 12px', fontSize: 10, borderRadius: 4, cursor: 'pointer', border: `1px solid ${status.running ? colors.red : colors.green}55`, background: `${status.running ? colors.red : colors.green}15`, color: status.running ? colors.red : colors.green, fontWeight: 600 }}>{status.running ? 'Stop' : 'Start'}</button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+        <StatBox label="Scanned" value={status.total_scanned || 0} color={colors.cyan} />
+        <StatBox label="Threats" value={status.total_threats || 0} color={status.total_threats > 0 ? colors.red : colors.green} />
+        <StatBox label="Inboxes" value={(status.monitored_inboxes || []).length} color={colors.purple} />
+      </div>
+      <div style={{ fontSize: 10, color: colors.textDim, marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Protected Emails</div>
+      {(status.protected_emails || []).map((email, i) => {
+        const inbox = (status.monitored_inboxes || []).find(m => m.email === email);
+        const mon = !!inbox;
+        return (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: `1px solid ${colors.border}15` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: mon && inbox.healthy ? colors.green : mon ? colors.orange : colors.textDim }} />
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: colors.textSecondary }}>{email}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {mon && (<><span style={{ fontSize: 9, color: colors.textDim }}>{inbox.messages_scanned} scanned</span>{inbox.threats_found > 0 && <Badge text={`${inbox.threats_found} threats`} color={colors.red} />}</>)}
+              <Badge text={mon ? inbox.auth_mode : 'no auth'} color={mon ? colors.green : colors.textDim} />
+            </div>
+          </div>
+        );
+      })}
+      {(status.unmonitored_emails || []).length > 0 && (
+        <div style={{ marginTop: 8, padding: 8, background: colors.orangeDim, borderRadius: 6, fontSize: 10 }}>
+          <span style={{ color: colors.orange, fontWeight: 600 }}>Setup Needed:</span>{' '}
+          <span style={{ color: colors.textSecondary }}>{status.unmonitored_emails.join(', ')} &mdash; configure OAuth2 tokens or Service Account</span>
+        </div>
+      )}
+      {(status.recent_threats || []).length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 10, color: colors.red, fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Recent Threats</div>
+          <MiniTable headers={['Inbox', 'From', 'Subject', 'Score']} rows={(status.recent_threats || []).slice(-5).reverse().map(t => [
+            <span style={{ fontFamily: 'monospace', fontSize: 10 }}>{t.inbox_email?.split('@')[0]}@...</span>,
+            <span style={{ fontFamily: 'monospace', fontSize: 10, color: colors.red }}>{(t.from_address || '').substring(0, 20)}</span>,
+            <span style={{ fontSize: 10 }}>{(t.subject || '').substring(0, 25)}</span>,
+            <Badge text={`${t.score}/100`} color={t.score >= 60 ? colors.red : colors.orange} />,
+          ])} />
+        </div>
+      )}
     </div>
   );
 }

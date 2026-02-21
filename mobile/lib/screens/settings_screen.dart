@@ -11,10 +11,20 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
-import '../main.dart' show LobbyScreen;
+import 'package:file_picker/file_picker.dart';
+import 'dart:typed_data';
+import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
+import '../main.dart' show LobbyScreen, HardwareIdentity;
 import 'billing_screens.dart';
 import '../config/app_config.dart';
 import 'vault_browser_screen.dart';
+import 'nate_organizer_screen.dart';
+import 'quiz_screen.dart';
+import 'nevedal_reports_screen.dart';
+import 'distress_beacon_screen.dart';
+import 'secure_search_screen.dart';
+import 'night_school_screen.dart';
+import 'ai_modes_screen.dart';
 
 // =============================================================================
 // DESIGN TOKENS
@@ -71,6 +81,17 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   int? _vaultUsageBytes;
   int? _vaultLimitBytes;
 
+  // Family members roster
+  List<Map<String, dynamic>> _familyMembers = [];
+  List<Map<String, dynamic>> _pendingInvites = [];
+  bool _familyLoading = false;
+  StreamSubscription? _familySocketSub;
+
+  // Biometric login toggle
+  final HardwareIdentity _bioIdentity = HardwareIdentity();
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +105,19 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
     _voiceModeDefault = _profile['voice_mode_default'] ?? false;
     if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) _loadVaultStats();
+    if (_isSovereignCircle) _fetchFamilyMembers();
+    _loadBiometricState();
+  }
+
+  Future<void> _loadBiometricState() async {
+    final enabled = await _bioIdentity.isBiometricEnabled();
+    final available = await _bioIdentity.isBiometricAvailable();
+    if (mounted) {
+      setState(() {
+        _biometricEnabled = enabled;
+        _biometricAvailable = available;
+      });
+    }
   }
 
   bool get _hasVaultAccess {
@@ -123,7 +157,219 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _phoneCtrl.dispose();
     _emergencyCtrl.dispose();
     _timezoneCtrl.dispose();
+    _familySocketSub?.cancel();
     super.dispose();
+  }
+
+  // ---- Fetch family members + pending invites via WebSocket ----
+  Future<void> _fetchFamilyMembers() async {
+    if (_familyLoading) return;
+    setState(() => _familyLoading = true);
+
+    WebSocketChannel? sock;
+    StreamSubscription? sub;
+    final completer = Completer<void>();
+
+    try {
+      sock = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      sub = sock.stream.listen((raw) {
+        try {
+          final data = jsonDecode(raw) as Map<String, dynamic>;
+          final type = (data['type'] ?? '').toString();
+          if (type == 'connected') {
+            sock?.sink.add(jsonEncode({
+              'type': 'auth',
+              'token': _profile['token'] ?? widget.profile['token'] ?? '',
+              'hardware_id': _profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '',
+            }));
+          } else if (type == 'auth_success' || type == 'login_success') {
+            sock?.sink.add(jsonEncode({'type': 'get_family_members'}));
+          } else if (type == 'family_members') {
+            if (mounted) {
+              setState(() {
+                _familyMembers = List<Map<String, dynamic>>.from(
+                  (data['members'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
+                );
+                _pendingInvites = List<Map<String, dynamic>>.from(
+                  (data['pending_invites'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
+                );
+                _familyLoading = false;
+              });
+            }
+            if (!completer.isCompleted) completer.complete();
+          }
+        } catch (_) {}
+      }, onError: (_) {
+        if (!completer.isCompleted) completer.complete();
+      }, onDone: () {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      await completer.future.timeout(const Duration(seconds: 10), onTimeout: () {});
+    } catch (_) {}
+
+    if (mounted && _familyLoading) setState(() => _familyLoading = false);
+    try { sub?.cancel(); } catch (_) {}
+    try { sock?.sink.close(); } catch (_) {}
+  }
+
+  // ---- Remove family member via WebSocket ----
+  Future<void> _removeFamilyMember(String memberId, String memberName, bool isMinor) async {
+    final action = isMinor ? 'Release' : 'Remove';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: Text('$action $memberName?', style: const TextStyle(color: _Design.red, fontFamily: 'Courier')),
+        content: Text(
+          isMinor
+              ? '$memberName is a minor. Releasing them will remove them from your family plan and revoke their access to Sovereign Sanctuary.'
+              : 'Are you sure you want to remove $memberName from your family plan? They will lose access to Sovereign Sanctuary.',
+          style: const TextStyle(color: _Design.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(action, style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    WebSocketChannel? sock;
+    StreamSubscription? sub;
+    final completer = Completer<Map<String, dynamic>?>();
+
+    try {
+      sock = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      sub = sock.stream.listen((raw) {
+        try {
+          final data = jsonDecode(raw) as Map<String, dynamic>;
+          final type = (data['type'] ?? '').toString();
+          if (type == 'connected') {
+            sock?.sink.add(jsonEncode({
+              'type': 'auth',
+              'token': _profile['token'] ?? widget.profile['token'] ?? '',
+              'hardware_id': _profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '',
+            }));
+          } else if (type == 'auth_success' || type == 'login_success') {
+            sock?.sink.add(jsonEncode({
+              'type': 'remove_family_member',
+              'member_id': memberId,
+              'reason': isMinor ? 'release' : 'delete',
+            }));
+          } else if (type == 'family_member_removed') {
+            if (!completer.isCompleted) completer.complete(data);
+          } else if (type == 'family_member_remove_error') {
+            if (!completer.isCompleted) completer.completeError(data['message'] ?? 'Failed');
+          }
+        } catch (_) {}
+      }, onError: (e) {
+        if (!completer.isCompleted) completer.completeError(e);
+      }, onDone: () {
+        if (!completer.isCompleted) completer.completeError('Connection closed');
+      });
+
+      await completer.future.timeout(const Duration(seconds: 15), onTimeout: () => throw TimeoutException('Timed out'));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$memberName has been removed from your family.'),
+          backgroundColor: _Design.green,
+        ));
+        _fetchFamilyMembers();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not remove member: ${e.toString().replaceAll('TimeoutException:', '').trim()}'),
+          backgroundColor: _Design.red,
+        ));
+      }
+    }
+
+    try { sub?.cancel(); } catch (_) {}
+    try { sock?.sink.close(); } catch (_) {}
+  }
+
+  // ---- Cancel a pending family invite ----
+  Future<void> _cancelFamilyInvite(String token, String inviteeName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Cancel Invite?', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+        content: Text(
+          'Cancel the pending invitation for $inviteeName? They will no longer be able to join your family.',
+          style: const TextStyle(color: _Design.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep', style: TextStyle(color: _Design.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel Invite', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    WebSocketChannel? sock;
+    StreamSubscription? sub;
+    final completer = Completer<void>();
+
+    try {
+      sock = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      sub = sock.stream.listen((raw) {
+        try {
+          final data = jsonDecode(raw) as Map<String, dynamic>;
+          final type = (data['type'] ?? '').toString();
+          if (type == 'connected') {
+            sock?.sink.add(jsonEncode({
+              'type': 'auth',
+              'token': _profile['token'] ?? widget.profile['token'] ?? '',
+              'hardware_id': _profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '',
+            }));
+          } else if (type == 'auth_success' || type == 'login_success') {
+            sock?.sink.add(jsonEncode({
+              'type': 'cancel_family_invite',
+              'invite_token': token,
+            }));
+          } else if (type == 'family_invite_cancelled') {
+            if (!completer.isCompleted) completer.complete();
+          }
+        } catch (_) {}
+      }, onError: (_) {
+        if (!completer.isCompleted) completer.complete();
+      }, onDone: () {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      await completer.future.timeout(const Duration(seconds: 10), onTimeout: () {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Invite for $inviteeName cancelled.'),
+          backgroundColor: _Design.gold,
+        ));
+        _fetchFamilyMembers();
+      }
+    } catch (_) {}
+
+    try { sub?.cancel(); } catch (_) {}
+    try { sock?.sink.close(); } catch (_) {}
   }
 
   bool get _isSovereignCircle {
@@ -746,6 +992,15 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
+  // ---- Weekly Coherence Brief ----
+  void _showWeeklyBrief() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => _WeeklyBriefDialog(profile: _profile),
+    );
+  }
+
   // ---- Legal Viewer ----
   void _showLegalAgreement() {
     Navigator.push(context, MaterialPageRoute(
@@ -865,6 +1120,161 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               _actionRow(Icons.group_add, 'Invite Family Members', 'Add spouse and dependents to your plan', _showFamilyInviteDialog),
               _infoRow('Plan', 'Sovereign Circle — Head of Household'),
             ]),
+            const SizedBox(height: 12),
+
+            // Current family members roster
+            if (_familyLoading)
+              const Center(child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: _Design.gold)),
+              ))
+            else if (_familyMembers.isNotEmpty || _pendingInvites.isNotEmpty) ...[
+              Container(
+                decoration: BoxDecoration(
+                  color: _Design.bgCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _Design.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: const BoxDecoration(
+                        border: Border(bottom: BorderSide(color: _Design.border)),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.people, color: _Design.gold, size: 16),
+                          SizedBox(width: 8),
+                          Text('Current Members', style: TextStyle(color: _Design.gold, fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'Courier')),
+                        ],
+                      ),
+                    ),
+                    // Column headers
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF0D0D0D),
+                        border: Border(bottom: BorderSide(color: _Design.border)),
+                      ),
+                      child: Row(
+                        children: const [
+                          Expanded(flex: 3, child: Text('Name', style: TextStyle(color: _Design.textSecondary, fontSize: 10, fontWeight: FontWeight.w600))),
+                          Expanded(flex: 2, child: Text('Role', style: TextStyle(color: _Design.textSecondary, fontSize: 10, fontWeight: FontWeight.w600))),
+                          SizedBox(width: 40, child: Text('', style: TextStyle(fontSize: 10))),
+                        ],
+                      ),
+                    ),
+                    // Active members
+                    ..._familyMembers.map((m) {
+                      final name = (m['name'] ?? 'Unknown').toString();
+                      final role = (m['family_role'] ?? m['role'] ?? '').toString().toUpperCase();
+                      final isHead = role == 'HEAD';
+                      final isMinor = m['is_minor'] == true;
+                      final memberId = (m['id'] ?? m['hardware_id'] ?? '').toString();
+                      final myId = (_profile['hardware_id'] ?? '').toString();
+                      final isMe = memberId == myId;
+
+                      Color roleColor = _Design.textSecondary;
+                      if (role == 'HEAD') roleColor = _Design.gold;
+                      else if (role == 'SPOUSE') roleColor = _Design.cyan;
+                      else if (role == 'DEPENDENT') roleColor = _Design.purple;
+
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: const BoxDecoration(
+                          border: Border(bottom: BorderSide(color: Color(0xFF1A1A1A))),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(flex: 3, child: Text(
+                              isMe ? '$name (You)' : name,
+                              style: TextStyle(color: _Design.textPrimary, fontSize: 12, fontWeight: isMe ? FontWeight.w600 : FontWeight.normal),
+                              overflow: TextOverflow.ellipsis,
+                            )),
+                            Expanded(flex: 2, child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: roleColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(role, style: TextStyle(color: roleColor, fontSize: 10, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                            )),
+                            SizedBox(width: 40, child: (isHead || isMe)
+                                ? const SizedBox.shrink()
+                                : GestureDetector(
+                                    onTap: () => _removeFamilyMember(memberId, name, isMinor),
+                                    child: Icon(
+                                      isMinor ? Icons.exit_to_app : Icons.person_remove,
+                                      color: _Design.red.withOpacity(0.7),
+                                      size: 18,
+                                    ),
+                                  ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                    // Pending invites
+                    if (_pendingInvites.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0D0D0D),
+                          border: Border(bottom: BorderSide(color: _Design.border)),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.hourglass_top, color: _Design.textSecondary, size: 12),
+                            SizedBox(width: 6),
+                            Text('Pending Invites', style: TextStyle(color: _Design.textSecondary, fontSize: 10, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                      ..._pendingInvites.map((inv) {
+                        final name = (inv['name'] ?? 'Unknown').toString();
+                        final contact = (inv['contact'] ?? '').toString();
+                        final role = (inv['role'] ?? '').toString().toUpperCase();
+                        final token = (inv['token'] ?? '').toString();
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: const BoxDecoration(
+                            border: Border(bottom: BorderSide(color: Color(0xFF1A1A1A))),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(flex: 3, child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name, style: const TextStyle(color: _Design.textSecondary, fontSize: 12, fontStyle: FontStyle.italic), overflow: TextOverflow.ellipsis),
+                                  if (contact.isNotEmpty)
+                                    Text(contact, style: const TextStyle(color: _Design.textSecondary, fontSize: 9), overflow: TextOverflow.ellipsis),
+                                ],
+                              )),
+                              Expanded(flex: 2, child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text('PENDING', style: TextStyle(color: Colors.orange.shade300, fontSize: 10, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                              )),
+                              SizedBox(width: 40, child: GestureDetector(
+                                onTap: () => _cancelFamilyInvite(token, name),
+                                child: Icon(Icons.cancel_outlined, color: _Design.red.withOpacity(0.7), size: 18),
+                              )),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
           ],
 
@@ -984,10 +1394,14 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 ));
               }),
               _actionRow(Icons.diamond, 'Transfer Crystal', 'Import from another source', () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Transfer Crystal flow coming soon'), backgroundColor: _Design.gold),
-                );
+                _showTransferCrystalFlow();
               }),
+              if (_isSovereignCircle)
+                _actionRow(Icons.auto_awesome, 'Organize with Nate', 'AI-guided content organization', () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => NateOrganizerScreen(profile: _profile),
+                  ));
+                }),
             ]),
             const SizedBox(height: 20),
           ],
@@ -1012,6 +1426,77 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               setState(() => _voiceModeDefault = v);
               _saveVoicePref();
             }),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Your Tools ---
+          _sectionHeader('YOUR TOOLS', Icons.dashboard),
+          _settingsCard([
+            _actionRow(Icons.quiz, 'Assessments', 'Take a quiz or self-assessment', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => QuizScreen(profile: _profile),
+              ));
+            }),
+            _actionRow(Icons.insights, 'Coherence Reports', 'View your Nevedal coherence trends', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => NevedalReportsScreen(profile: _profile),
+              ));
+            }),
+            _actionRow(Icons.auto_awesome, 'Weekly Brief', 'Your personalized coherence check-in', () {
+              _showWeeklyBrief();
+            }),
+            _actionRow(Icons.history, 'Memory Search', 'Search past conversations with Nate', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => SecureSearchScreen(profile: _profile, socket: widget.socket),
+              ));
+            }),
+            _actionRow(Icons.sos, 'Distress Beacon', 'Emergency support resources', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => DistressBeaconScreen(profile: _profile, socket: widget.socket),
+              ));
+            }, danger: true),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Security ---
+          _sectionHeader('SECURITY', Icons.security),
+          _settingsCard([
+            _toggleRow(
+              _biometricAvailable
+                  ? 'Biometric Login (Face ID / Fingerprint)'
+                  : 'Quick Login',
+              _biometricEnabled,
+              (v) async {
+                await _bioIdentity.setBiometricEnabled(v);
+                if (v) await _bioIdentity.setBiometricDeclined(false);
+                setState(() => _biometricEnabled = v);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(v
+                        ? 'Quick login enabled. Credentials will be saved on next sign-in.'
+                        : 'Biometric login disabled. Credentials cleared.')),
+                  );
+                }
+              },
+            ),
+            if (!_biometricAvailable && !kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 8),
+                child: Text(
+                  'Biometrics not available on this device. '
+                  'Device PIN will be used as fallback.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11),
+                ),
+              ),
+            if (kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 8),
+                child: Text(
+                  'Biometric login is available on native mobile apps. '
+                  'On web, credentials are stored securely for quick re-login.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11),
+                ),
+              ),
           ]),
           const SizedBox(height: 20),
 
@@ -1043,6 +1528,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _settingsCard([
             _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
+              _bioIdentity.clearCredentials();
               widget.onLogout?.call();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LobbyScreen()),
@@ -1163,6 +1649,140 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         children: [
           Text(label, style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
           Flexible(child: Text(value, style: const TextStyle(color: _Design.textPrimary, fontSize: 13), textAlign: TextAlign.right)),
+        ],
+      ),
+    );
+  }
+
+  // ─── Transfer Crystal Flow ───
+  void _showTransferCrystalFlow() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _Design.bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Transfer Crystal', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Import your AI chat history from another platform.', style: TextStyle(color: _Design.textSecondary, fontSize: 12)),
+            const SizedBox(height: 16),
+            _transferSourceTile(ctx, 'ChatGPT (OpenAI)', 'ZIP export from settings', Icons.chat_bubble, 'chatgpt'),
+            _transferSourceTile(ctx, 'Claude (Anthropic)', 'JSON conversations export', Icons.psychology, 'claude'),
+            _transferSourceTile(ctx, 'Gemini (Google)', 'Google Takeout export', Icons.auto_awesome, 'gemini'),
+            _transferSourceTile(ctx, 'Replika', 'Data export (JSON or CSV)', Icons.favorite, 'replika'),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high, color: _Design.gold),
+              title: const Text('Auto-Detect', style: TextStyle(color: _Design.textPrimary)),
+              subtitle: const Text('Pick any file and we\'ll figure it out', style: TextStyle(color: _Design.textSecondary, fontSize: 11)),
+              onTap: () { Navigator.pop(ctx); _pickAndUploadCrystal('auto'); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transferSourceTile(BuildContext ctx, String title, String subtitle, IconData icon, String source) {
+    return ListTile(
+      leading: Icon(icon, color: _Design.gold),
+      title: Text(title, style: const TextStyle(color: _Design.textPrimary)),
+      subtitle: Text(subtitle, style: const TextStyle(color: _Design.textSecondary, fontSize: 11)),
+      onTap: () { Navigator.pop(ctx); _pickAndUploadCrystal(source); },
+    );
+  }
+
+  Future<void> _pickAndUploadCrystal(String source) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.custom,
+        allowedExtensions: ['zip', 'json', 'csv'],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null && !kIsWeb) {
+        final f = File(file.path!);
+        bytes = Uint8List.fromList(await f.readAsBytes());
+      }
+      if (bytes == null) return;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Importing... this may take a moment'), backgroundColor: _Design.gold),
+        );
+      }
+
+      final userId = (_profile['hardware_id'] ?? _profile['id'] ?? '').toString();
+      final base = AppConfig.apiBaseUrl;
+      final uri = Uri.parse('$base/api/v1/vault/import');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['X-User-Id'] = userId;
+      request.fields['source'] = source;
+      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: file.name));
+      final streamed = await request.send().timeout(const Duration(seconds: 120));
+      final resp = await http.Response.fromStream(streamed);
+
+      if (!mounted) return;
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final data = jsonDecode(resp.body);
+        _showCrystalResult(data);
+      } else {
+        final detail = resp.body.contains('detail') ? jsonDecode(resp.body)['detail'] : 'Import failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $detail'), backgroundColor: _Design.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: _Design.red),
+        );
+      }
+    }
+  }
+
+  void _showCrystalResult(Map<String, dynamic> data) {
+    final crystal = data['crystal'];
+    final stats = data['stats'];
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Transfer Crystal Created', style: TextStyle(color: _Design.gold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (stats != null) ...[
+                Text('Source: ${data['source'] ?? 'auto'}', style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                if (stats['conversations_imported'] != null)
+                  Text('Conversations: ${stats['conversations_imported']}', style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                if (stats['messages_imported'] != null)
+                  Text('Messages: ${stats['messages_imported']}', style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                const SizedBox(height: 12),
+              ],
+              if (crystal != null && crystal is Map) ...[
+                const Text('Crystal Summary', style: TextStyle(color: _Design.gold, fontSize: 14, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text(crystal['summary'] ?? crystal.toString(), style: const TextStyle(color: _Design.textPrimary, fontSize: 12)),
+              ],
+              if (crystal == null)
+                const Text('Your chat history has been imported into the Sovereign Vault.', style: TextStyle(color: _Design.textPrimary, fontSize: 12)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Done', style: TextStyle(color: _Design.gold)),
+          ),
         ],
       ),
     );
@@ -1551,6 +2171,11 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   bool _notifCrisisAlerts = true;
   bool _notifNightSchool = true;
 
+  // Biometric login toggle
+  final HardwareIdentity _bioIdentity = HardwareIdentity();
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
+
   @override
   void initState() {
     super.initState();
@@ -1568,6 +2193,18 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
     _notifNightSchool = _profile['notif_night_school'] ?? true;
+    _loadBiometricState();
+  }
+
+  Future<void> _loadBiometricState() async {
+    final enabled = await _bioIdentity.isBiometricEnabled();
+    final available = await _bioIdentity.isBiometricAvailable();
+    if (mounted) {
+      setState(() {
+        _biometricEnabled = enabled;
+        _biometricAvailable = available;
+      });
+    }
   }
 
   @override
@@ -2052,11 +2689,69 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          // --- Coach Tools ---
+          _sectionHeader('COACH TOOLS', Icons.build_circle),
+          _settingsCard([
+            _actionRow(Icons.school, 'Night School', 'Wisdom entries, curriculum & training', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => NightSchoolScreen(profile: _profile),
+              ));
+            }),
+            _actionRow(Icons.psychology_alt, 'AI Modes', 'Tri-Corder, Archivist, Guardian, Supervisor', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const AIModesSelectorScreen(sessionId: 'coach_session'),
+              ));
+            }),
+          ]),
+          const SizedBox(height: 20),
+
           // --- Subscription ---
           _sectionHeader('SUBSCRIPTION', Icons.workspace_premium),
           _settingsCard([
             _infoRow('Tier', tier.toString().replaceAll('_', ' ')),
             _statusRow('Certification', certStatus, certStatus == 'APPROVED' ? _Design.green : _Design.gold),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Security ---
+          _sectionHeader('SECURITY', Icons.security),
+          _settingsCard([
+            _toggleRow(
+              _biometricAvailable
+                  ? 'Biometric Login (Face ID / Fingerprint)'
+                  : 'Quick Login',
+              _biometricEnabled,
+              (v) async {
+                await _bioIdentity.setBiometricEnabled(v);
+                if (v) await _bioIdentity.setBiometricDeclined(false);
+                setState(() => _biometricEnabled = v);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(v
+                        ? 'Quick login enabled. Credentials will be saved on next sign-in.'
+                        : 'Biometric login disabled. Credentials cleared.')),
+                  );
+                }
+              },
+            ),
+            if (!_biometricAvailable && !kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 8),
+                child: Text(
+                  'Biometrics not available on this device. '
+                  'Device PIN will be used as fallback.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11),
+                ),
+              ),
+            if (kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 8),
+                child: Text(
+                  'Biometric login is available on native mobile apps. '
+                  'On web, credentials are stored securely for quick re-login.',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 11),
+                ),
+              ),
           ]),
           const SizedBox(height: 20),
 
@@ -2088,6 +2783,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           _settingsCard([
             _actionRow(Icons.delete_forever, 'Delete My Account', '30-day recovery window', _requestAccountDeletion, danger: true),
             _actionRow(Icons.logout, 'Logout', null, () {
+              _bioIdentity.clearCredentials();
               widget.onLogout?.call();
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (_) => const LobbyScreen()),
@@ -2449,6 +3145,38 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         {
           'q': 'What happens during a crisis alert?',
           'a': 'If Nate detects signs of crisis, the system activates crisis protocol. You will see emergency contact information: call 988 (Suicide & Crisis Lifeline) or 911. Nate is NOT an emergency service — always reach out to professional help in a crisis.',
+        },
+        {
+          'q': 'What is Tri-Corder mode?',
+          'a': 'Tri-Corder is a deep diagnostic scan of your emotional patterns — like a medical scanner for your inner world. It examines your coherence data, mood history, and behavioral markers to give you a detailed picture of where you are right now. Tap the mode picker icon (brain icon) in the chat bar to activate it.',
+        },
+        {
+          'q': 'What is Archivist mode?',
+          'a': 'Archivist mode weaves your therapeutic journey into a narrative, spotting themes, patterns, and turning points you might miss on your own. It draws from your full conversation history with Nate to tell the story of your growth. Activate it from the mode picker in the chat bar.',
+        },
+        {
+          'q': 'What is Guardian mode?',
+          'a': 'Guardian mode activates protective monitoring. Nate watches for risk indicators, emotional distress patterns, and safety concerns. It is designed to keep you safe by gently flagging when something feels off. You can turn it on from the mode picker icon in the chat bar.',
+        },
+        {
+          'q': 'What is Supervisor mode?',
+          'a': 'Supervisor mode reviews your progress through a clinical lens — like having a wise clinical supervisor looking over your journey. It evaluates therapeutic progress, identifies areas of growth, and suggests next steps. Activate it from the mode picker in the chat bar.',
+        },
+        {
+          'q': 'How do I switch between Little Nate modes?',
+          'a': 'Tap the brain/mode icon in the chat input bar (next to the microphone and send buttons). A picker will appear showing all available modes: Tri-Corder, Archivist, Guardian, and Supervisor. Tap one to activate it. Nate will let you know when the mode is active and when it deactivates.',
+        },
+        {
+          'q': 'How do I read my stats and coherence reports?',
+          'a': 'Your metrics bar at the top of the chat screen shows live C_emo (emotional coherence), GAP (growth potential), and Quantum (processing depth). For detailed trends, go to Settings > Your Tools > Coherence Reports. For a quick weekly summary, tap Settings > Your Tools > Weekly Brief.',
+        },
+        {
+          'q': 'What is the Sovereign Vault?',
+          'a': 'The Vault is your secure storage space (Inner Chamber and above). You can upload documents, images, and files that Nate can reference in conversations. Tap the paperclip icon in the chat bar to upload files, browse your vault, or import conversations from other AI platforms using Transfer Crystal.',
+        },
+        {
+          'q': 'What is Night School?',
+          'a': 'Night School is how Little Nate learns and grows. Your anonymized interactions help train Nate to be a better companion for everyone. No personal information is used — only patterns and insights. You can learn more in Settings > About.',
         },
       ];
     } else {
@@ -2961,5 +3689,187 @@ class _LegalAgreementScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+
+// =============================================================================
+// WEEKLY COHERENCE BRIEF DIALOG
+// =============================================================================
+
+class _WeeklyBriefDialog extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  const _WeeklyBriefDialog({required this.profile});
+
+  @override
+  State<_WeeklyBriefDialog> createState() => _WeeklyBriefDialogState();
+}
+
+class _WeeklyBriefDialogState extends State<_WeeklyBriefDialog> {
+  bool _loading = true;
+  String _briefText = '';
+  String _goal = '';
+  Map<String, dynamic> _moodSummary = {};
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchBrief();
+  }
+
+  Future<void> _fetchBrief() async {
+    try {
+      final userId = (widget.profile['hardware_id'] ?? widget.profile['id'] ?? '').toString();
+      final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final resp = await http.get(
+        Uri.parse('$baseUrl/api/research/nevedal/reports/brief'),
+        headers: {'X-User-Id': userId},
+      ).timeout(const Duration(seconds: 35));
+
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body);
+        if (mounted) {
+          setState(() {
+            _briefText = data['brief'] ?? '';
+            _goal = data['goal'] ?? '';
+            _moodSummary = Map<String, dynamic>.from(data['mood_summary'] ?? {});
+            _loading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() { _error = 'Could not load brief'; _loading = false; });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Connection error'; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF0A0A0A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400, maxHeight: 600),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: _loading
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  SizedBox(height: 40),
+                  CircularProgressIndicator(color: Color(0xFFC9A962)),
+                  SizedBox(height: 16),
+                  Text('Little Nate is preparing your brief...',
+                    style: TextStyle(color: Color(0xFF888888), fontSize: 13)),
+                  SizedBox(height: 40),
+                ],
+              )
+            : _error != null
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.cloud_off, color: Color(0xFF888888), size: 40),
+                    const SizedBox(height: 12),
+                    Text(_error!, style: const TextStyle(color: Color(0xFF888888))),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close', style: TextStyle(color: Color(0xFFC9A962))),
+                    ),
+                  ],
+                )
+              : SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.auto_awesome, color: Color(0xFFC9A962), size: 20),
+                          SizedBox(width: 8),
+                          Text('Weekly Brief',
+                            style: TextStyle(color: Color(0xFFC9A962), fontSize: 18, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text('from Little Nate',
+                        style: TextStyle(color: const Color(0xFF888888), fontSize: 12)),
+                      const SizedBox(height: 16),
+                      if (_moodSummary.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111111),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _metricChip('Sessions', '${_moodSummary['sessions'] ?? 0}'),
+                              _metricChip('C_emo', '${(_moodSummary['avg_c_emo'] ?? 0).toStringAsFixed(2)}'),
+                              _metricChip('CEE', '${_moodSummary['cee_windows'] ?? 0}'),
+                              _metricChip('Trend', _trendIcon(_moodSummary['trend'] ?? 'stable')),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      Text(_briefText,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.6)),
+                      if (_goal.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC9A962).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.flag, color: Color(0xFFC9A962), size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(_goal,
+                                  style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, height: 1.4)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Close', style: TextStyle(color: Color(0xFFC9A962), fontSize: 14)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  Widget _metricChip(String label, String value) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: Color(0xFF888888), fontSize: 10)),
+      ],
+    );
+  }
+
+  String _trendIcon(String trend) {
+    switch (trend) {
+      case 'improving': return '↑';
+      case 'dipping': return '↓';
+      default: return '→';
+    }
   }
 }

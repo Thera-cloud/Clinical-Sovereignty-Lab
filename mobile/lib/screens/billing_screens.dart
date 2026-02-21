@@ -18,6 +18,14 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show defaultApiBaseUrl;
 
+/// Build standard auth headers for REST API calls.
+/// Backend auth accepts X-User-Id as a fallback for service/internal calls.
+Map<String, String> _authHeaders(String userId, {bool json = false}) {
+  final h = <String, String>{'X-User-Id': userId};
+  if (json) h['Content-Type'] = 'application/json';
+  return h;
+}
+
 // =============================================================================
 // Design Tokens — matches project design system
 // =============================================================================
@@ -193,7 +201,7 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
           widget.currentUserProfile['hardware_id'] ?? '';
       final resp = await http.post(
         Uri.parse('$defaultApiBaseUrl/api/billing/subscription/$endpoint'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _authHeaders(userId, json: true),
         body: jsonEncode({
           'user_id': userId,
           'new_plan': planKey,
@@ -722,6 +730,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
       final resp = await http.get(
         Uri.parse(
             '$defaultApiBaseUrl/api/billing/family/members?family_id=$_familyId'),
+        headers: _authHeaders(_userId),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -974,16 +983,24 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                                   fontWeight: FontWeight.bold)),
                           const SizedBox(height: 10),
                           _summaryRow('Base Subscription',
-                              _userPlan == 'TOP_TIER' ? '\$149/mo' : '\$49/mo'),
+                              _userPlan == 'TOP_TIER' || _userPlan == 'SOVEREIGN_CIRCLE' ? '\$149/mo' : '\$49/mo'),
                           _summaryRow('Family Members',
-                              '${_members.length} member(s)'),
-                          _summaryRow('Add-on per member', '\$15/mo'),
+                              '${_members.where((m) => (m['family_role'] ?? m['role'] ?? '').toString().toUpperCase() != 'HEAD').length} member(s)'),
+                          _summaryRow('Spouse/Partner', 'Free'),
+                          _summaryRow('First child', 'Free'),
+                          _summaryRow('Additional members', 'from \$75/mo'),
                           const Divider(color: _D.border),
-                          _summaryRow(
-                            'Total',
-                            '\$${(_userPlan == "TOP_TIER" ? 149 : 49) + (_members.where((m) => (m['role'] ?? '') != 'HEAD').length * 15)}/mo',
-                            bold: true,
-                          ),
+                          Builder(builder: (_) {
+                            final baseCents = (_userPlan == 'TOP_TIER' || _userPlan == 'SOVEREIGN_CIRCLE') ? 14900 : 4900;
+                            int addonCents = 0;
+                            for (final m in _members) {
+                              final r = (m['family_role'] ?? m['role'] ?? '').toString().toUpperCase();
+                              if (r == 'HEAD') continue;
+                              addonCents += (m['family_billing_price_cents'] as int?) ?? 0;
+                            }
+                            final totalCents = baseCents + addonCents;
+                            return _summaryRow('Total', '\$${(totalCents / 100).toStringAsFixed(0)}/mo', bold: true);
+                          }),
                         ],
                       ),
                     ),
@@ -1045,7 +1062,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                                             fontSize: 14,
                                             fontWeight: FontWeight.w500)),
                                     Text(
-                                      (m['role'] ?? m['relationship'] ?? 'MEMBER')
+                                      (m['family_role'] ?? m['role'] ?? m['relationship'] ?? 'MEMBER')
                                           .toString()
                                           .toUpperCase(),
                                       style: const TextStyle(
@@ -1056,12 +1073,23 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                                   ],
                                 ),
                               ),
-                              if ((m['role'] ?? '') != 'HEAD')
+                              if ((m['family_role'] ?? m['role'] ?? '').toString().toUpperCase() != 'HEAD') ...[
+                                Text(
+                                  () {
+                                    final cents = (m['family_billing_price_cents'] as int?) ?? 0;
+                                    return cents > 0 ? '\$${(cents / 100).toStringAsFixed(0)}/mo' : 'Free';
+                                  }(),
+                                  style: TextStyle(
+                                    color: ((m['family_billing_price_cents'] as int?) ?? 0) > 0 ? _D.textSecondary : const Color(0xFF4ECDC4),
+                                    fontSize: 11,
+                                  ),
+                                ),
                                 IconButton(
                                   onPressed: () => _confirmRemove(m),
                                   icon: const Icon(Icons.remove_circle_outline,
                                       color: _D.red, size: 20),
                                 ),
+                              ],
                             ]),
                           )),
 
@@ -1158,6 +1186,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
       // Load packs
       final packsResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/coaching/packs/$_userId'),
+        headers: _authHeaders(_userId),
       );
       if (packsResp.statusCode == 200) {
         final data = jsonDecode(packsResp.body);
@@ -1168,6 +1197,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
       // Load sessions
       final sessResp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/coaching/sessions/$_userId'),
+        headers: _authHeaders(_userId),
       );
       if (sessResp.statusCode == 200) {
         final data = jsonDecode(sessResp.body);
@@ -1270,7 +1300,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
                 final resp = await http.post(
                   Uri.parse(
                       '$defaultApiBaseUrl/api/billing/coaching/cancel/${session['session_id']}'),
-                  headers: {'Content-Type': 'application/json'},
+                  headers: _authHeaders(_userId, json: true),
                   body: jsonEncode({
                     'user_id': _userId,
                     'reason': 'Client requested cancellation',
@@ -1553,6 +1583,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/payment-methods/$_userId'),
+        headers: _authHeaders(_userId),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -1573,6 +1604,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     try {
       final resp = await http.get(
         Uri.parse('$defaultApiBaseUrl/api/billing/invoices/$_userId'),
+        headers: _authHeaders(_userId),
       );
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -1594,6 +1626,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
       final resp = await http.delete(
         Uri.parse(
             '$defaultApiBaseUrl/api/billing/payment-methods/$pmId?user_id=$_userId'),
+        headers: _authHeaders(_userId),
       );
       if (resp.statusCode == 200) {
         setState(() => _methods.removeWhere((m) => m['id'] == pmId));

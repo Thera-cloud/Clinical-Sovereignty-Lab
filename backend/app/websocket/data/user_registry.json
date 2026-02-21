@@ -330,17 +330,17 @@
       "token_usage_month": 0
     }
   },
-  "admin_admin1": {
+  "admin_DrNevedal1": {
     "credentials": {
-      "username": "admin1",
-      "password": "07cfa13b5b6f7fdc150101bcacc7fe2a:92207ffda1b89795d4451facb5f745aa65d49e59561e6b07fc9a88bab28e7921"
+      "username": "DrNevedal1",
+      "password": "bbdd59038a0e5ee2e6c1f1bf407503db:52d76e38242a85f327f7139dd4239fb0bb4c7fb7318c082dfd3561b8b9ef6de9"
     },
     "profile": {
       "role": "ADMIN",
-      "name": "Admin User",
-      "email": "admin@littlenate.ai",
+      "name": "Dr. Nevedal",
+      "email": "admin_nevedalnj@sovereignsanctuary.net",
       "phone": "",
-      "hardware_id": "ADMIN_ADMIN1_ID",
+      "hardware_id": "ADMIN_DRNEVEDAL1_ID",
       "family_id": "FAM_1834DACF",
       "family_role": "HEAD",
       "joined_date": "2026-01-26",

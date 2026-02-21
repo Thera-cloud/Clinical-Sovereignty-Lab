@@ -1,0 +1,54 @@
+# =============================================================================
+# LITTLE NATE — Detonation Sandbox (Isolated)
+# Layer 6: Runs Playwright + Chromium in a network-isolated container.
+# No access to production database, Redis, or bridge.
+# =============================================================================
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+# Install base system dependencies (OCR, networking, fonts)
+RUN apt-get update && apt-get install -y \
+    curl \
+    libmagic1 \
+    tesseract-ocr \
+    fonts-unifont \
+    iproute2 \
+    iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (minimal — only what sandbox needs)
+RUN pip install --no-cache-dir \
+    fastapi~=0.115.0 \
+    uvicorn[standard]~=0.27.0 \
+    aiohttp~=3.9.1 \
+    playwright~=1.49.0 \
+    pytesseract~=0.3.13 \
+    Pillow~=10.4.0 \
+    python-magic~=0.4.27 \
+    python-whois~=0.9.4 \
+    dnspython~=2.4.0
+
+# Install Playwright Chromium + all its OS deps (handles t64 package names automatically)
+RUN playwright install chromium && playwright install-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy sandbox API and security modules
+COPY app/services/security/sandbox_api.py ./sandbox_api.py
+COPY app/services/security/detonation_chamber.py ./detonation_chamber.py
+COPY app/services/security/phishing_link_hunter.py ./phishing_link_hunter.py
+COPY app/services/security/phishing_detector.py ./phishing_detector.py
+
+# Copy entrypoint
+COPY sandbox_entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh || true
+
+# Create non-root user
+RUN useradd -m -u 1000 sandbox && mkdir -p /tmp/screenshots && chown -R sandbox:sandbox /app /tmp/screenshots
+
+EXPOSE 9090
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:9090/health || exit 1
+
+ENTRYPOINT ["/bin/bash", "./entrypoint.sh"]

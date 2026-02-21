@@ -400,6 +400,238 @@ class StripeBillingSystem:
             return None
     
     # =========================================================================
+    # FAMILY MEMBER BILLING
+    # =========================================================================
+    
+    FAMILY_PRICING = {
+        "SPOUSE": 0,
+        "PARTNER": 0,
+        "CHILD_FIRST_FREE": 0,
+        "DEPENDENT": 7500,      # $75/mo (in cents) — first paid member
+        "DEPENDENT_2": 6000,    # $60/mo — second paid member
+        "DEPENDENT_3": 4500,    # $45/mo — third paid member
+        "DEPENDENT_4_PLUS": 3000,  # $30/mo — fourth+ paid members
+    }
+    
+    def _get_family_member_price(self, role: str, family_id: str) -> int:
+        """Calculate price in cents for a new family member based on role and existing members."""
+        role_upper = (role or "DEPENDENT").upper()
+        
+        if role_upper in ("SPOUSE", "PARTNER"):
+            return 0
+        
+        if not self.registry_loader:
+            return self.FAMILY_PRICING["DEPENDENT"]
+        
+        registry = self.registry_loader()
+        existing_paid = 0
+        has_free_child = False
+        
+        for k, v in registry.items():
+            if k.startswith("_"):
+                continue
+            p = v.get("profile", {})
+            if p.get("family_id") != family_id:
+                continue
+            if p.get("family_role", "").upper() == "HEAD":
+                continue
+            member_role = p.get("family_role", "").upper()
+            if member_role in ("SPOUSE", "PARTNER"):
+                continue
+            billing_price = p.get("family_billing_price_cents", -1)
+            if billing_price == 0:
+                has_free_child = True
+            elif billing_price > 0:
+                existing_paid += 1
+        
+        # First non-spouse member gets one free slot
+        if not has_free_child and role_upper in ("CHILD", "DEPENDENT", "CHILD_UNDER_12"):
+            return 0
+        
+        ordinal = existing_paid + 1
+        if ordinal == 1:
+            return self.FAMILY_PRICING["DEPENDENT"]
+        elif ordinal == 2:
+            return self.FAMILY_PRICING["DEPENDENT_2"]
+        elif ordinal == 3:
+            return self.FAMILY_PRICING["DEPENDENT_3"]
+        else:
+            return self.FAMILY_PRICING["DEPENDENT_4_PLUS"]
+    
+    async def add_family_member_billing(self, head_user_id: str, member_user_id: str,
+                                         member_name: str, member_role: str,
+                                         family_id: str) -> dict:
+        """
+        Create billing record for a new family member.
+        Creates Stripe subscription item if Stripe is configured.
+        Records the billing event locally regardless.
+        """
+        price_cents = self._get_family_member_price(member_role, family_id)
+        price_display = f"${price_cents / 100:.0f}/mo" if price_cents > 0 else "Free"
+        
+        billing = self._load_billing()
+        billing.setdefault("family_members", {})
+        
+        stripe_item_id = None
+        
+        if price_cents > 0 and self.stripe_enabled:
+            head_sub = billing.get("subscriptions", {}).get(head_user_id, {})
+            stripe_sub_id = head_sub.get("stripe_subscription_id")
+            family_price_id = self.price_ids.get("FAMILY_MONTHLY")
+            
+            if stripe_sub_id and family_price_id and not stripe_sub_id.startswith("sub_local"):
+                try:
+                    si = stripe.SubscriptionItem.create(
+                        subscription=stripe_sub_id,
+                        price=family_price_id,
+                        quantity=1,
+                        metadata={
+                            "type": "family_member",
+                            "member_id": member_user_id,
+                            "member_name": member_name,
+                            "role": member_role,
+                            "family_id": family_id,
+                        }
+                    )
+                    stripe_item_id = si.id
+                    print(f">>> [BILLING] Created Stripe subscription item {si.id} for family member {member_name}")
+                except Exception as e:
+                    print(f">>> [BILLING] Stripe family item creation failed (non-blocking): {e}")
+        
+        member_record = {
+            "head_user_id": head_user_id,
+            "member_user_id": member_user_id,
+            "member_name": member_name,
+            "role": member_role,
+            "family_id": family_id,
+            "price_cents": price_cents,
+            "price_display": price_display,
+            "stripe_subscription_item_id": stripe_item_id,
+            "status": "active",
+            "created_at": str(datetime.datetime.now()),
+        }
+        billing["family_members"][member_user_id] = member_record
+        self._save_billing(billing)
+        
+        # Update the member's profile with billing info
+        if self.registry_loader and self.registry_saver:
+            registry = self.registry_loader()
+            for k, v in registry.items():
+                if v.get("profile", {}).get("hardware_id") == member_user_id:
+                    v["profile"]["family_billing_price_cents"] = price_cents
+                    v["profile"]["family_billing_status"] = "active"
+                    v["profile"]["family_billing_stripe_item"] = stripe_item_id
+                    self.registry_saver(registry)
+                    break
+        
+        self._save_transaction({
+            "type": "family_member_added",
+            "head_user_id": head_user_id,
+            "member_user_id": member_user_id,
+            "member_name": member_name,
+            "role": member_role,
+            "family_id": family_id,
+            "price_cents": price_cents,
+            "stripe_item_id": stripe_item_id,
+            "timestamp": str(datetime.datetime.now()),
+        })
+        
+        print(f">>> [BILLING] Family member added: {member_name} ({member_role}) -> {price_display}")
+        
+        return {
+            "success": True,
+            "price_cents": price_cents,
+            "price_display": price_display,
+            "stripe_item_id": stripe_item_id,
+        }
+    
+    async def remove_family_member_billing(self, member_user_id: str) -> dict:
+        """Remove billing for a family member. Deletes Stripe subscription item if exists."""
+        billing = self._load_billing()
+        member_record = billing.get("family_members", {}).get(member_user_id)
+        
+        if not member_record:
+            return {"success": True, "message": "No billing record found"}
+        
+        stripe_item_id = member_record.get("stripe_subscription_item_id")
+        if stripe_item_id and self.stripe_enabled:
+            try:
+                stripe.SubscriptionItem.delete(stripe_item_id)
+                print(f">>> [BILLING] Deleted Stripe subscription item {stripe_item_id}")
+            except Exception as e:
+                print(f">>> [BILLING] Stripe family item deletion failed: {e}")
+        
+        member_record["status"] = "removed"
+        member_record["removed_at"] = str(datetime.datetime.now())
+        billing["family_members"][member_user_id] = member_record
+        self._save_billing(billing)
+        
+        # Clear billing info from profile
+        if self.registry_loader and self.registry_saver:
+            registry = self.registry_loader()
+            for k, v in registry.items():
+                if v.get("profile", {}).get("hardware_id") == member_user_id:
+                    v["profile"].pop("family_billing_price_cents", None)
+                    v["profile"].pop("family_billing_status", None)
+                    v["profile"].pop("family_billing_stripe_item", None)
+                    self.registry_saver(registry)
+                    break
+        
+        self._save_transaction({
+            "type": "family_member_removed",
+            "member_user_id": member_user_id,
+            "member_name": member_record.get("member_name", ""),
+            "family_id": member_record.get("family_id", ""),
+            "was_price_cents": member_record.get("price_cents", 0),
+            "timestamp": str(datetime.datetime.now()),
+        })
+        
+        print(f">>> [BILLING] Family member removed: {member_record.get('member_name', member_user_id)}")
+        return {"success": True}
+    
+    def get_family_billing_summary(self, family_id: str) -> dict:
+        """Get billing summary for a family."""
+        if not self.registry_loader:
+            return {"members": [], "total_monthly_cents": 0}
+        
+        registry = self.registry_loader()
+        members = []
+        total = 0
+        head_plan = "TRIAL"
+        
+        for k, v in registry.items():
+            if k.startswith("_"):
+                continue
+            p = v.get("profile", {})
+            if p.get("family_id") != family_id:
+                continue
+            role = p.get("family_role", "MEMBER").upper()
+            price = p.get("family_billing_price_cents", 0)
+            if role == "HEAD":
+                head_plan = p.get("subscription_plan", "TRIAL").upper()
+                continue
+            members.append({
+                "user_id": p.get("hardware_id", ""),
+                "name": p.get("name", ""),
+                "role": role,
+                "price_cents": price,
+                "price_display": f"${price / 100:.0f}/mo" if price > 0 else "Free",
+            })
+            total += price
+        
+        base_price = self.PLANS.get(head_plan, {}).get("price_monthly", 0) * 100
+        
+        return {
+            "head_plan": head_plan,
+            "base_price_cents": base_price,
+            "members": members,
+            "member_count": len(members),
+            "family_addon_cents": total,
+            "total_monthly_cents": base_price + total,
+            "total_display": f"${(base_price + total) / 100:.0f}/mo",
+        }
+    
+    # =========================================================================
     # SUBSCRIPTION MANAGEMENT
     # =========================================================================
     

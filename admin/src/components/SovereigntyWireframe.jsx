@@ -27,11 +27,14 @@ const colors = {
   textSecondary: '#888888',
 };
 
-const API = '';
+const API = process.env.REACT_APP_API_BASE_URL || '';
 
 async function apiFetch(path) {
   try {
-    const res = await fetch(`${API}${path}`);
+    const headers = {};
+    const token = sessionStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${API}${path}`, { headers });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }

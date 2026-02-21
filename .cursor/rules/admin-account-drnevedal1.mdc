@@ -1,0 +1,34 @@
+---
+description: DrNevedal1 is the sole admin account — never create or reference admin1
+alwaysApply: true
+---
+
+# Admin Account: DrNevedal1
+
+## Rule
+
+The **only** admin account is `DrNevedal1`. This is permanent and non-negotiable.
+
+| Field | Value |
+|-------|-------|
+| Username | `DrNevedal1` |
+| Role | `ADMIN` |
+| Email | `admin_nevedalnj@sovereignsanctuary.net` |
+| Hardware ID | `ADMIN_DRNEVEDAL1_ID` |
+| Registry Key | `admin_DrNevedal1` |
+
+## Requirements
+
+1. **Never create `admin1`** — that account was breached and permanently retired. Do not recreate it in `user_registry.json`, PostgreSQL, or any auth store.
+2. **Never create additional admin accounts** without explicit user approval.
+3. **Always use `DrNevedal1`** when referencing, testing, or scripting admin operations.
+4. **Admin email** is `admin_nevedalnj@sovereignsanctuary.net` — do not change it to `admin@littlenate.ai` or any other address.
+5. **Password hashing** uses `pbkdf2_hmac('sha256', password, salt, 100000)` — never store admin passwords in plaintext.
+
+## Where Admin Identity Lives
+
+- **PostgreSQL** (`users` table): Source of truth when `USE_POSTGRES_REGISTRY` is enabled
+- **JSON** (`data/bridge/user_registry.json`): Backup/fallback registry
+- **Local** (`backend/app/websocket/data/user_registry.json`): Development copy
+
+All three must stay in sync with `DrNevedal1` as the sole admin.

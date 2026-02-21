@@ -45,6 +45,20 @@ MIGRATIONS=(
     "030_hive_defense_foundation.sql"
     "031_hive_defense_supplemental.sql"
     "032_user_store_profile_data.sql"
+    "033_family_pricing_v3_founding.sql"
+    "034_sovereign_vault.sql"
+    "035_founding_member_constraint.sql"
+    "036_webhook_idempotency.sql"
+    "037_transfer_conversations.sql"
+    "038_organization_sessions.sql"
+    "039_billing_fortress.sql"
+    "040_guardian_fibre.sql"
+    "041_advanced_protections.sql"
+    "042_sentinel_mesh.sql"
+    "043_pipeline_drum.sql"
+    "044_hepa_filter.sql"
+    "045_campaign_episodes.sql"
+    "046_deadman_activity_tracking.sql"
 )
 
 echo "=== Sovereign Swarm Migration Runner ==="
@@ -161,6 +175,51 @@ for migration in "${MIGRATIONS[@]}"; do
         "032_user_store_profile_data.sql")
             TABLE_CHECK="user_store_profiles"
             ;;
+        "033_family_pricing_v3_founding.sql")
+            TABLE_CHECK="platform_config"
+            ;;
+        "034_sovereign_vault.sql")
+            TABLE_CHECK="vault_folders"
+            ;;
+        "035_founding_member_constraint.sql")
+            # ALTER TABLE + trigger, no new table
+            TABLE_CHECK=""
+            ;;
+        "036_webhook_idempotency.sql")
+            TABLE_CHECK="webhook_events"
+            ;;
+        "037_transfer_conversations.sql")
+            # Index-only migration
+            TABLE_CHECK=""
+            ;;
+        "038_organization_sessions.sql")
+            TABLE_CHECK="organization_sessions"
+            ;;
+        "039_billing_fortress.sql")
+            TABLE_CHECK="webhook_events_v2"
+            ;;
+        "040_guardian_fibre.sql")
+            TABLE_CHECK="guardian_fibres"
+            ;;
+        "041_advanced_protections.sql")
+            TABLE_CHECK="sentinel_records"
+            ;;
+        "042_sentinel_mesh.sql")
+            TABLE_CHECK="guardian_heartbeat_log"
+            ;;
+        "043_pipeline_drum.sql")
+            TABLE_CHECK="drum_baselines"
+            ;;
+        "044_hepa_filter.sql")
+            TABLE_CHECK="staged_deletions"
+            ;;
+        "045_campaign_episodes.sql")
+            TABLE_CHECK="campaign_templates"
+            ;;
+        "046_deadman_activity_tracking.sql")
+            # ALTER TABLE + index, no new table
+            TABLE_CHECK=""
+            ;;
         *)
             TABLE_CHECK=""
             ;;
@@ -198,7 +257,16 @@ for table in standing_orders insight_log strategy_proposals coherence_briefings 
              subscriptions subscription_items payment_history \
              hive_forensic_logs attacker_fingerprints curiosity_events \
              containment_zones defcon_state drift_scores ghost_missions \
-             hive_heartbeats curiosity_state ring_membership hive_events; do
+             hive_heartbeats curiosity_state ring_membership hive_events \
+             platform_config vault_folders vault_items transfer_crystals \
+             webhook_events organization_sessions webhook_events_v2 \
+             trial_fingerprints usage_meters \
+             guardian_fibres device_imprints guardian_snapshots \
+             sentinel_records minor_data_access_log custody_dispute_records \
+             guardian_heartbeat_log cross_guardian_alerts sentinel_mesh_state \
+             drum_baselines drum_alerts \
+             staged_deletions heritage_vault_records legacy_wishes \
+             campaign_templates storytelling_campaigns; do
     EXISTS=$(docker exec "${CONTAINER}" psql -U "${DB_USER}" -d "${DB_NAME}" -tAc \
         "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '${table}');")
     STATUS="OK"

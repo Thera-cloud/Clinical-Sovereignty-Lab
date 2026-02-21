@@ -481,27 +481,42 @@ class FacebookAdapter(SocialPlatformAdapter):
     # ── Analytics ───────────────────────────────────────────────────
 
     async def get_analytics(self) -> PlatformAnalytics:
-        """Get Facebook page analytics."""
-        if not self._connected or not self._page_id:
+        """Get Facebook page or profile analytics."""
+        if not self._connected:
             return PlatformAnalytics(platform="facebook")
+
+        target_id = self._page_id or "me"
+        analytics = PlatformAnalytics(platform="facebook")
 
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
-                    f"{GRAPH_API_BASE}/{self._page_id}",
+                    f"{GRAPH_API_BASE}/{target_id}",
                     params={
-                        "fields": "followers_count,fan_count",
+                        "fields": "followers_count,fan_count,friends",
                         "access_token": self._access_token,
                     }
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return PlatformAnalytics(
-                        followers=data.get("followers_count", data.get("fan_count", 0)),
-                        platform="facebook",
-                        raw_data=data,
+                    analytics.followers = data.get(
+                        "followers_count",
+                        data.get("fan_count", 0)
                     )
+                    friends = data.get("friends", {})
+                    if not analytics.followers and friends:
+                        analytics.followers = friends.get("summary", {}).get("total_count", 0)
+                    analytics.raw_data = data
+
+                posts = await self.get_feed(limit=20)
+                if posts:
+                    analytics.total_posts = len(posts)
+                    analytics.total_likes = sum(p.likes or 0 for p in posts)
+                    analytics.total_comments = sum(p.comments or 0 for p in posts)
+                    if analytics.total_posts > 0:
+                        eng = (analytics.total_likes + analytics.total_comments) / analytics.total_posts
+                        analytics.engagement_rate = round(eng / max(analytics.followers, 1), 4)
         except Exception as e:
             logger.error(f"Facebook analytics error: {e}")
 
-        return PlatformAnalytics(platform="facebook")
+        return analytics

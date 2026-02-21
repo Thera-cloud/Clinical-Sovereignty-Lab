@@ -29,6 +29,9 @@ email-validator~=2.1.0
 httpx~=0.27.0
 aiohttp~=3.9.1
 
+# Web Search (DuckDuckGo fallback - no API key required)
+ddgs>=9.0.0
+
 # Redis (redis-py includes async support — aioredis is deprecated and removed)
 redis[hiredis]~=5.0.1
 
@@ -50,6 +53,9 @@ librosa~=0.10.1
 
 # PDF Processing (for workbook extraction)
 pypdf~=4.0.1
+
+# OCR — Threat Dropbox image text extraction (requires system package: tesseract-ocr)
+pytesseract~=0.3.13
 
 # Sovereign Vault — File processing pipeline
 PyMuPDF~=1.26.7          # PDF text extraction (fitz) — patched for CVE path traversal

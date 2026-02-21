@@ -224,9 +224,9 @@ class _OnboardingTutorialScreenState extends State<OnboardingTutorialScreen> wit
           final data = json.decode(message);
           final type = data['type'];
           if (type == 'nate_audio_delta') {
-            _nateVoice.handleAudioDelta(data['payload'], format: data['format'] ?? 'pcm');
+            _nateVoice.handleAudioDelta(data['payload'], format: data['format'] ?? 'pcm', requestId: data['request_id'] ?? '');
           } else if (type == 'tts_done') {
-            _nateVoice.handleTtsDone();
+            _nateVoice.handleTtsDone(requestId: data['request_id'] ?? '');
           } else if (type == 'connected' || type == 'auth_success' || type == 'login_success') {
             if (mounted) setState(() => _socketReady = true);
             debugPrint("[Onboarding] WebSocket authenticated");
@@ -1461,13 +1461,15 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       }
       else if (data['type'] == 'login_failed' || data['type'] == 'login_failure') {
         final msg = (data['message'] ?? data['error'] ?? 'Login failed').toString();
+        final errorCode = (data['error_code'] ?? '').toString();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(msg),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            backgroundColor: errorCode == 'WRONG_PORTAL'
+                ? const Color(0xFFC9A962)
+                : Colors.red,
+            duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
           ));
-          // Return to login screen so user can retry — do NOT reconnect loop
           Navigator.of(context).pop();
         }
       }
@@ -10042,6 +10044,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       'cnc': 'CNC',
       'mcat': 'MCAT',
       'teacher': 'Teacher',
+      'judge': 'Judge',
     };
     const dojoPrices = {
       'therapist': 175.0,
@@ -10050,6 +10053,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       'cnc': 150.0,
       'mcat': 500.0,
       'teacher': 225.0,
+      'judge': 2100.0,
     };
 
     // Determine which dojos can be added (not currently active)

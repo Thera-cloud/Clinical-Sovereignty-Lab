@@ -84,7 +84,7 @@ class NateSentinel:
             profile["sentinel_baseline"] = {
                 "known_ips": [],
                 "known_devices": [],
-                "typical_hours": [],
+                "typical_hours": list(range(24)) if profile.get("role") == "ADMIN" else [],
                 "typical_actions_per_minute": 2.5,
                 "typical_action_types": {},
             }
@@ -257,11 +257,16 @@ class NateSentinel:
             return
         try:
             async with self.db_pool.acquire() as conn:
+                pg_uid = await conn.fetchval(
+                    "SELECT id FROM users WHERE hardware_id = $1 LIMIT 1", uid
+                )
+                if not pg_uid:
+                    return
                 await conn.execute(
                     """INSERT INTO audit_log
                         (action_type, admin_id, target_id, description, ip_address)
                     VALUES ($1, $2, $3, $4, $5::inet)""",
-                    action, uid, target or uid,
+                    action, pg_uid, target or str(pg_uid),
                     f"{details} [anomaly_score={anomaly_score}, device={device_hash[:8] if device_hash else 'n/a'}]",
                     ip or "0.0.0.0",
                 )

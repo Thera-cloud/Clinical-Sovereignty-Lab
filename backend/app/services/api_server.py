@@ -285,29 +285,79 @@ def verify_password(password: str, stored: str) -> bool:
     except Exception:
         return False
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
-    """Validate JWT token and return user profile"""
+_auth_redis = None
+_REDIS_URL_SNAPSHOT = os.getenv("REDIS_URL", "")
+_REDIS_PW_SNAPSHOT = os.getenv("REDIS_PASSWORD", "")
+
+async def _get_auth_redis():
+    """Lazy-connect to Redis for token validation (matches bridge's token store).
+    Uses REDIS_URL captured at import time to avoid load_dotenv(override=True) clobbering."""
+    global _auth_redis
+    if _auth_redis is not None:
+        try:
+            await _auth_redis.ping()
+            return _auth_redis
+        except Exception:
+            _auth_redis = None
+    try:
+        import redis.asyncio as aioredis
+        if _REDIS_URL_SNAPSHOT:
+            _auth_redis = aioredis.from_url(
+                _REDIS_URL_SNAPSHOT, decode_responses=True, socket_connect_timeout=5,
+            )
+        else:
+            _auth_redis = aioredis.Redis(
+                host="redis", port=6379,
+                password=_REDIS_PW_SNAPSHOT or None,
+                decode_responses=True, socket_connect_timeout=5,
+            )
+        await _auth_redis.ping()
+    except Exception as e:
+        print(f"[AUTH] Redis connection failed: {e}")
+        _auth_redis = None
+    return _auth_redis
+
+
+_REDIS_KEY_PREFIX = os.environ.get("REDIS_KEY_PREFIX", "nate")
+_REDIS_KEY_ENV = os.environ.get("ENVIRONMENT", "production")
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> Dict[str, Any]:
+    """Validate bridge token against Redis (shared with bridge container)."""
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     token = credentials.credentials
-    
+
+    # Primary path: Redis token store (written by bridge on login)
+    # Key format must match bridge: {prefix}:{env}:auth:{token}
+    r = await _get_auth_redis()
+    if r:
+        try:
+            token_key = f"{_REDIS_KEY_PREFIX}:{_REDIS_KEY_ENV}:auth:{token}"
+            raw = await r.get(token_key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+
+    # Fallback: PostgreSQL active_tokens table
     if db.pool:
-        # PostgreSQL lookup
-        async with db.pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT u.* FROM users u
-                JOIN active_tokens t ON t.user_id = u.id
-                WHERE t.token = $1 AND t.is_valid = TRUE AND t.expires_at > NOW()
-            """, token)
-            
-            if not row:
-                raise HTTPException(status_code=401, detail="Invalid or expired token")
-            
-            return dict(row)
-    else:
-        # Fallback to in-memory tokens
-        from bridge_server_hybrid import ACTIVE_TOKENS
-        if token not in ACTIVE_TOKENS:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
-        return ACTIVE_TOKENS[token]
+        try:
+            async with db.pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT u.* FROM users u
+                    JOIN active_tokens t ON t.user_id = u.id
+                    WHERE t.token = $1 AND t.is_valid = TRUE
+                      AND t.expires_at > NOW()
+                """, token)
+                if row:
+                    return dict(row)
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 async def require_admin(user: Dict = Depends(get_current_user)) -> Dict:
     """Require admin role"""

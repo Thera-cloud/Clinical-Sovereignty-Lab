@@ -473,12 +473,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                 title: const Text('Transfer Crystal', style: TextStyle(color: _VaultDesign.textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Transfer Crystal flow coming soon'),
-                      backgroundColor: _VaultDesign.gold,
-                    ),
-                  );
+                  _showTransferCrystalFlow();
                 },
               ),
             ],
@@ -531,7 +526,120 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   }
 
   Future<Uint8List> _readFileBytes(String path) async {
-    return await File(path).readAsBytes();
+    return Uint8List.fromList(await File(path).readAsBytes());
+  }
+
+  // ─── Transfer Crystal Flow ───
+  void _showTransferCrystalFlow() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _VaultDesign.bgElevated,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Transfer Crystal', style: TextStyle(color: _VaultDesign.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Import your AI chat history from another platform.', style: TextStyle(color: _VaultDesign.textSecondary, fontSize: 12)),
+            const SizedBox(height: 16),
+            _crystalSourceTile(ctx, 'ChatGPT (OpenAI)', 'ZIP export', Icons.chat_bubble, 'chatgpt'),
+            _crystalSourceTile(ctx, 'Claude (Anthropic)', 'JSON export', Icons.psychology, 'claude'),
+            _crystalSourceTile(ctx, 'Gemini (Google)', 'Takeout export', Icons.auto_awesome, 'gemini'),
+            _crystalSourceTile(ctx, 'Replika', 'JSON or CSV', Icons.favorite, 'replika'),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high, color: _VaultDesign.gold),
+              title: const Text('Auto-Detect', style: TextStyle(color: _VaultDesign.textPrimary)),
+              onTap: () { Navigator.pop(ctx); _pickAndUploadCrystal('auto'); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _crystalSourceTile(BuildContext ctx, String title, String sub, IconData icon, String src) {
+    return ListTile(
+      leading: Icon(icon, color: _VaultDesign.gold),
+      title: Text(title, style: const TextStyle(color: _VaultDesign.textPrimary)),
+      subtitle: Text(sub, style: const TextStyle(color: _VaultDesign.textSecondary, fontSize: 11)),
+      onTap: () { Navigator.pop(ctx); _pickAndUploadCrystal(src); },
+    );
+  }
+
+  Future<void> _pickAndUploadCrystal(String source) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.custom,
+        allowedExtensions: ['zip', 'json', 'csv'],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      Uint8List? bytes = file.bytes;
+      if (bytes == null && file.path != null && !kIsWeb) {
+        bytes = await _readFileBytes(file.path!);
+      }
+      if (bytes == null) return;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Importing... this may take a moment'), backgroundColor: _VaultDesign.gold),
+        );
+      }
+
+      final uri = Uri.parse('$_baseUrl/api/v1/vault/import');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['X-User-Id'] = _userId;
+      request.fields['source'] = source;
+      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: file.name));
+      final streamed = await request.send().timeout(const Duration(seconds: 120));
+      final resp = await http.Response.fromStream(streamed);
+
+      if (!mounted) return;
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final data = jsonDecode(resp.body);
+        final crystal = data['crystal'];
+        final stats = data['stats'];
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: _VaultDesign.bgElevated,
+            title: const Text('Transfer Crystal Created', style: TextStyle(color: _VaultDesign.gold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (stats != null) ...[
+                  Text('Source: ${data['source'] ?? source}', style: const TextStyle(color: _VaultDesign.textSecondary, fontSize: 12)),
+                  if (stats['conversations_imported'] != null)
+                    Text('Conversations: ${stats['conversations_imported']}', style: const TextStyle(color: _VaultDesign.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 8),
+                ],
+                if (crystal != null && crystal is Map)
+                  Text(crystal['summary'] ?? 'Crystal created successfully', style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 12))
+                else
+                  const Text('Imported into Sovereign Vault.', style: TextStyle(color: _VaultDesign.textPrimary, fontSize: 12)),
+              ],
+            ),
+            actions: [TextButton(onPressed: () { Navigator.pop(ctx); _loadData(); }, child: const Text('Done', style: TextStyle(color: _VaultDesign.gold)))],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: ${resp.statusCode}'), backgroundColor: _VaultDesign.gold),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: _VaultDesign.gold),
+        );
+      }
+    }
   }
 
   bool get _isSovereignCircle {

@@ -618,3 +618,165 @@ class CTMonitor:
             f"certs={self._total_certs_found} "
             f"unauthorized={self._total_unauthorized}>"
         )
+
+    # ------------------------------------------------------------------
+    # TYPOSQUAT DETECTION — Sovereign Domain Lookalike Surveillance
+    # ------------------------------------------------------------------
+
+    _TYPOSQUAT_VARIANTS: Optional[Set[str]] = None
+
+    @classmethod
+    def _build_typosquat_variants(cls) -> Set[str]:
+        """
+        Generate probable typosquat domains for sovereignsanctuary.net.
+        Techniques: character swaps, drops, doubles, near-key substitutions,
+        homoglyphs, TLD variations, hyphen insertion/removal.
+        """
+        base_domains = ["sovereignsanctuary", "littlenate"]
+        tlds = [".net", ".com", ".org", ".io", ".co", ".ai", ".us", ".info", ".app", ".dev"]
+        near_keys = {
+            "a": "sq", "b": "vn", "c": "xv", "d": "sf", "e": "rw",
+            "f": "dg", "g": "fh", "h": "gj", "i": "uo", "j": "hk",
+            "k": "jl", "l": "ko", "m": "n", "n": "bm", "o": "ip",
+            "p": "ol", "q": "wa", "r": "et", "s": "ad", "t": "ry",
+            "u": "yi", "v": "cb", "w": "qe", "x": "zc", "y": "tu", "z": "x",
+        }
+        homoglyphs = {
+            "a": ["à", "á", "ä", "ɑ"], "e": ["è", "é", "ë", "ε"],
+            "i": ["ì", "í", "1", "l"], "o": ["ò", "ó", "ö", "0"],
+            "n": ["ñ", "η"], "s": ["ş", "$", "5"], "g": ["ğ", "9"],
+            "t": ["ţ", "ť"], "u": ["ù", "ú", "ü"], "r": ["г"],
+            "c": ["ç", "с"], "y": ["ý", "ÿ", "у"],
+        }
+
+        variants: Set[str] = set()
+
+        for base in base_domains:
+            for tld in tlds:
+                # Original (different TLDs)
+                variants.add(f"{base}{tld}")
+
+                # Character drops
+                for i in range(len(base)):
+                    variants.add(f"{base[:i]}{base[i+1:]}{tld}")
+
+                # Character doubles
+                for i in range(len(base)):
+                    variants.add(f"{base[:i]}{base[i]}{base[i:]}{tld}")
+
+                # Adjacent character swaps
+                for i in range(len(base) - 1):
+                    swapped = list(base)
+                    swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
+                    variants.add(f"{''.join(swapped)}{tld}")
+
+                # Near-key substitutions
+                for i, ch in enumerate(base):
+                    for replacement in near_keys.get(ch, ""):
+                        variants.add(f"{base[:i]}{replacement}{base[i+1:]}{tld}")
+
+                # Homoglyphs
+                for i, ch in enumerate(base):
+                    for hg in homoglyphs.get(ch, []):
+                        variants.add(f"{base[:i]}{hg}{base[i+1:]}{tld}")
+
+                # Hyphen insertion
+                for i in range(1, len(base)):
+                    variants.add(f"{base[:i]}-{base[i:]}{tld}")
+
+            # Subdomain/compound variations
+            if base == "sovereignsanctuary":
+                for tld in tlds:
+                    variants.add(f"sovereign-sanctuary{tld}")
+                    variants.add(f"sovereingsanctuary{tld}")
+                    variants.add(f"soveriegnsanctuary{tld}")
+                    variants.add(f"sovereignsantuary{tld}")
+                    variants.add(f"sovereignsancutary{tld}")
+                    variants.add(f"soveriensanctuary{tld}")
+                    variants.add(f"soveregnsanctuary{tld}")
+                    variants.add(f"sovereignsanctury{tld}")
+
+        # Remove real domains
+        for real in SOVEREIGN_DOMAINS:
+            variants.discard(real.replace("*.", ""))
+
+        return variants
+
+    async def check_typosquat_domains(self) -> List[CTAlert]:
+        """
+        Search CT logs for certificates issued to typosquat lookalikes
+        of Sovereign Sanctuary domains.  Any cert found is a CRITICAL
+        alert — someone is trying to impersonate the platform.
+
+        Returns
+        -------
+        list[CTAlert]
+            Alerts for any lookalike domain certificates discovered.
+        """
+        if self.__class__._TYPOSQUAT_VARIANTS is None:
+            self.__class__._TYPOSQUAT_VARIANTS = self._build_typosquat_variants()
+
+        typosquat_alerts: List[CTAlert] = []
+        checked = 0
+        found = 0
+
+        logger.info(
+            "typosquat_scan_started variants=%d",
+            len(self.__class__._TYPOSQUAT_VARIANTS),
+        )
+
+        for variant in sorted(self.__class__._TYPOSQUAT_VARIANTS):
+            try:
+                entries = await self._query_crtsh(variant)
+                checked += 1
+
+                for entry in entries:
+                    if entry.sha256_fingerprint in self._known_fingerprints:
+                        continue
+                    self._known_fingerprints.add(entry.sha256_fingerprint)
+                    found += 1
+
+                    alert = CTAlert(
+                        certificate=entry,
+                        alert_type="typosquat_domain",
+                        severity="critical",
+                        message=(
+                            f"TYPOSQUAT ALERT: Certificate found for '{variant}' — "
+                            f"possible impersonation of Sovereign Sanctuary. "
+                            f"Issuer: {entry.issuer_org or entry.issuer_cn}. "
+                            f"Serial: {entry.serial_number}."
+                        ),
+                    )
+                    typosquat_alerts.append(alert)
+                    self.alerts.append(alert)
+                    self._total_unauthorized += 1
+
+                    await self._persist_alert(alert)
+                    await self._broadcast_event(
+                        "hive.ct_monitor.typosquat_detected",
+                        {
+                            "domain": variant,
+                            "issuer": entry.issuer_org or entry.issuer_cn,
+                            "not_before": entry.not_before.isoformat() if entry.not_before else None,
+                            "not_after": entry.not_after.isoformat() if entry.not_after else None,
+                            "fingerprint": entry.sha256_fingerprint,
+                        },
+                    )
+
+                    logger.critical(
+                        "TYPOSQUAT_CERT_FOUND domain=%s issuer=%s serial=%s",
+                        variant,
+                        entry.issuer_org or entry.issuer_cn,
+                        entry.serial_number,
+                    )
+            except Exception as exc:
+                logger.debug("typosquat_check_skip domain=%s error=%s", variant, str(exc)[:80])
+
+        logger.info(
+            "typosquat_scan_complete checked=%d certs_found=%d alerts=%d",
+            checked,
+            found,
+            len(typosquat_alerts),
+        )
+
+        return typosquat_alerts

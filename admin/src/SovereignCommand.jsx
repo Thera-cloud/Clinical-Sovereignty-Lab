@@ -71,12 +71,20 @@ const colors = {
 
 const API_BASE = '';  // relative — same origin
 
+function _getAuthHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  const token = sessionStorage.getItem('token');
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
+}
+
 async function apiFetch(path, options = {}) {
   try {
     const res = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...options.headers },
+      headers: { ..._getAuthHeaders(), ...options.headers },
       ...options,
     });
+    if (res.status === 401) { window.location.href = 'index.html'; return null; }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -235,6 +243,7 @@ const navItems = [
   { id: 'big-nate', icon: '💬', label: 'Big Nate Chat' },
   { id: 'zefcp', icon: '📡', label: 'ZEFCP Monitor' },
   { id: 'hive-defense', icon: '🛡️', label: 'Hive Defense' },
+  { id: 'dependency-guardian', icon: '📦', label: 'Dep. Guardian' },
 ];
 
 const Sidebar = ({ activeScreen, setActiveScreen }) => (
@@ -681,26 +690,122 @@ const UserManagementScreen = () => {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
                     <span>C_emo (Coherence)</span>
-                    <span style={{ color: colors.cyan }}>{cEmo.toFixed ? cEmo.toFixed(3) : cEmo}</span>
+                    <span style={{ color: colors.cyan }}>{(ns.C_emo || cEmo)?.toFixed ? (ns.C_emo || cEmo).toFixed(3) : (ns.C_emo || cEmo)}</span>
                   </div>
-                  <ProgressBar value={cEmo * 100} max={100} color={colors.cyan} />
+                  <ProgressBar value={(ns.C_emo || cEmo) * 100} max={100} color={colors.cyan} />
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                    <span>p_ent (Entanglement)</span>
-                    <span style={{ color: colors.purple }}>{pEnt.toFixed ? pEnt.toFixed(3) : pEnt}</span>
+                    <span>GAP (Growth Attunement)</span>
+                    <span style={{ color: colors.gold }}>{(ns.GAP || 0)?.toFixed ? (ns.GAP || 0).toFixed(3) : (ns.GAP || 0)}</span>
                   </div>
-                  <ProgressBar value={pEnt * 100} max={100} color={colors.purple} />
+                  <ProgressBar value={(ns.GAP || 0) * 100} max={100} color={colors.gold} />
                 </div>
-                <div>
+                <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-                    <span>gamma_env (Decoherence)</span>
-                    <span style={{ color: colors.orange }}>{gammaEnv.toFixed ? gammaEnv.toFixed(3) : gammaEnv}</span>
+                    <span>Quantum Depth</span>
+                    <span style={{ color: colors.purple }}>{(ns.Quantum || 0)?.toFixed ? (ns.Quantum || 0).toFixed(3) : (ns.Quantum || 0)}</span>
                   </div>
-                  <ProgressBar value={gammaEnv * 100} max={100} color={colors.orange} />
+                  <ProgressBar value={(ns.Quantum || 0) * 100} max={100} color={colors.purple} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 8, fontSize: 11 }}>
+                  <div style={{ textAlign: 'center', padding: 6, background: `${colors.cyan}11`, borderRadius: 6 }}>
+                    <div style={{ color: colors.cyan, fontWeight: 700 }}>{ns.session_count || 0}</div>
+                    <div style={{ color: colors.textSecondary }}>Sessions</div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 6, background: `${colors.green}11`, borderRadius: 6 }}>
+                    <div style={{ color: colors.green, fontWeight: 700 }}>{ns.breakthrough_count || 0}</div>
+                    <div style={{ color: colors.textSecondary }}>CEE</div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 6, background: `${colors.orange}11`, borderRadius: 6 }}>
+                    <div style={{ color: colors.orange, fontWeight: 700 }}>{ns.risk_level || 'LOW'}</div>
+                    <div style={{ color: colors.textSecondary }}>Risk</div>
+                  </div>
                 </div>
               </Card>
               
+              <Card>
+                <SectionTitle>CEE Experiences & Drift</SectionTitle>
+                <div style={{ fontSize: 12 }}>
+                  {selectedDetail?.cee_experiences?.length > 0 ? (
+                    <>
+                      <div style={{ color: colors.green, fontWeight: 600, marginBottom: 8 }}>
+                        {selectedDetail.cee_experiences.length} CEE Mismatch Events
+                      </div>
+                      {selectedDetail.cee_experiences.slice(-5).reverse().map((ce, i) => (
+                        <div key={i} style={{ padding: '6px 0', borderBottom: `1px solid ${colors.border}`, fontSize: 11 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: colors.textSecondary }}>{ce.timestamp?.substring(0, 16)}</span>
+                            <span style={{ color: colors.green }}>+{ce.delta?.toFixed(3)}</span>
+                          </div>
+                          <div style={{ color: colors.cyan }}>C_emo {ce.c_emo_before?.toFixed(3)} → {ce.c_emo_after?.toFixed(3)}</div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ color: colors.textSecondary, textAlign: 'center', padding: 16 }}>No CEE events yet</div>
+                  )}
+                  {selectedDetail?.drift_periods?.length > 0 && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+                      <div style={{ color: colors.textSecondary, fontWeight: 600, marginBottom: 6 }}>Drift Periods</div>
+                      {selectedDetail.drift_periods.map((dp, i) => (
+                        <div key={i} style={{ padding: '4px 0', fontSize: 11 }}>
+                          <span style={{ color: colors.orange }}>{dp.gap_days}d away</span>
+                          <span style={{ color: colors.textSecondary }}> — {dp.explored ? '✅ explored' : '⏳ unexplored'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {selectedDetail?.legacy_healing?.length > 0 && (
+                    <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.border}` }}>
+                      <div style={{ color: colors.purple, fontWeight: 600, marginBottom: 6 }}>Legacy Healing</div>
+                      {selectedDetail.legacy_healing.map((lh, i) => (
+                        <div key={i} style={{ padding: '4px 0', fontSize: 11 }}>
+                          <span>{lh.pattern?.replace(/_/g, ' ')}</span>
+                          <span style={{ color: colors.green, marginLeft: 8 }}>{lh.corrective_count} corrective exp.</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card>
+                <SectionTitle>Reply Therapy (3+3+3)</SectionTitle>
+                <div style={{ fontSize: 12 }}>
+                  {selectedDetail?.reply_therapy?.themes && Object.keys(selectedDetail.reply_therapy.themes).length > 0 ? (
+                    <>
+                      {selectedDetail.reply_therapy.active_theme && (
+                        <div style={{ background: `${colors.purple}22`, border: `1px solid ${colors.purple}`, borderRadius: 6, padding: '6px 10px', marginBottom: 10, fontSize: 11 }}>
+                          <span style={{ color: colors.purple, fontWeight: 700 }}>ACTIVE: </span>
+                          <span>{selectedDetail.reply_therapy.active_theme.replace(/_/g, ' ').toUpperCase()}</span>
+                        </div>
+                      )}
+                      {selectedDetail.reply_therapy.completed_count > 0 && (
+                        <div style={{ color: colors.green, fontWeight: 600, marginBottom: 8 }}>
+                          {selectedDetail.reply_therapy.completed_count} completed Reply Therapy cycles
+                        </div>
+                      )}
+                      {Object.entries(selectedDetail.reply_therapy.themes).map(([theme, data]) => (
+                        <div key={theme} style={{ padding: '6px 0', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ color: data.threshold_met ? colors.green : colors.textPrimary }}>
+                            {theme.replace(/_/g, ' ')}
+                            {data.reply_completed && ' ✅'}
+                          </span>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <span style={{ color: colors.cyan, fontSize: 11 }}>M:{data.mismatch}/3</span>
+                            <span style={{ color: colors.gold, fontSize: 11 }}>R:{data.reconsolidation}/3</span>
+                            <span style={{ color: colors.purple, fontSize: 11 }}>E:{data.evocative}/3</span>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ color: colors.textSecondary, textAlign: 'center', padding: 16 }}>No Reply Therapy themes yet</div>
+                  )}
+                </div>
+              </Card>
+
               <Card>
                 <SectionTitle>Matchmaker Protocol</SectionTitle>
                 <div style={{ textAlign: 'center', marginBottom: 16 }}>
@@ -738,6 +843,24 @@ const UserManagementScreen = () => {
                     alert(r ? (r.message || 'Memory wiped.') : 'Failed to wipe memory.');
                   }}>🗑️ Wipe Memory</Button>
                 </div>
+                <div style={{ marginTop: 12 }}>
+                  <Button variant="danger" style={{ width: '100%' }} onClick={async () => {
+                    if (selectedUser.role === 'ADMIN') { alert('Cannot delete admin accounts.'); return; }
+                    if (!window.confirm('PERMANENTLY DELETE ' + selectedUser.name + '? This will remove all data, vault files, and anonymize the account. THIS CANNOT BE UNDONE.')) return;
+                    const reason = window.prompt('Deletion reason (required):');
+                    if (!reason || reason.trim().length < 3) { alert('A deletion reason is required.'); return; }
+                    if (!window.confirm('FINAL CONFIRMATION: Delete ' + selectedUser.name + ' permanently?')) return;
+                    const r = await apiFetch('/api/admin/delete-user', { method: 'POST', body: JSON.stringify({ user_id: selectedUser.id, reason }) });
+                    if (r && r.status === 'deleted') {
+                      alert(r.message || 'User deleted.');
+                      setSelectedUser(null);
+                      setSelectedDetail(null);
+                      refreshUsers();
+                    } else {
+                      alert(r ? (r.detail || r.message || 'Failed to delete user.') : 'Failed to delete user.');
+                    }
+                  }}>⛔ Delete Account Permanently</Button>
+                </div>
               </Card>
             </div>
             </>
@@ -763,6 +886,8 @@ const NightSchoolScreen = () => {
   const { data: wisdomData, refresh: refreshWisdom } = useApi('/api/night-school/wisdom?limit=50');
   const { data: notesData, refresh: refreshNotes } = useApi('/api/night-school/notes?status=pending&limit=50');
   const { data: versionsData } = useApi('/api/night-school/versions');
+  const { data: dojoScenariosData, refresh: refreshScenarios } = useApi('/api/night-school/dojo/scenarios?status=all');
+  const { data: dojoMemoriesData } = useApi('/api/night-school/memories/dojo?limit=10');
   const [dojoPersona, setDojoPersona] = useState(null);
 
   const wisdomEntries = (wisdomData && wisdomData.entries) || [];
@@ -892,12 +1017,52 @@ const NightSchoolScreen = () => {
           </Card>
           
           <Card>
-            <SectionTitle>Recent Dojo Results</SectionTitle>
-            <div style={{ textAlign: 'center', padding: 24 }}>
-              <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
-              <div style={{ fontSize: 16, fontWeight: 'bold', color: colors.green }}>Ready</div>
-              <div style={{ fontSize: 11, color: colors.textSecondary }}>Select a persona and start a session</div>
-            </div>
+            <SectionTitle badge={((dojoScenariosData && dojoScenariosData.scenarios) || []).length}>Recent Dojo Results</SectionTitle>
+            {(() => {
+              const scenarios = (dojoScenariosData && dojoScenariosData.scenarios) || [];
+              const memories = (dojoMemoriesData && dojoMemoriesData.memories) || [];
+              if (scenarios.length === 0 && memories.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: 24 }}>
+                    <div style={{ fontSize: 48, marginBottom: 8 }}>🥋</div>
+                    <div style={{ fontSize: 14, fontWeight: 'bold', color: colors.textSecondary }}>No sessions yet</div>
+                    <div style={{ fontSize: 11, color: colors.textSecondary }}>Select a persona and start a session</div>
+                  </div>
+                );
+              }
+              return (
+                <div>
+                  {scenarios.slice(0, 5).map((s, i) => (
+                    <div key={s.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 'bold' }}>{s.persona || s.skill_target || 'Session'}</div>
+                        <div style={{ fontSize: 10, color: colors.textSecondary }}>{s.created_at || s.date || ''}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {s.violation_count != null && (
+                          <Badge color={s.violation_count > 0 ? colors.red : colors.green}>
+                            {s.violation_count > 0 ? `${s.violation_count} violation${s.violation_count !== 1 ? 's' : ''}` : 'Clean'}
+                          </Badge>
+                        )}
+                        <Badge color={s.status === 'completed' ? colors.green : s.status === 'active' ? colors.cyan : colors.textSecondary}>
+                          {(s.status || 'queued').toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {memories.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 10, color: colors.purple, fontWeight: 'bold', marginBottom: 6 }}>Training Memories</div>
+                      {memories.slice(0, 3).map((m, i) => (
+                        <div key={i} style={{ fontSize: 10, color: colors.textSecondary, padding: '4px 0', borderBottom: `1px solid ${colors.border}` }}>
+                          {m.summary || m.content || JSON.stringify(m).slice(0, 80)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </Card>
         </div>
       )}
@@ -935,6 +1100,7 @@ const NightSchoolScreen = () => {
 const TheEyeScreen = () => {
   const { data: tokenData } = useApi('/api/admin/token-economics');
   const { data: metricsData } = useApi('/api/admin/analytics/metrics-distribution');
+  const { data: tierData } = useApi('/api/admin/billing/tier-config');
   const tokens = tokenData || {};
   const daily = (tokens.daily_usage || []);
   const todayTokens = daily.length > 0 ? daily[0].tokens || 0 : 0;
@@ -944,6 +1110,7 @@ const TheEyeScreen = () => {
   const costWeek = (weekTokens * 6 / 1_000_000).toFixed(2);
   const costMonth = tokens.estimated_cost_30d_usd || 0;
   const dist = metricsData || {};
+  const tiers = (tierData && tierData.tiers) || [];
 
   return (
     <div style={{ padding: 24 }}>
@@ -998,24 +1165,22 @@ const TheEyeScreen = () => {
         
         <div>
           <Card style={{ marginBottom: 24 }}>
-            <SectionTitle>Tier Feature Controls</SectionTitle>
-            {/* Backend tier keys mapped to display names */}
-            {[
-              { key: 'TOP_TIER', label: 'Sovereign Circle', price: '$149/mo' },
-              { key: 'STANDARD', label: 'Inner Chamber', price: '$49/mo' },
-              { key: 'TRIAL', label: 'Threshold (Trial)', price: 'Free — 14 days' },
-              { key: 'COACH_ONLY', label: 'Coach Only', price: 'Free — no AI' },
-            ].map(({ key, label, price }) => (
-              <div key={key} style={{ padding: 12, borderBottom: `1px solid ${colors.border}` }}>
+            <SectionTitle badge={tiers.length || null}>Tier Feature Controls</SectionTitle>
+            {tiers.length === 0 && <div style={{ color: colors.textSecondary, fontSize: 11, padding: 12 }}>Loading tier config...</div>}
+            {tiers.map((t) => (
+              <div key={t.key} style={{ padding: 12, borderBottom: `1px solid ${colors.border}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontWeight: 'bold', color: key === 'TOP_TIER' ? colors.gold : colors.textPrimary }}>{label}</span>
-                  <span style={{ fontSize: 11, color: colors.textSecondary }}>{price}</span>
+                  <span style={{ fontWeight: 'bold', color: t.key === 'TOP_TIER' ? colors.gold : colors.textPrimary }}>{t.label}</span>
+                  <span style={{ fontSize: 11, color: colors.textSecondary }}>
+                    {t.price_display}{t.subscriber_count > 0 ? ` · ${t.subscriber_count} users` : ''}
+                  </span>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Badge color={key === 'COACH_ONLY' ? colors.textSecondary : colors.green}>{key === 'COACH_ONLY' ? 'Nate ✗' : 'Voice ✓'}</Badge>
-                  <Badge color={key === 'TRIAL' || key === 'COACH_ONLY' ? colors.textSecondary : colors.green}>{key === 'TRIAL' || key === 'COACH_ONLY' ? 'Vision ✗' : 'Vision ✓'}</Badge>
-                  <Badge color={key === 'TOP_TIER' ? colors.green : colors.textSecondary}>{key === 'TOP_TIER' ? 'Me2Me ✓' : 'Me2Me ✗'}</Badge>
-                  <Badge color={key === 'STANDARD' || key === 'TOP_TIER' ? colors.green : colors.textSecondary}>{key === 'STANDARD' || key === 'TOP_TIER' ? 'Family ✓' : 'Family ✗'}</Badge>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {Object.entries(t.features || {}).map(([feat, enabled]) => (
+                    <Badge key={feat} color={enabled ? colors.green : colors.textSecondary}>
+                      {feat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} {enabled ? '✓' : '✗'}
+                    </Badge>
+                  ))}
                 </div>
               </div>
             ))}
@@ -1345,6 +1510,137 @@ const NevedalLabScreen = () => {
 };
 
 // =============================================================================
+// SC_08: DEPENDENCY GUARDIAN
+// =============================================================================
+
+const SEVERITY_COLORS = {
+  CRITICAL: '#EF4444',
+  WARNING: '#F59E0B',
+  INFO: '#3B82F6',
+  OK: '#22C55E',
+};
+
+const DependencyGuardianScreen = () => {
+  const { data: report, loading, refresh } = useApi('/api/admin/dependency-report');
+  const [running, setRunning] = useState(false);
+  const [filter, setFilter] = useState('all');
+
+  const triggerAudit = async () => {
+    setRunning(true);
+    await apiFetch('/api/admin/run-dependency-audit', { method: 'POST' });
+    setRunning(false);
+    refresh();
+  };
+
+  const summary = (report && report.summary) || {};
+  const findings = (report && report.findings) || [];
+  const ts = report && report.timestamp ? new Date(report.timestamp).toLocaleString() : 'Never';
+
+  const filtered = filter === 'all'
+    ? findings
+    : findings.filter(f => f.severity === filter.toUpperCase());
+
+  const categories = [...new Set(findings.map(f => f.category))];
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ color: colors.gold, fontSize: 20, margin: 0 }}>Dependency Guardian</h1>
+          <div style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }}>Last audit: {ts}</div>
+        </div>
+        <button
+          onClick={triggerAudit}
+          disabled={running}
+          style={{
+            padding: '10px 20px', background: running ? colors.bgElevated : colors.gold,
+            color: colors.bgDark, border: 'none', borderRadius: 8, cursor: running ? 'wait' : 'pointer',
+            fontWeight: 'bold', fontSize: 12,
+          }}
+        >
+          {running ? 'Auditing...' : 'Run Audit Now'}
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ color: colors.textSecondary, padding: 40, textAlign: 'center' }}>Loading report...</div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 12, marginBottom: 24 }}>
+            {[
+              { label: 'Critical', count: summary.critical || 0, color: SEVERITY_COLORS.CRITICAL, key: 'CRITICAL' },
+              { label: 'Warning', count: summary.warning || 0, color: SEVERITY_COLORS.WARNING, key: 'WARNING' },
+              { label: 'Info', count: summary.info || 0, color: SEVERITY_COLORS.INFO, key: 'INFO' },
+              { label: 'OK', count: summary.ok || 0, color: SEVERITY_COLORS.OK, key: 'OK' },
+              { label: 'Total', count: summary.total || 0, color: colors.textPrimary, key: 'all' },
+            ].map(s => (
+              <div
+                key={s.key}
+                onClick={() => setFilter(s.key === filter ? 'all' : s.key)}
+                style={{
+                  background: filter === s.key ? colors.bgElevated : colors.bgCard,
+                  border: `1px solid ${filter === s.key ? s.color : colors.border}`,
+                  borderRadius: 8, padding: 16, textAlign: 'center', cursor: 'pointer',
+                }}
+              >
+                <div style={{ fontSize: 28, fontWeight: 'bold', color: s.color }}>{s.count}</div>
+                <div style={{ fontSize: 10, color: colors.textSecondary, marginTop: 4 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {categories.map(cat => {
+            const catFindings = filtered.filter(f => f.category === cat);
+            if (catFindings.length === 0) return null;
+            const catLabel = { python: 'Python Packages', node: 'Node Packages', flutter: 'Flutter Packages', docker: 'Docker Images', api_keys: 'API Keys', playwright: 'Playwright / Chromium' }[cat] || cat;
+            return (
+              <Card key={cat} style={{ marginBottom: 16 }}>
+                <SectionTitle badge={catFindings.length}>{catLabel}</SectionTitle>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ color: colors.textSecondary, textAlign: 'left', borderBottom: `1px solid ${colors.border}` }}>
+                      <th style={{ padding: '8px 12px', width: 80 }}>Status</th>
+                      <th style={{ padding: '8px 12px' }}>Package</th>
+                      <th style={{ padding: '8px 12px' }}>Current</th>
+                      <th style={{ padding: '8px 12px' }}>Latest</th>
+                      <th style={{ padding: '8px 12px' }}>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catFindings.map((f, idx) => (
+                      <tr key={idx} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span style={{
+                            display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontSize: 9, fontWeight: 'bold',
+                            background: `${SEVERITY_COLORS[f.severity]}22`, color: SEVERITY_COLORS[f.severity],
+                          }}>
+                            {f.severity}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'monospace' }}>{f.package}</td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: colors.textSecondary }}>{f.current || '--'}</td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: f.severity !== 'OK' ? SEVERITY_COLORS[f.severity] : colors.textSecondary }}>{f.latest || '--'}</td>
+                        <td style={{ padding: '8px 12px', color: colors.textSecondary, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.message}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            );
+          })}
+
+          {findings.length === 0 && (
+            <Card style={{ textAlign: 'center', padding: 40 }}>
+              <div style={{ fontSize: 14, color: colors.textSecondary }}>No audit data yet. Click "Run Audit Now" to start the first scan.</div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+// =============================================================================
 // MAIN APP
 // =============================================================================
 
@@ -1372,6 +1668,7 @@ export default function SovereignCommand() {
       case 'big-nate': return <BigNateChat />;
       case 'zefcp': return <ZEFCPMonitor />;
       case 'hive-defense': return <HiveDefenseDashboard />;
+      case 'dependency-guardian': return <DependencyGuardianScreen />;
       default: return <DashboardScreen />;
     }
   };

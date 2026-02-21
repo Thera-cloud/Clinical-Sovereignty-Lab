@@ -74,8 +74,8 @@ async def get_db_pool() -> asyncpg.Pool:
             user=settings.POSTGRES_USER,
             password=settings.POSTGRES_PASSWORD,
             database=settings.POSTGRES_DB,
-            min_size=5,
-            max_size=20
+            min_size=10,
+            max_size=50
         )
     return db_pool
 
@@ -107,8 +107,8 @@ async def lifespan(app: FastAPI):
         user=settings.POSTGRES_USER,
         password=settings.POSTGRES_PASSWORD,
         database=settings.POSTGRES_DB,
-        min_size=5,
-        max_size=20
+        min_size=10,
+        max_size=50
     )
     print(f"   ✅ Database connected (host={_db_host})")
     
@@ -206,6 +206,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"   ⚠️  SkyEye session engine failed to start: {e}")
     
+    # Start Marketing Automation Worker
+    marketing_worker = None
+    if getattr(settings, "ENABLE_SKYEYE_SESSIONS", False):
+        try:
+            from app.workers.marketing_automation_worker import MarketingAutomationWorker
+            marketing_worker = MarketingAutomationWorker(db_pool, interval=600)
+            await marketing_worker.start()
+            app.state.marketing_worker = marketing_worker
+            print(f"   ✅ Marketing automation worker started (10min interval)")
+        except Exception as e:
+            print(f"   ⚠️  Marketing automation worker failed to start: {e}")
+
     # Initialize Sovereign Swarm services
     _workers = []  # Track all background workers for shutdown (must be outside if-block for shutdown access)
     if getattr(settings, "ENABLE_SOVEREIGN_SWARM", False):
@@ -1004,6 +1016,22 @@ async def lifespan(app: FastAPI):
         print(f"   ⚠️  Platinum Finish Line services/workers failed: {plat_err}")
 
     # =========================================================================
+    # DEPENDENCY GUARDIAN — Daily dependency & API key health audit
+    # =========================================================================
+    try:
+        from app.workers.dependency_guardian import DependencyGuardian
+        _dep_guardian = DependencyGuardian(
+            settings=settings,
+            notifications=getattr(app.state, 'notifications', None),
+        )
+        await _dep_guardian.start()
+        app.state.dependency_guardian = _dep_guardian
+        _workers.append(_dep_guardian)
+        print("   ✅ Dependency Guardian started (daily audit)")
+    except Exception as dg_err:
+        print(f"   ⚠️  Dependency Guardian failed to start: {dg_err}")
+
+    # =========================================================================
     # PHASE 8: HIVE DEFENSE PROTOCOL INITIALIZATION
     # Patent-Pending — Claims 30-56
     # =========================================================================
@@ -1537,6 +1565,51 @@ async def lifespan(app: FastAPI):
             "zero_knowledge_vault": ZeroKnowledgeVault(db_pool),
         }
 
+        # ── Castle Defense Layers 0-8 ──
+        try:
+            from app.services.security.yubikey_gate import get_yubikey_gate
+            from app.services.security.sase_controller import get_sase
+            from app.services.security.zta_gatekeeper import get_zta
+            from app.services.security.zta_bug_fibre import get_zta_bug
+            from app.services.security.skeptic_guard import get_skeptic
+            from app.services.security.critic_guard import get_critic
+            from app.services.security.endpoint_shield import get_endpoint_shield
+            from app.services.security.mirror_gateway import get_mirror_gateway
+            from app.services.security.sovereign_fall_command import get_fall_command
+
+            _yubikey_gate = get_yubikey_gate()
+            _sase = get_sase()
+            _zta = get_zta(guardian_fibre=_guardian_fibre)
+            _zta_bug = get_zta_bug()
+            _skeptic = get_skeptic()
+            _critic = get_critic()
+            _endpoint_shield = get_endpoint_shield()
+            _mirror_gateway = get_mirror_gateway()
+            _fall_command = get_fall_command()
+
+            # Wire ZTA Bug to guards and Drum
+            _zta_bug.attach_guards(_skeptic, _critic)
+            _zta_bug.attach_sentinel_mesh(_sentinel_mesh)
+            _pipeline_drum._zta_bug = _zta_bug
+
+            app.state.hive_v4["yubikey_gate"] = _yubikey_gate
+            app.state.hive_v4["sase_controller"] = _sase
+            app.state.hive_v4["zta_gatekeeper"] = _zta
+            app.state.hive_v4["zta_bug"] = _zta_bug
+            app.state.hive_v4["skeptic_guard"] = _skeptic
+            app.state.hive_v4["critic_guard"] = _critic
+            app.state.hive_v4["endpoint_shield"] = _endpoint_shield
+            app.state.hive_v4["mirror_gateway"] = _mirror_gateway
+            app.state.hive_v4["fall_command"] = _fall_command
+
+            _yk_mode = "active" if _yubikey_gate.available else "passthrough (no hardware)"
+            print("   ✅ Castle Defense Layers 0-8 initialized")
+            print(f"      YubiKey Gate: {_yk_mode} | SASE: {_sase.stats['enabled']} | ZTA: active")
+            print(f"      ZTA Bug: guards attached | Endpoint Shield: active")
+            print(f"      Mirror Gateway: active | Fall Command: armed")
+        except Exception as _cd_err:
+            print(f"   ⚠️  Castle Defense init (non-fatal): {_cd_err}")
+
         # ── Multi-Cloud Heritage Vault (Section 13.10.7) ──
         try:
             _heritage_vault = MultiCloudHeritageVault(db_pool)
@@ -1785,6 +1858,89 @@ async def lifespan(app: FastAPI):
         traceback.print_exc()
         app.state.hive_v4 = {}
 
+    # ── Token Guardian — keeps all social media OAuth tokens alive ──
+    _token_guardian = None
+    try:
+        from app.services.token_guardian import TokenGuardian
+        _token_guardian = TokenGuardian(db_pool, interval_seconds=2700)
+        await _token_guardian.start()
+        app.state.token_guardian = _token_guardian
+        print("   ✅ Token Guardian started (45-min sweep, proactive refresh)")
+    except Exception as tg_err:
+        print(f"   ⚠️  Token Guardian init failed: {tg_err}")
+
+    # ── Token Renewal Agent — notifies admin on token failures, validates after renewal ──
+    _token_renewal_agent = None
+    try:
+        from app.services.token_renewal_agent import TokenRenewalAgent
+        from app.config import settings as _tra_settings
+        _notify_sys = getattr(app.state, "notification_system", None)
+        if _notify_sys is None:
+            from app.websocket.notification_system import NotificationSystem
+            _notify_sys = NotificationSystem(
+                data_dir=os.environ.get("DATA_DIR", "data/bridge"),
+                sendgrid_key=os.environ.get("SENDGRID_API_KEY"),
+            )
+        _admin_phone = _tra_settings.ADMIN_ALERT_PHONE or os.environ.get("ADMIN_VERIFY_PHONE", "")
+        _admin_email = (_tra_settings.ADMIN_ALERT_EMAILS or "").split(",")[0].strip()
+        _token_renewal_agent = TokenRenewalAgent(
+            db_pool,
+            notification_system=_notify_sys,
+            admin_phone=_admin_phone,
+            admin_email=_admin_email,
+            interval_seconds=900,
+        )
+        await _token_renewal_agent.start()
+        app.state.token_renewal_agent = _token_renewal_agent
+        print("   ✅ Token Renewal Agent started (15-min sweep, SMS/email notify)")
+    except Exception as tra_err:
+        print(f"   ⚠️  Token Renewal Agent init failed: {tra_err}")
+
+    # ── Token Audit Agent — independently audits the Renewal Agent ──
+    _token_audit_agent = None
+    try:
+        from app.services.token_audit_agent import TokenAuditAgent
+        from app.config import settings as _taa_settings
+        _audit_phone = _taa_settings.ADMIN_ALERT_PHONE or os.environ.get("ADMIN_VERIFY_PHONE", "")
+        _audit_email = (_taa_settings.ADMIN_ALERT_EMAILS or "").split(",")[0].strip()
+        _audit_notify = getattr(app.state, "notification_system", None)
+        if _audit_notify is None:
+            _audit_notify = _notify_sys if _token_renewal_agent else None
+        _token_audit_agent = TokenAuditAgent(
+            db_pool,
+            interval_seconds=1800,
+            notification_system=_audit_notify,
+            admin_phone=_audit_phone,
+            admin_email=_audit_email,
+        )
+        await _token_audit_agent.start()
+        app.state.token_audit_agent = _token_audit_agent
+        print("   ✅ Token Audit Agent started (30-min audit cycle)")
+    except Exception as taa_err:
+        print(f"   ⚠️  Token Audit Agent init failed: {taa_err}")
+
+    # ── Insight Accumulator — unifies all wisdom sources into coherent intelligence ──
+    _insight_accumulator = None
+    try:
+        from app.services.insight_accumulator import InsightAccumulator
+        _insight_accumulator = InsightAccumulator(db_pool)
+        await _insight_accumulator.start()
+        app.state.insight_accumulator = _insight_accumulator
+        print("   ✅ Insight Accumulator started (1h synthesis, daily reflection)")
+    except Exception as ia_err:
+        print(f"   ⚠️  Insight Accumulator init failed: {ia_err}")
+
+    # ── Web Content Reader — Little Nate reads external articles ──
+    _web_reader = None
+    try:
+        from app.services.web_content_reader import WebContentReader
+        _web_reader = WebContentReader(db_pool)
+        await _web_reader.start()
+        app.state.web_content_reader = _web_reader
+        print("   ✅ Web Content Reader started (6 feeds, 4h cycle)")
+    except Exception as wr_err:
+        print(f"   ⚠️  Web Content Reader init failed: {wr_err}")
+
     # ── HIVE DEFENSE v4.3: Startup Health Summary ──
     _healthy_count = 0
     _degraded_list = []
@@ -1798,6 +1954,11 @@ async def lifespan(app: FastAPI):
         ("skyeye", skyeye_engine is not None),
         ("drip_scheduler", drip_scheduler is not None),
         ("swarm_relay", getattr(app.state, "swarm_relay", None) is not None),
+        ("token_guardian", _token_guardian is not None),
+        ("token_renewal_agent", _token_renewal_agent is not None),
+        ("token_audit_agent", _token_audit_agent is not None),
+        ("insight_accumulator", _insight_accumulator is not None),
+        ("web_content_reader", _web_reader is not None),
         ("hot_memory", getattr(app.state, "hot_memory", None) is not None),
         ("warm_memory", getattr(app.state, "warm_memory", None) is not None),
         ("cold_memory", getattr(app.state, "cold_memory", None) is not None),
@@ -1906,6 +2067,36 @@ async def lifespan(app: FastAPI):
         _pg_task.cancel()
         print("   ✅ Account Purge Job stopped")
 
+    # Stop Token Guardian
+    _tg = getattr(app.state, "token_guardian", None)
+    if _tg:
+        _tg.stop()
+        print("   ✅ Token Guardian stopped")
+
+    # Stop Token Renewal Agent
+    _tra = getattr(app.state, "token_renewal_agent", None)
+    if _tra:
+        await _tra.stop()
+        print("   ✅ Token Renewal Agent stopped")
+
+    # Stop Token Audit Agent
+    _taa = getattr(app.state, "token_audit_agent", None)
+    if _taa:
+        await _taa.stop()
+        print("   ✅ Token Audit Agent stopped")
+
+    # Stop Insight Accumulator
+    _ia = getattr(app.state, "insight_accumulator", None)
+    if _ia:
+        await _ia.stop()
+        print("   ✅ Insight Accumulator stopped")
+
+    # Stop Web Content Reader
+    _wr = getattr(app.state, "web_content_reader", None)
+    if _wr:
+        await _wr.stop()
+        print("   ✅ Web Content Reader stopped")
+
     # SECURITY: Persist in-memory sessions and memory index BEFORE stopping anything
     # This prevents data loss on restart/crash.
     
@@ -1936,6 +2127,11 @@ async def lifespan(app: FastAPI):
     if skyeye_engine:
         try:
             await skyeye_engine.stop()
+        except Exception:
+            pass
+    if marketing_worker:
+        try:
+            await marketing_worker.stop()
         except Exception:
             pass
     if drip_scheduler:
@@ -2052,6 +2248,7 @@ if settings.ENABLE_ZOOM:
 # SkyEye Social Media Hub
 if settings.ENABLE_SKYEYE:
     app.include_router(skyeye_api.router)
+    app.include_router(skyeye_api.oauth_router)
 
 # Marketing Brain (always enabled when SkyEye is enabled)
 if settings.ENABLE_SKYEYE:

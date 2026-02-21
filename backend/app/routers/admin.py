@@ -266,10 +266,38 @@ async def get_user_details(user_id: str):
             sessions = load_json(DATA_DIR / "sessions.json", [])
             user_sessions = [s for s in sessions if s.get("client_id") == p.get("hardware_id")]
             
+            ns = metrics.get("nevedal_state", {})
+
+            # Extract CEE/drift/reply therapy data for admin visibility
+            _admin_cee = ns.get("cee_experiences", [])
+            _admin_drift = ns.get("drift_periods", [])
+            _admin_rt = ns.get("reply_therapy", {})
+            _admin_pmb = ns.get("pmb", {}) if isinstance(ns.get("pmb"), dict) else {}
+            _admin_legacy = _admin_pmb.get("legacy_patterns", []) if isinstance(_admin_pmb.get("legacy_patterns"), list) else []
+
+            _admin_rt_summary = {}
+            if isinstance(_admin_rt, dict):
+                _admin_rt_summary = {
+                    "active_theme": _admin_rt.get("active_reply_theme"),
+                    "completed_count": len(_admin_rt.get("completed_replies", [])),
+                    "completed_replies": _admin_rt.get("completed_replies", [])[-5:],
+                    "themes": {
+                        t: {
+                            "mismatch": td.get("mismatch_count", 0),
+                            "reconsolidation": td.get("reconsolidation_count", 0),
+                            "evocative": td.get("evocative_recall_count", 0),
+                            "threshold_met": td.get("threshold_met", False),
+                            "reply_completed": td.get("reply_completed", False),
+                        }
+                        for t, td in _admin_rt.get("themes", {}).items()
+                        if isinstance(td, dict)
+                    },
+                }
+
             return {
                 "profile": p,
                 "credentials": {"username": v.get("credentials", {}).get("username")},
-                "metrics": metrics.get("nevedal_state", {}),
+                "metrics": ns,
                 "metrics_history": metrics.get("history", [])[-20:],
                 "conversation_count": len(memories),
                 "recent_topics": _extract_topics(memories[-20:]),
@@ -277,7 +305,41 @@ async def get_user_details(user_id: str):
                     "total": len(user_sessions),
                     "completed": len([s for s in user_sessions if s.get("status") == "completed"]),
                     "recent": user_sessions[-5:]
-                }
+                },
+                "cee_experiences": [
+                    {
+                        "timestamp": ce.get("timestamp", ""),
+                        "c_emo_before": ce.get("c_emo_before", 0),
+                        "c_emo_after": ce.get("c_emo_after", 0),
+                        "delta": ce.get("delta", 0),
+                        "mood_before": ce.get("mood_before", ""),
+                        "mood_after": ce.get("mood_after", ""),
+                    }
+                    for ce in (_admin_cee[-20:] if isinstance(_admin_cee, list) else [])
+                    if isinstance(ce, dict)
+                ],
+                "drift_periods": [
+                    {
+                        "left_at": dp.get("left_at", ""),
+                        "returned_at": dp.get("returned_at", ""),
+                        "gap_days": dp.get("gap_days", 0),
+                        "explored": dp.get("explored", False),
+                    }
+                    for dp in (_admin_drift if isinstance(_admin_drift, list) else [])
+                    if isinstance(dp, dict)
+                ],
+                "reply_therapy": _admin_rt_summary,
+                "legacy_healing": [
+                    {
+                        "pattern": lp.get("pattern", ""),
+                        "source": lp.get("source", ""),
+                        "corrective_count": lp.get("corrective_experience_count", 0),
+                        "last_corrective_at": lp.get("last_corrective_at"),
+                        "reflected_in_client": lp.get("reflected_in_client", False),
+                    }
+                    for lp in _admin_legacy
+                    if isinstance(lp, dict) and lp.get("corrective_experience_count", 0) > 0
+                ],
             }
     
     raise HTTPException(404, "User not found")
@@ -443,6 +505,94 @@ async def admin_wipe_memory(req: WipeMemoryRequest):
         "user_id": req.user_id,
         "wiped": wiped,
         "message": f"All memory wiped for {user_name or req.user_id}. {len(wiped)} data stores cleared.",
+    }
+
+
+class DeleteUserRequest(BaseModel):
+    user_id: str
+    reason: str = "Administrative action"
+
+
+@router.post("/delete-user")
+async def admin_delete_user(req: DeleteUserRequest, request: Request):
+    """
+    Permanently delete a user account (soft-delete + anonymization).
+    Removes vault data, DB records, and sends notification email.
+    Audit-logged. IRREVERSIBLE.
+    """
+    registry = load_json(DATA_DIR / "user_registry.json")
+
+    target_key = None
+    target_profile = None
+    for k, v in registry.items():
+        p = v.get("profile", {})
+        if p.get("hardware_id") == req.user_id or k == req.user_id:
+            target_key = k
+            target_profile = p
+            break
+
+    if not target_key or not target_profile:
+        raise HTTPException(404, "User not found")
+
+    if target_profile.get("role") == "ADMIN":
+        raise HTTPException(403, "Cannot delete admin accounts via this endpoint")
+
+    user_name = target_profile.get("name", "Unknown")
+    user_email = target_profile.get("email", "")
+    hw_id = target_profile.get("hardware_id", req.user_id)
+
+    # Anonymize registry entry (soft delete)
+    target_profile["name"] = "Deleted User"
+    target_profile["email"] = ""
+    target_profile["phone"] = ""
+    target_profile["account_status"] = "DELETED"
+    target_profile["deleted_at"] = datetime.utcnow().isoformat()
+    target_profile["delete_reason"] = req.reason
+    registry[target_key]["profile"] = target_profile
+
+    if "password_hash" in registry[target_key]:
+        registry[target_key]["password_hash"] = ""
+    if "password_salt" in registry[target_key]:
+        registry[target_key]["password_salt"] = ""
+
+    save_json(DATA_DIR / "user_registry.json", registry)
+
+    # DB soft-delete
+    cleaned = []
+    try:
+        pool = request.app.state.db_pool
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET deleted_at = NOW(), email = '', name = 'Deleted User' WHERE hardware_id = $1",
+                hw_id,
+            )
+            cleaned.append("db_users")
+    except Exception:
+        pass
+
+    # Vault cleanup
+    role = target_profile.get("role", "CLIENT")
+    vault_subdir = "Coaches" if role == "COACH" else "Clients"
+    vault_dir = VAULT_ROOT / vault_subdir / hw_id
+    if vault_dir.exists():
+        import shutil
+        shutil.rmtree(vault_dir, ignore_errors=True)
+        cleaned.append("vault_files")
+
+    _audit_log_append(
+        "ADMIN_DELETE_USER",
+        user_id=req.user_id,
+        user_name=user_name,
+        reason=req.reason,
+        cleaned=cleaned,
+    )
+
+    return {
+        "status": "deleted",
+        "user_id": req.user_id,
+        "name": user_name,
+        "cleaned": cleaned,
+        "message": f"Account '{user_name}' permanently deleted. {len(cleaned)} data stores cleaned.",
     }
 
 
@@ -617,11 +767,14 @@ async def assign_coach(req: AssignCoachRequest):
     """Assign a coach to a client"""
     registry = load_json(DATA_DIR / "user_registry.json")
     
-    # Verify coach exists
+    # Verify coach exists and resolve username
+    coach_username = ""
     coach_exists = False
     for v in registry.values():
-        if v.get("profile", {}).get("hardware_id") == req.coach_id:
+        cp = v.get("profile", {})
+        if cp.get("hardware_id") == req.coach_id:
             coach_exists = True
+            coach_username = v.get("credentials", {}).get("username", "")
             break
     
     if not coach_exists:
@@ -632,6 +785,7 @@ async def assign_coach(req: AssignCoachRequest):
         p = v.get("profile", {})
         if p.get("hardware_id") == req.client_id:
             p["assigned_coach_id"] = req.coach_id
+            p["assigned_coach"] = coach_username
             p["coach_assigned_at"] = str(datetime.now())
             save_json(DATA_DIR / "user_registry.json", registry)
             return {"message": "Coach assigned", "client_id": req.client_id, "coach_id": req.coach_id}
@@ -1008,6 +1162,36 @@ PLAN_LABELS = {
     "TOP_TIER": "Sovereign Circle",
     "SOVEREIGN_CIRCLE": "Sovereign Circle",
 }
+
+
+TIER_FEATURES = {
+    "TOP_TIER": {"voice": True, "vision": True, "me2me": True, "family": True, "secure_search": True, "night_school": True},
+    "STANDARD": {"voice": True, "vision": True, "me2me": False, "family": True, "secure_search": False, "night_school": False},
+    "TRIAL": {"voice": True, "vision": False, "me2me": False, "family": False, "secure_search": False, "night_school": False},
+    "COACH_ONLY": {"voice": False, "vision": False, "me2me": False, "family": False, "secure_search": False, "night_school": False},
+}
+
+
+@router.get("/billing/tier-config")
+async def get_tier_config():
+    """Return canonical tier definitions — prices, labels, feature gates."""
+    registry = _load_registry()
+    tier_counts: Dict[str, int] = {}
+    for entry in registry.values():
+        plan = (entry.get("profile", {}).get("subscription_plan") or "TRIAL").upper()
+        tier_counts[plan] = tier_counts.get(plan, 0) + 1
+
+    tiers = []
+    for key in ("TOP_TIER", "STANDARD", "TRIAL", "COACH_ONLY"):
+        tiers.append({
+            "key": key,
+            "label": PLAN_LABELS.get(key, key),
+            "price": PLAN_PRICES.get(key, 0),
+            "price_display": f"${PLAN_PRICES[key]}/mo" if key in PLAN_PRICES else "Free" if key == "COACH_ONLY" else "Free — 14 days",
+            "features": TIER_FEATURES.get(key, {}),
+            "subscriber_count": tier_counts.get(key, 0),
+        })
+    return {"tiers": tiers}
 
 
 class OverridePlanRequest(BaseModel):
@@ -1546,3 +1730,100 @@ async def emergency_purge(req: EmergencyPurgeRequest):
         "purged": purged,
         "message": f"Emergency purge complete for {user_name or req.user_id}. {len(purged)} data categories cleared.",
     }
+
+
+# =============================================================================
+# TEST: Admin Alert Protocol (SMS + Email)
+# =============================================================================
+
+@router.post("/test-alert")
+async def test_admin_alert():
+    """Fire a test SMS + email alert to the admin via the Defense Shield."""
+    from app.services.security.admin_contact_shield import get_shield
+    shield = get_shield()
+
+    if not shield._alert_phone and not shield._alert_emails:
+        return {
+            "status": "error",
+            "message": "No ADMIN_ALERT_PHONE or ADMIN_ALERT_EMAILS configured in .env",
+        }
+
+    results = {"sms": "skipped", "email": "skipped"}
+
+    # Ensure notification system is wired
+    if not shield._notification_system:
+        try:
+            from app.websocket.bridge_server import notification_system as ns
+            shield.set_notification_system(ns)
+        except Exception:
+            pass
+
+    if shield._alert_phone:
+        try:
+            ns = shield._notification_system
+            if ns and ns.twilio_enabled:
+                sms_body = "[SANCTUARY DEFENSE] Test Alert\nThis is a test of the admin alert protocol. If you received this, SMS alerts are working."
+                sent = await ns.send_sms(shield._alert_phone, sms_body)
+                results["sms"] = "sent" if sent else "failed"
+                results["sms_to"] = shield._alert_phone
+            else:
+                results["sms"] = "twilio_disabled"
+        except Exception as e:
+            results["sms"] = f"error: {e}"
+
+    for email in shield._alert_emails:
+        try:
+            ns = shield._notification_system
+            if ns:
+                await ns._send_email(
+                    to_email=email,
+                    subject="[SANCTUARY DEFENSE] Test Alert",
+                    content="""
+                    <div style="font-family: 'DM Sans', sans-serif; background: #050505; color: #E8D5A3; padding: 24px;">
+                        <h2 style="color: #C9A962; margin-top: 0;">Defense Alert — TEST</h2>
+                        <p style="font-size: 18px; font-weight: bold;">This is a test of the admin alert protocol.</p>
+                        <p style="color: #ccc;">If you received this email, the defense alert system (email) is working correctly.</p>
+                        <hr style="border-color: #333;">
+                        <p style="color: #666; font-size: 12px;">Sovereign Sanctuary Defense System</p>
+                    </div>
+                    """,
+                    notification_type="defense_alert",
+                )
+                results["email"] = "sent"
+                results["email_to"] = email
+            else:
+                results["email"] = "no_notification_system"
+        except Exception as e:
+            results["email"] = f"error: {e}"
+
+    return {"status": "ok", "results": results}
+
+
+# =============================================================================
+# DEPENDENCY GUARDIAN
+# =============================================================================
+
+@router.get("/dependency-report")
+async def get_dependency_report(request: Request):
+    """Return the latest Dependency Guardian audit report."""
+    guardian = getattr(request.app.state, "dependency_guardian", None)
+    if guardian:
+        report = guardian.get_latest_report()
+        if report:
+            return report
+    # Fallback: read directly from disk
+    from app.workers.dependency_guardian import REPORT_DIR
+    reports = sorted(REPORT_DIR.glob("report_*.json"), reverse=True)
+    if reports:
+        return json.loads(reports[0].read_text())
+    return {"timestamp": None, "summary": {"critical": 0, "warning": 0, "info": 0, "ok": 0, "total": 0}, "findings": []}
+
+
+@router.post("/run-dependency-audit")
+async def trigger_dependency_audit(request: Request):
+    """Manually trigger a Dependency Guardian audit."""
+    guardian = getattr(request.app.state, "dependency_guardian", None)
+    if not guardian:
+        raise HTTPException(status_code=503, detail="Dependency Guardian not initialized")
+    report = await guardian.run_audit()
+    return report

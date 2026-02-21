@@ -99,6 +99,7 @@ class NotificationSystem:
         self.twilio_enabled = False
         self.twilio_client = None
         self.twilio_from_number = os.getenv("TWILIO_PHONE_NUMBER", "")
+        self.twilio_messaging_service_sid = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
         
         twilio_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
         twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
@@ -107,7 +108,10 @@ class NotificationSystem:
             try:
                 self.twilio_client = TwilioClient(twilio_sid, twilio_token)
                 self.twilio_enabled = True
-                print(f">>> [NOTIFY] Twilio initialized (from: {self.twilio_from_number})")
+                if self.twilio_messaging_service_sid:
+                    print(f">>> [NOTIFY] Twilio initialized (messaging service: {self.twilio_messaging_service_sid})")
+                else:
+                    print(f">>> [NOTIFY] Twilio initialized (from: {self.twilio_from_number})")
             except Exception as e:
                 print(f">>> [NOTIFY] Twilio init error: {e}")
         else:
@@ -366,25 +370,28 @@ class NotificationSystem:
     
     def _log_email(self, to_email: str, subject: str, status: str, 
                    details: Any = None):
-        """Log email send attempt."""
-        logs = []
-        if self.email_log_file.exists():
-            try:
-                with open(self.email_log_file, 'r') as f:
-                    logs = json.load(f)
-            except:
-                pass
-        
-        logs.append({
-            "to": to_email,
-            "subject": subject,
-            "status": status,
-            "details": details,
-            "timestamp": datetime.datetime.now().isoformat()
-        })
-        
-        with open(self.email_log_file, 'w') as f:
-            json.dump(logs[-500:], f, indent=2)  # Keep last 500
+        """Log email send attempt. Never raises — logging must not break sends."""
+        try:
+            logs = []
+            if self.email_log_file.exists():
+                try:
+                    with open(self.email_log_file, 'r') as f:
+                        logs = json.load(f)
+                except Exception:
+                    pass
+            
+            logs.append({
+                "to": to_email,
+                "subject": subject,
+                "status": status,
+                "details": details,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+            
+            with open(self.email_log_file, 'w') as f:
+                json.dump(logs[-500:], f, indent=2)
+        except Exception as log_err:
+            print(f">>> [NOTIFY] Email log write failed (email still sent): {log_err}")
     
     # =========================================================================
     # TEMPLATED EMAIL METHODS
@@ -781,11 +788,14 @@ class NotificationSystem:
             return False
 
         try:
-            message = self.twilio_client.messages.create(
-                body=body,
-                from_=self.twilio_from_number,
-                to=to_phone
-            )
+            # Use Messaging Service SID for A2P 10DLC compliance when available
+            create_kwargs = {"body": body, "to": to_phone}
+            if self.twilio_messaging_service_sid:
+                create_kwargs["messaging_service_sid"] = self.twilio_messaging_service_sid
+            else:
+                create_kwargs["from_"] = self.twilio_from_number
+
+            message = self.twilio_client.messages.create(**create_kwargs)
             
             success = message.sid is not None
             self._log_sms(to_phone, body[:50], "sent" if success else "failed",

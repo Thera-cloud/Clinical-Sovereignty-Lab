@@ -1035,31 +1035,28 @@
         <div class="nav-tab active" data-tab="command" onclick="switchTab('command')">
             <span>📊</span> Command
         </div>
-        <div class="nav-tab" data-tab="clients" onclick="window.location.href='my_clients.html'">
+        <div class="nav-tab" data-tab="clients" onclick="navTo('my_clients.html')">
             <span>👥</span> My Clients
             <span class="badge info" id="clientCount">0</span>
         </div>
-        <div class="nav-tab" data-tab="calendar" onclick="window.location.href='calendar.html'">
+        <div class="nav-tab" data-tab="calendar" onclick="navTo('calendar.html')">
             <span>📅</span> Calendar
         </div>
-        <div class="nav-tab" data-tab="crisis" onclick="window.location.href='crisis_center.html'">
+        <div class="nav-tab" data-tab="crisis" onclick="navTo('crisis_center.html')">
             <span>🚨</span> Crisis Center
             <span class="badge" id="crisisBadge" style="display:none;">0</span>
         </div>
-        <div class="nav-tab" data-tab="users" onclick="window.location.href='users.html'">
+        <div class="nav-tab" data-tab="users" onclick="navTo('users.html')">
             <span>👤</span> Users
         </div>
-        <div class="nav-tab" data-tab="system" onclick="window.location.href='system.html'">
+        <div class="nav-tab" data-tab="system" onclick="navTo('system.html')">
             <span>⚙️</span> System
         </div>
-        <div class="nav-tab" data-tab="marketplace" onclick="window.location.href='sovereign-command-admin.html'">
+        <div class="nav-tab" data-tab="marketplace" onclick="navTo('sovereign-command-admin.html')">
             <span>🏪</span> MarketPlace
         </div>
-        <div class="nav-tab" data-tab="skyeye" onclick="window.location.href='skyeye.html'">
+        <div class="nav-tab" data-tab="skyeye" onclick="navTo('skyeye.html')">
             <span>👁️</span> SkyEye
-        </div>
-        <div class="nav-tab" data-tab="hive" onclick="window.location.href='hive_defense.html'">
-            <span>🛡️</span> Hive Defense
         </div>
     </nav>
 
@@ -1128,7 +1125,7 @@
                         <div class="icon gold">👥</div>
                         My Clients
                     </div>
-                    <button class="card-action" onclick="window.location.href='my_clients.html'">View All</button>
+                    <button class="card-action" onclick="navTo('my_clients.html')">View All</button>
                 </div>
                 <div class="card-body">
                     <div class="client-list" id="clientList">
@@ -1144,7 +1141,7 @@
                         <div class="icon cyan">📅</div>
                         Today's Sessions
                     </div>
-                    <button class="card-action" onclick="window.location.href='calendar.html'">Calendar</button>
+                    <button class="card-action" onclick="navTo('calendar.html')">Calendar</button>
                 </div>
                 <div class="card-body" id="todaySessions">
                     <div class="loading"><div class="spinner"></div></div>
@@ -1158,7 +1155,7 @@
                         <div class="icon red">🚨</div>
                         Crisis Watchlist
                     </div>
-                    <button class="card-action" onclick="window.location.href='crisis_center.html'">View All</button>
+                    <button class="card-action" onclick="navTo('crisis_center.html')">View All</button>
                 </div>
                 <div class="card-body" id="crisisWatchlist">
                     <div class="empty-state">
@@ -1178,7 +1175,7 @@
                 </div>
                 <div class="card-body">
                     <div class="quick-actions">
-                        <div class="quick-action" onclick="window.location.href='presession_brief.html'">
+                        <div class="quick-action" onclick="navTo('presession_brief.html')">
                             <div class="icon">📋</div>
                             <div class="label">Pre-Session Brief</div>
                         </div>
@@ -1186,19 +1183,19 @@
                             <div class="icon">🧭</div>
                             <div class="label">Live Sanctuary Brief</div>
                         </div>
-                        <div class="quick-action" onclick="window.location.href='ask_nate.html'">
+                        <div class="quick-action" onclick="navTo('ask_nate.html')">
                             <div class="icon">🧠</div>
                             <div class="label">Ask Little Nate</div>
                         </div>
-                        <div class="quick-action" onclick="window.location.href='users.html'">
+                        <div class="quick-action" onclick="navTo('users.html')">
                             <div class="icon">👤</div>
                             <div class="label">User Management</div>
                         </div>
-                        <div class="quick-action" id="coachApprovalsBtn" onclick="window.location.href='coach_approvals.html'">
+                        <div class="quick-action" id="coachApprovalsBtn" onclick="navTo('coach_approvals.html')">
                             <div class="icon">✅</div>
                             <div class="label">Coach Approvals</div>
                         </div>
-                        <div class="quick-action" onclick="window.location.href='family_merge.html'">
+                        <div class="quick-action" onclick="navTo('family_merge.html')">
                             <div class="icon">👨‍👩‍👧‍👦</div>
                             <div class="label">Family Management</div>
                         </div>
@@ -1530,27 +1527,81 @@
         let lastBriefingRequest = null; // { kind: "client"|"sanctuary", client_id?, sanctuary_id? }
 
         // =============================================================================
+        // NAVIGATION — pass auth via URL hash so sub-pages always receive credentials
+        // =============================================================================
+        function navTo(page) {
+            const t = token || sessionStorage.getItem('token') || localStorage.getItem('sc_token') || _ck('sc_token') || '';
+            const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || _ck('sc_username') || '';
+            const p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || _ck('sc_profile') || '';
+            try { localStorage.setItem('sc_token', t); } catch(e) {}
+            try { localStorage.setItem('sc_username', u); } catch(e) {}
+            try { localStorage.setItem('sc_profile', p); } catch(e) {}
+            try {
+                var _ckOpts = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+                document.cookie = 'sc_token=' + encodeURIComponent(t) + _ckOpts;
+                document.cookie = 'sc_username=' + encodeURIComponent(u) + _ckOpts;
+                document.cookie = 'sc_profile=' + encodeURIComponent(p) + _ckOpts;
+            } catch(e) {}
+            window.location.href = page + '#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u) + '&p=' + encodeURIComponent(p);
+        }
+
+        // =============================================================================
         // INITIALIZATION
         // =============================================================================
-        function init() {
-            // Check for session
-            const storedProfile = sessionStorage.getItem('profile');
-            const storedToken = sessionStorage.getItem('token');
+        function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
 
-            if (!storedProfile || !storedToken) {
+        function init() {
+            let storedToken = sessionStorage.getItem('token');
+            let storedProfile = sessionStorage.getItem('profile');
+            let storedUsername = sessionStorage.getItem('username');
+
+            // Recover token: hash → localStorage → cookie
+            if (!storedToken) {
+                const hp = new URLSearchParams(location.hash.slice(1));
+                const ht = hp.get('t');
+                if (ht) storedToken = decodeURIComponent(ht);
+            }
+            if (!storedToken) storedToken = localStorage.getItem('sc_token');
+            if (!storedToken) storedToken = _ck('sc_token');
+
+            // Recover profile & username from any available source
+            if (!storedProfile) storedProfile = localStorage.getItem('sc_profile');
+            if (!storedProfile) storedProfile = _ck('sc_profile');
+            if (!storedUsername) storedUsername = localStorage.getItem('sc_username');
+            if (!storedUsername) storedUsername = _ck('sc_username');
+
+            if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+
+            if (!storedToken) {
                 window.location.href = 'index.html';
                 return;
             }
 
-            profile = JSON.parse(storedProfile);
+            // Persist everything back to sessionStorage so sub-pages can find it
+            try { sessionStorage.setItem('token', storedToken); } catch(e) {}
+            if (storedUsername) { try { sessionStorage.setItem('username', storedUsername); } catch(e) {} }
+            // Also refresh cookie (extends lifetime)
+            try {
+                var _ckOpts = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+                document.cookie = 'sc_token=' + encodeURIComponent(storedToken) + _ckOpts;
+                if (storedUsername) document.cookie = 'sc_username=' + encodeURIComponent(storedUsername) + _ckOpts;
+                if (storedProfile) document.cookie = 'sc_profile=' + encodeURIComponent(storedProfile) + _ckOpts;
+            } catch(e) {}
+
+            if (storedProfile) {
+                try {
+                    profile = JSON.parse(storedProfile);
+                    try { sessionStorage.setItem('profile', storedProfile); } catch(e) {}
+                } catch (e) {
+                    profile = null;
+                }
+            }
             token = storedToken;
 
-            // Update UI
-            document.getElementById('userName').textContent = profile.name || 'Admin';
-            document.getElementById('userRole').textContent = profile.role || 'ADMIN';
-            if (profile.role !== 'ADMIN') { var cab = document.getElementById('coachApprovalsBtn'); if (cab) cab.style.display = 'none'; }
+            document.getElementById('userName').textContent = (profile && profile.name) || 'Admin';
+            document.getElementById('userRole').textContent = (profile && profile.role) || 'ADMIN';
+            if (profile && profile.role !== 'ADMIN') { var cab = document.getElementById('coachApprovalsBtn'); if (cab) cab.style.display = 'none'; }
 
-            // Connect to server
             connect();
         }
 
@@ -1586,13 +1637,22 @@
         function handleMessage(event) {
             try {
                 const data = JSON.parse(event.data);
-                console.log('Received:', data);
 
                 switch(data.type) {
                     case 'login_success':
                     case 'auth_success':
-                        if (data.profile) { profile = data.profile; sessionStorage.setItem('profile', JSON.stringify(profile)); }
+                        if (data.profile) {
+                            profile = data.profile;
+                            try { sessionStorage.setItem('profile', JSON.stringify(profile)); } catch(e) {}
+                            try { localStorage.setItem('sc_profile', JSON.stringify(profile)); } catch(e) {}
+                        }
                         loadDashboard();
+                        break;
+                    case 'auth_failed':
+                        console.warn('Token auth failed, redirecting to login:', data.message);
+                        try { sessionStorage.clear(); } catch(e) {}
+                        try { localStorage.removeItem('sc_token'); localStorage.removeItem('sc_profile'); localStorage.removeItem('sc_username'); } catch(e) {}
+                        window.location.href = 'index.html';
                         break;
                     case 'admin_stats':
                         updateStats(data.stats);
@@ -1636,6 +1696,31 @@
                         break;
                     case 'search_admin_confirmed':
                         showSearchConfirmation(data);
+                        break;
+                    case 'session_frozen':
+                        if (!window._frozenAlerted) {
+                            window._frozenAlerted = true;
+                            if (_autoRefreshInterval) { clearInterval(_autoRefreshInterval); _autoRefreshInterval = null; }
+                            alert('SESSION FROZEN by Nate Sentinel: ' + (data.reason || 'Suspicious activity detected.'));
+                        }
+                        break;
+                    case 'audit_log_data':
+                        renderAuditLog(data.entries || []);
+                        break;
+                    case 'totp_setup_data':
+                        alert("TOTP Secret: " + data.secret + "\nScan the QR code in Microsoft Authenticator:\n" + data.uri);
+                        break;
+                    case 'totp_verify_result':
+                        alert(data.success ? "TOTP verified and activated!" : "TOTP verification failed. Try again.");
+                        break;
+                    case 'webauthn_register_options':
+                        alert("WebAuthn registration initiated. Use your browser's biometric prompt to complete setup.");
+                        break;
+                    case 'admin_reinstate_result':
+                        if (data.success) { alert("User reinstated."); loadBannedUsers(); }
+                        break;
+                    case 'admin_delete_user_result':
+                        if (data.success) { alert("User deleted: " + (data.name || "")); loadBannedUsers(); }
                         break;
                 }
             } catch (e) {
@@ -2095,7 +2180,9 @@
         }
 
         function logout() {
-            sessionStorage.clear();
+            try { sessionStorage.clear(); } catch(e) {}
+            try { localStorage.removeItem('sc_token'); localStorage.removeItem('sc_profile'); localStorage.removeItem('sc_username'); } catch(e) {}
+            try { document.cookie='sc_token=;path=/;max-age=0'; document.cookie='sc_username=;path=/;max-age=0'; document.cookie='sc_profile=;path=/;max-age=0'; } catch(e) {}
             window.location.href = 'index.html';
         }
 
@@ -2379,8 +2466,8 @@
         // =====================================================================
 
         function loadBannedUsers() {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: "admin_get_users" }));
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(JSON.stringify({ type: "admin_get_users" }));
         }
 
         function renderBannedUsers(users) {
@@ -2412,17 +2499,19 @@
 
         function reinstateUser(uid) {
             if (!confirm("Reinstate this user? Strikes will be reset to 0.")) return;
-            ws.send(JSON.stringify({ type: "admin_reinstate_user", target_uid: uid }));
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: "admin_reinstate_user", target_uid: uid }));
         }
 
         function deleteFromBanned(uid) {
             if (!confirm("PERMANENTLY DELETE this user?")) return;
-            ws.send(JSON.stringify({ type: "admin_delete_user", target_uid: uid, reason: "Admin removal from banned list" }));
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: "admin_delete_user", target_uid: uid, reason: "Admin removal from banned list" }));
         }
 
         function loadAuditLog() {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: "admin_get_audit_log", limit: 50 }));
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(JSON.stringify({ type: "admin_get_audit_log", limit: 50 }));
         }
 
         function renderAuditLog(entries) {
@@ -2450,37 +2539,13 @@
         }
 
         function setupAdminTOTP() {
-            ws.send(JSON.stringify({ type: "admin_setup_totp" }));
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: "admin_setup_totp" }));
         }
 
         function setupAdminWebAuthn() {
-            ws.send(JSON.stringify({ type: "admin_webauthn_register_start" }));
-        }
-
-        // Handle additional message types
-        var _origOnMessage = ws ? ws.onmessage : null;
-        function extendedMessageHandler(event) {
-            if (_origOnMessage) _origOnMessage(event);
-            try {
-                var data = JSON.parse(event.data);
-                if (data.type === "admin_users" && data.users) {
-                    renderBannedUsers(data.users);
-                } else if (data.type === "audit_log_data") {
-                    renderAuditLog(data.entries || []);
-                } else if (data.type === "totp_setup_data") {
-                    alert("TOTP Secret: " + data.secret + "\n\nScan the QR code in Microsoft Authenticator:\n" + data.uri);
-                } else if (data.type === "totp_verify_result") {
-                    alert(data.success ? "TOTP verified and activated!" : "TOTP verification failed. Try again.");
-                } else if (data.type === "webauthn_register_options") {
-                    alert("WebAuthn registration initiated. Use your browser's biometric prompt to complete setup.");
-                } else if (data.type === "session_frozen") {
-                    alert("SESSION FROZEN: " + data.reason);
-                } else if (data.type === "admin_reinstate_result") {
-                    if (data.success) { alert("User reinstated."); loadBannedUsers(); }
-                } else if (data.type === "admin_delete_user_result") {
-                    if (data.success) { alert("User deleted: " + (data.name || "")); loadBannedUsers(); }
-                }
-            } catch(e) {}
+            if (socket && socket.readyState === WebSocket.OPEN)
+                socket.send(JSON.stringify({ type: "admin_webauthn_register_start" }));
         }
 
         // Initialize

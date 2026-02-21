@@ -381,6 +381,7 @@ class PipelineDrum:
         self.burn = BurnSensor()
         self.clot = ClotSensor()
         self.resonance = ResonanceEngine()
+        self._zta_bug = None  # Layer 4: ZTABugFibre (attached at startup)
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -461,6 +462,23 @@ class PipelineDrum:
 
         # Resonance
         result = self.resonance.compute_resonance(sensor_scores)
+
+        # ZTA Bug Fibre — 5th meta-signal (Layer 4 Castle Defense)
+        if self._zta_bug:
+            try:
+                import uuid
+                trace = await self._zta_bug.trace(
+                    trace_id=str(uuid.uuid4())[:12],
+                    sensors=sensor_scores,
+                    resonance_level=result["level"],
+                    resonance_score=result["final_score"],
+                )
+                if trace.meta_signal > 0:
+                    result["final_score"] = result["final_score"] + trace.meta_signal
+                    result["zta_meta_signal"] = trace.meta_signal
+                    result["zta_consensus"] = trace.consensus
+            except Exception as exc:
+                _logger.debug("ZTA Bug trace error: %s", exc)
 
         if result["level"] >= 2:
             _logger.warning(

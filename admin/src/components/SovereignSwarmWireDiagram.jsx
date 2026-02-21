@@ -29,7 +29,10 @@ const colors = {
 
 async function apiFetch(path) {
   try {
-    const res = await fetch(path);
+    const headers = {};
+    const token = sessionStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(path, { headers });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }

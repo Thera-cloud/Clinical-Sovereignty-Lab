@@ -220,6 +220,10 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_ID: str = ""
     LINKEDIN_CLIENT_SECRET: str = ""
 
+    # X (Twitter) — OAuth 2.0 with PKCE
+    X_CLIENT_ID: str = ""
+    X_CLIENT_SECRET: str = ""
+
     # Pinterest
     PINTEREST_APP_ID: str = ""
     PINTEREST_APP_SECRET: str = ""

@@ -28,6 +28,9 @@ from app.workers.migration_worker import MigrationWorker
 from app.workers.vault_integrity_worker import VaultIntegrityWorker
 from app.workers.ingestion_safety_worker import IngestionSafetyWorker
 
+# Dependency Guardian
+from app.workers.dependency_guardian import DependencyGuardian
+
 # Hive Defense Protocol (Phase 8A)
 from app.workers.heartbeat_monitor_worker import HeartbeatMonitorWorker
 from app.workers.curiosity_scanner_worker import CuriosityScannerWorker
@@ -64,6 +67,8 @@ __all__ = [
     "MigrationWorker",
     "VaultIntegrityWorker",
     "IngestionSafetyWorker",
+    # Dependency Guardian
+    "DependencyGuardian",
     # Hive Defense Protocol (Phase 8A)
     "HeartbeatMonitorWorker",
     "CuriosityScannerWorker",

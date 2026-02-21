@@ -329,13 +329,20 @@ class FamilySanctuaryEngine:
             return True, "Base fee recorded"
         return True, "Base fee charged successfully"
     
-    def verify_invitation(self, sanctuary_id: str, user_id: str) -> bool:
-        """Verify user is invited to sanctuary"""
+    def verify_invitation(self, sanctuary_id: str, user_id: str,
+                          user_family_id: str = None) -> bool:
+        """Verify user is invited to sanctuary (by invite list or family membership)."""
         sanctuary = self.data["active_sanctuaries"].get(sanctuary_id)
         if not sanctuary:
             return False
         
-        return user_id in sanctuary["invited_member_ids"]
+        if user_id in sanctuary.get("invited_member_ids", []):
+            return True
+        
+        if user_family_id and sanctuary.get("family_id") == user_family_id:
+            return True
+        
+        return False
     
     # =========================================================================
     # MEMBER MANAGEMENT - With proper reconnection handling
@@ -346,7 +353,8 @@ class FamilySanctuaryEngine:
         sanctuary_id: str, 
         user_id: str, 
         user_name: str, 
-        websocket
+        websocket,
+        user_family_id: str = None
     ) -> dict:
         """
         Add a new member or reconnect an existing one.
@@ -357,7 +365,8 @@ class FamilySanctuaryEngine:
             return {"success": False, "error": "Sanctuary not found"}
         
         # SECURITY: Verify family membership before allowing join.
-        # Check if the user is already a member OR is in the invited list.
+        # Check if the user is already a member OR is in the invited list
+        # OR belongs to the same family as the sanctuary.
         existing_member = None
         for member in sanctuary.get('members', []):
             if member['user_id'] == user_id:
@@ -365,10 +374,12 @@ class FamilySanctuaryEngine:
                 break
         
         if not existing_member:
-            # Not yet a member — verify they are invited to this sanctuary
             invited_ids = sanctuary.get("invited_member_ids", [])
-            family_id = sanctuary.get("family_id")
-            if user_id not in invited_ids:
+            sanctuary_family_id = sanctuary.get("family_id")
+            is_invited = user_id in invited_ids
+            is_family_member = (user_family_id and sanctuary_family_id
+                                and user_family_id == sanctuary_family_id)
+            if not is_invited and not is_family_member:
                 logger.warning(f"[SANCTUARY] Unauthorized join attempt: {user_id} not invited to {sanctuary_id}")
                 return {"success": False, "error": "You are not invited to this family sanctuary"}
         

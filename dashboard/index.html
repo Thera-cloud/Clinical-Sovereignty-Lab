@@ -469,6 +469,36 @@
         </div>
     </div>
 
+    <!-- SMS Verification Overlay (Layer 4 — device trust) -->
+    <div id="smsOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:1300;overflow-y:auto;padding:40px 20px;">
+        <div style="max-width:440px;margin:80px auto 0;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;">
+            <div style="padding:40px 32px 0;text-align:center;">
+                <div style="font-size:10px;letter-spacing:3px;color:#C9A962;text-transform:uppercase;margin-bottom:16px;">Device Verification</div>
+                <div style="font-size:36px;margin-bottom:12px;">📱</div>
+                <div style="font-family:var(--font-display);font-size:20px;font-weight:300;color:var(--text-primary);margin-bottom:8px;line-height:1.4;">
+                    Verification Code Sent
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:24px;">
+                    A 6-digit code was sent to <strong id="smsPhoneHint" style="color:#C9A962;"></strong>
+                </div>
+            </div>
+            <div style="padding:0 32px 32px;">
+                <div class="error-message" id="smsError" style="display:none;"></div>
+                <div class="form-group">
+                    <label class="form-label">Enter Code</label>
+                    <input type="text" class="form-input" id="smsCodeInput" placeholder="000000" maxlength="6" autocomplete="one-time-code"
+                           style="text-align:center;font-size:24px;letter-spacing:8px;font-family:monospace;">
+                </div>
+                <button class="login-btn" style="width:100%;margin-top:12px;" onclick="submitSmsCode()">
+                    Verify &amp; Enter Command Center
+                </button>
+                <div style="text-align:center;margin-top:16px;">
+                    <span style="font-size:11px;color:var(--text-muted);">Code valid for 10 minutes</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // =============================================================================
         // WEBSOCKET CONNECTION
@@ -528,12 +558,28 @@
                 console.log('Received:', data);
 
                 if (data.type === 'login_success') {
-                    // Store session data (token-based — never store password)
-                    sessionStorage.setItem('username', document.getElementById('username').value);
-                    sessionStorage.setItem('profile', JSON.stringify(data.profile));
-                    sessionStorage.setItem('token', data.token);
+                    const _uname = document.getElementById('username').value;
+                    const _profStr = JSON.stringify(data.profile);
+                    try {
+                        sessionStorage.setItem('username', _uname);
+                        sessionStorage.setItem('profile', _profStr);
+                        sessionStorage.setItem('token', data.token);
+                    } catch (storageErr) {
+                        console.warn('sessionStorage write failed:', storageErr);
+                    }
+                    try {
+                        localStorage.setItem('sc_username', _uname);
+                        localStorage.setItem('sc_profile', _profStr);
+                        localStorage.setItem('sc_token', data.token);
+                    } catch (e) {}
+                    // Cookies — most reliable cross-page persistence
+                    try {
+                        var _ck = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+                        document.cookie = 'sc_token=' + encodeURIComponent(data.token) + _ck;
+                        document.cookie = 'sc_username=' + encodeURIComponent(_uname) + _ck;
+                        document.cookie = 'sc_profile=' + encodeURIComponent(_profStr) + _ck;
+                    } catch (e) {}
 
-                    // Check if consent update needed
                     if (data.consent_update_needed) {
                         _pendingProfile = data.profile;
                         _pendingToken = data.token;
@@ -543,31 +589,48 @@
                         return;
                     }
                     
-                    // Show passphrase challenge (Layer 3)
                     showPassphraseChallenge();
                     
                 } else if (data.type === 'consent_updated') {
-                    // Consent accepted — update stored profile and proceed
                     if (data.profile) {
-                        sessionStorage.setItem('profile', JSON.stringify(data.profile));
+                        try { sessionStorage.setItem('profile', JSON.stringify(data.profile)); } catch(e) {}
                     }
                     document.getElementById('consentOverlay').style.display = 'none';
-                    // After consent, show passphrase challenge
                     showPassphraseChallenge();
+
+                } else if (data.type === 'sms_verification_result') {
+                    if (data.success) {
+                        document.getElementById('smsOverlay').style.display = 'none';
+                        const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+                        setTimeout(() => { window.location.replace('command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                    } else {
+                        const smsErr = document.getElementById('smsError');
+                        smsErr.textContent = data.message || 'Incorrect code.';
+                        smsErr.style.display = 'block';
+                        document.getElementById('smsCodeInput').value = '';
+                        document.getElementById('smsCodeInput').focus();
+                    }
 
                 } else if (data.type === 'passphrase_verified') {
                     if (data.success) {
-                        // Correct — proceed to command center
-                        sessionStorage.removeItem('_pp_lock');
+                        try { sessionStorage.removeItem('_pp_lock'); } catch(e) {}
                         document.getElementById('passphraseOverlay').style.display = 'none';
-                        window.location.href = 'command.html';
+
+                        if (data.sms_verification_required) {
+                            document.getElementById('smsPhoneHint').textContent = data.phone_hint || '';
+                            document.getElementById('smsOverlay').style.display = 'block';
+                            document.getElementById('smsCodeInput').focus();
+                        } else {
+                            const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+                            setTimeout(() => { window.location.replace('command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                        }
                     } else {
                         // Wrong answer — handle attempts/lockout client-side
                         passphraseAttempts++;
                         const remaining = MAX_PASSPHRASE_ATTEMPTS - passphraseAttempts;
                         if (remaining <= 0) {
                             lockedUntil = Date.now() + (LOCKOUT_SECONDS * 1000);
-                            sessionStorage.setItem('_pp_lock', lockedUntil.toString());
+                            try { sessionStorage.setItem('_pp_lock', lockedUntil.toString()); } catch(e) {}
                             document.getElementById('passphraseOverlay').style.display = 'none';
                             showLockout();
                         } else {
@@ -637,6 +700,16 @@
             }));
         }
 
+        function submitSmsCode() {
+            const code = document.getElementById('smsCodeInput').value.trim();
+            if (!code || code.length < 6) return;
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                showError('Connection lost. Please refresh and try again.');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'verify_sms_code', code: code }));
+        }
+
         function showLockout() {
             document.getElementById('passphraseOverlay').style.display = 'none';
             document.getElementById('lockoutOverlay').style.display = 'block';
@@ -658,6 +731,19 @@
                     document.getElementById('loginBtn').disabled = false;
                 }
             }, 1000);
+        }
+
+        function getStableHardwareId() {
+            try {
+                let hwid = localStorage.getItem('_nate_hwid');
+                if (!hwid) {
+                    hwid = 'WEB_' + navigator.userAgent.slice(0, 20).replace(/\s/g, '_') + '_' + crypto.randomUUID().slice(0, 8);
+                    try { localStorage.setItem('_nate_hwid', hwid); } catch(e) {}
+                }
+                return hwid;
+            } catch(e) {
+                return 'WEB_FALLBACK_' + Math.random().toString(36).slice(2, 10);
+            }
         }
 
         function attemptLogin() {
@@ -683,7 +769,7 @@
                 username: username,
                 password: password,
                 expected_role: selectedRole,
-                hardware_id: `WEB_${navigator.userAgent.slice(0, 20)}_${Date.now()}`
+                hardware_id: getStableHardwareId()
             }));
 
             // Reset button after timeout
@@ -703,11 +789,14 @@
             document.getElementById('errorMessage').classList.remove('visible');
         }
 
-        // Enter key to submit (login form or passphrase)
+        // Enter key to submit (login form, passphrase, or SMS code)
         document.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                const ppOverlay = document.getElementById('passphraseOverlay');
-                if (ppOverlay && ppOverlay.style.display !== 'none') {
+                const smsOv = document.getElementById('smsOverlay');
+                const ppOv = document.getElementById('passphraseOverlay');
+                if (smsOv && smsOv.style.display !== 'none') {
+                    submitSmsCode();
+                } else if (ppOv && ppOv.style.display !== 'none') {
                     verifyPassphrase();
                 } else {
                     attemptLogin();

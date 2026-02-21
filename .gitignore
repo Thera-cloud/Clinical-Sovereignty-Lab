@@ -145,3 +145,12 @@ temp/
 *.sqlite3
 postgres_data/
 redis_data/
+gmail_tokens_output.json
+
+# Scripts with hardcoded OAuth secrets
+scripts/get_gmail_tokens.py
+scripts/get_outlook_tokens.py
+scripts/reauth_nathan.py
+
+# WireGuard secrets
+wireguard/*/privatekey

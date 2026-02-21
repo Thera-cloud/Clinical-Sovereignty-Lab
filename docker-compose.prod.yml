@@ -72,8 +72,12 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DATA_DIR=/app/data
       - PYTHONUNBUFFERED=1
+      - SANDBOX_URL=http://10.13.13.4:9090
+      - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8000}:8000"
     depends_on:
@@ -94,9 +98,9 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1G
+          memory: 2G
         reservations:
-          memory: 512M
+          memory: 768M
     networks:
       - nate_network
 
@@ -114,6 +118,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DATA_DIR=/app/data
       - PYTHONUNBUFFERED=1
     ports:
@@ -138,9 +144,9 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1G
+          memory: 2G
         reservations:
-          memory: 512M
+          memory: 768M
     networks:
       - nate_network
 

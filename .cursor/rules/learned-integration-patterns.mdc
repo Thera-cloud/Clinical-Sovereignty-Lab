@@ -1,0 +1,150 @@
+---
+description: Hard-won lessons from production debugging — integration seams, auth, Redis, browser compat, and deployment
+alwaysApply: true
+---
+
+# Learned Integration Patterns
+
+## 1. PostgreSQL Is the Source of Truth — Not JSON
+
+The bridge uses `USE_POSTGRES_REGISTRY=true`. The in-memory `_registry_cache` is loaded from PostgreSQL via `UserStore` on startup. Writing directly to `user_registry.json` has **no effect** — the data is overwritten on restart.
+
+- To update user data: UPDATE the `profile_data` JSONB column in the `users` table
+- The JSON file is a backup only; `save_registry()` writes to both PG and JSON
+- `load_registry()` returns the in-memory PG cache, not the JSON file
+- Always verify which store you're writing to before making changes
+
+## 2. Container Restart vs. Recreate
+
+`docker restart` keeps the same container — env vars from `.env` are NOT reloaded.
+`docker compose up -d <service>` recreates the container and picks up new env vars.
+
+- After adding/changing `.env` vars, always use `docker compose up -d`, not `docker restart`
+- The compose service names differ from container names (e.g., service `bridge` → container `nate_bridge`)
+
+## 3. Reuse Existing Instances — Never Re-instantiate
+
+Module-level singletons exist for a reason. Never create a new instance inside a handler when one is already initialized at module scope.
+
+- `notification_system` is initialized at startup with `DATA_DIR` and `SENDGRID_API_KEY`
+- Creating `NotificationSystem()` without args fails silently with `missing positional argument`
+- Same applies to: `_token_redis_sync`, `_pg_user_store`, `parietal`, `cortex`
+
+## 4. Twilio: Use Verify for OTP, Not Raw SMS
+
+US carriers enforce A2P 10DLC. If the campaign registration is FAILED, all raw SMS are blocked (error 30034). Twilio Verify bypasses this entirely.
+
+- OTP/verification codes: use `client.verify.v2.services(VERIFY_SID).verifications.create(to=phone, channel='sms')`
+- Code checking: use `verification_checks.create(to=phone, code=submitted_code)`, check `status == 'approved'`
+- Env var: `TWILIO_VERIFY_SID` (currently `VAa3b4671b2fa7d590fd06ddaa9065fa46`)
+- Check campaign status before assuming SMS works: `client.messaging.v1.services(SID).us_app_to_person.list()`
+
+## 5. Bridge Tokens vs JWTs — Two Auth Worlds
+
+- Bridge issues hex tokens (e.g., `443d6cf2...`) stored in `ACTIVE_TOKENS` + Redis
+- FastAPI backend issues JWTs for REST API endpoints
+- Dashboard sub-pages send bridge tokens as `Authorization: Bearer` to REST APIs
+- `auth.py` → `get_current_user()` must check JWT first, then fall back to Redis bridge token lookup
+- Key pattern: `nate:{env}:auth:{token}`
+
+## 6. UI Display Maps Must Mirror Backend Data Maps
+
+When backend defines N items (e.g., 7 dojos in `DOJO_PRICES`), every UI that renders them must also list all N. If a UI widget iterates over `dojoLabels.keys`, missing entries are invisible.
+
+- Check: registration flow, subscription display, admin panels, approval screens
+- The `judge` dojo was missing from `_buildDojoSubscriptionsSection()` in `updated_screens.dart`
+
+## 7. Router-Level Auth Applies to ALL Endpoints
+
+`APIRouter(dependencies=[Depends(require_admin)])` gates every endpoint under that prefix. Individual endpoint-level auth comments (`# admin = Depends(require_admin)`) are irrelevant.
+
+- Night School needed `require_coach` (allows COACH + ADMIN), not `require_admin`
+- Flutter screens must send `Authorization: Bearer <token>` in HTTP headers
+- The token lives in `widget.profile['token']`
+
+## 8. Cancel Previous Async Tasks Before Starting New Ones
+
+`asyncio.create_task()` without tracking causes concurrent operations that overlap (e.g., TTS voices). Always:
+
+- Track the active task per connection: `_active_tts_task`
+- Set a cancellation event before spawning a new task
+- Check `cancel_event.is_set()` inside the task before sending data
+- Handle `tts_cancel` messages from the client
+
+## 9. Safari vs Chrome Compatibility
+
+| Issue | Safari | Chrome |
+|-------|--------|--------|
+| Async redirects | Blocked by ITP | Works |
+| `sessionStorage` in Private | Throws on write | Works |
+| Service worker caching | Aggressive, needs no-cache headers | Normal |
+| `window.location.href` in async | Treated as popup, blocked | Works |
+| Cookie lifetime | ITP limits to 7 days | Respects max-age |
+
+- Always use `try/catch` around `sessionStorage.setItem()`
+- Use `webOnlyWindowName: '_self'` for same-tab navigation in Flutter web
+- Set `Cache-Control: no-cache` on service worker and bootstrap files in Nginx
+
+## 10. Session Persistence Across Page Navigations
+
+`sessionStorage` does not reliably survive page navigations in all browsers. Use a four-layer fallback:
+
+1. `sessionStorage` (primary)
+2. URL hash parameters (`#t=<token>&u=<username>&p=<profile>`) via `navTo()`
+3. `localStorage` (prefixed with `sc_`)
+4. Cookies (`sc_token`, `sc_username`, `sc_profile`)
+
+Every sub-page must run `_recoverAuth()` on load to parse fallbacks into `sessionStorage`.
+
+## 11. Password Hash Format: `salt:hash`
+
+All password hashing must use the same format: `secrets.token_hex(16)` for a 32-char hex salt, then `hashlib.pbkdf2_hmac('sha256', password, salt, 100000)`, stored as `salt:hash`.
+
+- Do NOT use `username` as salt
+- Do NOT use `token_hex(32)` (produces 64-char salt, breaks `verify_password`)
+- Verify round-trip after generation: hash it, then immediately verify
+
+## 12. Sentinel False Positives
+
+- Generate a **stable** `hardware_id` using `crypto.randomUUID()` + `localStorage`, not `Date.now()`
+- Pre-seed `typical_hours` for admin accounts so any login hour isn't flagged
+- Auth timeout must be long enough for multi-step login (120s, not 30s)
+- Add auth-related message types to `_SENTINEL_SKIP` set
+- Reset Sentinel session state after passphrase verification
+
+## 13. Redis Token Hygiene
+
+- Use `volatile-lru` eviction policy (not `allkeys-lru`) to protect non-TTL keys
+- TTL buffer: `TOKEN_TTL_HOURS * 3600 * 1.1`
+- Key namespace: `nate:{env}:auth:{token}` — environment-scoped
+- Health check on startup with `ping()`, background loop for auto-reconnect
+- Atomic revocation: clear from both `ACTIVE_TOKENS` and Redis with `_revoke_token()`
+- Use `SCAN` for bulk operations, not `KEYS` (disabled in production Redis)
+
+## 14. load_dotenv(override=True) Clobbers Docker Env Vars
+
+Multiple modules call `load_dotenv(override=True)` at import time, which overwrites Docker-injected environment variables (like `REDIS_URL`, `REDIS_HOST`) with stale values from `.env` files baked into the image (e.g., `/app/app/websocket/.env` has `REDIS_HOST=10.0.0.81`).
+
+- **Capture env vars at module scope** (before any cross-module imports trigger `load_dotenv`): use `_VAR = os.getenv("VAR")` at the top of the file
+- Never read `os.environ` lazily at request time for connection strings — by then, `load_dotenv` may have overwritten Docker values
+- `api_server.py` uses `_REDIS_URL_SNAPSHOT` and `_REDIS_PW_SNAPSHOT` captured at import time
+- The bridge's `.env` at `/app/app/websocket/.env` contains hardcoded LAN IPs (`10.0.0.81`) that are unreachable from inside Docker containers
+- Always test auth endpoints with `curl -H 'Authorization: Bearer <bridge_token>'` after deploying — a 401 from `/api/skyeye/pulse` was the symptom of this env var clobbering
+
+## 15. Two `get_current_user` Functions — Know Which One Your Router Uses
+
+- `backend/app/auth.py` → `get_current_user()` returns a **string** (user_id). Used by routers that import from `app.auth`.
+- `backend/app/services/api_server.py` → `get_current_user()` returns a **Dict** (full profile from Redis). Used by `require_admin`/`require_coach`, which most routers depend on.
+- Both must use the same Redis key pattern (`{prefix}:{env}:auth:{token}`) — a mismatch causes silent 401s
+- When fixing auth, always check WHICH `get_current_user` your router chain ultimately calls
+
+## 16. Embed Sub-Pages Natively — Never Use Iframes
+
+When adding a dashboard section (like Hive Defense) inside another page (like SkyEye), embed the HTML and JS directly as a tab — do NOT use `<iframe>`. Iframes are blocked by `X-Frame-Options` / CSP headers on the server and fail with "refused to connect."
+
+- Add the HTML as a `<section class="tab-content" id="tab-{name}">` block
+- Prefix all JS function names with a short namespace (e.g., `hd` for Hive Defense) to avoid collisions with existing functions
+- Prefix all element IDs similarly (e.g., `hd-defconLevel` instead of `defconLevel`)
+- Reuse the parent page's `apiFetch()` / `_authHeaders()` for authenticated API calls — don't duplicate auth logic
+- Add a `case` in the `switchTab()` handler to call the load function on tab activation
+- The standalone `.html` page can still exist for direct-URL access but should not be loaded via iframe

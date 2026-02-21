@@ -1,0 +1,39 @@
+{
+  "client_id": "sarah_001",
+  "sessions": [
+    {
+      "session_id": "test_session",
+      "timestamp": "2026-02-16T17:38:36.431551",
+      "client_id": "sarah_001",
+      "client_name": "Sarah",
+      "family_id": "",
+      "emotional_state": "neutral",
+      "emotional_indicators": [],
+      "engagement_level": 0.5,
+      "topics_discussed": [],
+      "concerns_raised": [],
+      "growth_moments": [],
+      "family_members_present": [],
+      "family_members_mentioned": [],
+      "coherence_indicators": {
+        "emotional_awareness": 0.0,
+        "cognitive_clarity": 0.0,
+        "dominant_state": "neutral",
+        "coherence_estimate": 0.0
+      },
+      "mood_indicators": {
+        "current_mood": "neutral",
+        "anxiety_estimate": 0.4,
+        "mood_valence": 0.5,
+        "indicators": [],
+        "timestamp": "2026-02-16T17:38:36.431461"
+      },
+      "session_summary_for_nate": "In recent coaching session, Sarah appeared neutral. They were moderately engaged throughout.",
+      "coach_observations": []
+    }
+  ],
+  "last_updated": "2026-02-16T17:38:36.431648",
+  "total_sessions_analyzed": 1,
+  "avg_engagement": 0.5,
+  "dominant_emotional_state": "neutral"
+}

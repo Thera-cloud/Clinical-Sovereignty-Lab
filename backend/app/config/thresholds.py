@@ -32,7 +32,7 @@ class ThresholdConfig:
     ENABLE_ZOOM = os.getenv("ENABLE_ZOOM", "False").lower() == "true"
     ENABLE_DRIP_CAMPAIGN = os.getenv("ENABLE_DRIP_CAMPAIGN", "True").lower() == "true"
     ENABLE_SKYEYE = os.getenv("ENABLE_SKYEYE", "True").lower() == "true"
-    ENABLE_SKYEYE_SESSIONS = os.getenv("ENABLE_SKYEYE_SESSIONS", "False").lower() == "true"
+    ENABLE_SKYEYE_SESSIONS = os.getenv("ENABLE_SKYEYE_SESSIONS", "True").lower() == "true"
     ENABLE_SOVEREIGN_SWARM = os.getenv("ENABLE_SOVEREIGN_SWARM", "True").lower() == "true"
     ENABLE_NATE_NUDGE = os.getenv("ENABLE_NATE_NUDGE", "True").lower() == "true"
 

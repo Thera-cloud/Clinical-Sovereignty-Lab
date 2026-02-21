@@ -72,10 +72,10 @@ class BriefingWorker:
             async with self.db_pool.acquire() as conn:
                 sessions = await conn.fetch(
                     """
-                    SELECT id, coach_id, client_id, scheduled_at
+                    SELECT id, coach_id, user_id, scheduled_at
                     FROM sessions
                     WHERE scheduled_at BETWEEN $1 AND $2
-                      AND status = 'scheduled'
+                      AND status = 'SCHEDULED'
                     ORDER BY scheduled_at ASC
                     """,
                     window_start, window_end,
@@ -92,7 +92,7 @@ class BriefingWorker:
             try:
                 briefing = await self.briefing_generator.generate_briefing(
                     coach_id=session["coach_id"],
-                    member_id=session["client_id"],
+                    member_id=session["user_id"],
                     session_datetime=session["scheduled_at"],
                 )
                 self._generated.add(session_id)
@@ -111,7 +111,7 @@ class BriefingWorker:
                     "briefing_generated",
                     session_id=session_id,
                     coach_id=session["coach_id"],
-                    member_id=session["client_id"],
+                    member_id=session["user_id"],
                 )
             except Exception as e:
                 logger.error(

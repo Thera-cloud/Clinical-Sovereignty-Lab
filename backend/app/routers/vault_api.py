@@ -79,15 +79,24 @@ def create_vault_router(db_pool) -> APIRouter:
     async def get_member_id_and_tier(
         authenticated_user_id: str = Depends(get_current_user),
     ) -> tuple[str, str]:
-        """Resolve member_id and tier from the authenticated user."""
-        row = await db_pool.fetchrow(
-            "SELECT id, tier FROM users WHERE id::text = $1 OR username = $1",
-            authenticated_user_id
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="User not found")
-        member_id = str(row["id"])
-        tier = (row["tier"] or "STANDARD") if row.get("tier") else "STANDARD"
+        """Resolve member_id and tier from the authenticated user.
+        Falls back to the raw user ID with STANDARD tier if no DB record exists
+        (e.g. users who register through the bridge/WebSocket and don't yet
+        have a row in the PostgreSQL users table).
+        """
+        try:
+            row = await db_pool.fetchrow(
+                "SELECT id, tier FROM users WHERE id::text = $1 OR username = $1",
+                authenticated_user_id
+            )
+        except Exception:
+            row = None
+        if row:
+            member_id = str(row["id"])
+            tier = (row["tier"] or "STANDARD") if row.get("tier") else "STANDARD"
+        else:
+            member_id = authenticated_user_id
+            tier = "STANDARD"
         return member_id, tier
 
     # -------------------------------------------------------------------------

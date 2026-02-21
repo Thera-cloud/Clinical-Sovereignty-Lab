@@ -668,6 +668,20 @@
         </div>
     </div>
     <script>
+
+function _recoverAuth() {
+  function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+  var hp = new URLSearchParams(location.hash.slice(1));
+  var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+  if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+  if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+  if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+  if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+  if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
+  if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
+  if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+}
+_recoverAuth();
         // Default WS endpoint (can be overridden via URL param `ws=`)
         var SERVER_URL = "wss://api.sovereignsanctuary.net/ws";
         var socket = null;
@@ -1020,7 +1034,7 @@
             initMobileUI();
             // If opened from Coach Command, we should have a token in the URL.
             // If not, fall back to sessionStorage-based login (admin/dev flows).
-            if (!tokenParam && !sessionStorage.getItem("username")) {
+            if (!tokenParam && !(sessionStorage.getItem("username") || localStorage.getItem("sc_username"))) {
                 window.location.href = "index.html";
                 return;
             }
@@ -1041,10 +1055,10 @@
                 }
 
                 // Fallback: sessionStorage token auth
-                var profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+                var profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
                 socket.send(JSON.stringify({
                     type: "auth",
-                    token: sessionStorage.getItem("token"),
+                    token: (sessionStorage.getItem("token") || localStorage.getItem("sc_token")),
                     hardware_id: profile.hardware_id || "WEB_ADMIN"
                 }));
             };
@@ -1721,7 +1735,7 @@
             var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
             var hwId = hwParam || sessionStorage.getItem("hardware_id") || "";
             var coachName = "";
-            try { coachName = JSON.parse(sessionStorage.getItem("profile") || "{}").name || ""; } catch(e) {}
+            try { coachName = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}").name || ""; } catch(e) {}
             
             var numQ = document.getElementById("assessNumQuestions").value;
             var diff = document.getElementById("assessDifficulty").value;
@@ -1767,7 +1781,7 @@
             var apiBase = SERVER_URL.replace("wss://", "https://").replace("ws://", "http://").replace("/ws", "");
             var hwId = hwParam || sessionStorage.getItem("hardware_id") || "";
             var coachName = "";
-            try { coachName = JSON.parse(sessionStorage.getItem("profile") || "{}").name || ""; } catch(e) {}
+            try { coachName = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}").name || ""; } catch(e) {}
             
             var numQ = document.getElementById("assessNumQuestions").value;
             var diff = document.getElementById("assessDifficulty").value;

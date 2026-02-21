@@ -8,13 +8,25 @@ content queue, platform connections, moderation, and content generation.
 """
 
 import json
-from fastapi import APIRouter, HTTPException, Request, Query
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 
-router = APIRouter(prefix="/api/skyeye", tags=["skyeye"])
+from app.services.api_server import require_admin
+
+logger = logging.getLogger("skyeye.api")
+
+router = APIRouter(
+    prefix="/api/skyeye",
+    tags=["skyeye"],
+    dependencies=[Depends(require_admin)],
+)
+
+# Public router for OAuth callbacks (called by external platforms, no auth)
+oauth_router = APIRouter(prefix="/api/skyeye", tags=["skyeye-oauth"])
 
 
 # =============================================================================
@@ -39,6 +51,9 @@ class ApprovalAction(BaseModel):
 class ChatMessage(BaseModel):
     message: str
     mode: Optional[str] = None
+
+class ChatActionExecute(BaseModel):
+    action_id: str
 
 class ExpressionCapture(BaseModel):
     raw_text: str
@@ -520,8 +535,8 @@ async def toggle_session(request: Request):
 # =============================================================================
 
 @router.get("/chat")
-async def get_chat(request: Request, limit: int = Query(default=50, le=200)):
-    """Get chat message history."""
+async def get_chat(request: Request, limit: int = Query(default=200, le=5000)):
+    """Get chat message history (unlimited for Sovereign Command)."""
     from app.services.skyeye_chat import SkyEyeChatService
     service = SkyEyeChatService(request.app.state.db_pool)
     return await service.get_chat_history(limit=limit)
@@ -533,6 +548,173 @@ async def send_chat(body: ChatMessage, request: Request):
     from app.services.skyeye_chat import SkyEyeChatService
     service = SkyEyeChatService(request.app.state.db_pool)
     return await service.send_message(body.message, mode_override=body.mode)
+
+
+@router.post("/chat/execute")
+async def execute_chat_action(body: ChatActionExecute, request: Request):
+    """Execute a confirmed action from the Big Nate Chat interface."""
+    from app.services.skyeye_chat import SkyEyeChatService
+    service = SkyEyeChatService(request.app.state.db_pool)
+    return await service.execute_confirmed_action(body.action_id)
+
+
+@router.delete("/chat")
+async def clear_chat(request: Request, archive: bool = Query(default=True)):
+    """Clear Big Nate Chat history, optionally archiving to strategic memory first."""
+    pool = request.app.state.db_pool
+    archived_count = 0
+
+    async with pool.acquire() as conn:
+        if archive:
+            messages = await conn.fetch(
+                "SELECT sender, message, metadata, created_at FROM skyeye_chat ORDER BY created_at ASC"
+            )
+            if messages:
+                lines = []
+                for m in messages:
+                    prefix = "Big Nate" if m["sender"] == "big_nate" else "Little Nate"
+                    ts = m["created_at"].strftime("%Y-%m-%d %H:%M") if m["created_at"] else ""
+                    lines.append(f"[{ts}] {prefix}: {m['message']}")
+                transcript = "\n".join(lines)
+                archived_count = len(messages)
+
+                import json as _json
+                await conn.execute("""
+                    INSERT INTO swarm_oversight_log
+                        (event_type, details, metadata)
+                    VALUES ('chat_archive', $1, $2)
+                """, _json.dumps({"transcript": transcript, "message_count": archived_count}),
+                     _json.dumps({"source": "big_nate_chat_clear", "archived_at": datetime.utcnow().isoformat()}))
+
+        deleted = await conn.execute("DELETE FROM skyeye_chat")
+
+    return {
+        "cleared": True,
+        "archived": archive,
+        "archived_count": archived_count,
+        "message": f"Chat cleared. {archived_count} messages archived to strategic memory." if archive else "Chat cleared.",
+    }
+
+
+@router.get("/chat/archives")
+async def list_chat_archives(request: Request):
+    """List all archived Big Nate Chat conversations stored in strategic memory."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, entry_id, details, metadata, created_at
+            FROM swarm_oversight_log
+            WHERE event_type = 'chat_archive'
+            ORDER BY created_at DESC
+        """)
+
+    import json as _json
+    archives = []
+    for r in rows:
+        details = r["details"]
+        if isinstance(details, str):
+            details = _json.loads(details)
+        transcript = (details or {}).get("transcript", "")
+        msg_count = (details or {}).get("message_count", 0)
+        preview = transcript[:200] + ("..." if len(transcript) > 200 else "")
+        meta = r["metadata"]
+        if isinstance(meta, str):
+            meta = _json.loads(meta)
+        archives.append({
+            "id": r["id"],
+            "entry_id": str(r["entry_id"]),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "message_count": msg_count,
+            "preview": preview,
+            "archived_at": (meta or {}).get("archived_at"),
+        })
+    return archives
+
+
+@router.get("/chat/archives/{entry_id}")
+async def get_chat_archive(entry_id: str, request: Request):
+    """Get the full transcript for a specific archived conversation."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, entry_id, details, metadata, created_at
+            FROM swarm_oversight_log
+            WHERE entry_id = $1::uuid AND event_type = 'chat_archive'
+        """, entry_id)
+
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Archive not found")
+
+    import json as _json
+    details = row["details"]
+    if isinstance(details, str):
+        details = _json.loads(details)
+    meta = row["metadata"]
+    if isinstance(meta, str):
+        meta = _json.loads(meta)
+
+    return {
+        "id": row["id"],
+        "entry_id": str(row["entry_id"]),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "message_count": (details or {}).get("message_count", 0),
+        "transcript": (details or {}).get("transcript", ""),
+        "archived_at": (meta or {}).get("archived_at"),
+    }
+
+
+@router.post("/chat/archives/{entry_id}/restore")
+async def restore_chat_archive(entry_id: str, request: Request):
+    """Restore an archived conversation back into the active chat."""
+    pool = request.app.state.db_pool
+    import re as _re
+    import json as _json
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT details FROM swarm_oversight_log
+            WHERE entry_id = $1::uuid AND event_type = 'chat_archive'
+        """, entry_id)
+
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Archive not found")
+
+    details = row["details"]
+    if isinstance(details, str):
+        details = _json.loads(details)
+    transcript = (details or {}).get("transcript", "")
+    if not transcript:
+        return {"restored": 0, "message": "Archive was empty."}
+
+    line_pattern = _re.compile(
+        r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]\s+(Big Nate|Little Nate):\s+(.*)',
+        _re.DOTALL,
+    )
+
+    parsed = []
+    for line in transcript.split("\n"):
+        m = line_pattern.match(line)
+        if m:
+            ts_str, speaker, text = m.group(1), m.group(2), m.group(3)
+            sender = "big_nate" if speaker == "Big Nate" else "little_nate"
+            parsed.append((sender, text.strip(), ts_str))
+
+    if not parsed:
+        return {"restored": 0, "message": "Could not parse archive transcript."}
+
+    async with pool.acquire() as conn:
+        for sender, message, ts_str in parsed:
+            await conn.execute("""
+                INSERT INTO skyeye_chat (sender, message, metadata, created_at)
+                VALUES ($1, $2, '{}', ($3 || ':00')::timestamptz)
+            """, sender, message, ts_str)
+
+    return {
+        "restored": len(parsed),
+        "message": f"Restored {len(parsed)} messages from archive.",
+    }
 
 
 # =============================================================================
@@ -930,12 +1112,11 @@ async def get_platform_status(request: Request):
         )
         # Get token statuses
         tokens = await conn.fetch(
-            "SELECT platform, status, account_name, last_used, error_message FROM skyeye_platform_tokens"
+            "SELECT platform, status, account_name, last_used, error_message, token_expiry FROM skyeye_platform_tokens"
         )
 
     token_map = {t["platform"]: dict(t) for t in tokens}
 
-    # Check which platforms have credentials configured
     from app.config import settings
     CREDENTIAL_CHECK = {
         "tiktok":    ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
@@ -945,6 +1126,7 @@ async def get_platform_status(request: Request):
         "reddit":    ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
         "linkedin":  ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
         "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
+        "x":         ("X_CLIENT_ID", "X_CLIENT_SECRET"),
     }
 
     result = []
@@ -952,11 +1134,24 @@ async def get_platform_status(request: Request):
         name = p["name"]
         tok = token_map.get(name, {})
 
-        # Check if API credentials are configured in .env
         cred_fields = CREDENTIAL_CHECK.get(name, ())
         has_credentials = all(
             bool(getattr(settings, f, "")) for f in cred_fields
         ) if cred_fields else False
+
+        _tok_exp = tok.get("token_expiry")
+        _days_left = None
+        _health = "unknown"
+        if _tok_exp:
+            try:
+                _exp_dt = _tok_exp if isinstance(_tok_exp, datetime) else datetime.fromisoformat(str(_tok_exp).replace("Z", "+00:00"))
+                _now = datetime.now(_exp_dt.tzinfo) if _exp_dt.tzinfo else datetime.now()
+                _days_left = (_exp_dt - _now).days
+                _health = "healthy" if _days_left > 7 else ("warning" if _days_left > 0 else "expired")
+            except Exception:
+                pass
+        elif tok.get("status") == "connected":
+            _health = "healthy"
 
         result.append({
             "platform": name,
@@ -966,6 +1161,9 @@ async def get_platform_status(request: Request):
             "has_credentials": has_credentials,
             "account_name": tok.get("account_name"),
             "last_used": tok.get("last_used"),
+            "token_expiry": _tok_exp.isoformat() if isinstance(_tok_exp, datetime) else _tok_exp,
+            "days_until_expiry": _days_left,
+            "health": _health,
             "error": tok.get("error_message"),
         })
     return result
@@ -987,6 +1185,7 @@ async def initiate_platform_connect(platform: str, request: Request):
         "reddit":    "https://www.reddit.com/prefs/apps",
         "linkedin":  "https://www.linkedin.com/developers/apps",
         "pinterest": "https://developers.pinterest.com/manage/",
+        "x":         "https://developer.x.com/en/portal/projects-and-apps",
     }
 
     # Credential requirements per platform
@@ -998,6 +1197,7 @@ async def initiate_platform_connect(platform: str, request: Request):
         "reddit":    ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
         "linkedin":  ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
         "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
+        "x":         ("X_CLIENT_ID", "X_CLIENT_SECRET"),
     }
 
     portal_url = DEVELOPER_PORTALS.get(platform)
@@ -1047,19 +1247,53 @@ async def initiate_platform_connect(platform: str, request: Request):
         }
 
 
-@router.get("/platforms/{platform}/callback")
+@router.get("/platforms/{platform}/connect")
+async def platform_connect_redirect(platform: str, request: Request):
+    """Browser-friendly GET redirect — navigates directly to OAuth authorization."""
+    from app.services.platforms import get_adapter
+    from app.config import settings as _settings
+
+    adapter = get_adapter(platform, request.app.state.db_pool)
+    if not adapter:
+        raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+    base_url = _settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
+
+    try:
+        oauth_url = await adapter.get_oauth_url(redirect_uri)
+        return RedirectResponse(url=oauth_url)
+    except NotImplementedError:
+        raise HTTPException(status_code=501, detail=f"OAuth not implemented for {platform}")
+
+
+@oauth_router.get("/platforms/{platform}/callback")
 async def platform_oauth_callback(
     platform: str,
     request: Request,
-    code: str = Query(...),
+    code: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None),
+    error: Optional[str] = Query(default=None),
+    error_description: Optional[str] = Query(default=None),
 ):
     """
     OAuth callback handler. Called by the platform after admin authorizes.
     Exchanges the code for tokens and stores them.
+    Handles error responses (e.g. unauthorized_scope_error) gracefully.
     """
     import logging as _logging
+    import urllib.parse
     _log = _logging.getLogger("skyeye.oauth")
+
+    if error:
+        desc = error_description or error
+        _log.warning(f"OAuth error for {platform}: {error} — {desc}")
+        dashboard_url = f"https://command.sovereignsanctuary.net/skyeye.html?oauth_error={urllib.parse.quote(desc)}&platform={platform}"
+        return RedirectResponse(url=dashboard_url)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="No authorization code received")
+
     from app.services.platforms import get_adapter
     from app.config import settings as _settings
     adapter = get_adapter(platform, request.app.state.db_pool)
@@ -1071,15 +1305,192 @@ async def platform_oauth_callback(
 
     _log.info(f"OAuth callback for {platform}: code_len={len(code)}, state={state}, redirect_uri={redirect_uri}")
 
-    success = await adapter.handle_oauth_callback(code, redirect_uri)
+    try:
+        success = await adapter.handle_oauth_callback(code, redirect_uri, state=state)
+    except TypeError:
+        success = await adapter.handle_oauth_callback(code, redirect_uri)
     if success:
-        # Redirect back to SkyEye dashboard (on the app subdomain, not the API)
-        return RedirectResponse(url="https://app.sovereignsanctuary.net/dashboard/skyeye.html?connected=" + platform)
+        return RedirectResponse(url=f"https://command.sovereignsanctuary.net/skyeye.html?connected={platform}")
     else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"OAuth callback failed for {platform}: {adapter.last_error}"
+        err_msg = urllib.parse.quote(adapter.last_error or "Token exchange failed")
+        return RedirectResponse(url=f"https://command.sovereignsanctuary.net/skyeye.html?oauth_error={err_msg}&platform={platform}")
+
+
+# =============================================================================
+# LIVESTREAM — Little Nate Live Sessions
+# =============================================================================
+
+_livestream_engine = None
+_livestream_scheduler = None
+
+def _get_livestream_engine(request):
+    global _livestream_engine
+    if _livestream_engine is None:
+        from app.services.livestream_engine import LivestreamEngine
+        _livestream_engine = LivestreamEngine(request.app.state.db_pool)
+    return _livestream_engine
+
+def _get_livestream_scheduler(request):
+    global _livestream_scheduler, _livestream_engine
+    if _livestream_scheduler is None:
+        from app.services.livestream_scheduler import LivestreamScheduler
+        engine = _get_livestream_engine(request)
+        _livestream_scheduler = LivestreamScheduler(
+            request.app.state.db_pool, livestream_engine=engine
         )
+    return _livestream_scheduler
+
+
+@router.post("/livestream/start")
+async def start_livestream(request: Request):
+    """Start a live streaming session."""
+    body = await request.json()
+    engine = _get_livestream_engine(request)
+    result = await engine.start_session(
+        platforms=body.get("platforms", ["x"]),
+        rtmp_keys=body.get("rtmp_keys", {}),
+        topic=body.get("topic"),
+        duration_limit=body.get("duration_limit", 1800),
+    )
+    return result
+
+
+@router.post("/livestream/stop")
+async def stop_livestream(request: Request):
+    """Stop the current live streaming session."""
+    engine = _get_livestream_engine(request)
+    result = await engine.stop_session()
+    return result
+
+
+@router.get("/livestream/status")
+async def livestream_status(request: Request):
+    """Get current livestream session status."""
+    engine = _get_livestream_engine(request)
+    return await engine.get_status()
+
+
+@router.get("/livestream/history")
+async def livestream_history(request: Request, limit: int = Query(default=20)):
+    """Get past livestream sessions with summaries."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT session_id, status, platforms, topic,
+                   duration_limit, started_at, ended_at,
+                   total_interactions, unique_viewers,
+                   signups_attributed, summary, created_at
+            FROM livestream_sessions
+            ORDER BY created_at DESC
+            LIMIT $1
+        """, limit)
+
+    return [
+        {
+            "session_id": str(r["session_id"]),
+            "status": r["status"],
+            "platforms": r["platforms"],
+            "topic": r["topic"],
+            "duration_limit": r["duration_limit"],
+            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+            "ended_at": r["ended_at"].isoformat() if r["ended_at"] else None,
+            "total_interactions": r["total_interactions"],
+            "unique_viewers": r["unique_viewers"],
+            "signups_attributed": r["signups_attributed"],
+            "summary": r["summary"],
+        }
+        for r in rows
+    ]
+
+
+@router.get("/livestream/wisdom/{session_id}")
+async def get_livestream_wisdom(session_id: str, request: Request):
+    """Get all interactions from a specific livestream session."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT platform, viewer_handle, viewer_question,
+                   nate_response, expression_used, signup_cta_given,
+                   matched_client_id, created_at
+            FROM livestream_wisdom
+            WHERE session_id = $1::uuid
+            ORDER BY created_at ASC
+        """, session_id)
+
+    return [
+        {
+            "platform": r["platform"],
+            "viewer_handle": r["viewer_handle"],
+            "question": r["viewer_question"],
+            "response": r["nate_response"],
+            "expression": r["expression_used"],
+            "cta_given": r["signup_cta_given"],
+            "matched_client": r["matched_client_id"],
+            "timestamp": r["created_at"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/livestream/scheduler/start")
+async def start_scheduler(request: Request):
+    """Enable autonomous scheduling — Little Nate picks his own live times."""
+    scheduler = _get_livestream_scheduler(request)
+    await scheduler.start()
+    config = await scheduler.get_config()
+    return {"status": "started", **config}
+
+
+@router.post("/livestream/scheduler/stop")
+async def stop_scheduler(request: Request):
+    """Disable autonomous scheduling."""
+    scheduler = _get_livestream_scheduler(request)
+    await scheduler.stop()
+    return {"status": "stopped"}
+
+
+@router.get("/livestream/scheduler/config")
+async def get_scheduler_config(request: Request):
+    """Get current autonomous schedule configuration."""
+    scheduler = _get_livestream_scheduler(request)
+    return await scheduler.get_config()
+
+
+@router.put("/livestream/scheduler/config")
+async def update_scheduler_config(request: Request):
+    """Update schedule preferences (sessions per week, duration)."""
+    body = await request.json()
+    scheduler = _get_livestream_scheduler(request)
+    await scheduler.update_config(
+        sessions_per_week=body.get("sessions_per_week"),
+        session_duration=body.get("session_duration"),
+    )
+    return await scheduler.get_config()
+
+
+@router.post("/livestream/preflight")
+async def run_preflight(request: Request):
+    """Manually run a pre-flight connection check without going live."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT rtmp_keys FROM livestream_sessions
+            WHERE status = 'config'
+            ORDER BY created_at DESC LIMIT 1
+        """)
+    if not row or not row["rtmp_keys"]:
+        return {"connected": False, "error": "No RTMP keys configured"}
+
+    import json as _json
+    keys = row["rtmp_keys"]
+    if isinstance(keys, str):
+        keys = _json.loads(keys)
+
+    from app.services.livestream_renderer import LivestreamRenderer
+    renderer = LivestreamRenderer(keys)
+    connected = await renderer.preflight_check()
+    await renderer.stop()
+    return {"connected": connected, "platforms": list(keys.keys())}
 
 
 # =============================================================================
@@ -1176,6 +1587,196 @@ async def get_engine_status(request: Request):
     return {
         "engine_running": True,
         **pulse,
+    }
+
+
+@router.post("/engine/wake")
+async def wake_engine(request: Request):
+    """Manually trigger a SkyEye session via the engine's manual_wake()."""
+    engine = getattr(request.app.state, "skyeye_engine", None)
+    if not engine:
+        raise HTTPException(status_code=503, detail="SkyEye session engine not running")
+    result = await engine.manual_wake()
+    return result
+
+
+@router.post("/engine/rest")
+async def rest_engine(request: Request):
+    """Manually end the current SkyEye session."""
+    engine = getattr(request.app.state, "skyeye_engine", None)
+    if not engine:
+        raise HTTPException(status_code=503, detail="SkyEye session engine not running")
+    result = await engine.manual_rest()
+    return result
+
+
+@router.get("/platform-health")
+async def get_platform_health(request: Request):
+    """Enhanced platform status with token expiry and health indicators."""
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        platforms = await conn.fetch(
+            "SELECT name, display_name, enabled FROM skyeye_platforms ORDER BY tier, name"
+        )
+        tokens = await conn.fetch(
+            """SELECT platform, status, account_name, last_used, error_message,
+                      token_expiry, updated_at
+               FROM skyeye_platform_tokens"""
+        )
+
+    token_map = {t["platform"]: dict(t) for t in tokens}
+
+    from app.config import settings
+    CREDENTIAL_CHECK = {
+        "tiktok": ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"),
+        "instagram": ("INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"),
+        "facebook": ("FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET"),
+        "youtube": ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET"),
+        "reddit": ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"),
+        "linkedin": ("LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"),
+        "pinterest": ("PINTEREST_APP_ID", "PINTEREST_APP_SECRET"),
+        "x": ("X_CLIENT_ID", "X_CLIENT_SECRET"),
+    }
+
+    result = []
+    for p in platforms:
+        name = p["name"]
+        tok = token_map.get(name, {})
+
+        cred_fields = CREDENTIAL_CHECK.get(name, ())
+        has_credentials = all(
+            bool(getattr(settings, f, "")) for f in cred_fields
+        ) if cred_fields else False
+
+        _ph_tok_exp = tok.get("token_expiry")
+        days_until_expiry = None
+        health = "unknown"
+        if _ph_tok_exp:
+            try:
+                _ph_exp_dt = _ph_tok_exp if isinstance(_ph_tok_exp, datetime) else datetime.fromisoformat(str(_ph_tok_exp).replace("Z", "+00:00"))
+                _ph_now = datetime.now(_ph_exp_dt.tzinfo) if _ph_exp_dt.tzinfo else datetime.now()
+                days_until_expiry = (_ph_exp_dt - _ph_now).days
+                if days_until_expiry > 7:
+                    health = "healthy"
+                elif days_until_expiry > 0:
+                    health = "warning"
+                else:
+                    health = "expired"
+            except Exception:
+                pass
+        elif tok.get("status") == "connected":
+            health = "healthy"
+
+        _ph_updated = tok.get("updated_at")
+        result.append({
+            "platform": name,
+            "display_name": p["display_name"],
+            "enabled": p["enabled"],
+            "connection_status": tok.get("status", "disconnected"),
+            "has_credentials": has_credentials,
+            "account_name": tok.get("account_name"),
+            "last_used": tok.get("last_used"),
+            "token_expiry": _ph_tok_exp.isoformat() if isinstance(_ph_tok_exp, datetime) else _ph_tok_exp,
+            "days_until_expiry": days_until_expiry,
+            "health": health,
+            "error": tok.get("error_message"),
+            "last_refresh_at": _ph_updated.isoformat() if isinstance(_ph_updated, datetime) else _ph_updated,
+        })
+    return result
+
+
+@router.post("/verify-posts")
+async def verify_recent_posts(request: Request):
+    """
+    Verify that recently posted content is still live on platforms.
+    Fetches the last 24h of posted content, then checks each post's URL
+    with an HTTP HEAD request and attempts platform API verification.
+    """
+    import httpx
+    from app.services.platforms import get_adapter
+
+    pool = request.app.state.db_pool
+    results = []
+    async with pool.acquire() as conn:
+        recent_posts = await conn.fetch(
+            """SELECT id, platform, content_text, post_url, post_id_external, posted_at
+               FROM skyeye_content_queue
+               WHERE status = 'posted'
+                 AND posted_at > NOW() - INTERVAL '24 hours'
+               ORDER BY posted_at DESC
+               LIMIT 20"""
+        )
+
+        for post in recent_posts:
+            verification = {
+                "id": post["id"],
+                "platform": post["platform"],
+                "content_preview": (post["content_text"] or "")[:100],
+                "post_url": post["post_url"],
+                "posted_at": post["posted_at"].isoformat() if post["posted_at"] else None,
+                "status": "unverifiable",
+            }
+
+            if not post["post_url"] and not post["post_id_external"]:
+                verification["status"] = "no_external_reference"
+                await conn.execute(
+                    """INSERT INTO skyeye_activity (type, platform, content)
+                       VALUES ('post_verification_warning', $1, $2)""",
+                    post["platform"],
+                    f"Post {post['id']} has no external URL or ID — may not have been published"
+                )
+                results.append(verification)
+                continue
+
+            # Try HTTP HEAD on the post URL to check if it's still reachable
+            if post["post_url"]:
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                        resp = await client.head(post["post_url"])
+                        if resp.status_code < 400:
+                            verification["status"] = "verified_live"
+                        elif resp.status_code == 404:
+                            verification["status"] = "deleted"
+                        else:
+                            verification["status"] = f"http_{resp.status_code}"
+                except Exception as e:
+                    verification["status"] = "url_unreachable"
+                    verification["error"] = str(e)[:100]
+
+            # Try platform API verification via get_own_posts if URL check inconclusive
+            if verification["status"] not in ("verified_live",) and post["post_id_external"]:
+                try:
+                    adapter = get_adapter(post["platform"], pool)
+                    if adapter:
+                        own_posts = await adapter.get_own_posts(limit=30)
+                        found = any(
+                            getattr(p, "post_id", None) == post["post_id_external"]
+                            for p in own_posts
+                        )
+                        if found:
+                            verification["status"] = "verified_via_api"
+                        elif verification["status"] == "unverifiable":
+                            verification["status"] = "not_found_in_api"
+                except Exception:
+                    pass
+
+            if verification["status"] in ("deleted", "not_found_in_api"):
+                await conn.execute(
+                    """INSERT INTO skyeye_activity (type, platform, content)
+                       VALUES ('post_verification_failed', $1, $2)""",
+                    post["platform"],
+                    f"Post {post['id']} appears deleted or unreachable (status: {verification['status']})"
+                )
+
+            results.append(verification)
+
+    verified_count = sum(1 for r in results if r["status"] in ("verified_live", "verified_via_api"))
+    failed_count = sum(1 for r in results if r["status"] in ("deleted", "not_found_in_api"))
+    return {
+        "total": len(results),
+        "verified": verified_count,
+        "failed": failed_count,
+        "posts": results,
     }
 
 

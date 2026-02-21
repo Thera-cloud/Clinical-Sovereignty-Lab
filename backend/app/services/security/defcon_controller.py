@@ -384,6 +384,20 @@ class DefconController:
             },
         )
 
+        # Layer 8: Sovereign Fall Command — auto-backup on CRITICAL/LOCKDOWN
+        if new_level in (DefconLevel.CRITICAL,):
+            try:
+                from app.services.security.sovereign_fall_command import get_fall_command
+                fall = get_fall_command()
+                import asyncio
+                asyncio.create_task(fall.execute(
+                    trigger=f"defcon_{new_level.name.lower()}",
+                    include_database=True,
+                ))
+                logger.warning("SOVEREIGN FALL COMMAND triggered by DEFCON %s", new_level.name)
+            except Exception as fall_err:
+                logger.error("Fall Command trigger failed: %s", fall_err)
+
         return state_snapshot
 
     async def deescalate(self) -> Optional[DefconState]:

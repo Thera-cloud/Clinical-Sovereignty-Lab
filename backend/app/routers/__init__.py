@@ -61,10 +61,9 @@ async def register(request: Request):
     if exists:
         raise HTTPException(409, "Username already taken")
 
-    import hashlib
-    pw_hash = hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), username.encode(), 100_000
-    ).hex()
+    import hashlib, secrets as _secrets
+    _salt = _secrets.token_hex(16)
+    pw_hash = f"{_salt}:{hashlib.pbkdf2_hmac('sha256', password.encode(), _salt.encode(), 100_000).hex()}"
 
     user_id = await db.fetchval(
         """INSERT INTO users (username, password_hash, name, email, role, tier)

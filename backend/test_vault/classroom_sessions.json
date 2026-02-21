@@ -1,0 +1,142 @@
+[
+  {
+    "session_id": "test_session",
+    "coach_id": "coach_001",
+    "client_id": "sarah_001",
+    "client_name": "Sarah",
+    "family_id": null,
+    "analyzed_at": "2026-02-16T17:38:36.432275",
+    "metrics": {
+      "total_duration_minutes": 1.25,
+      "coach_talk_time_percent": 53.333333333333336,
+      "client_talk_time_percent": 46.666666666666664,
+      "silence_percent": 0,
+      "total_questions": 0,
+      "open_questions": 0,
+      "closed_questions": 0,
+      "scaling_questions": 0,
+      "techniques_detected": {
+        "SOMATIC": 1
+      },
+      "reflection_count": 1,
+      "validation_count": 1,
+      "average_response_length_coach": 14.4,
+      "average_response_length_client": 13.0,
+      "longest_monologue_seconds": 10.0,
+      "turn_count": 9
+    },
+    "strengths": [],
+    "growth_areas": [],
+    "key_moments": [],
+    "therapeutic_presence_score": 0.0,
+    "focus_area": "general therapeutic skills",
+    "focus_specific_feedback": "",
+    "reflection_questions": [],
+    "dojo_scenarios": [],
+    "workbook_recommendations": [],
+    "transcript_hash": "1a5a9d0b63a1506c5bde723971b8e075",
+    "due_date": null,
+    "ai_analysis_pending": true,
+    "transcript_excerpt": [
+      {
+        "time": "0:00",
+        "speaker": "Dr. Coach",
+        "text": "Good morning, Sarah. How are you feeling today?"
+      },
+      {
+        "time": "0:05",
+        "speaker": "Sarah",
+        "text": "I've been struggling with anxiety again. Work has been really stressful."
+      },
+      {
+        "time": "0:12",
+        "speaker": "Dr. Coach",
+        "text": "I hear you. It sounds like work pressure is bringing up some challenging feelings."
+      },
+      {
+        "time": "0:20",
+        "speaker": "Sarah",
+        "text": "Yes, exactly. My boss has been really demanding and I feel overwhelmed."
+      },
+      {
+        "time": "0:28",
+        "speaker": "Dr. Coach",
+        "text": "That sense of being overwhelmed is completely understandable. Can you tell me more about what triggers those feelings?"
+      },
+      {
+        "time": "0:35",
+        "speaker": "Sarah",
+        "text": "Mostly when I have deadlines. I start to panic and can't focus."
+      },
+      {
+        "time": "0:45",
+        "speaker": "Dr. Coach",
+        "text": "Let's explore some grounding techniques that might help when you notice that panic arising."
+      },
+      {
+        "time": "0:55",
+        "speaker": "Sarah",
+        "text": "That would be helpful. My husband Mike mentioned he's noticed I've been more irritable at home too."
+      },
+      {
+        "time": "1:05",
+        "speaker": "Dr. Coach",
+        "text": "It's good that Mike is supportive and aware. Have you tried the breathing exercises we discussed last session?"
+      }
+    ],
+    "participants": [
+      {
+        "speaker_name": "Dr. Coach",
+        "normalized_name": "dr coach",
+        "role": "coach",
+        "matched_client_id": null,
+        "matched_family_id": null,
+        "talk_time_seconds": 40.0,
+        "turn_count": 5,
+        "is_present": true,
+        "confidence": 0.95
+      },
+      {
+        "speaker_name": "Sarah",
+        "normalized_name": "sarah",
+        "role": "potential_client",
+        "matched_client_id": null,
+        "matched_family_id": null,
+        "talk_time_seconds": 35.0,
+        "turn_count": 4,
+        "is_present": true,
+        "confidence": 0.3
+      }
+    ],
+    "family_members_present": [],
+    "family_members_mentioned": [],
+    "client_insights": {
+      "client_id": "sarah_001",
+      "client_name": "Sarah",
+      "family_id": "",
+      "emotional_state": "neutral",
+      "emotional_indicators": [],
+      "engagement_level": 0.5,
+      "topics_discussed": [],
+      "concerns_raised": [],
+      "growth_moments": [],
+      "family_members_present": [],
+      "family_members_mentioned": [],
+      "coherence_indicators": {
+        "emotional_awareness": 0.0,
+        "cognitive_clarity": 0.0,
+        "dominant_state": "neutral",
+        "coherence_estimate": 0.0
+      },
+      "mood_indicators": {
+        "current_mood": "neutral",
+        "anxiety_estimate": 0.4,
+        "mood_valence": 0.5,
+        "indicators": [],
+        "timestamp": "2026-02-16T17:38:36.431461"
+      },
+      "session_summary_for_nate": "In recent coaching session, Sarah appeared neutral. They were moderately engaged throughout.",
+      "coach_observations": []
+    }
+  }
+]

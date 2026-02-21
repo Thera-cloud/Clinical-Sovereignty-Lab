@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -183,8 +183,11 @@ class SkyEyeSessionEngine:
 
                 if last_session and last_session["session_end"]:
                     cooldown = await self._get_setting("session_cooldown_minutes", 30)
-                    cooldown_until = last_session["session_end"] + timedelta(minutes=cooldown)
-                    if datetime.utcnow() < cooldown_until:
+                    session_end = last_session["session_end"]
+                    if session_end.tzinfo is None:
+                        session_end = session_end.replace(tzinfo=timezone.utc)
+                    cooldown_until = session_end + timedelta(minutes=cooldown)
+                    if datetime.now(timezone.utc) < cooldown_until:
                         return False
 
                 # Check if any platform is due for a session
@@ -255,6 +258,7 @@ class SkyEyeSessionEngine:
 
                 # Run through phases for this platform
                 await self._browse_phase(platform_name, adapter)
+                await self._sync_platform_stats(platform_name, adapter)
                 await self._observe_phase(platform_name, adapter, monitor)
                 await self._engage_phase(platform_name, adapter, generator, monitor)
                 await self._route_engaged_users(platform_name, funnel_router)
@@ -326,6 +330,46 @@ class SkyEyeSessionEngine:
         except Exception as e:
             logger.warning(f"Browse phase error on {platform}: {e}")
 
+    async def _sync_platform_stats(self, platform: str, adapter):
+        """Pull live analytics from the platform and update skyeye_platforms."""
+        try:
+            analytics = await adapter.get_analytics()
+            if not analytics:
+                return
+
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE skyeye_platforms
+                    SET followers   = COALESCE(NULLIF($2, 0), followers),
+                        engagement  = COALESCE(NULLIF($3, 0.0), engagement),
+                        posts       = COALESCE(NULLIF($4, 0), posts),
+                        updated_at  = NOW()
+                    WHERE LOWER(name) = LOWER($1)
+                """, platform, analytics.followers, analytics.engagement_rate,
+                    analytics.total_posts)
+
+            logger.info(
+                f"{platform}: synced stats — "
+                f"followers={analytics.followers}, "
+                f"engagement={analytics.engagement_rate:.4f}, "
+                f"posts={analytics.total_posts}"
+            )
+
+            await self._log_action(
+                platform, SessionState.BROWSING, "stats_sync",
+                detail={
+                    "summary": f"Synced {platform} stats",
+                    "followers": analytics.followers,
+                    "engagement_rate": analytics.engagement_rate,
+                    "total_posts": analytics.total_posts,
+                    "total_likes": analytics.total_likes,
+                    "total_comments": analytics.total_comments,
+                    "total_views": analytics.total_views,
+                }
+            )
+        except Exception as e:
+            logger.debug(f"Stats sync skipped for {platform}: {e}")
+
     async def _observe_phase(self, platform: str, adapter, monitor):
         """Check comments and mentions on recent posts."""
         if self._is_session_expired():
@@ -380,11 +424,96 @@ class SkyEyeSessionEngine:
                             "mention_count": len(mentions)}
                 )
 
+            # Capture emotionally resonant comments as expressions
+            await self._capture_expressions(platform, own_posts)
+
+            # Track engagement on previously posted expressions (feedback loop)
+            await self._track_expression_engagement(platform, own_posts)
+
             # Campaign feedback aggregation
             await self._aggregate_campaign_feedback(platform, own_posts, comments if 'comments' in dir() else [])
 
         except Exception as e:
             logger.warning(f"Observe phase error on {platform}: {e}")
+
+    async def _capture_expressions(self, platform: str, own_posts):
+        """Capture emotionally resonant comments and posts as live expressions."""
+        try:
+            emotional_keywords = [
+                "thank", "grateful", "changed my life", "needed this",
+                "beautiful", "powerful", "healing", "love this",
+                "inspired", "touched", "moved", "resonat",
+                "breakthrough", "growth", "transform",
+            ]
+
+            async with self.db_pool.acquire() as conn:
+                for post in own_posts[:2]:
+                    # Also capture Little Nate's own best-performing posts
+                    metrics = getattr(post, "raw_data", {}).get("public_metrics", {})
+                    likes = metrics.get("like_count", 0) if metrics else 0
+                    if likes >= 3 and post.text:
+                        existing = await conn.fetchval("""
+                            SELECT id FROM skyeye_live_expressions
+                            WHERE source_id = $1 AND platform = $2
+                        """, post.item_id, platform)
+                        if not existing:
+                            await conn.execute("""
+                                INSERT INTO skyeye_live_expressions
+                                    (platform, source_type, source_id, author_handle,
+                                     content, emotion_tag, engagement_score, created_at)
+                                VALUES ($1, 'post', $2, $3, $4, 'resonant', $5, NOW())
+                            """, platform, post.item_id,
+                                 getattr(post, "author_handle", "littlenate"),
+                                 post.text[:2000], likes)
+
+        except Exception as e:
+            logger.debug(f"Expression capture error on {platform}: {e}")
+
+    async def _track_expression_engagement(self, platform: str, own_posts):
+        """Track engagement on posted expressions to close the feedback loop.
+        Stores results in expression_engagement so the Insight Accumulator
+        can learn which emotional themes resonate most with the audience."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                posted_expressions = await conn.fetch("""
+                    SELECT id, source_id, emotion_tag
+                    FROM skyeye_live_expressions
+                    WHERE platform = $1 AND status = 'posted'
+                    ORDER BY created_at DESC LIMIT 20
+                """, platform)
+
+                if not posted_expressions:
+                    return
+
+                post_map = {p.item_id: p for p in own_posts if hasattr(p, "item_id")}
+
+                for expr in posted_expressions:
+                    post = post_map.get(expr["source_id"])
+                    if not post:
+                        continue
+
+                    metrics = getattr(post, "raw_data", {}).get("public_metrics", {})
+                    if not metrics:
+                        continue
+
+                    likes = metrics.get("like_count", 0)
+                    comments = metrics.get("reply_count", 0)
+                    shares = metrics.get("retweet_count", 0) + metrics.get("quote_count", 0)
+                    total = likes + comments + shares
+                    engagement_rate = total / max(1, metrics.get("impression_count", 1))
+
+                    await conn.execute("""
+                        INSERT INTO expression_engagement
+                            (expression_id, platform, post_id, likes, comments,
+                             shares, engagement_rate, emotional_theme)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """, expr["id"], platform, expr["source_id"],
+                         likes, comments, shares,
+                         round(engagement_rate, 4),
+                         expr.get("emotion_tag", "unknown"))
+
+        except Exception as e:
+            logger.debug(f"Expression engagement tracking error: {e}")
 
     async def _aggregate_campaign_feedback(self, platform: str, own_posts, recent_comments):
         """Check if observed posts belong to campaigns and aggregate feedback."""
@@ -593,7 +722,7 @@ class SkyEyeSessionEngine:
 
             approved = await expr_service.get_approved_expressions(limit=3)
             unposted = [
-                e for e in approved.get("expressions", [])
+                e for e in approved
                 if not e.get("posted")
             ]
 
@@ -626,25 +755,24 @@ class SkyEyeSessionEngine:
             # Use Marketing Brain strategy for content generation
             recent_count = await self._get_recent_post_count(platform, hours=12)
             if recent_count < 2:
+                recent_texts = []
                 try:
-                    # Try strategic content generation first
+                    own = await adapter.get_own_posts(limit=3)
+                    recent_texts = [p.text[:80] for p in own]
+                except Exception:
+                    pass
+
+                try:
                     post_data = await generator.generate_strategic_post(
                         platform=platform,
-                        context={
-                            "recent_posts": [p.text[:80] for p in
-                                             (await adapter.get_own_posts(limit=3))],
-                        }
+                        context={"recent_posts": recent_texts}
                     )
                 except Exception:
-                    # Fallback to basic generation
                     post_data = await generator.generate_post(
                         platform=platform,
                         topic="Something meaningful from today — your choice. "
                               "Draw from your lived experience with real people.",
-                        context={
-                            "recent_posts": [p.text[:80] for p in
-                                             (await adapter.get_own_posts(limit=3))],
-                        }
+                        context={"recent_posts": recent_texts}
                     )
 
                 if post_data.get("safe") and post_data.get("content"):
@@ -756,12 +884,11 @@ class SkyEyeSessionEngine:
 
         try:
             async with self.db_pool.acquire() as conn:
-                # Get users with 3+ interactions who aren't yet in a funnel
                 engaged = await conn.fetch("""
                     SELECT platform_handle, interaction_count, interests, tone_notes
                     FROM skyeye_social_memory
                     WHERE platform = $1
-                      AND interaction_count >= 3
+                      AND interaction_count >= 1
                       AND (funnel_stage IS NULL OR funnel_stage = 'unqualified')
                     ORDER BY interaction_count DESC
                     LIMIT 10
@@ -846,8 +973,67 @@ class SkyEyeSessionEngine:
                     detail={"summary": "Strategy review not due yet — next review in < 7 days"}
                 )
 
+            # 3. Generate drip suggestions from engaged users
+            await self._generate_drip_suggestions(brain)
+
         except Exception as e:
             logger.warning(f"Strategize phase error: {e}")
+
+    async def _generate_drip_suggestions(self, brain):
+        """Generate drip bridge suggestions from recently engaged social users."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                engaged_users = await conn.fetch("""
+                    SELECT platform_handle, platform, interests, tone_notes,
+                           interaction_count
+                    FROM skyeye_social_memory
+                    WHERE interaction_count >= 2
+                      AND last_interaction > NOW() - INTERVAL '48 hours'
+                    ORDER BY interaction_count DESC
+                    LIMIT 5
+                """)
+
+                if not engaged_users:
+                    return
+
+                for user in engaged_users:
+                    existing = await conn.fetchval("""
+                        SELECT id FROM skyeye_drip_suggestions
+                        WHERE platform_handle = $1 AND platform = $2
+                          AND created_at > NOW() - INTERVAL '7 days'
+                    """, user["platform_handle"], user["platform"])
+
+                    if existing:
+                        continue
+
+                    interests = user["interests"] or "general wellness"
+                    suggestion = (
+                        f"@{user['platform_handle']} on {user['platform']} has engaged "
+                        f"{user['interaction_count']} times. Interests: {interests}. "
+                        f"Consider a drip sequence on their topic of interest to bridge "
+                        f"them from social engagement to the Sanctuary quiz."
+                    )
+
+                    await conn.execute("""
+                        INSERT INTO skyeye_drip_suggestions
+                            (platform, platform_handle, suggestion, interests,
+                             interaction_count, status, created_at)
+                        VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
+                    """, user["platform"], user["platform_handle"],
+                         suggestion[:2000], interests[:500],
+                         user["interaction_count"])
+
+                if engaged_users:
+                    await self._log_action(
+                        "system", SessionState.STRATEGIZING, "drip_suggestions",
+                        detail={
+                            "summary": f"Generated drip suggestions for {len(engaged_users)} engaged users",
+                            "users_evaluated": len(engaged_users),
+                        }
+                    )
+
+        except Exception as e:
+            logger.warning(f"Drip suggestion generation error: {e}")
 
     async def _rest_phase(self, generator=None):
         """End the session and log summary."""
@@ -878,7 +1064,7 @@ class SkyEyeSessionEngine:
                             status = 'completed'
                         WHERE id = $1
                     """, self._current_session_id,
-                         json.dumps(platforms_visited),
+                         platforms_visited,
                          self._action_count)
         except Exception as e:
             logger.error(f"Failed to update session record: {e}")
@@ -893,6 +1079,34 @@ class SkyEyeSessionEngine:
                 """, summary[:2000])
         except Exception as e:
             logger.error(f"Failed to log session summary: {e}")
+
+        # Write to skyeye_history for History tab
+        try:
+            if self._current_session_id and self.db_pool:
+                platforms_visited = list(set(
+                    a.get("platform", "") for a in self._session_actions
+                    if a.get("platform") != "system"
+                ))
+                per_platform = {}
+                for a in self._session_actions:
+                    p = a.get("platform", "system")
+                    if p not in per_platform:
+                        per_platform[p] = {"actions": 0, "types": []}
+                    per_platform[p]["actions"] += 1
+                    per_platform[p]["types"].append(a.get("action_type", ""))
+
+                duration = int(time.time() - self._session_start) if self._session_start else 0
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO skyeye_history
+                            (session_id, summary, platforms, actions_count,
+                             duration_seconds, breakdown, created_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                    """, self._current_session_id, summary[:2000],
+                         json.dumps(platforms_visited), self._action_count,
+                         duration, json.dumps(per_platform))
+        except Exception as e:
+            logger.error(f"Failed to write session history: {e}")
 
         duration = int(time.time() - self._session_start) if self._session_start else 0
         logger.info(
@@ -914,9 +1128,28 @@ class SkyEyeSessionEngine:
             return False
         return (time.time() - self._session_start) > self._max_duration_seconds
 
+    _ACTION_TO_ACTIVITY = {
+        "session_start": "session_start",
+        "auth_skip": "security",
+        "read_feed": "analytics_update",
+        "read_trending": "analytics_update",
+        "read_comments": "analytics_update",
+        "read_mentions": "mention_detected",
+        "reply": "engagement",
+        "create_post": "content_generated",
+        "create_expression_post": "content_generated",
+        "post": "post_published",
+        "post_failed": "post_failed",
+        "post_scheduled": "post_scheduled",
+        "route_users": "funnel_routing",
+        "growth_snapshot": "analytics_update",
+        "strategy_review": "analytics_update",
+        "strategy_check": "analytics_update",
+    }
+
     async def _log_action(self, platform: str, phase: str, action_type: str,
                           target_user: str = "", detail: Optional[Dict] = None):
-        """Log a session action to the database and in-memory list."""
+        """Log a session action to both session log and global activity feed."""
         action = {
             "platform": platform,
             "phase": phase,
@@ -938,6 +1171,13 @@ class SkyEyeSessionEngine:
                         VALUES ($1, $2, $3, $4, $5, $6, NOW())
                     """, self._current_session_id, platform, phase,
                          action_type, target_user, json.dumps(detail or {}))
+
+                    activity_type = self._ACTION_TO_ACTIVITY.get(action_type, action_type)
+                    summary = (detail or {}).get("summary", f"{action_type} on {platform}")
+                    await conn.execute("""
+                        INSERT INTO skyeye_activity (platform, type, content, created_at)
+                        VALUES ($1, $2, $3, NOW())
+                    """, platform, activity_type, summary[:2000])
         except Exception as e:
             logger.debug(f"Failed to log session action: {e}")
 

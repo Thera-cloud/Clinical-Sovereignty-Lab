@@ -34,22 +34,66 @@ class SwarmRelayClient:
     """
     Lightweight client used by the bridge process to send swarm requests
     to the FastAPI process via Redis pub/sub.
+
+    Uses synchronous redis.Redis in a thread pool executor to avoid
+    redis-py 5.x async connection pool timeouts inside the bridge's
+    websockets event loop.
     """
 
     def __init__(self, redis_url: str = None):
-        self._redis_url = redis_url or os.environ.get("REDIS_URL", "redis://redis:6379")
+        self._redis_host = os.environ.get("REDIS_HOST", "redis")
+        self._redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+        self._redis_password = os.environ.get("REDIS_PASSWORD", None)
+        if self._redis_host not in ("redis", "localhost", "127.0.0.1"):
+            self._redis_host = "redis"
         self._redis = None
 
-    async def connect(self):
-        """Establish Redis connection."""
+    async def connect(self, retries: int = 5, delay: float = 5.0):
+        """Establish Redis connection with retry. Uses sync client in thread pool."""
+        import redis as sync_redis
+        loop = asyncio.get_event_loop()
+        for attempt in range(1, retries + 1):
+            try:
+                client = sync_redis.Redis(
+                    host=self._redis_host,
+                    port=self._redis_port,
+                    password=self._redis_password,
+                    decode_responses=True,
+                    socket_connect_timeout=5,
+                    socket_timeout=10,
+                )
+                await loop.run_in_executor(None, client.ping)
+                self._redis = client
+                logger.info("[SWARM RELAY CLIENT] Connected to Redis")
+                return
+            except Exception as e:
+                logger.warning(
+                    f"[SWARM RELAY CLIENT] Redis attempt {attempt}/{retries} failed: {type(e).__name__}: {e}"
+                )
+                self._redis = None
+                if attempt < retries:
+                    await asyncio.sleep(delay)
+        logger.warning("[SWARM RELAY CLIENT] All Redis connection attempts exhausted — relay disabled")
+
+    def _sync_request(self, message: str, response_channel: str, timeout: float) -> Optional[str]:
+        """Synchronous pub/sub request-response cycle (runs in thread pool)."""
+        import time
+        pubsub = self._redis.pubsub()
         try:
-            import redis.asyncio as aioredis
-            self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
-            await self._redis.ping()
-            logger.info("[SWARM RELAY CLIENT] Connected to Redis")
-        except Exception as e:
-            logger.warning(f"[SWARM RELAY CLIENT] Redis connection failed: {e}")
-            self._redis = None
+            pubsub.subscribe(response_channel)
+            self._redis.publish(REDIS_CHANNEL_REQUEST, message)
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                raw_msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if raw_msg and raw_msg["type"] == "message":
+                    return raw_msg["data"]
+            return None
+        finally:
+            try:
+                pubsub.unsubscribe(response_channel)
+                pubsub.close()
+            except Exception:
+                pass
 
     async def request(self, action: str, payload: Dict[str, Any],
                       timeout: float = REQUEST_TIMEOUT_SECONDS) -> Optional[Dict[str, Any]]:
@@ -79,27 +123,11 @@ class SwarmRelayClient:
         })
 
         try:
-            # Subscribe to response channel BEFORE publishing request
-            pubsub = self._redis.pubsub()
-            await pubsub.subscribe(response_channel)
-
-            # Publish the request
-            await self._redis.publish(REDIS_CHANNEL_REQUEST, message)
-
-            # Wait for response with timeout
-            deadline = asyncio.get_event_loop().time() + timeout
-            async for raw_msg in pubsub.listen():
-                if raw_msg["type"] == "message":
-                    await pubsub.unsubscribe(response_channel)
-                    await pubsub.close()
-                    return json.loads(raw_msg["data"])
-                if asyncio.get_event_loop().time() > deadline:
-                    break
-
-            await pubsub.unsubscribe(response_channel)
-            await pubsub.close()
-            return None
-
+            loop = asyncio.get_event_loop()
+            raw = await loop.run_in_executor(
+                None, self._sync_request, message, response_channel, timeout
+            )
+            return json.loads(raw) if raw else None
         except Exception as e:
             logger.warning(f"[SWARM RELAY CLIENT] Request failed ({action}): {e}")
             return None
@@ -118,13 +146,19 @@ class SwarmRelayClient:
         })
 
         try:
-            await self._redis.publish(REDIS_CHANNEL_REQUEST, message)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, self._redis.publish, REDIS_CHANNEL_REQUEST, message
+            )
         except Exception as e:
             logger.warning(f"[SWARM RELAY CLIENT] Fire-and-forget failed ({action}): {e}")
 
     async def disconnect(self):
         if self._redis:
-            await self._redis.close()
+            try:
+                self._redis.close()
+            except Exception:
+                pass
             self._redis = None
 
 
@@ -141,7 +175,9 @@ class SwarmRelayServer:
 
     def __init__(self, app_state, redis_url: str = None):
         self._app_state = app_state
-        self._redis_url = redis_url or os.environ.get("REDIS_URL", "redis://redis:6379")
+        self._redis_host = os.environ.get("REDIS_HOST", "redis")
+        self._redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+        self._redis_password = os.environ.get("REDIS_PASSWORD", None)
         self._redis = None
         self._pubsub = None
         self._listener_task = None
@@ -150,7 +186,12 @@ class SwarmRelayServer:
         """Connect to Redis and start listening for swarm requests."""
         try:
             import redis.asyncio as aioredis
-            self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+            self._redis = aioredis.Redis(
+                host=self._redis_host,
+                port=self._redis_port,
+                password=self._redis_password,
+                decode_responses=True,
+            )
             await self._redis.ping()
 
             self._pubsub = self._redis.pubsub()
@@ -205,7 +246,12 @@ class SwarmRelayServer:
                 await self._redis.close()
         except Exception:
             pass
-        self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+        self._redis = aioredis.Redis(
+            host=self._redis_host,
+            port=self._redis_port,
+            password=self._redis_password,
+            decode_responses=True,
+        )
         await self._redis.ping()
         self._pubsub = self._redis.pubsub()
         await self._pubsub.subscribe(REDIS_CHANNEL_REQUEST)

@@ -1,0 +1,19 @@
+---
+description: Hive Defense lives inside SkyEye only — never as a standalone top-level tab
+alwaysApply: true
+---
+
+# Hive Defense Placement
+
+Hive Defense (Threat Dropbox, threat hunting, defense dashboard) is a **sub-tab inside SkyEye only**. It must NOT appear as a standalone top-level navigation tab in `command.html`.
+
+## Rule
+
+- Hive Defense lives inside `skyeye.html` as the "Threat Dropbox" tab
+- Do NOT add a `<div class="nav-tab" data-tab="hive">` or similar to `command.html`
+- Do NOT create a top-level navigation link to `hive_defense.html` from the main Sovereign Command nav bar
+- The standalone `hive_defense.html` page may still exist for direct-URL access but should not be surfaced in the primary UI navigation
+
+## Why
+
+SkyEye is the unified monitoring and intelligence hub. Hive Defense is a component of that hub, not a peer of it. Placing it at the top level creates confusion about whether it's a separate system or part of SkyEye.

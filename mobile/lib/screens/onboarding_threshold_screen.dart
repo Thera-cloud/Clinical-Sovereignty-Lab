@@ -75,18 +75,58 @@ class _OnboardingThresholdScreenState extends State<OnboardingThresholdScreen>
     try {
       _socket = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
       _socket!.stream.listen(
-        (_) {},
-        onError: (e) => debugPrint('[Onboarding] WS error: $e'),
-        onDone: () => _socket = null,
+        (msg) {
+          try {
+            final data = jsonDecode(msg);
+            if (data['type'] == 'connected' || data['status'] == 'ready') {
+              _socket!.sink.add(jsonEncode({
+                'type': 'login_request',
+                'username': widget.username,
+                'password': widget.password,
+              }));
+            }
+          } catch (_) {}
+        },
+        onError: (e) {
+          debugPrint('[Onboarding] WS error: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Connection error. Please go back and try again.'),
+                backgroundColor: Color(0xFFEF4444),
+              ),
+            );
+          }
+        },
+        onDone: () {
+          _socket = null;
+        },
       );
-      _socket!.sink.add(jsonEncode({
-        'type': 'login_request',
-        'username': widget.username,
-        'password': widget.password,
-      }));
     } catch (e) {
       debugPrint('[Onboarding] WS connect error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to connect. Please go back and try again.'),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+      }
     }
+  }
+
+  String _computeTrialDay() {
+    try {
+      final createdAt = widget.profileWithToken['created_at'] ?? widget.profileWithToken['trial_start'] ?? '';
+      if (createdAt.toString().isNotEmpty) {
+        final start = DateTime.tryParse(createdAt.toString());
+        if (start != null) {
+          final day = DateTime.now().difference(start).inDays + 1;
+          return 'Day ${day.clamp(1, 14)} of 14';
+        }
+      }
+    } catch (_) {}
+    return 'Day 1 of 14';
   }
 
   void _onPageChanged(int index) {
@@ -94,6 +134,18 @@ class _OnboardingThresholdScreenState extends State<OnboardingThresholdScreen>
       if (i == index) {
         _slideControllers[i].forward();
       }
+    }
+  }
+
+  Future<void> _saveOnboardingSeenHttp(String userId) async {
+    try {
+      await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/onboarding_seen'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId}),
+      );
+    } catch (e) {
+      debugPrint('[Onboarding] HTTP fallback error: $e');
     }
   }
 
@@ -344,7 +396,7 @@ class _OnboardingThresholdScreenState extends State<OnboardingThresholdScreen>
                 border: Border.all(color: _goldDim),
               ),
               child: Text(
-                'Day 1 of 14',
+                _computeTrialDay(),
                 style: TextStyle(color: _gold, fontFamily: 'DM Sans', fontSize: 14),
               ),
             ),

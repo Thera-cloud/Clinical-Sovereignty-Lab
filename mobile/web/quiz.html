@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discover Your Emotional Wellness — Sovereign Sanctuary</title>
+  <meta name="description" content="Take a free emotional wellness assessment with Little Nate. Discover your coherence patterns, growth potential, and get personalized insights.">
+  <meta property="og:title" content="Discover Your Emotional Wellness — Sovereign Sanctuary">
+  <meta property="og:description" content="A free, private emotional wellness assessment powered by Little Nate. Takes about 5 minutes.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://app.sovereignsanctuary.net/quiz">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --void: #050505;
+      --chamber: #0A0A0A;
+      --elevated: #111111;
+      --border: #1a1a1a;
+      --gold: #C9A962;
+      --gold-bright: #E8D5A3;
+      --gold-dim: #8B7355;
+      --cyan: #4ECDC4;
+      --purple: #9D4EDD;
+      --red: #EF4444;
+      --text-primary: #ffffff;
+      --text-secondary: #aaaaaa;
+      --text-tertiary: #666666;
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body: 'DM Sans', -apple-system, sans-serif;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--void);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 640px;
+      padding: 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Welcome Screen ── */
+    #welcome {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .nate-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dim) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      margin-bottom: 24px;
+      box-shadow: 0 0 30px rgba(201, 169, 98, 0.2);
+    }
+
+    .welcome-title {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--gold-bright);
+      margin-bottom: 12px;
+      line-height: 1.2;
+    }
+
+    .welcome-subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-width: 440px;
+      margin-bottom: 32px;
+    }
+
+    .welcome-features {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .feature-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .feature-chip span { font-size: 16px; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dim) 100%);
+      color: #000;
+      border: none;
+      padding: 16px 48px;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: var(--font-body);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(201, 169, 98, 0.3);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .privacy-note {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 16px;
+    }
+
+    /* ── Info Collection ── */
+    #info-form {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+
+    .form-header {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--gold-bright);
+      margin-bottom: 8px;
+    }
+
+    .form-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+
+    .field {
+      margin-bottom: 20px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--gold);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .field input {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 15px;
+      font-family: var(--font-body);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .field input:focus {
+      border-color: var(--gold);
+    }
+
+    .field input::placeholder {
+      color: var(--text-tertiary);
+    }
+
+    .field-optional {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-left: 4px;
+    }
+
+    /* ── Quiz Screen ── */
+    #quiz-screen {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      padding: 20px;
+    }
+
+    .quiz-progress {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .progress-bar {
+      flex: 1;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--gold) 0%, var(--cyan) 100%);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+
+    .progress-text {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+    }
+
+    .question-card {
+      background: var(--chamber);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 24px;
+      margin-bottom: 24px;
+      animation: fadeIn 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .question-number {
+      font-size: 11px;
+      color: var(--gold-dim);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+
+    .question-text {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.4;
+      margin-bottom: 28px;
+    }
+
+    /* Scale input */
+    .scale-container {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .scale-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+
+    .scale-options {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .scale-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--elevated);
+      color: var(--text-secondary);
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: var(--font-body);
+    }
+
+    .scale-btn:hover {
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    .scale-btn.selected {
+      background: var(--gold);
+      border-color: var(--gold);
+      color: #000;
+      font-weight: 600;
+    }
+
+    /* Multiple choice */
+    .choice-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .choice-btn {
+      padding: 14px 18px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: var(--font-body);
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s;
+    }
+
+    .choice-btn:hover {
+      border-color: var(--gold-dim);
+    }
+
+    .choice-btn.selected {
+      border-color: var(--gold);
+      background: rgba(201, 169, 98, 0.1);
+    }
+
+    /* Open text */
+    .open-textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 14px 16px;
+      background: var(--elevated);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: var(--font-body);
+      outline: none;
+      resize: vertical;
+    }
+
+    .open-textarea:focus { border-color: var(--gold); }
+
+    /* Navigation */
+    .quiz-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .btn-back {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      padding: 12px 24px;
+      font-size: 14px;
+      font-family: var(--font-body);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-back:hover { border-color: var(--text-tertiary); }
+
+    .btn-next {
+      background: var(--gold);
+      color: #000;
+      border: none;
+      padding: 12px 32px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: var(--font-body);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-left: auto;
+    }
+
+    .btn-next:hover { box-shadow: 0 4px 12px rgba(201, 169, 98, 0.3); }
+    .btn-next:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Results Screen ── */
+    #results-screen {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .results-icon {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+
+    .results-title {
+      font-family: var(--font-display);
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--gold-bright);
+      margin-bottom: 12px;
+    }
+
+    .results-body {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      max-width: 440px;
+      margin-bottom: 32px;
+    }
+
+    .insight-card {
+      background: var(--chamber);
+      border: 1px solid var(--gold-dim);
+      border-radius: 12px;
+      padding: 24px;
+      text-align: left;
+      width: 100%;
+      max-width: 440px;
+      margin-bottom: 32px;
+    }
+
+    .insight-label {
+      font-size: 11px;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+
+    .insight-text {
+      font-size: 14px;
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .cta-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn-cta {
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold-dim) 100%);
+      color: #000;
+      border: none;
+      padding: 16px 40px;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: var(--font-body);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .btn-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(201, 169, 98, 0.3);
+    }
+
+    .btn-secondary-link {
+      color: var(--text-tertiary);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .btn-secondary-link:hover { color: var(--text-secondary); }
+
+    /* ── Loading & Error ── */
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      color: var(--red);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .welcome-title { font-size: 26px; }
+      .question-text { font-size: 19px; }
+      .scale-btn { width: 38px; height: 38px; font-size: 13px; }
+      .welcome-features { gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- WELCOME -->
+  <div id="welcome">
+    <div class="nate-avatar">N</div>
+    <h1 class="welcome-title">Discover Your Emotional Wellness</h1>
+    <p class="welcome-subtitle">
+      Hi, I'm Little Nate. I'd love to learn a bit about how you're doing.
+      This quick assessment helps me understand your emotional patterns so I can
+      offer something genuinely useful.
+    </p>
+    <div class="welcome-features">
+      <div class="feature-chip"><span>🕐</span> 5 minutes</div>
+      <div class="feature-chip"><span>🔒</span> Private & secure</div>
+      <div class="feature-chip"><span>✨</span> Free insight</div>
+    </div>
+    <button class="btn-primary" onclick="showInfoForm()">Begin Assessment</button>
+    <p class="privacy-note">Your responses are confidential and never shared.</p>
+  </div>
+
+  <!-- INFO FORM -->
+  <div id="info-form">
+    <h2 class="form-header">Before we start</h2>
+    <p class="form-desc">Just a couple details so I can personalize your experience and send you your results.</p>
+
+    <div class="field">
+      <label>First Name</label>
+      <input type="text" id="first-name" placeholder="What should I call you?">
+    </div>
+
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="Where should I send your insight?">
+    </div>
+
+    <div class="field">
+      <label>Phone <span class="field-optional">(optional)</span></label>
+      <input type="tel" id="phone" placeholder="For text updates">
+    </div>
+
+    <div id="info-error" class="error-msg" style="display:none"></div>
+
+    <div style="margin-top:24px">
+      <button class="btn-primary" onclick="submitInfo()" id="info-submit-btn">Continue to Quiz</button>
+    </div>
+  </div>
+
+  <!-- QUIZ -->
+  <div id="quiz-screen">
+    <div class="quiz-progress">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-text" id="progress-text">1 / ?</div>
+    </div>
+
+    <div id="question-area"></div>
+
+    <div class="quiz-nav">
+      <button class="btn-back" id="btn-back" onclick="prevQuestion()" style="visibility:hidden">Back</button>
+      <button class="btn-next" id="btn-next" onclick="nextQuestion()" disabled>Next</button>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results-screen">
+    <div class="results-icon">✨</div>
+    <h2 class="results-title">Thank you</h2>
+    <p class="results-body" id="results-body">
+      Your responses are in. Little Nate is preparing a personalized insight just for you.
+      Check your email for your results.
+    </p>
+
+    <div class="insight-card" id="insight-card" style="display:none">
+      <div class="insight-label">Little Nate's Insight</div>
+      <div class="insight-text" id="insight-text"></div>
+    </div>
+
+    <div class="cta-section">
+      <a class="btn-cta" href="https://app.sovereignsanctuary.net">Meet Little Nate</a>
+      <a class="btn-secondary-link" href="https://sovereignsanctuary.net">Learn more about Sovereign Sanctuary</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+
+let quizzes = [];
+let currentQuiz = null;
+let questions = [];
+let currentQ = 0;
+let answers = {};
+let prospectToken = '';
+let startedAt = null;
+
+function show(id) {
+  ['welcome', 'info-form', 'quiz-screen', 'results-screen'].forEach(s => {
+    document.getElementById(s).style.display = 'none';
+  });
+  document.getElementById(id).style.display = 'flex';
+}
+
+function showInfoForm() {
+  show('info-form');
+  document.getElementById('first-name').focus();
+}
+
+async function submitInfo() {
+  const firstName = document.getElementById('first-name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const phone = document.getElementById('phone').value.trim();
+  const errorEl = document.getElementById('info-error');
+
+  if (!firstName) { errorEl.textContent = 'Please enter your name.'; errorEl.style.display = ''; return; }
+  if (!email || !email.includes('@')) { errorEl.textContent = 'Please enter a valid email.'; errorEl.style.display = ''; return; }
+  errorEl.style.display = 'none';
+
+  const btn = document.getElementById('info-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Setting up...';
+
+  try {
+    const subResp = await fetch(`${API_BASE}/api/prospects/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email, first_name: firstName, phone: phone || null, source: 'quiz_landing'
+      })
+    });
+    const subData = await subResp.json();
+    if (!subResp.ok) throw new Error(subData.detail || 'Subscription failed');
+
+    prospectToken = email;
+
+    const qResp = await fetch(`${API_BASE}/api/quizzes`);
+    quizzes = await qResp.json();
+
+    if (!quizzes.length) {
+      errorEl.textContent = 'No quizzes available right now. Please try again later.';
+      errorEl.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Continue to Quiz';
+      return;
+    }
+
+    currentQuiz = quizzes[0];
+    const detailResp = await fetch(`${API_BASE}/api/quizzes/${currentQuiz.id}`);
+    const quizDetail = await detailResp.json();
+    questions = quizDetail.questions || [];
+
+    if (!questions.length) {
+      errorEl.textContent = 'This quiz has no questions yet. Please try again later.';
+      errorEl.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Continue to Quiz';
+      return;
+    }
+
+    startedAt = new Date().toISOString();
+    currentQ = 0;
+    answers = {};
+    show('quiz-screen');
+    renderQuestion();
+
+  } catch (e) {
+    errorEl.textContent = e.message || 'Something went wrong. Please try again.';
+    errorEl.style.display = '';
+    btn.disabled = false;
+    btn.textContent = 'Continue to Quiz';
+  }
+}
+
+function renderQuestion() {
+  const q = questions[currentQ];
+  const total = questions.length;
+  const pct = ((currentQ + 1) / total) * 100;
+
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = `${currentQ + 1} / ${total}`;
+  document.getElementById('btn-back').style.visibility = currentQ > 0 ? 'visible' : 'hidden';
+
+  const isLast = currentQ === total - 1;
+  document.getElementById('btn-next').textContent = isLast ? 'Submit' : 'Next';
+
+  const existing = answers[q.id];
+  document.getElementById('btn-next').disabled = existing === undefined;
+
+  let html = `
+    <div class="question-card">
+      <div class="question-number">Question ${currentQ + 1}</div>
+      <div class="question-text">${escHtml(q.question_text)}</div>
+  `;
+
+  const type = q.question_type || 'scale';
+
+  if (type === 'scale') {
+    const min = q.scale_min || 1;
+    const max = q.scale_max || 10;
+    const minLabel = q.scale_min_label || 'Not at all';
+    const maxLabel = q.scale_max_label || 'Very much';
+
+    html += `<div class="scale-container">
+      <div class="scale-labels"><span>${escHtml(minLabel)}</span><span>${escHtml(maxLabel)}</span></div>
+      <div class="scale-options">`;
+    for (let i = min; i <= max; i++) {
+      const sel = existing === i ? 'selected' : '';
+      html += `<button class="scale-btn ${sel}" onclick="selectScale('${q.id}', ${i}, this)">${i}</button>`;
+    }
+    html += `</div></div>`;
+
+  } else if (type === 'multiple_choice') {
+    const opts = (typeof q.options === 'string' ? JSON.parse(q.options) : q.options) || [];
+    html += `<div class="choice-options">`;
+    for (const opt of opts) {
+      const label = typeof opt === 'string' ? opt : opt.label || opt.text || JSON.stringify(opt);
+      const val = typeof opt === 'string' ? opt : opt.value || opt.label || opt;
+      const sel = existing === val ? 'selected' : '';
+      html += `<button class="choice-btn ${sel}" onclick="selectChoice('${q.id}', '${escAttr(String(val))}', this)">${escHtml(label)}</button>`;
+    }
+    html += `</div>`;
+
+  } else if (type === 'multi_select') {
+    const opts = (typeof q.options === 'string' ? JSON.parse(q.options) : q.options) || [];
+    const selected = Array.isArray(existing) ? existing : [];
+    html += `<div class="choice-options">`;
+    for (const opt of opts) {
+      const label = typeof opt === 'string' ? opt : opt.label || opt.text || JSON.stringify(opt);
+      const val = typeof opt === 'string' ? opt : opt.value || opt.label || opt;
+      const sel = selected.includes(val) ? 'selected' : '';
+      html += `<button class="choice-btn ${sel}" onclick="toggleMulti('${q.id}', '${escAttr(String(val))}', this)">${escHtml(label)}</button>`;
+    }
+    html += `</div>`;
+
+  } else if (type === 'open_text') {
+    html += `<textarea class="open-textarea" id="open-input" placeholder="Share your thoughts..." oninput="onTextInput('${q.id}')">${existing || ''}</textarea>`;
+
+  } else if (type === 'ranking') {
+    const opts = (typeof q.options === 'string' ? JSON.parse(q.options) : q.options) || [];
+    html += `<div class="choice-options">`;
+    for (const opt of opts) {
+      const label = typeof opt === 'string' ? opt : opt.label || opt;
+      const val = typeof opt === 'string' ? opt : opt.value || opt;
+      const sel = existing === val ? 'selected' : '';
+      html += `<button class="choice-btn ${sel}" onclick="selectChoice('${q.id}', '${escAttr(String(val))}', this)">${escHtml(label)}</button>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  document.getElementById('question-area').innerHTML = html;
+}
+
+function selectScale(qid, val, el) {
+  answers[qid] = val;
+  el.parentNode.querySelectorAll('.scale-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('btn-next').disabled = false;
+}
+
+function selectChoice(qid, val, el) {
+  answers[qid] = val;
+  el.parentNode.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('btn-next').disabled = false;
+}
+
+function toggleMulti(qid, val, el) {
+  if (!Array.isArray(answers[qid])) answers[qid] = [];
+  const idx = answers[qid].indexOf(val);
+  if (idx >= 0) { answers[qid].splice(idx, 1); el.classList.remove('selected'); }
+  else { answers[qid].push(val); el.classList.add('selected'); }
+  document.getElementById('btn-next').disabled = answers[qid].length === 0;
+}
+
+function onTextInput(qid) {
+  const val = document.getElementById('open-input').value.trim();
+  answers[qid] = val;
+  document.getElementById('btn-next').disabled = !val;
+}
+
+function nextQuestion() {
+  if (currentQ < questions.length - 1) {
+    currentQ++;
+    renderQuestion();
+  } else {
+    submitQuiz();
+  }
+}
+
+function prevQuestion() {
+  if (currentQ > 0) {
+    currentQ--;
+    renderQuestion();
+  }
+}
+
+async function submitQuiz() {
+  const btn = document.getElementById('btn-next');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  const duration = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+  const responses = questions.map(q => ({
+    question_id: q.id,
+    answer: answers[q.id],
+    type: q.question_type
+  }));
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: prospectToken,
+        quiz_id: currentQuiz.id,
+        responses,
+        started_at: startedAt,
+        duration_seconds: duration
+      })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Submission failed');
+
+    show('results-screen');
+
+    if (data.message) {
+      document.getElementById('results-body').textContent = data.message;
+    }
+
+    if (quizzes.length > 1 && !currentQuiz.is_final) {
+      const nextIdx = quizzes.findIndex(q => q.id === currentQuiz.id) + 1;
+      if (nextIdx < quizzes.length) {
+        document.getElementById('results-body').textContent +=
+          '\n\nThere\'s another part to this assessment — check your email when you\'re ready for the next step.';
+      }
+    }
+
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Submit';
+    alert(e.message || 'Something went wrong. Please try again.');
+  }
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function escAttr(s) {
+  return (s || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+</script>
+
+</body>
+</html>

@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -47,6 +48,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
   List<dynamic> _clients = [];
   List<dynamic> _schedule = [];
   List<dynamic> _sessions = [];
+  List<dynamic> _sessionHistory = [];
   bool _isLoading = true;
   String _statusMessage = "Initializing...";
 
@@ -63,6 +65,8 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
     _connectToBridge();
   }
 
+  int _reconnectAttempts = 0;
+
   void _connectToBridge() {
     setState(() => _statusMessage = "Connecting to HQ...");
     try {
@@ -70,10 +74,18 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
       _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
-          if (mounted) setState(() => _statusMessage = "Connection Failed");
+          debugPrint('[CoachPortal] WebSocket error: $e');
+          if (mounted) {
+            setState(() => _statusMessage = "Connection Failed. Reconnecting...");
+            _scheduleReconnect();
+          }
         },
         onDone: () {
-          if (mounted) setState(() => _statusMessage = "Disconnected");
+          debugPrint('[CoachPortal] WebSocket closed');
+          if (mounted) {
+            setState(() => _statusMessage = "Disconnected. Reconnecting...");
+            _scheduleReconnect();
+          }
         },
       );
 
@@ -83,9 +95,24 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
         "password": widget.password,
         "expected_role": "COACH",
       }));
+      _reconnectAttempts = 0;
     } catch (e) {
-      print("Fatal Connection Error: $e");
+      debugPrint('[CoachPortal] Connection error: $e');
+      if (mounted) setState(() => _statusMessage = "Connection Error");
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= 5) {
+      if (mounted) setState(() => _statusMessage = "Unable to reach server.");
+      return;
+    }
+    _reconnectAttempts++;
+    final delay = Duration(milliseconds: 500 * (1 << (_reconnectAttempts - 1)).clamp(1, 16));
+    Future.delayed(delay, () {
+      if (mounted) _connectToBridge();
+    });
   }
 
   void _handleSocketMessage(dynamic message) {
@@ -113,6 +140,11 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
         case 'coach_calendar_data':
           if (mounted) {
             setState(() => _schedule = data['data']['schedule'] ?? []);
+          }
+          break;
+        case 'session_history_data':
+          if (mounted) {
+            setState(() => _sessionHistory = data['data']?['sessions'] ?? data['sessions'] ?? []);
           }
           break;
         case 'error':
@@ -311,7 +343,10 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
             ),
           );
         },
-        onViewHistory: () => Navigator.pop(ctx),
+        onViewHistory: () {
+          Navigator.pop(ctx);
+          _showClientHistory(client);
+        },
       ),
     );
   }
@@ -329,7 +364,10 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
           Navigator.pop(ctx);
           _showCancelDialog(session);
         },
-        onReschedule: () => Navigator.pop(ctx),
+        onReschedule: () {
+          Navigator.pop(ctx);
+          _showRescheduleDialog(session);
+        },
       ),
     );
   }
@@ -346,10 +384,26 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
     );
   }
 
-  void _joinSession(Map<String, dynamic> session) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Launching ${session['platform'] ?? 'Zoom'}...")),
-    );
+  void _joinSession(Map<String, dynamic> session) async {
+    final zoomUrl = session['zoom_url'] ?? session['meeting_url'] ?? session['join_url'];
+    if (zoomUrl != null && zoomUrl.toString().isNotEmpty) {
+      final uri = Uri.parse(zoomUrl.toString());
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Could not open: $zoomUrl")),
+          );
+        }
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No meeting URL available for this session.")),
+        );
+      }
+    }
   }
 
   void _showCancelDialog(Map<String, dynamic> session) {
@@ -369,6 +423,128 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
             const SnackBar(content: Text("Session cancelled. Client notified.")),
           );
         },
+      ),
+    );
+  }
+
+  void _showClientHistory(Map<String, dynamic> client) {
+    _sendMessage({
+      "type": "get_session_history",
+      "client_id": client['id']?.toString() ?? '',
+    });
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text(
+          "Session History — ${client['name'] ?? 'Client'}",
+          style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 300,
+          child: (_sessionHistory.isEmpty)
+            ? const Center(child: Text('No session history yet.', style: TextStyle(color: Colors.grey)))
+            : ListView.builder(
+                itemCount: _sessionHistory.length,
+                itemBuilder: (_, i) {
+                  final s = _sessionHistory[i];
+                  return ListTile(
+                    leading: Icon(
+                      s['status'] == 'completed' ? Icons.check_circle : Icons.pending,
+                      color: s['status'] == 'completed' ? Colors.green : Colors.orange,
+                      size: 20,
+                    ),
+                    title: Text(
+                      s['date']?.toString() ?? s['scheduled_at']?.toString() ?? 'Unknown date',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    subtitle: Text(
+                      '${s['duration_minutes'] ?? '?'} min — ${s['status'] ?? 'unknown'}',
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    ),
+                  );
+                },
+              ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Color(0xFFC9A962))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRescheduleDialog(Map<String, dynamic> session) {
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+    TimeOfDay selectedTime = const TimeOfDay(hour: 10, minute: 0);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('Reschedule Session', style: TextStyle(color: Color(0xFFC9A962))),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.calendar_today, color: Color(0xFFC9A962)),
+                title: Text(
+                  '${selectedDate.month}/${selectedDate.day}/${selectedDate.year}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: selectedDate,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 90)),
+                  );
+                  if (picked != null) setDialogState(() => selectedDate = picked);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.access_time, color: Color(0xFFC9A962)),
+                title: Text(
+                  selectedTime.format(ctx),
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () async {
+                  final picked = await showTimePicker(context: ctx, initialTime: selectedTime);
+                  if (picked != null) setDialogState(() => selectedTime = picked);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+              onPressed: () {
+                final dt = DateTime(
+                  selectedDate.year, selectedDate.month, selectedDate.day,
+                  selectedTime.hour, selectedTime.minute,
+                );
+                _sendMessage({
+                  "type": "reschedule_session",
+                  "session_id": session['id'],
+                  "new_datetime": dt.toIso8601String(),
+                });
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Session rescheduled. Client notified.")),
+                );
+              },
+              child: const Text('Reschedule', style: TextStyle(color: Colors.black)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -529,17 +705,32 @@ class ClientsTab extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 12),
-              Row(
+              Builder(builder: (ctx) => Row(
                 children: [
-                  _buildActionButton(Icons.videocam, "Join Session", Colors.green),
+                  _buildActionButton(Icons.videocam, "Join Session", Colors.green, () {
+                    final link = client['zoom_link'] ?? client['meeting_url'] ?? '';
+                    if (link.toString().isNotEmpty) {
+                      launchUrl(Uri.parse(link.toString()));
+                    } else {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('No session link available')),
+                      );
+                    }
+                  }),
                   const SizedBox(width: 8),
-                  _buildActionButton(Icons.chat, "Ask Nate", Colors.cyan),
+                  _buildActionButton(Icons.chat, "Ask Nate", Colors.cyan, () {
+                    onClientTap(client);
+                  }),
                   const SizedBox(width: 8),
-                  _buildActionButton(Icons.description, "Pre-Brief", const Color(0xFFFFD700)),
+                  _buildActionButton(Icons.description, "Pre-Brief", const Color(0xFFC9A962), () {
+                    onClientTap(client);
+                  }),
                   const SizedBox(width: 8),
-                  _buildActionButton(Icons.history, "History", Colors.grey),
+                  _buildActionButton(Icons.history, "History", Colors.grey, () {
+                    onClientTap(client);
+                  }),
                 ],
-              ),
+              )),
             ],
           ),
         ),
@@ -547,21 +738,24 @@ class ClientsTab extends StatelessWidget {
     );
   }
 
-  Widget _buildActionButton(IconData icon, String label, Color color) {
+  Widget _buildActionButton(IconData icon, String label, Color color, VoidCallback onTap) {
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          border: Border.all(color: color.withOpacity(0.3)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: color, fontSize: 9), textAlign: TextAlign.center),
-          ],
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            border: Border.all(color: color.withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 16),
+              const SizedBox(height: 4),
+              Text(label, style: TextStyle(color: color, fontSize: 9), textAlign: TextAlign.center),
+            ],
+          ),
         ),
       ),
     );
@@ -1061,13 +1255,45 @@ class _AskNateTabState extends State<AskNateTab> {
 
   final List<String> _quickQuestions = ["Recent breakthroughs?", "Family dynamics", "Emotional patterns", "Session themes", "Risk indicators"];
 
+  WebSocketChannel? _ownSocket;
+  StreamSubscription? _socketSub;
+
   @override
   void initState() {
     super.initState();
-    widget.socket?.stream.listen(_handleResponse);
+    _connectOwnSocket();
     _initSpeechToText();
     _initTts();
     _inputController.addListener(_onDraftChanged);
+  }
+
+  void _connectOwnSocket() {
+    try {
+      _ownSocket = WebSocketChannel.connect(Uri.parse(AppConfig.serverUrl));
+      _socketSub = _ownSocket!.stream.listen(
+        _handleResponse,
+        onError: (e) {
+          debugPrint('[AskNate] WebSocket error: $e');
+          if (mounted) {
+            setState(() {
+              _isTyping = false;
+              _messages.add({'role': 'system', 'content': 'Connection lost. Reconnecting...'});
+            });
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted) _connectOwnSocket();
+            });
+          }
+        },
+        onDone: () {
+          debugPrint('[AskNate] WebSocket closed');
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) _connectOwnSocket();
+          });
+        },
+      );
+    } catch (e) {
+      debugPrint('[AskNate] Connection failed: $e');
+    }
   }
 
   void _onDraftChanged() {
@@ -1099,7 +1325,7 @@ class _AskNateTabState extends State<AskNateTab> {
       _messages.add({'role': 'user', 'content': query});
       _isTyping = true;
     });
-    widget.socket?.sink.add(jsonEncode({
+    _ownSocket?.sink.add(jsonEncode({
       "type": "coach_nate_query",
       "nate_query": query,
       "client_context": _selectedClient,
@@ -2465,6 +2691,8 @@ class _AskNateTabState extends State<AskNateTab> {
 
   @override
   void dispose() {
+    _socketSub?.cancel();
+    _ownSocket?.sink.close();
     _tts.stop();
     _speech.stop();
     _inputController.dispose();
@@ -2720,6 +2948,8 @@ class PreSessionBriefScreen extends StatefulWidget {
 class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
   Map<String, dynamic>? _briefData;
   bool _isLoading = true;
+  String? _error;
+  StreamSubscription? _briefSub;
 
   @override
   void initState() {
@@ -2728,34 +2958,38 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
   }
 
   void _fetchBrief() {
-    widget.socket?.sink.add(jsonEncode({"type": "fetch_presession_brief", "client_id": widget.client['id']}));
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _briefData = {
-            'client_name': widget.client['name'] ?? 'Unknown',
-            'tier': widget.client['tier'] ?? 'STANDARD',
-            'sessions_total': 24,
-            'client_since': 'Oct 2025',
-            'recent_mood': 'Moderately anxious, seeking validation',
-            'mood_date': 'Jan 19',
-            'topics': [
-              {'text': 'Follow up on workplace boundary exercise', 'type': 'normal'},
-              {'text': 'Sleep disturbances mentioned 3x - needs attention', 'type': 'caution'},
-              {'text': 'Celebrate progress on self-advocacy (up 40%)', 'type': 'positive'},
-            ],
-            'breakthroughs': ['Connected work stress to childhood perfectionism (Jan 18)', 'Successfully set boundary with mother about visit frequency'],
-            'family': [
-              {'name': 'Robert Thompson', 'relation': 'Father', 'note': 'Also your client - tension re: career'},
-              {'name': 'Linda Thompson', 'relation': 'Mother', 'note': 'Source of boundary challenges'},
-            ],
-            'nate_suggestion': 'Based on recent sessions, I recommend opening with a check-in about sleep. She mentioned "racing thoughts at night" twice this week.',
-            'next_session': 'Today at 2:30 PM',
-          };
-          _isLoading = false;
-        });
+    if (widget.socket == null) {
+      setState(() { _isLoading = false; _error = 'No connection'; });
+      return;
+    }
+
+    _briefSub = widget.socket!.stream.listen((msg) {
+      try {
+        final data = jsonDecode(msg);
+        if (data['type'] == 'presession_brief') {
+          if (mounted) setState(() { _briefData = data['brief'] ?? data; _isLoading = false; });
+          _briefSub?.cancel();
+        } else if (data['type'] == 'error' && (data['context'] ?? '').toString().contains('brief')) {
+          if (mounted) setState(() { _error = data['message'] ?? 'Failed to load brief'; _isLoading = false; });
+        }
+      } catch (_) {}
+    }, onError: (_) {
+      if (mounted) setState(() { _error = 'Connection error'; _isLoading = false; });
+    });
+
+    widget.socket!.sink.add(jsonEncode({"type": "fetch_presession_brief", "client_id": widget.client['id']}));
+
+    Future.delayed(const Duration(seconds: 8), () {
+      if (mounted && _isLoading) {
+        setState(() { _isLoading = false; _error = 'Request timed out'; });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _briefSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -2775,7 +3009,19 @@ class _PreSessionBriefScreenState extends State<PreSessionBriefScreen> {
   }
 
   Widget _buildContent() {
-    if (_briefData == null) return const Center(child: Text("Failed to load brief", style: TextStyle(color: Colors.grey)));
+    if (_error != null || _briefData == null) {
+      return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text(_error ?? "Failed to load brief", style: const TextStyle(color: Colors.grey, fontSize: 14)),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () { setState(() { _isLoading = true; _error = null; }); _fetchBrief(); },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+            child: const Text('Retry', style: TextStyle(color: Colors.black)),
+          ),
+        ]),
+      );
+    }
     return SingleChildScrollView(
       child: Column(children: [
         _buildSessionAlert(),
@@ -2949,31 +3195,54 @@ class CoachingAdviceScreen extends StatefulWidget {
 class _CoachingAdviceScreenState extends State<CoachingAdviceScreen> {
   Map<String, dynamic>? _adviceData;
   bool _isLoading = true;
+  String? _error;
+  StreamSubscription? _adviceSub;
 
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _adviceData = {
-            'client_name': widget.session['client'] ?? 'Unknown',
-            'session_date': widget.session['date'] ?? 'Unknown',
-            'duration': widget.session['duration'] ?? '52',
-            'key_observation': 'Client displayed significant emotional breakthrough at the 23-minute mark when discussing workplace boundaries. Voice pattern showed decreased stress markers after this disclosure.',
-            'recommendation': 'Continue exploring the connection between family dynamics and workplace relationships. Client appears ready for deeper work in this area.',
-            'biometrics': {'engagement': 85, 'emotional_range': 72, 'stress_level': 45, 'openness': 78},
-            'notable_moments': [
-              {'time': '08:42', 'desc': 'Elevated heart rate detected. Client began discussing manager. Consider revisiting this topic.'},
-              {'time': '23:15', 'desc': 'Major breakthrough moment. Voice tremor followed by relief pattern. Excellent facilitation here.'},
-              {'time': '41:30', 'desc': 'Client showed signs of fatigue. Good timing on session wrap-up.'},
-            ],
-            'next_session_suggestions': ['Follow up on boundary-setting exercises assigned', 'Explore deeper connection to childhood family dynamics', 'Check in on sleep quality (mentioned briefly at 35:20)', 'Consider introducing mindfulness technique for work stress'],
-          };
-          _isLoading = false;
-        });
+    _fetchAdvice();
+  }
+
+  void _fetchAdvice() {
+    if (widget.socket == null) {
+      setState(() { _isLoading = false; _error = 'No connection'; });
+      return;
+    }
+
+    _adviceSub = widget.socket!.stream.listen((msg) {
+      try {
+        final data = jsonDecode(msg);
+        if (data['type'] == 'coaching_advice' || data['type'] == 'session_advice') {
+          if (mounted) setState(() { _adviceData = data['advice'] ?? data; _isLoading = false; });
+          _adviceSub?.cancel();
+        } else if (data['type'] == 'error' && (data['context'] ?? '').toString().contains('advice')) {
+          if (mounted) setState(() { _error = data['message'] ?? 'Failed to load advice'; _isLoading = false; });
+        }
+      } catch (_) {}
+    }, onError: (_) {
+      if (mounted) setState(() { _error = 'Connection error'; _isLoading = false; });
+    });
+
+    final sessionId = widget.session['id'] ?? widget.session['session_id'] ?? '';
+    final clientId = widget.session['client_id'] ?? widget.session['client_hardware_id'] ?? '';
+    widget.socket!.sink.add(jsonEncode({
+      "type": "fetch_coaching_advice",
+      "session_id": sessionId,
+      "client_id": clientId,
+    }));
+
+    Future.delayed(const Duration(seconds: 10), () {
+      if (mounted && _isLoading) {
+        setState(() { _isLoading = false; _error = 'Request timed out'; });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _adviceSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -2998,7 +3267,19 @@ class _CoachingAdviceScreenState extends State<CoachingAdviceScreen> {
   }
 
   Widget _buildContent() {
-    if (_adviceData == null) return const Center(child: Text("Failed to load advice", style: TextStyle(color: Colors.grey)));
+    if (_error != null || _adviceData == null) {
+      return Center(
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text(_error ?? "Failed to load advice", style: const TextStyle(color: Colors.grey, fontSize: 14)),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () { setState(() { _isLoading = true; _error = null; }); _fetchAdvice(); },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF9D4EDD)),
+            child: const Text('Retry', style: TextStyle(color: Colors.white)),
+          ),
+        ]),
+      );
+    }
     return SingleChildScrollView(child: Column(children: [
       _buildSessionContext(),
       Padding(padding: const EdgeInsets.all(16), child: Column(children: [

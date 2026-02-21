@@ -1,0 +1,76 @@
+---
+description: Safety rules for agents that touch therapeutic/clinical data — PII protection, HIPAA compliance, data boundaries
+globs: backend/app/workers/coherence_worker.py, backend/app/workers/pattern_worker.py, backend/app/workers/growth_engine_worker.py, backend/app/workers/foresight_worker.py, backend/app/workers/recursive_learning_worker.py, backend/app/workers/night_school_worker.py, backend/app/services/therapeutic_integrity.py, backend/app/services/nevedal_engine.py, backend/app/services/deadman_switch.py
+alwaysApply: false
+---
+
+# Clinical Agent Safety Rules
+
+## Clinical Agents
+
+| Agent | Purpose | Data Touched |
+|-------|---------|-------------|
+| CoherenceWorker | Computes C_emo and coherence metrics | Session transcripts, voice biometrics |
+| PatternWorker | Detects transgenerational patterns | Session history, family data |
+| GrowthEngineWorker | Tracks client growth trajectory | Metrics, session outcomes |
+| ForesightWorker | Predictive pattern alerts | Aggregated metrics, session trends |
+| RecursiveLearningWorker | AI self-improvement from sessions | Anonymized session data |
+| NightSchoolWorker | Wisdom absorption and curriculum | Teaching materials, anonymized cases |
+| TherapeuticIntegrityMonitor | Audits AI therapeutic responses | Conversation logs |
+| DeadmanSwitch | Client silence monitoring | Last-seen timestamps |
+
+## PII Rules
+
+- **Never log PII** — no names, emails, phone numbers, SSNs, addresses in agent log output
+- Use `user_id` (UUID) in logs, never `username` or `name`
+- The `PIIDetector` in `night_school_director.py` must run on any data before it enters Night School or Recursive Learning
+- Session transcripts processed by agents must be anonymized before storage in teaching tables
+
+## Data Boundaries
+
+Clinical agents **must not**:
+
+- Modify session records directly — they compute metrics and write to metric tables
+- Delete any clinical data — only the HEPA Filter (with cooling period) handles deletions
+- Share raw session data between clients — ever
+- Write clinical data to `skyeye_activity`, `audit_log`, or any non-clinical table
+- Expose coherence scores in admin-facing dashboards without aggregation (individual scores are clinical data)
+
+Clinical agents **must**:
+
+- Write to their own metric tables (`coherence_metrics`, `growth_metrics`, `pattern_detections`)
+- Respect anonymization thresholds from the coherence engine (Layer 5)
+- Use HIPAA-compliant audit trail for any data access
+
+## HIPAA Compliance
+
+All `audit_log` entries from clinical agents must include:
+
+```python
+compliance_flags = ['HIPAA']
+```
+
+The Nevedal Formula (`C_emo(t)`) and voice biometrics are classified as Protected Health Information (PHI). Any agent that computes or stores these values must:
+
+- Use encrypted connections to the database (enforced by Docker network)
+- Never cache PHI in Redis without encryption
+- Never include PHI in notification messages (SMS, email, push)
+
+## Deadman Switch Special Rules
+
+The Deadman Switch monitors client silence and alerts coaches:
+
+- Trigger threshold: configurable per client (default 4 hours of silence)
+- Notification goes to the **assigned coach**, not the admin
+- Never disclose why the alert was triggered in the notification body — just "check in on [client]"
+- False positives (client on vacation, different timezone) are acceptable — err on the side of safety
+- This agent is HIPAA-critical: silence patterns are clinical data
+
+## Nevedal Formula Protection
+
+The Nevedal Formula is a patented algorithm (Patent Claim #8). Agents that compute it:
+
+- Must use the canonical implementation in `nevedal_engine.py`
+- Must not approximate, simplify, or modify the formula
+- Must not expose intermediate computation values in logs
+- Voice biometric extraction parameters are fixed — do not retune without clinical review

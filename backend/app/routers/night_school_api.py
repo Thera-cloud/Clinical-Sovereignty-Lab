@@ -29,12 +29,12 @@ from app.services.night_school_director import (
 # ROUTER
 # =============================================================================
 
-from app.services.api_server import require_admin
+from app.services.api_server import require_coach
 
 router = APIRouter(
     prefix="/api/night-school",
     tags=["Night School"],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_coach)],
 )
 
 # Global director instance (initialize in main app)

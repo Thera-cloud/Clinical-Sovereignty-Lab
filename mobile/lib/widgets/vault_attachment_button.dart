@@ -177,13 +177,12 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
 
       final userId = (widget.profile?['hardware_id'] ?? widget.profile?['id'] ?? '').toString();
       final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
-      final uri = Uri.parse('$baseUrl/api/v1/upload').replace(
-        queryParameters: {'user_id': userId},
-      );
+      final uri = Uri.parse('$baseUrl/api/v1/upload');
 
+      final fileName = file.name.isNotEmpty ? file.name : 'file';
       setState(() {
         _progressState = UploadProgressState.uploading(
-          filename: file.name,
+          filename: fileName,
           progress: 0,
         );
       });
@@ -191,26 +190,37 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
 
       Uint8List data = bytes ?? Uint8List(0);
       if (data.isEmpty && file.path != null && !kIsWeb) {
-        data = await File(file.path!).readAsBytes();
+        data = Uint8List.fromList(await File(file.path!).readAsBytes());
       }
-      if (data.isEmpty) return;
+      if (data.isEmpty) {
+        setState(() => _progressState = UploadProgressState.error(fileName, 'File is empty'));
+        widget.onUploadProgress?.call(_progressState);
+        return;
+      }
 
       final request = http.MultipartRequest('POST', uri);
       request.headers['X-User-Id'] = userId;
-      request.fields['user_id'] = userId;
-      request.files.add(http.MultipartFile.fromBytes('file', data, filename: file.name));
-      final streamed = await request.send();
+      request.files.add(http.MultipartFile.fromBytes('file', data, filename: fileName));
+      final streamed = await request.send().timeout(const Duration(seconds: 60));
       final resp = await http.Response.fromStream(streamed);
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
-        setState(() => _progressState = UploadProgressState.success(file.name));
+        setState(() => _progressState = UploadProgressState.success(fileName));
       } else {
-        setState(() => _progressState = UploadProgressState.error(file.name, 'Upload failed'));
+        String errorMsg = 'Upload failed (${resp.statusCode})';
+        try {
+          final body = resp.body;
+          if (body.contains('detail')) {
+            final detail = RegExp(r'"detail"\s*:\s*"([^"]+)"').firstMatch(body);
+            if (detail != null) errorMsg = detail.group(1) ?? errorMsg;
+          }
+        } catch (_) {}
+        setState(() => _progressState = UploadProgressState.error(fileName, errorMsg));
       }
     } catch (e) {
       setState(() => _progressState = UploadProgressState.error(
         file?.name ?? 'file',
-        e.toString().length > 40 ? 'Upload failed' : e.toString(),
+        e.toString().length > 50 ? 'Upload failed — check connection' : e.toString(),
       ));
     }
     widget.onUploadProgress?.call(_progressState);
@@ -231,11 +241,88 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
   }
 
   void _transferCrystal() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Transfer Crystal import flow coming soon'),
-        backgroundColor: _AttachmentDesign.gold,
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _AttachmentDesign.bgElevated,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Transfer Crystal', style: TextStyle(color: _AttachmentDesign.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Import AI chat history from another platform.', style: TextStyle(color: _AttachmentDesign.textSecondary, fontSize: 12)),
+            const SizedBox(height: 16),
+            ...[
+              ('ChatGPT (OpenAI)', 'chatgpt', Icons.chat_bubble),
+              ('Claude (Anthropic)', 'claude', Icons.psychology),
+              ('Gemini (Google)', 'gemini', Icons.auto_awesome),
+              ('Replika', 'replika', Icons.favorite),
+            ].map((s) => ListTile(
+              leading: Icon(s.$3, color: _AttachmentDesign.gold),
+              title: Text(s.$1, style: const TextStyle(color: _AttachmentDesign.textPrimary)),
+              onTap: () { Navigator.pop(ctx); _doTransferCrystalImport(s.$2); },
+            )),
+            ListTile(
+              leading: const Icon(Icons.auto_fix_high, color: _AttachmentDesign.gold),
+              title: const Text('Auto-Detect', style: TextStyle(color: _AttachmentDesign.textPrimary)),
+              onTap: () { Navigator.pop(ctx); _doTransferCrystalImport('auto'); },
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _doTransferCrystalImport(String source) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.custom,
+        allowedExtensions: ['zip', 'json', 'csv'],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final picked = result.files.single;
+      Uint8List? bytes = picked.bytes;
+      if (bytes == null && picked.path != null && !kIsWeb) {
+        bytes = Uint8List.fromList(await File(picked.path!).readAsBytes());
+      }
+      if (bytes == null) return;
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Importing... this may take a moment'), backgroundColor: _AttachmentDesign.gold),
+        );
+      }
+
+      final userId = (widget.profile?['hardware_id'] ?? widget.profile?['id'] ?? '').toString();
+      final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final uri = Uri.parse('$baseUrl/api/v1/vault/import');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['X-User-Id'] = userId;
+      request.fields['source'] = source;
+      request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: picked.name));
+      final streamed = await request.send().timeout(const Duration(seconds: 120));
+      final resp = await http.Response.fromStream(streamed);
+
+      if (!mounted) return;
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transfer Crystal created successfully!'), backgroundColor: _AttachmentDesign.gold),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Import failed: ${resp.statusCode}'), backgroundColor: _AttachmentDesign.gold),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: _AttachmentDesign.gold),
+        );
+      }
+    }
   }
 }

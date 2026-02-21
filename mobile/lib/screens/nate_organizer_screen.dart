@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/app_config.dart';
 
@@ -81,14 +82,36 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
   final _chatScrollController = ScrollController();
   final _sectionScrollController = ScrollController();
 
+  String? _resolvedToken;
+
   String get _userId => widget.profile['hardware_id']?.toString() ?? '';
-  String get _token => widget.profile['token']?.toString() ?? '';
 
   @override
   void initState() {
     super.initState();
     if (widget.initialContent != null) {
       _contentController.text = widget.initialContent!;
+    }
+    _resolveTokenAndConnect();
+  }
+
+  Future<void> _resolveTokenAndConnect() async {
+    _resolvedToken = widget.profile['token']?.toString();
+    if (_resolvedToken == null || _resolvedToken!.isEmpty) {
+      try {
+        const storage = FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        );
+        _resolvedToken = await storage.read(key: 'session_token');
+      } catch (_) {}
+    }
+    if (_resolvedToken == null || _resolvedToken!.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _error = 'Session expired. Please log in again.';
+        });
+      }
+      return;
     }
     _connect();
   }
@@ -144,7 +167,7 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
     // Auth handshake
     _channel!.sink.add(jsonEncode({
       'type': 'auth',
-      'token': _token,
+      'token': _resolvedToken ?? '',
       'hardware_id': _userId,
     }));
   }

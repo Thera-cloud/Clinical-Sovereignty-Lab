@@ -25,6 +25,7 @@ _ADAPTER_MAP = {
     "linkedin":  "app.services.platforms.linkedin.LinkedInAdapter",
     "facebook":  "app.services.platforms.facebook.FacebookAdapter",
     "pinterest": "app.services.platforms.pinterest.PinterestAdapter",
+    "x":         "app.services.platforms.x_twitter.XTwitterAdapter",
 }
 
 # Cache instantiated adapters per db_pool identity

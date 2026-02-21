@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/services.dart';
-
-/// Debug-only print: suppressed in production builds.
-// ignore: avoid_print
-void debugLog(Object? message) { if (kDebugMode) print(message); }
 import 'package:web_socket_channel/web_socket_channel.dart';
 // 1. ADDED: Permission Handler (Required for Vagus v2.6.1)
 import 'package:permission_handler/permission_handler.dart';
@@ -32,6 +28,9 @@ import 'screens/onboarding_paid_screen.dart';
 import 'shared_widgets.dart';
 import 'services/device_shield.dart';
 
+/// Debug-only print: suppressed in production builds.
+// ignore: avoid_print
+void debugLog(Object? message) { if (kDebugMode) print(message); }
 
 // =============================================================================
 
@@ -168,7 +167,7 @@ void main() {
   if (!kIsWeb) {
     DeviceShield.instance.runFullCheck().then((report) {
       debugLog('>>> [DeviceShield] Launch check: ${report.overallStatus.name} '
-          '(${report.passedCount}/${report.totalChecks} passed)');
+          '(${report.checks.where((c) => c.passed).length}/${report.checks.length} passed)');
       if (report.overallStatus == ShieldStatus.locked) {
         debugLog('>>> [DeviceShield] CRITICAL: Device compromised — degraded mode');
       }
@@ -328,6 +327,7 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
   final _passwordCtrl = TextEditingController();
   bool _loggingIn = false;
   String _loginError = '';
+  bool _obscurePassword = true;
 
   @override
   void initState() {
@@ -711,7 +711,7 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                 const SizedBox(height: 10),
                 TextField(
                   controller: _passwordCtrl,
-                  obscureText: true,
+                  obscureText: _obscurePassword,
                   style: const TextStyle(color: _textPrimary),
                   decoration: InputDecoration(
                     hintText: 'Password',
@@ -719,6 +719,10 @@ class _FamilyInviteAcceptScreenState extends State<FamilyInviteAcceptScreen> {
                     filled: true,
                     fillColor: _bgElevated,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: _textSecondary),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
                   ),
                 ),
                 if (_loginError.isNotEmpty) ...[
@@ -861,6 +865,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _isSubmitting = false;
+  bool _obscurePass = true;
+  bool _obscureConfirm = true;
   String get _serverUrl => defaultWsUrl;
 
   @override
@@ -981,21 +987,29 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _passCtrl,
-                obscureText: true,
+                obscureText: _obscurePass,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: "New password (min 6 characters)",
-                  prefixIcon: Icon(Icons.lock, color: Colors.grey),
+                  prefixIcon: const Icon(Icons.lock, color: Colors.grey),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                    onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _confirmCtrl,
-                obscureText: true,
+                obscureText: _obscureConfirm,
                 style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: "Confirm password",
-                  prefixIcon: Icon(Icons.lock_outline, color: Colors.grey),
+                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                    onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                  ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -1126,6 +1140,146 @@ class HardwareIdentity {
       return true; // Fail Open for Development, switch to 'return false' for Prod
     }
   }
+
+  // =========================================================================
+  // 1.5: Biometric-Gated Auto-Login (Face ID / Fingerprint)
+  // =========================================================================
+
+  /// Save login credentials for biometric re-authentication.
+  /// Only called for CLIENT and COACH roles — never for ADMIN.
+  Future<void> saveCredentials(String username, String password, String role) async {
+    try {
+      await _storage.write(key: 'bio_username', value: username);
+      await _storage.write(key: 'bio_password', value: password);
+      await _storage.write(key: 'bio_role', value: role);
+      await _storage.write(key: 'bio_enabled', value: 'true');
+      debugLog(">>> [IDENTITY] Biometric credentials saved for $role.");
+    } catch (e) {
+      debugLog("!!! [IDENTITY] saveCredentials error: $e");
+    }
+  }
+
+  /// Check whether saved biometric credentials exist (no biometric prompt).
+  Future<bool> hasSavedCredentials() async {
+    try {
+      final enabled = await _storage.read(key: 'bio_enabled');
+      if (enabled != 'true') return false;
+      final user = await _storage.read(key: 'bio_username');
+      final pass = await _storage.read(key: 'bio_password');
+      return user != null && user.isNotEmpty && pass != null && pass.isNotEmpty;
+    } catch (e) {
+      debugLog("!!! [IDENTITY] hasSavedCredentials error: $e");
+      return false;
+    }
+  }
+
+  /// Retrieve the stored username for display (no biometric prompt).
+  Future<String?> getSavedUsername() async {
+    try {
+      return await _storage.read(key: 'bio_username');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Recover credentials behind a biometric gate (Face ID / Fingerprint).
+  /// Returns {username, password, role} on success, null on failure/cancel.
+  Future<Map<String, String>?> recoverCredentials() async {
+    try {
+      final enabled = await _storage.read(key: 'bio_enabled');
+      if (enabled != 'true') return null;
+
+      final user = await _storage.read(key: 'bio_username');
+      final pass = await _storage.read(key: 'bio_password');
+      final role = await _storage.read(key: 'bio_role');
+
+      if (user == null || pass == null || role == null) return null;
+
+      bool authenticated = await _authenticateBiometrics();
+      if (!authenticated) {
+        debugLog("!!! [IDENTITY] Biometric auth failed for auto-login.");
+        return null;
+      }
+
+      debugLog(">>> [IDENTITY] Biometric credentials recovered for $role.");
+      return {'username': user, 'password': pass, 'role': role};
+    } catch (e) {
+      debugLog("!!! [IDENTITY] recoverCredentials error: $e");
+      return null;
+    }
+  }
+
+  /// Check if biometrics are available on this device.
+  Future<bool> isBiometricAvailable() async {
+    try {
+      if (kIsWeb) return false;
+      final canCheck = await _auth.canCheckBiometrics;
+      final isSupported = await _auth.isDeviceSupported();
+      return canCheck && isSupported;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Clear stored biometric credentials (logout / switch account).
+  Future<void> clearCredentials() async {
+    try {
+      await _storage.delete(key: 'bio_username');
+      await _storage.delete(key: 'bio_password');
+      await _storage.delete(key: 'bio_role');
+      await _storage.delete(key: 'bio_enabled');
+      await _storage.delete(key: 'bio_declined');
+      debugLog(">>> [IDENTITY] Biometric credentials cleared.");
+    } catch (e) {
+      debugLog("!!! [IDENTITY] clearCredentials error: $e");
+    }
+  }
+
+  /// Set biometric login enabled/disabled (settings toggle).
+  Future<void> setBiometricEnabled(bool enabled) async {
+    try {
+      if (enabled) {
+        await _storage.write(key: 'bio_enabled', value: 'true');
+      } else {
+        await clearCredentials();
+      }
+    } catch (e) {
+      debugLog("!!! [IDENTITY] setBiometricEnabled error: $e");
+    }
+  }
+
+  /// Check if biometric login is currently enabled.
+  Future<bool> isBiometricEnabled() async {
+    try {
+      final val = await _storage.read(key: 'bio_enabled');
+      return val == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Check if user previously declined the biometric opt-in prompt.
+  Future<bool> hasBiometricDeclined() async {
+    try {
+      final val = await _storage.read(key: 'bio_declined');
+      return val == 'true';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Mark that the user declined the biometric opt-in prompt.
+  Future<void> setBiometricDeclined(bool declined) async {
+    try {
+      if (declined) {
+        await _storage.write(key: 'bio_declined', value: 'true');
+      } else {
+        await _storage.delete(key: 'bio_declined');
+      }
+    } catch (e) {
+      debugLog("!!! [IDENTITY] setBiometricDeclined error: $e");
+    }
+  }
 }
 // -----------------------------------------------------------------------------
 // END OF PART 1
@@ -1201,8 +1355,15 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     }
   }
 
+  // Track socket subscription to prevent "Stream already listened to"
+  StreamSubscription? _socketSub;
+
   @override
   void dispose() {
+    _socketSub?.cancel();
+    _socket?.sink.close();
+    _scrollController.dispose();
+    _speech.stop();
     WidgetsBinding.instance.removeObserver(this);
     if (!kIsWeb) {
       DeviceShield.instance.stopPeriodicChecks();
@@ -1225,10 +1386,16 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   void _connectToCortex() {
     setState(() => _connectionStatus = "Dialing Neural Core...");
     
+    // Clean up previous connection
+    _socketSub?.cancel();
+    _socketSub = null;
+    try { _socket?.sink.close(); } catch (_) {}
+    _socket = null;
+
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       
-      _socket!.stream.listen(
+      _socketSub = _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
           if(mounted) setState(() => _connectionStatus = "ERROR: $e");
@@ -1582,12 +1749,6 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     return s;
   }
 
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    _speech.stop();
-    super.dispose();
-  }
 
   
   // ===========================================================================
@@ -1730,14 +1891,23 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
     _connectToBridge();
   }
 
+  // Track socket subscription for clean reconnect
+  StreamSubscription? _coachSocketSub;
+
   // 1. ESTABLISH FRESH CONNECTION (Stability Fix)
   void _connectToBridge() {
     setState(() => _statusMessage = "Connecting to HQ...");
     
+    // Clean up previous connection
+    _coachSocketSub?.cancel();
+    _coachSocketSub = null;
+    try { _socket?.sink.close(); } catch (_) {}
+    _socket = null;
+
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       
-      _socket!.stream.listen(
+      _coachSocketSub = _socket!.stream.listen(
         _handleSocketMessage,
         onError: (e) {
           debugLog("Coach Socket Error: $e");
@@ -1794,14 +1964,16 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
       // C. Login Failed — show error and return to login screen
       else if (data['type'] == 'login_failed' || data['type'] == 'login_failure' || data['type'] == 'error') {
         final msg = (data['message'] ?? 'Login failed').toString();
-        debugLog(">>> COACH LOGIN FAILED: $msg");
+        final errorCode = (data['error_code'] ?? '').toString();
+        debugLog(">>> COACH LOGIN FAILED: $msg (code=$errorCode)");
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(msg),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            backgroundColor: errorCode == 'WRONG_PORTAL'
+                ? const Color(0xFFC9A962)
+                : Colors.red,
+            duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
           ));
-          // Navigate back to the login screen so user can retry
           Navigator.of(context).pop();
         }
       }
@@ -2036,13 +2208,32 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
         trailing: IconButton(
           icon: const Icon(Icons.message, color: Colors.amber),
           onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Secure Relay Opening...")));
+            _openSecureRelay(client);
           },
         ),
       ),
     );
   }
   
+  void _openSecureRelay(dynamic client) {
+    final clientId = client['id']?.toString() ?? '';
+    final clientName = client['name']?.toString() ?? 'Client';
+    _socket?.sink.add(jsonEncode({
+      "type": "secure_relay_open",
+      "client_id": clientId,
+    }));
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _SecureRelayScreen(
+          socket: _socket,
+          clientId: clientId,
+          clientName: clientName,
+        ),
+      ),
+    );
+  }
+
   Widget _buildScheduleTile(dynamic slot) {
     return Card(
       color: Colors.grey[900],
@@ -2100,6 +2291,139 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
           ),
         )
       ],
+    );
+  }
+}
+
+// =============================================================================
+// SECURE RELAY — Encrypted messaging with a client
+// =============================================================================
+class _SecureRelayScreen extends StatefulWidget {
+  final WebSocketChannel? socket;
+  final String clientId;
+  final String clientName;
+  const _SecureRelayScreen({required this.socket, required this.clientId, required this.clientName});
+  @override
+  State<_SecureRelayScreen> createState() => _SecureRelayScreenState();
+}
+
+class _SecureRelayScreenState extends State<_SecureRelayScreen> {
+  final _msgCtrl = TextEditingController();
+  final List<Map<String, String>> _messages = [];
+  WebSocketChannel? _ownSocket;
+  StreamSubscription? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectOwnSocket();
+  }
+
+  void _connectOwnSocket() {
+    try {
+      _ownSocket = WebSocketChannel.connect(Uri.parse(defaultWsUrl));
+      _sub = _ownSocket!.stream.listen((msg) {
+        try {
+          final data = jsonDecode(msg);
+          if (data['type'] == 'secure_relay_message' && data['client_id'] == widget.clientId) {
+            if (mounted) {
+              setState(() {
+                _messages.add({'sender': 'client', 'text': data['message'] ?? ''});
+              });
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _ownSocket?.sink.close();
+    _msgCtrl.dispose();
+    super.dispose();
+  }
+
+  void _send() {
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty) return;
+    _ownSocket?.sink.add(jsonEncode({
+      "type": "secure_relay_message",
+      "client_id": widget.clientId,
+      "message": text,
+    }));
+    setState(() => _messages.add({'sender': 'coach', 'text': text}));
+    _msgCtrl.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF050505),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0A0A0A),
+        title: Text('Secure Relay — ${widget.clientName}', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16)),
+        iconTheme: const IconThemeData(color: Color(0xFFC9A962)),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: _messages.isEmpty
+              ? const Center(child: Text('Send a secure message...', style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _messages.length,
+                  itemBuilder: (_, i) {
+                    final m = _messages[i];
+                    final isCoach = m['sender'] == 'coach';
+                    return Align(
+                      alignment: isCoach ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                        decoration: BoxDecoration(
+                          color: isCoach ? const Color(0xFFC9A962).withOpacity(0.15) : const Color(0xFF1A1A1A),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isCoach ? const Color(0xFFC9A962).withOpacity(0.3) : Colors.white10),
+                        ),
+                        child: Text(m['text'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                      ),
+                    );
+                  },
+                ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: const Color(0xFF0A0A0A),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _msgCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Type a secure message...',
+                      hintStyle: TextStyle(color: Colors.grey[600]),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white10)),
+                      filled: true,
+                      fillColor: const Color(0xFF111111),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    onSubmitted: (_) => _send(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.send, color: Color(0xFFC9A962)),
+                  onPressed: _send,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2210,6 +2534,12 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   }
 
   void _connectToServer() {
+    // Cancel previous subscription and close old channel before reconnecting
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
+    try { _channel?.sink.close(); } catch (_) {}
+    _channel = null;
+
     _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
     _listenToWebSocket();
 
@@ -5181,6 +5511,17 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
   // Admin gate-check: true when we are verifying admin credentials before redirect
   bool _adminGateCheck = false;
+
+  // Biometric auto-login state
+  bool _hasBiometricCreds = false;
+  bool _biometricAvailable = false;
+  String? _savedUsername;
+
+  // Biometric opt-in prompt state (shown after successful manual login)
+  bool _showBiometricOptIn = false;
+  String _pendingBioUser = "";
+  String _pendingBioPass = "";
+  String _pendingBioRole = "";
   
   // Resolve dynamically so `/#/?ws=...` overrides apply without rebuilding.
   String get _serverUrl => defaultWsUrl;
@@ -5189,6 +5530,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
   void initState() {
     super.initState();
     _connectToBridge();
+    _checkBiometricLogin();
+  }
+
+  /// Check if saved biometric credentials exist for quick login.
+  Future<void> _checkBiometricLogin() async {
+    final hasCreds = await _identity.hasSavedCredentials();
+    final bioAvail = await _identity.isBiometricAvailable();
+    final savedUser = await _identity.getSavedUsername();
+    if (mounted) {
+      setState(() {
+        _hasBiometricCreds = hasCreds;
+        _biometricAvailable = bioAvail;
+        _savedUsername = savedUser;
+      });
+    }
   }
 
   @override
@@ -5197,6 +5553,9 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _channel?.sink.close();
     super.dispose();
   }
+
+  int _reconnectAttempts = 0;
+  static const _maxReconnectAttempts = 5;
 
   void _connectToBridge() {
     setState(() {
@@ -5209,8 +5568,6 @@ class _LobbyScreenState extends State<LobbyScreen> {
       _channel?.sink.close();
       _channel = WebSocketChannel.connect(Uri.parse(_serverUrl));
 
-      // On Flutter web, websocket failures can surface as unhandled async errors unless
-      // we provide an explicit onError handler.
       _lobbySub = _channel!.stream.listen(
         _handlePacket,
         onError: (e) {
@@ -5220,6 +5577,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
               _isConnected = false;
               _statusMessage = "Connection Failed.\n$_serverUrl";
             });
+            _scheduleReconnect();
           }
         },
         onDone: () {
@@ -5229,24 +5587,174 @@ class _LobbyScreenState extends State<LobbyScreen> {
               _isConnected = false;
               _statusMessage = "Disconnected.\n$_serverUrl";
             });
+            _scheduleReconnect();
           }
         },
         cancelOnError: true,
       );
 
-      // IMPORTANT:
-      // Don't block login on receiving a first packet. Some browser/websocket timing
-      // edge-cases can miss the server's immediate "connected" greeting.
-      // We'll allow login attempts immediately; onError/onDone will flip state back.
+      // Allow login attempts immediately — onError/onDone will flip state back.
+      // Some browser/websocket timing edge-cases can miss the server's "connected" greeting.
       if (mounted) {
         setState(() {
           _isConnected = true;
+          _reconnectAttempts = 0;
           _statusMessage = "Awaiting handshake...\n$_serverUrl";
         });
       }
 
     } catch (e) {
       if (mounted) setState(() => _statusMessage = "Fatal Connection Error: $e");
+      _scheduleReconnect();
+    }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      if (mounted) {
+        setState(() => _statusMessage = "Unable to reach server. Pull down to retry.");
+      }
+      return;
+    }
+    _reconnectAttempts++;
+    final delay = Duration(milliseconds: 500 * (1 << (_reconnectAttempts - 1)).clamp(1, 16));
+    debugLog("Reconnect attempt $_reconnectAttempts in ${delay.inMilliseconds}ms");
+    Future.delayed(delay, () {
+      if (mounted && !_isConnected) _connectToBridge();
+    });
+  }
+
+  /// Biometric auto-login: prompt Face ID / Fingerprint, then send stored
+  /// credentials over WebSocket automatically.
+  Future<void> _attemptBiometricLogin() async {
+    if (!_isConnected) {
+      _connectToBridge();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Reconnecting — please try again in a moment.")),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    final creds = await _identity.recoverCredentials();
+    if (creds == null) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Biometric authentication cancelled or failed."),
+            backgroundColor: Color(0xFFEF4444),
+          ),
+        );
+      }
+      return;
+    }
+
+    _tempUser = creds['username']!;
+    _tempPass = creds['password']!;
+    final role = creds['role']!;
+
+    _channel?.sink.add(jsonEncode({
+      "type": "login_request",
+      "username": _tempUser,
+      "password": _tempPass,
+      "expected_role": role,
+    }));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Authenticating...")),
+      );
+    }
+  }
+
+  /// Clear biometric login and show manual login.
+  void _switchAccount() {
+    _identity.clearCredentials();
+    setState(() {
+      _hasBiometricCreds = false;
+      _savedUsername = null;
+    });
+  }
+
+  /// Show biometric opt-in dialog after successful manual login.
+  Future<void> _showBiometricOptInDialog() async {
+    if (!mounted) return;
+    final isWeb = kIsWeb;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isWeb ? Icons.lock_open : Icons.fingerprint,
+              color: const Color(0xFFC9A962),
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                "Enable Quick Login?",
+                style: TextStyle(color: Color(0xFFE8D5A3), fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          isWeb
+              ? "Save your credentials for one-tap login next time. Your password is stored securely in your browser."
+              : "Enable Face ID or Fingerprint to log in instantly next time. Your credentials are encrypted on-device.",
+          style: const TextStyle(color: Color(0xFFAAAAAA), fontSize: 14, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Not Now", style: TextStyle(color: Color(0xFF888888))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFC9A962),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(isWeb ? "Enable Quick Login" : "Enable Biometric Login"),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      await _identity.saveCredentials(_pendingBioUser, _pendingBioPass, _pendingBioRole);
+      await _identity.setBiometricDeclined(false);
+    } else {
+      await _identity.setBiometricDeclined(true);
+    }
+    _pendingBioUser = "";
+    _pendingBioPass = "";
+    _pendingBioRole = "";
+  }
+
+  Future<void> _checkBiometricOptIn(String role) async {
+    try {
+      final alreadyEnabled = await _identity.isBiometricEnabled();
+      final hasDeclined = await _identity.hasBiometricDeclined();
+      if (alreadyEnabled) {
+        _identity.saveCredentials(_tempUser, _tempPass, role);
+      } else if (!hasDeclined) {
+        _pendingBioUser = _tempUser;
+        _pendingBioPass = _tempPass;
+        _pendingBioRole = role;
+        _showBiometricOptIn = true;
+      }
+    } catch (e) {
+      debugLog("!!! [BIO] opt-in check error: $e");
     }
   }
 
@@ -5265,6 +5773,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
         String role = profile['role'] ?? "CLIENT";
         String token = data['token'] ?? "";
 
+        // Persist session token so sub-screens (Coherence Dashboard, etc.) can authenticate
+        if (token.isNotEmpty) {
+          HardwareIdentity().saveSession(
+            _tempUser,
+            token,
+            profile,
+          );
+        }
+
         // ---------------------------------------------------------------
         // ADMIN GATE-CHECK: If we were verifying admin credentials at the
         // gateway (app.*), redirect the browser to command.* instead of
@@ -5273,19 +5790,29 @@ class _LobbyScreenState extends State<LobbyScreen> {
         if (_adminGateCheck) {
           _adminGateCheck = false;
           if (kIsWeb) {
-            // Use url_launcher to redirect to the admin command portal
-            launchUrl(
-              Uri.parse('https://command.sovereignsanctuary.net'),
-              mode: LaunchMode.externalApplication,
-            );
-          }
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("Admin verified. Redirecting to Sovereign Command..."),
-              backgroundColor: Color(0xFFC9A962),
-            ));
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text("Admin verified. Redirecting to Sovereign Command..."),
+                backgroundColor: Color(0xFFC9A962),
+              ));
+            }
+            Future.delayed(const Duration(milliseconds: 300), () {
+              launchUrl(
+                Uri.parse('https://command.sovereignsanctuary.net'),
+                webOnlyWindowName: '_self',
+              );
+            });
           }
           return;
+        }
+
+        // ---------------------------------------------------------------
+        // BIOMETRIC: Offer opt-in for Face ID / Fingerprint re-login
+        // Only for CLIENT and COACH roles (never ADMIN).
+        // Only ask if not already enabled AND not previously declined.
+        // ---------------------------------------------------------------
+        if (role == 'CLIENT' || role == 'COACH') {
+          _checkBiometricOptIn(role);
         }
         
         // Close the Lobby socket - next screen will create its own authenticated connection.
@@ -5302,7 +5829,15 @@ class _LobbyScreenState extends State<LobbyScreen> {
         final pass = _tempPass;
         final consentNeeded = data['consent_update_needed'] == true;
         
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+
+          // Show biometric opt-in dialog before navigating
+          if (_showBiometricOptIn) {
+            _showBiometricOptIn = false;
+            await _showBiometricOptInDialog();
+          }
+
           if (!mounted) return;
 
           if (consentNeeded) {
@@ -5388,10 +5923,14 @@ class _LobbyScreenState extends State<LobbyScreen> {
         // Safely close loading dialog if one is open
         try { Navigator.pop(context); } catch (_) {}
         if (mounted) {
+          final errorCode = data['error_code'] ?? '';
+          final msg = data['message'] ?? 'Login failed';
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(data['message'] ?? 'Login failed'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            content: Text(msg),
+            backgroundColor: errorCode == 'WRONG_PORTAL'
+                ? const Color(0xFFC9A962)
+                : Colors.red,
+            duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
           ));
           setState(() => _isLoading = false);
         }
@@ -5447,114 +5986,140 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
     TextEditingController userCtrl = TextEditingController();
     TextEditingController passCtrl = TextEditingController();
+    bool obscurePass = true;
 
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF111111),
-        title: const Text("ADMIN VERIFICATION", style: TextStyle(color: Color(0xFFFF006E), fontFamily: 'Courier')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              "Verify your admin credentials to access Sovereign Command.",
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text("ADMIN VERIFICATION", style: TextStyle(color: Color(0xFFFF006E), fontFamily: 'Courier')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Verify your admin credentials to access Sovereign Command.",
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: obscurePass,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "KEY",
+                  prefixIcon: const Icon(Icons.vpn_key),
+                  suffixIcon: IconButton(
+                    icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                    onPressed: () => setDialogState(() => obscurePass = !obscurePass),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF006E), foregroundColor: Colors.white),
+              child: const Text("VERIFY & ENTER"),
+              onPressed: () {
+                _tempUser = userCtrl.text.trim();
+                _tempPass = passCtrl.text.trim();
+                _adminGateCheck = true;
+
+                _channel?.sink.add(jsonEncode({
+                  "type": "login_request",
+                  "username": _tempUser,
+                  "password": _tempPass,
+                  "expected_role": "ADMIN"
+                }));
+
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying admin credentials...")));
+              },
             ),
-            const SizedBox(height: 16),
-            TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
-            const SizedBox(height: 10),
-            TextField(controller: passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "KEY", prefixIcon: Icon(Icons.vpn_key))),
           ],
         ),
-        actions: [
-          TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF006E), foregroundColor: Colors.white),
-            child: const Text("VERIFY & ENTER"),
-            onPressed: () {
-              _tempUser = userCtrl.text.trim();
-              _tempPass = passCtrl.text.trim();
-              _adminGateCheck = true;
-
-              _channel?.sink.add(jsonEncode({
-                "type": "login_request",
-                "username": _tempUser,
-                "password": _tempPass,
-                "expected_role": "ADMIN"
-              }));
-
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying admin credentials...")));
-            },
-          ),
-        ],
       ),
     );
   }
 
   void _showLoginDialog(String expectedRole) {
     if (!_isConnected) {
-      // Try to reconnect, but don't block the coach from attempting login.
       _connectToBridge();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reconnecting...")));
     }
 
     TextEditingController userCtrl = TextEditingController();
     TextEditingController passCtrl = TextEditingController();
+    bool obscurePass = true;
     
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF111111),
-        title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
-            const SizedBox(height: 10),
-            TextField(controller: passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "KEY", prefixIcon: Icon(Icons.vpn_key))),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () { Navigator.pop(ctx); _showForgotUsernameDialog(); },
-                  child: const Text("Forgot username?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: obscurePass,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: "KEY",
+                  prefixIcon: const Icon(Icons.vpn_key),
+                  suffixIcon: IconButton(
+                    icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                    onPressed: () => setDialogState(() => obscurePass = !obscurePass),
+                  ),
                 ),
-                TextButton(
-                  onPressed: () { Navigator.pop(ctx); _showForgotPasswordMethodDialog(); },
-                  child: const Text("Forgot password?", style: TextStyle(color: Colors.grey, fontSize: 12)),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () { Navigator.pop(ctx); _showForgotUsernameDialog(); },
+                    child: const Text("Forgot username?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                  TextButton(
+                    onPressed: () { Navigator.pop(ctx); _showForgotPasswordMethodDialog(); },
+                    child: const Text("Forgot password?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
+              child: const Text("VERIFY"),
+              onPressed: () {
+                _tempUser = userCtrl.text.trim();
+                _tempPass = passCtrl.text.trim();
+                
+                _channel?.sink.add(jsonEncode({
+                  "type": "login_request",
+                  "username": _tempUser,
+                  "password": _tempPass,
+                  "expected_role": expectedRole
+                }));
+
+                Navigator.pop(ctx); 
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying Credentials...")));
+              },
+            )
           ],
         ),
-        actions: [
-          TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
-            child: const Text("VERIFY"),
-            onPressed: () {
-              // 1. Save Credentials
-              _tempUser = userCtrl.text.trim();
-              _tempPass = passCtrl.text.trim();
-              
-              // 2. Send Login
-              _channel?.sink.add(jsonEncode({
-                "type": "login_request",
-                "username": _tempUser,
-                "password": _tempPass,
-                "expected_role": expectedRole
-              }));
-
-              // 3. Show Loading (Don't close dialog yet, wait for response)
-              Navigator.pop(ctx); 
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying Credentials...")));
-            },
-          )
-        ],
       ),
     );
   }
@@ -5710,9 +6275,12 @@ class _LobbyScreenState extends State<LobbyScreen> {
     TextEditingController codeCtrl = TextEditingController();
     TextEditingController passCtrl = TextEditingController();
     TextEditingController confirmCtrl = TextEditingController();
+    bool obscurePass = true;
+    bool obscureConfirm = true;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
         backgroundColor: const Color(0xFF111111),
         title: const Text("Enter Code", style: TextStyle(color: Color(0xFF4ECDC4), fontFamily: 'Courier')),
         content: Column(
@@ -5735,21 +6303,29 @@ class _LobbyScreenState extends State<LobbyScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: passCtrl,
-              obscureText: true,
+              obscureText: obscurePass,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "New password",
-                prefixIcon: Icon(Icons.vpn_key, color: Colors.grey),
+                prefixIcon: const Icon(Icons.vpn_key, color: Colors.grey),
+                suffixIcon: IconButton(
+                  icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                  onPressed: () => setDialogState(() => obscurePass = !obscurePass),
+                ),
               ),
             ),
             const SizedBox(height: 10),
             TextField(
               controller: confirmCtrl,
-              obscureText: true,
+              obscureText: obscureConfirm,
               style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: "Confirm password",
-                prefixIcon: Icon(Icons.vpn_key, color: Colors.grey),
+                prefixIcon: const Icon(Icons.vpn_key, color: Colors.grey),
+                suffixIcon: IconButton(
+                  icon: Icon(obscureConfirm ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                  onPressed: () => setDialogState(() => obscureConfirm = !obscureConfirm),
+                ),
               ),
             ),
           ],
@@ -5785,6 +6361,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
             },
           ),
         ],
+      ),
       ),
     );
   }
@@ -5890,6 +6467,76 @@ class _LobbyScreenState extends State<LobbyScreen> {
               ),
 
               const SizedBox(height: 60),
+
+              // =============================================================
+              // BIOMETRIC QUICK LOGIN (Face ID / Fingerprint)
+              // Shown when saved credentials exist for CLIENT or COACH
+              // =============================================================
+              if (_hasBiometricCreds && !_isLoading && mode != 'ADMIN') ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 24),
+                  padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111111),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+                  ),
+                  child: Column(children: [
+                    Text(
+                      'Welcome back${_savedUsername != null ? ", $_savedUsername" : ""}',
+                      style: const TextStyle(
+                        color: Color(0xFFE8D5A3),
+                        fontSize: 14,
+                        fontFamily: 'Cormorant Garamond',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFC9A962),
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: _attemptBiometricLogin,
+                        icon: Icon(
+                          _biometricAvailable ? Icons.fingerprint : Icons.lock_open,
+                          size: 24,
+                        ),
+                        label: Text(
+                          _biometricAvailable ? 'Login with Face ID / Fingerprint' : 'Quick Login',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: _switchAccount,
+                      child: const Text(
+                        'Use a different account',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
+
+              if (_isLoading) ...[
+                const SizedBox(height: 20),
+                const CircularProgressIndicator(color: Color(0xFFC9A962)),
+                const SizedBox(height: 12),
+                const Text('Authenticating...', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                const SizedBox(height: 20),
+              ],
 
               // =============================================================
               // COACH MODE (coach.sovereignsanctuary.net) — coach-only login
@@ -6071,6 +6718,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
   final _nameCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  bool _obscurePass = true;
   final List<String> _endpoints = [defaultWsUrl];
   bool _isDependent = false;
   TextEditingController _parentCtrl = TextEditingController();
@@ -6304,11 +6952,11 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
       // CASE A: Server created account AND logged us in (Ideal)
       if (data['type'] == 'login_success') {
-        HardwareIdentity().saveSession(_userCtrl.text, "NEW_REG_TOKEN", data['profile']);
-
         final profile = Map<String, dynamic>.from(data['profile'] ?? {});
         final regRole = (profile['role'] ?? _effectiveRole).toString();
         final token = data['token'] ?? "";
+
+        HardwareIdentity().saveSession(_userCtrl.text, token.isNotEmpty ? token : "REG_${DateTime.now().millisecondsSinceEpoch}", profile);
 
         // Defer sink close to avoid "Cannot add event after closing" — closing
         // synchronously inside the stream callback can race with the WebSocket impl.
@@ -6387,7 +7035,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
   }
 
   void _handleLoginSuccess(Map<String, dynamic> data, WebSocketChannel burnerSocket) {
-        HardwareIdentity().saveSession(_userCtrl.text, "NEW_REG_TOKEN", data['profile']);
+        final loginToken = data['token']?.toString() ?? "REG_${DateTime.now().millisecondsSinceEpoch}";
+        HardwareIdentity().saveSession(_userCtrl.text, loginToken, data['profile'] ?? {});
         burnerSocket.sink.close();
         final chatSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
         chatSocket.sink.add(jsonEncode({
@@ -7422,7 +8071,19 @@ class _SignUpWizardState extends State<SignUpWizard> {
             // 4. CREDENTIALS
             TextField(controller: _userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "Create Username", prefixIcon: Icon(Icons.alternate_email))),
             const SizedBox(height: 10),
-            TextField(controller: _passCtrl, obscureText: true, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "Create Password", prefixIcon: Icon(Icons.lock))),
+            TextField(
+              controller: _passCtrl,
+              obscureText: _obscurePass,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: "Create Password",
+                prefixIcon: const Icon(Icons.lock),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                  onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                ),
+              ),
+            ),
             
             const SizedBox(height: 40),
             ElevatedButton(
@@ -7666,7 +8327,7 @@ class ClientScheduleScreen extends StatefulWidget {
 
 class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   WebSocketChannel? _socket;
-  final String _serverUrl = getWebSocketUrl();
+  final String _serverUrl = defaultWsUrl;
   List<Map<String, dynamic>> _upcomingSessions = [];
   List<Map<String, dynamic>> _availableSlots = [];
   String? _selectedDate;

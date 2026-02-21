@@ -1,0 +1,88 @@
+---
+description: Database interaction rules for all background agents — connection management, write targets, immutable tables, contention prevention
+globs: backend/app/workers/**/*.py, backend/app/services/**/*.py
+alwaysApply: false
+---
+
+# Agent Database Discipline
+
+## Connection Management
+
+With 69+ background agents sharing one `asyncpg` pool, discipline is critical:
+
+```python
+# CORRECT — acquire and release within the same block
+async with self.db_pool.acquire() as conn:
+    await conn.execute("INSERT INTO ...")
+
+# WRONG — holds connection across sleep
+conn = await self.db_pool.acquire()
+await asyncio.sleep(60)  # starves the pool
+await conn.execute("...")
+```
+
+- **Never** hold a connection across `await asyncio.sleep()`
+- **Never** hold a connection across external API calls (`adapter.authenticate()`)
+- Keep transactions short — acquire, execute, release in one block
+- Use `fetchrow`/`fetchval` instead of `fetch` when expecting a single row
+
+## Write Targets by Agent Type
+
+| Agent Category | Allowed Write Tables |
+|---------------|---------------------|
+| Token agents (Guardian, Renewal, Audit) | `skyeye_platform_tokens`, `skyeye_activity`, `skyeye_content_queue`, `audit_log` |
+| Hive Defense workers | `hive_*` tables, `audit_log` |
+| Clinical agents | `coherence_metrics`, `growth_metrics`, `pattern_detections`, `session_metrics` |
+| Billing agents | `usage_records`, `metered_billing_state`, `billing_anomalies` |
+| SkyEye/Marketing agents | `skyeye_content_queue`, `skyeye_activity`, `skyeye_platforms` |
+| Infrastructure (Canary, Dependency) | `audit_log`, agent-specific tables |
+
+Agents must **not** write to tables outside their domain without explicit justification.
+
+## Immutable Tables
+
+`audit_log` is protected by the `audit_log_immutable` trigger:
+
+```sql
+CREATE TRIGGER audit_log_immutable
+    BEFORE UPDATE OR DELETE ON audit_log
+    FOR EACH ROW EXECUTE FUNCTION prevent_audit_modification();
+```
+
+- Agents must only INSERT into `audit_log`, never UPDATE or DELETE
+- `admin_id` is optional (UUID reference to `users`) — agents running as system processes leave it NULL
+- Required columns: `action_type` (VARCHAR(30)), `description` (TEXT)
+- Optional: `target_type`, `target_id`, `compliance_flags` (TEXT[])
+- Valid `action_type` values: `ACCESS`, `CREATE`, `MODIFY`, `DELETE`, `SECURITY`, `LOGIN`, `LOGOUT`, `APPROVE`, `REJECT`, `EXPORT`, `DEADMAN_ALERT`, `TRIAL_REMINDER_SENT`, `COACHING_REMINDER_SENT`, `SYSTEM`
+
+## audit_log Insert Pattern
+
+```python
+await conn.execute("""
+    INSERT INTO audit_log (action_type, target_type, description, compliance_flags)
+    VALUES ($1, $2, $3, $4)
+""", 'SECURITY', 'token_audit', 'Discrepancy found: ...', ['AUDIT'])
+```
+
+Do NOT use columns that don't exist (`user_id`, `resource_type`, `resource_id`, `details`, `created_at`). The actual columns are: `admin_id`, `admin_username`, `admin_role`, `ip_address`, `user_agent`, `action_type`, `target_type`, `target_id`, `target_name`, `description`, `old_value`, `new_value`, `compliance_flags`, `logged_at`.
+
+## skyeye_activity Insert Pattern
+
+```python
+await conn.execute("""
+    INSERT INTO skyeye_activity (platform, type, content, severity, metadata, created_at)
+    VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+""", platform, activity_type, content, severity, json.dumps(meta))
+```
+
+Columns: `id` (SERIAL), `platform` (TEXT), `type` (TEXT), `content` (TEXT), `compliance_note` (TEXT), `pillar` (TEXT), `severity` (TEXT, default 'info'), `metadata` (JSONB), `created_at` (TIMESTAMPTZ).
+
+## No DDL from Agents
+
+Background agents must **never** run DDL statements (`ALTER TABLE`, `CREATE INDEX`, `DROP`, etc.). Schema changes go through migration files in `backend/migrations/`.
+
+## Bulk Operations
+
+- Use `SCAN` for Redis bulk operations — `KEYS` is disabled in production
+- For bulk DB updates, use parameterized batch queries, not loops of individual INSERTs
+- Cap batch sizes at 100 rows per transaction to avoid long locks

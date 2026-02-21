@@ -36,7 +36,7 @@ LINKEDIN_API_BASE = "https://api.linkedin.com/v2"
 LINKEDIN_REST_BASE = "https://api.linkedin.com/rest"
 
 # Versioned API header — all REST API calls must include this
-LINKEDIN_API_VERSION = "202401"
+LINKEDIN_API_VERSION = "202601"
 
 # Token refresh proactive window — refresh if expiry is within this many days
 PROACTIVE_REFRESH_DAYS = 7
@@ -47,6 +47,7 @@ def _linkedin_headers(access_token: str, content_type: bool = False) -> Dict[str
     headers = {
         "Authorization": f"Bearer {access_token}",
         "LinkedIn-Version": LINKEDIN_API_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
     }
     if content_type:
         headers["Content-Type"] = "application/json"
@@ -98,13 +99,17 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
         # Check if token is already expired
         token_expiry = tokens.get("token_expiry")
-        if token_expiry and token_expiry < datetime.utcnow():
+        now = datetime.utcnow()
+        if token_expiry:
+            if token_expiry.tzinfo is not None:
+                token_expiry = token_expiry.replace(tzinfo=None)
+        if token_expiry and token_expiry < now:
             logger.info("LinkedIn: Token expired, attempting refresh")
             return await self.refresh_token()
 
         # Proactive refresh: if within 7 days of expiry, refresh now
         if token_expiry:
-            days_until_expiry = (token_expiry - datetime.utcnow()).days
+            days_until_expiry = (token_expiry - now).days
             if days_until_expiry <= PROACTIVE_REFRESH_DAYS:
                 logger.info(
                     f"LinkedIn: Token expires in {days_until_expiry} days, "
@@ -253,7 +258,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            "scope": "openid profile email w_member_social r_organization_social rw_organization_admin",
+            "scope": "openid profile email w_member_social",
             "state": "skyeye_linkedin",
         }
         return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
@@ -754,8 +759,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
           - Share statistics (impressions, clicks, likes, comments, shares)
           - Page view statistics
 
-        Requires r_organization_social and rw_organization_admin scopes
-        (both already requested in the OAuth flow).
+        Organization-level analytics require r_organization_social and
+        rw_organization_admin scopes (Marketing Developer Platform approval).
+        Falls back to person-level analytics when org scopes unavailable.
         """
         if not self._connected:
             return PlatformAnalytics(platform="linkedin")
@@ -862,11 +868,37 @@ class LinkedInAdapter(SocialPlatformAdapter):
     async def _get_person_analytics(self) -> PlatformAnalytics:
         """
         Fallback analytics when no organization page is available.
-        Returns basic profile-level data from own posts.
+        Fetches connection count from the personal profile and post engagement.
         """
         analytics = PlatformAnalytics(platform="linkedin")
 
         try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                # Fetch connection count via networkSizes (personal profile)
+                if self._person_urn:
+                    try:
+                        conn_resp = await client.get(
+                            f"{LINKEDIN_REST_BASE}/networkSizes/{self._person_urn}",
+                            params={"edgeType": "CompanyFollowedByMember"},
+                            headers=_linkedin_headers(self._access_token),
+                        )
+                        if conn_resp.status_code == 200:
+                            analytics.followers = conn_resp.json().get("firstDegreeSize", 0)
+                    except Exception:
+                        pass
+
+                    if analytics.followers == 0:
+                        try:
+                            conn_resp2 = await client.get(
+                                f"{LINKEDIN_API_BASE}/connections?q=viewer&start=0&count=0",
+                                headers={"Authorization": f"Bearer {self._access_token}"},
+                            )
+                            if conn_resp2.status_code == 200:
+                                data = conn_resp2.json()
+                                analytics.followers = data.get("_total", 0) or data.get("paging", {}).get("total", 0)
+                        except Exception:
+                            pass
+
             posts = await self.get_feed(limit=20)
             if posts:
                 total_likes = sum(p.likes or 0 for p in posts)
@@ -880,14 +912,14 @@ class LinkedInAdapter(SocialPlatformAdapter):
                         posts, key=lambda p: (p.likes or 0) + (p.comments or 0)
                     ).item_id
 
-                # Approximate engagement rate from post data
                 if analytics.total_posts > 0:
                     avg_engagement = (total_likes + total_comments) / analytics.total_posts
                     analytics.engagement_rate = round(avg_engagement / 100, 4)
 
                 analytics.raw_data = {
-                    "source": "person_posts",
+                    "source": "person_profile",
                     "post_count": len(posts),
+                    "connections": analytics.followers,
                 }
         except Exception as e:
             logger.debug(f"LinkedIn: Person analytics fallback error: {e}")

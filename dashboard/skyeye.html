@@ -357,6 +357,9 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="nav-item" data-tab="big-nate-chat" onclick="switchTab('big-nate-chat',this)">
       <span class="nav-icon">💬</span><span class="nav-label">Big Nate Chat</span>
     </div>
+    <div class="nav-item" data-tab="go-live" onclick="switchTab('go-live',this)">
+      <span class="nav-icon">🔴</span><span class="nav-label">Go Live</span>
+    </div>
     <div class="nav-item" data-tab="expressions-wall" onclick="switchTab('expressions-wall',this)">
       <span class="nav-icon">✨</span><span class="nav-label">Expressions Wall</span>
     </div>
@@ -389,7 +392,11 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       <span class="nav-icon">🐝</span><span class="nav-label">Swarm</span>
     </div>
     <div class="nav-divider"></div>
-    <div class="nav-item" onclick="window.location.href='hive_defense.html'">
+    <div class="nav-item" data-tab="threat-dropbox" onclick="switchTab('threat-dropbox',this)">
+      <span class="nav-icon">🎯</span><span class="nav-label">Threat Dropbox</span>
+      <span class="nav-badge" id="hunt-active-count" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-tab="hive-defense" onclick="switchTab('hive-defense',this)">
       <span class="nav-icon">🛡️</span><span class="nav-label">Hive Defense</span>
     </div>
   </aside>
@@ -405,6 +412,26 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <div>
           <div class="status-text" id="cc-status-text">Initializing...</div>
           <div class="status-sub" id="cc-status-sub">Connecting to SkyEye</div>
+        </div>
+      </div>
+
+      <!-- Engine Controls -->
+      <div class="glass mb-24">
+        <div class="glass-header">
+          <div class="glass-title">🎮 Engine Controls</div>
+          <span style="font-size:11px;color:var(--t3)" id="cc-engine-status">--</span>
+        </div>
+        <div class="glass-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+          <button onclick="wakeEngine()" class="btn-gold" id="btn-wake" style="padding:8px 20px;border-radius:8px;background:var(--gold);color:#050505;border:none;cursor:pointer;font-weight:700;font-size:13px">
+            ⚡ Wake Session
+          </button>
+          <button onclick="restEngine()" class="btn-outline" id="btn-rest" style="padding:8px 20px;border-radius:8px;background:transparent;color:var(--t2);border:1px solid var(--t3);cursor:pointer;font-weight:600;font-size:13px">
+            🌙 Rest
+          </button>
+          <button onclick="verifyPosts()" style="padding:8px 20px;border-radius:8px;background:transparent;color:var(--cyan);border:1px solid var(--cyan);cursor:pointer;font-weight:600;font-size:13px">
+            🔍 Verify Posts
+          </button>
+          <span id="cc-engine-msg" style="font-size:12px;color:var(--t3)"></span>
         </div>
       </div>
 
@@ -457,6 +484,16 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 
     <!-- TAB 2: PLATFORM GRID -->
     <section class="tab-content" id="tab-platform-grid">
+      <!-- Token Health Panel -->
+      <div id="pg-token-health" style="margin-bottom:24px">
+        <div class="section-header" style="display:flex;align-items:center;gap:10px">
+          Token Health
+          <span id="th-summary" style="font-size:11px;color:var(--t3);font-family:'DM Sans',sans-serif;font-weight:400"></span>
+        </div>
+        <div class="grid-3" id="th-cards"></div>
+        <div id="th-loading" class="loader" style="display:none"><div class="spinner"></div> Checking tokens...</div>
+      </div>
+
       <div id="pg-tier1-section">
         <div class="section-header">Tier 1 — Primary Platforms</div>
         <div class="grid-3 mb-24" id="pg-tier1"></div>
@@ -476,6 +513,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
           <option value="tiktok">🎵 TikTok</option>
           <option value="instagram">📸 Instagram</option>
           <option value="youtube">🎬 YouTube</option>
+          <option value="x">𝕏 X</option>
           <option value="reddit">🗣️ Reddit</option>
           <option value="linkedin">💼 LinkedIn</option>
           <option value="facebook">👤 Facebook</option>
@@ -550,8 +588,8 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
           <div class="glass-title">💬 Big Nate ↔ Little Nate Chat</div>
           <span style="font-size:11px;color:var(--t3)">8-mode strategic coordination channel</span>
         </div>
-        <!-- Mode Selector Bar -->
-        <div class="chat-mode-bar" id="chat-mode-bar">
+        <!-- Mode Selector Bar + Actions -->
+        <div class="chat-mode-bar" id="chat-mode-bar" style="flex-wrap:wrap;gap:6px">
           <button class="chat-mode-btn active" data-mode="strategy" onclick="setChatMode('strategy',this)">Strategy</button>
           <button class="chat-mode-btn" data-mode="command" onclick="setChatMode('command',this)">Command</button>
           <button class="chat-mode-btn" data-mode="briefing" onclick="setChatMode('briefing',this)">Briefing</button>
@@ -561,14 +599,195 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
           <button class="chat-mode-btn mode-marketing" data-mode="marketing" onclick="setChatMode('marketing',this)">Marketing</button>
           <button class="chat-mode-btn mode-defense" data-mode="defense" onclick="setChatMode('defense',this)">Defense</button>
           <button class="chat-mode-btn mode-admin" data-mode="admin" onclick="setChatMode('admin',this)">Admin</button>
+          <span style="width:1px;height:20px;background:var(--bdr2);flex-shrink:0"></span>
+          <button class="btn" style="background:rgba(157,78,221,0.15);border:1px solid #9D4EDD;color:#9D4EDD;font-size:10px;padding:5px 10px;font-weight:600;border-radius:16px" onclick="clearChat(true)" title="Archive chat to strategic memory and start fresh">📦 Archive & Clear</button>
+          <button class="btn" style="background:rgba(239,68,68,0.15);border:1px solid #EF4444;color:#EF4444;font-size:10px;padding:5px 10px;font-weight:600;border-radius:16px" onclick="clearChat(false)" title="Clear chat without archiving">🗑 Clear</button>
+          <button class="btn" id="archive-toggle-btn" style="background:rgba(201,169,98,0.15);border:1px solid #C9A962;color:#C9A962;font-size:10px;padding:5px 10px;font-weight:600;border-radius:16px" onclick="toggleArchivePanel()" title="Browse archived conversations">📂 History</button>
         </div>
-        <div class="chat-messages" id="chat-messages">
-          <div class="loader"><div class="spinner"></div> Loading messages...</div>
+
+        <!-- Main chat area with optional archive sidebar -->
+        <div style="display:flex;flex:1;min-height:0;overflow:hidden">
+          <!-- Chat messages column -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+            <div class="chat-messages" id="chat-messages">
+              <div class="loader"><div class="spinner"></div> Loading messages...</div>
+            </div>
+            <div class="chat-typing" id="chat-typing">Little Nate is thinking...</div>
+            <div class="chat-input-wrap">
+              <input class="input chat-input" id="chat-input" placeholder="Type a message to Little Nate..." onkeydown="if(event.key==='Enter')sendChat()">
+              <button class="btn btn-green" onclick="sendChat()">Send</button>
+            </div>
+          </div>
+
+          <!-- Archive Sidebar (hidden by default) -->
+          <div id="archive-sidebar" style="display:none;width:340px;border-left:1px solid var(--bdr);background:var(--panel);overflow-y:auto;flex-shrink:0">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:13px;font-weight:600;color:var(--gold)">📂 Archived Sessions</span>
+              <button onclick="toggleArchivePanel()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px" title="Close">✕</button>
+            </div>
+            <div id="archive-list" style="padding:8px">
+              <div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">Loading archives...</div>
+            </div>
+            <!-- Archive transcript viewer (hidden until an archive is clicked) -->
+            <div id="archive-viewer" style="display:none;padding:12px 16px;border-top:1px solid var(--bdr)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <span style="font-size:12px;font-weight:600;color:var(--gold)" id="archive-viewer-title">Session</span>
+                <button onclick="closeArchiveViewer()" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:12px">← Back</button>
+              </div>
+              <div id="archive-viewer-content" style="max-height:400px;overflow-y:auto;font-size:11px;line-height:1.6;color:var(--text);white-space:pre-wrap;background:var(--bg2);border-radius:8px;padding:12px;border:1px solid var(--bdr)"></div>
+              <button class="btn" style="margin-top:8px;width:100%;background:rgba(0,255,136,0.12);border:1px solid var(--green);color:var(--green);font-size:11px;padding:8px;font-weight:600;border-radius:8px" id="archive-restore-btn" onclick="restoreArchive()">↩ Restore This Conversation</button>
+            </div>
+          </div>
         </div>
-        <div class="chat-typing" id="chat-typing">Little Nate is thinking...</div>
-        <div class="chat-input-wrap">
-          <input class="input chat-input" id="chat-input" placeholder="Type a message to Little Nate..." onkeydown="if(event.key==='Enter')sendChat()">
-          <button class="btn btn-green" onclick="sendChat()">Send</button>
+      </div>
+    </section>
+
+    <!-- GO LIVE TAB -->
+    <section class="tab-content" id="tab-go-live">
+      <div class="glass" style="padding:24px">
+        <div class="glass-header" style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <div class="glass-title">🔴 Little Nate — Go Live</div>
+            <span style="font-size:11px;color:var(--t3)">Multi-platform livestream with AI-powered open mic guidance</span>
+          </div>
+          <div id="live-status-badge" style="padding:4px 12px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(120,120,120,0.2);color:var(--t3);border:1px solid var(--bdr)">OFFLINE</div>
+        </div>
+
+        <!-- Config Panel (shown when offline) -->
+        <div id="live-config" style="margin-top:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+            <div>
+              <label style="font-size:11px;color:var(--gold);font-weight:600;display:block;margin-bottom:6px">PLATFORMS</label>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <label style="font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" id="live-platform-x" checked> X (Twitter)
+                </label>
+                <label style="font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" id="live-platform-youtube"> YouTube
+                </label>
+                <label style="font-size:12px;color:var(--text);display:flex;align-items:center;gap:8px">
+                  <input type="checkbox" id="live-platform-linkedin"> LinkedIn
+                </label>
+              </div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--gold);font-weight:600;display:block;margin-bottom:6px">DURATION</label>
+              <select id="live-duration" class="input" style="font-size:12px;padding:6px 10px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:6px">
+                <option value="900">15 minutes</option>
+                <option value="1800" selected>30 minutes</option>
+                <option value="2700">45 minutes</option>
+                <option value="3600">60 minutes</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:16px">
+            <label style="font-size:11px;color:var(--gold);font-weight:600;display:block;margin-bottom:6px">TOPIC / THEME (optional)</label>
+            <input type="text" id="live-topic" class="input" placeholder="e.g. Navigating anxiety in uncertain times..." style="width:100%;font-size:12px;padding:8px 12px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:6px">
+          </div>
+
+          <div style="margin-bottom:16px">
+            <label style="font-size:11px;color:var(--gold);font-weight:600;display:block;margin-bottom:6px">RTMP KEYS</label>
+            <div id="rtmp-key-inputs" style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--t3);width:70px">X:</span>
+                <input type="text" id="rtmp-key-x" class="input" placeholder="rtmp://..." style="flex:1;font-size:11px;padding:6px 10px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:6px;font-family:'JetBrains Mono',monospace">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--t3);width:70px">YouTube:</span>
+                <input type="text" id="rtmp-key-youtube" class="input" placeholder="rtmp://..." style="flex:1;font-size:11px;padding:6px 10px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:6px;font-family:'JetBrains Mono',monospace">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--t3);width:70px">LinkedIn:</span>
+                <input type="text" id="rtmp-key-linkedin" class="input" placeholder="rtmp://..." style="flex:1;font-size:11px;padding:6px 10px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:6px;font-family:'JetBrains Mono',monospace">
+              </div>
+            </div>
+          </div>
+
+          <button class="btn" onclick="startLivestream()" style="width:100%;padding:12px;font-size:14px;font-weight:700;background:rgba(239,68,68,0.2);border:2px solid #EF4444;color:#EF4444;border-radius:8px;cursor:pointer;transition:all 0.2s" onmouseenter="this.style.background='rgba(239,68,68,0.4)'" onmouseleave="this.style.background='rgba(239,68,68,0.2)'">
+            🔴 GO LIVE
+          </button>
+        </div>
+
+        <!-- Live Dashboard (shown when live) -->
+        <div id="live-dashboard" style="display:none;margin-top:20px">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="font-size:10px;color:var(--t3);text-transform:uppercase">Elapsed</div>
+              <div style="font-size:20px;font-weight:700;color:var(--gold)" id="live-elapsed">00:00</div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="font-size:10px;color:var(--t3);text-transform:uppercase">Remaining</div>
+              <div style="font-size:20px;font-weight:700;color:var(--text)" id="live-remaining">30:00</div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="font-size:10px;color:var(--t3);text-transform:uppercase">Interactions</div>
+              <div style="font-size:20px;font-weight:700;color:var(--green)" id="live-interactions">0</div>
+            </div>
+            <div class="glass" style="padding:12px;text-align:center">
+              <div style="font-size:10px;color:var(--t3);text-transform:uppercase">Viewers</div>
+              <div style="font-size:20px;font-weight:700;color:var(--cyan)" id="live-viewers">0</div>
+            </div>
+          </div>
+
+          <div class="glass" style="padding:12px;margin-bottom:16px;max-height:300px;overflow-y:auto" id="live-feed">
+            <div style="font-size:10px;color:var(--gold);font-weight:600;text-transform:uppercase;margin-bottom:8px">Live Interactions</div>
+            <div style="color:var(--t3);text-align:center;padding:20px;font-size:12px">Waiting for viewers...</div>
+          </div>
+
+          <button class="btn" onclick="stopLivestream()" style="width:100%;padding:12px;font-size:14px;font-weight:700;background:rgba(239,68,68,0.15);border:2px solid #EF4444;color:#EF4444;border-radius:8px;cursor:pointer">
+            ⏹ END STREAM
+          </button>
+        </div>
+
+        <!-- Autonomous Scheduler -->
+        <div style="margin-top:24px;border-top:1px solid var(--bdr);padding-top:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:12px;color:var(--gold);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Autonomous Scheduler</div>
+            <div style="display:flex;gap:8px">
+              <button id="scheduler-toggle-btn" onclick="toggleScheduler()" style="padding:4px 12px;font-size:10px;font-weight:600;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);color:var(--green);border-radius:6px;cursor:pointer">ENABLE</button>
+              <button onclick="runPreflight()" style="padding:4px 12px;font-size:10px;font-weight:600;background:rgba(78,205,196,0.1);border:1px solid rgba(78,205,196,0.3);color:var(--cyan);border-radius:6px;cursor:pointer">PRE-FLIGHT TEST</button>
+            </div>
+          </div>
+          <div id="preflight-result" style="display:none;margin-bottom:10px;padding:8px 12px;border-radius:6px;font-size:11px"></div>
+          <div id="scheduler-status" style="font-size:11px;color:var(--t3);margin-bottom:8px">Scheduler is offline. Enable to let Little Nate pick his own live times.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+            <div>
+              <label style="font-size:10px;color:var(--t3);display:block;margin-bottom:4px">Sessions / Week</label>
+              <select id="scheduler-freq" style="width:100%;font-size:11px;padding:4px 8px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:4px">
+                <option value="1">1x / week</option>
+                <option value="2">2x / week</option>
+                <option value="3" selected>3x / week</option>
+                <option value="5">5x / week</option>
+                <option value="7">Daily</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--t3);display:block;margin-bottom:4px">Duration</label>
+              <select id="scheduler-duration" style="width:100%;font-size:11px;padding:4px 8px;background:var(--bg2);color:var(--text);border:1px solid var(--bdr);border-radius:4px">
+                <option value="900">15 min</option>
+                <option value="1800" selected>30 min</option>
+                <option value="2700">45 min</option>
+                <option value="3600">60 min</option>
+              </select>
+            </div>
+          </div>
+          <div id="scheduler-upcoming" style="font-size:11px;color:var(--t3)"></div>
+        </div>
+
+        <!-- Connection Health -->
+        <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:12px">
+          <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Stream Connection</div>
+          <div id="stream-health-bar" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-radius:6px">
+            <div id="health-dot" style="width:8px;height:8px;border-radius:50%;background:var(--t3)"></div>
+            <span id="health-text" style="font-size:11px;color:var(--t3)">No active stream</span>
+          </div>
+        </div>
+
+        <!-- Past Sessions -->
+        <div style="margin-top:16px;border-top:1px solid var(--bdr);padding-top:16px">
+          <div style="font-size:12px;color:var(--gold);font-weight:600;margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">Past Sessions</div>
+          <div id="live-history" style="font-size:12px;color:var(--t3);text-align:center;padding:12px">Loading...</div>
         </div>
       </div>
     </section>
@@ -689,6 +908,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
               <option value="tiktok">TikTok</option>
               <option value="instagram">Instagram</option>
               <option value="youtube">YouTube</option>
+              <option value="x">X</option>
               <option value="reddit">Reddit</option>
               <option value="linkedin">LinkedIn</option>
               <option value="facebook">Facebook</option>
@@ -1026,6 +1246,288 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </div>
     </section>
 
+    <!-- TAB: THREAT DROPBOX -->
+    <section class="tab-content" id="tab-threat-dropbox">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">🎯 Threat Dropbox</h2>
+        <button class="btn btn-green" onclick="refreshHunts()" style="gap:6px">↻ Refresh</button>
+      </div>
+
+      <!-- Drop Zone -->
+      <div class="glass mb-24">
+        <div class="glass-header">
+          <div class="glass-title">📥 Drop Threats Here</div>
+          <span style="font-size:11px;color:var(--t3)">Files + Text + URLs</span>
+        </div>
+        <div class="glass-body" style="padding:0">
+
+          <!-- Drag & Drop File Zone -->
+          <div id="td-dropzone" style="position:relative;border:2px dashed var(--bdr2);border-radius:var(--rs);margin:16px;padding:32px;text-align:center;cursor:pointer;transition:.3s;background:rgba(255,255,255,0.01)" onclick="document.getElementById('td-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--red)';this.style.background='rgba(255,59,92,0.06)'" ondragleave="this.style.borderColor='var(--bdr2)';this.style.background='rgba(255,255,255,0.01)'" ondrop="handleFileDrop(event)">
+            <input type="file" id="td-file-input" accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv,.html,.eml" multiple style="display:none" onchange="handleFileSelect(this.files)">
+            <div style="font-size:36px;margin-bottom:12px;opacity:0.6">📂</div>
+            <div style="font-size:14px;color:var(--t1);font-weight:600;margin-bottom:6px">Drag & drop files here</div>
+            <div style="font-size:12px;color:var(--t3);margin-bottom:12px">or click to browse</div>
+            <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(255,59,92,0.1);color:var(--red);border:1px solid rgba(255,59,92,0.15)">PNG</span>
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(255,59,92,0.1);color:var(--red);border:1px solid rgba(255,59,92,0.15)">JPG</span>
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(255,184,0,0.1);color:var(--amber);border:1px solid rgba(255,184,0,0.15)">PDF</span>
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(56,189,248,0.1);color:var(--blue);border:1px solid rgba(56,189,248,0.15)">TXT</span>
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(167,139,250,0.1);color:var(--purple);border:1px solid rgba(167,139,250,0.15)">EML</span>
+              <span style="padding:3px 8px;border-radius:4px;font-size:10px;background:rgba(0,229,160,0.1);color:var(--green);border:1px solid rgba(0,229,160,0.15)">HTML</span>
+            </div>
+          </div>
+
+          <!-- Queued Files -->
+          <div id="td-file-queue" style="margin:0 16px;display:none">
+            <div style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:600">Queued Files</div>
+            <div id="td-file-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+          </div>
+
+          <!-- Upload Results -->
+          <div id="td-upload-results" style="margin:0 16px;display:none">
+            <div style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:600">Extraction Results</div>
+            <div id="td-upload-results-content"></div>
+          </div>
+
+          <!-- Divider -->
+          <div style="border-top:1px solid var(--bdr);margin:16px 0"></div>
+
+          <!-- Text Input Section -->
+          <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;align-items:start;padding:0 16px 16px">
+            <div>
+              <label style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px">Threat Type</label>
+              <select id="td-threat-type" style="width:100%;padding:10px 12px;background:var(--glass);border:1px solid var(--bdr2);border-radius:var(--rs);color:var(--t1);font-size:13px;font-family:var(--sans)">
+                <option value="url">URL / Link</option>
+                <option value="email">Email Body</option>
+                <option value="domain">Domain</option>
+                <option value="phone">Phone Number</option>
+                <option value="raw_text">Raw Text</option>
+              </select>
+              <div style="margin-top:16px">
+                <label style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px">Source Note</label>
+                <input id="td-source-note" placeholder="e.g. Phishing email 2/17" style="width:100%;padding:10px 12px;background:var(--glass);border:1px solid var(--bdr2);border-radius:var(--rs);color:var(--t1);font-size:13px;font-family:var(--sans)">
+              </div>
+              <div style="display:flex;gap:8px;margin-top:16px">
+                <button onclick="submitThreat()" style="flex:1;padding:12px;background:rgba(255,59,92,0.15);color:var(--red);border:1px solid rgba(255,59,92,0.3);border-radius:var(--rs);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:.2s" onmouseover="this.style.background='rgba(255,59,92,0.25)'" onmouseout="this.style.background='rgba(255,59,92,0.15)'">🚀 Hunt Text</button>
+                <button onclick="uploadDroppedFiles()" id="td-upload-btn" style="flex:1;padding:12px;background:rgba(167,139,250,0.15);color:var(--purple);border:1px solid rgba(167,139,250,0.3);border-radius:var(--rs);font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:.2s;display:none" onmouseover="this.style.background='rgba(167,139,250,0.25)'" onmouseout="this.style.background='rgba(167,139,250,0.15)'">📤 Hunt Files</button>
+              </div>
+              <div id="td-status" style="margin-top:12px;font-size:11px;color:var(--t3)"></div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px">Paste Text / URLs</label>
+              <textarea id="td-content" rows="6" placeholder="Paste suspicious URL, email body, phone number, or domain here..." style="width:100%;padding:12px;background:var(--glass);border:1px solid var(--bdr2);border-radius:var(--rs);color:var(--t1);font-size:13px;font-family:var(--mono);resize:vertical;line-height:1.5"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hunt Results -->
+      <div class="glass">
+        <div class="glass-header">
+          <div class="glass-title">🏹 Hunt Operations</div>
+          <span style="font-size:11px;color:var(--t3)" id="td-hunt-count">0 hunts</span>
+        </div>
+        <div class="glass-body" style="padding:0">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="border-bottom:1px solid var(--bdr)">
+                <th style="text-align:left;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Time</th>
+                <th style="text-align:left;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Type</th>
+                <th style="text-align:left;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Content</th>
+                <th style="text-align:center;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Score</th>
+                <th style="text-align:center;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Status</th>
+                <th style="text-align:center;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">URLs</th>
+                <th style="text-align:center;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Traps</th>
+                <th style="text-align:center;padding:10px 14px;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:1px;font-weight:600">Action</th>
+              </tr>
+            </thead>
+            <tbody id="td-hunts-body">
+              <tr><td colspan="8" style="padding:40px;text-align:center;color:var(--t4)">No hunts yet. Submit a threat above to deploy hunters.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Hunt Report Modal -->
+      <div id="td-report-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);align-items:center;justify-content:center">
+        <div style="background:var(--panel);border:1px solid var(--bdr2);border-radius:var(--rl);padding:0;max-width:800px;width:90%;max-height:85vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--bdr)">
+            <div style="font-family:var(--serif);font-size:18px">🏹 Hunt Report</div>
+            <button onclick="closeHuntReport()" style="background:none;border:none;color:var(--t3);font-size:20px;cursor:pointer">✕</button>
+          </div>
+          <div id="td-report-content" style="padding:24px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: HIVE DEFENSE -->
+    <section class="tab-content" id="tab-hive-defense">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+        <h2 style="font-family:var(--serif);font-size:26px">🛡️ Hive Defense Protocol</h2>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="hd-defconBadge" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:16px;font-size:12px;font-weight:600;font-family:var(--mono);letter-spacing:1px;background:rgba(0,229,160,0.1);border:1px solid rgba(0,229,160,0.25);color:var(--green)">DEFCON 5</div>
+          <button class="btn btn-green" onclick="hdRefreshAll()" style="gap:6px">↻ Refresh</button>
+          <span id="hd-lastUpdate" style="font-family:var(--mono);font-size:11px;color:var(--t3)"></span>
+        </div>
+      </div>
+
+      <!-- OVERVIEW STRIP -->
+      <div style="display:flex;gap:2px;border-radius:var(--r);overflow:hidden;margin-bottom:24px;background:var(--glass);border:1px solid var(--bdr)">
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">DEFCON</div><div id="hd-ovDefcon" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--green)">--</div></div>
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Services</div><div id="hd-ovServices" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--blue)">--</div></div>
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Vectors</div><div id="hd-ovVectors" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--purple)">--</div></div>
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Three Cord</div><div id="hd-ovCords" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--gold)">--</div></div>
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Forensic</div><div id="hd-ovForensic" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--cyan)">--</div></div>
+        <div style="flex:1;text-align:center;padding:14px 8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Attackers</div><div id="hd-ovAttackers" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--red)">--</div></div>
+      </div>
+
+      <!-- ROW 1: DEFCON + MIRROR SHELL + GATE -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">⚠ Core Defense Layer</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">🛡 DEFCON Controller</div>
+          <div style="padding:14px 16px" id="hd-defconPanel">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+              <div style="text-align:center"><div id="hd-defconLevel" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--amber)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Level</div></div>
+              <div style="text-align:center"><div id="hd-defconInterval" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--blue)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Heartbeat</div></div>
+            </div>
+            <div style="font-size:11px;color:var(--t2)"><strong>Trigger:</strong> <span id="hd-defconTrigger" style="font-family:var(--mono)">--</span></div>
+            <div style="font-size:11px;color:var(--t2);margin-top:3px"><strong>Mirror:</strong> <span id="hd-defconMirror" style="font-family:var(--mono)">--</span></div>
+            <div style="font-size:11px;color:var(--t2);margin-top:3px"><strong>Last Esc:</strong> <span id="hd-defconEsc" style="font-family:var(--mono);color:var(--t3)">--</span></div>
+          </div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">👁 Mirror Shell</div>
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div style="text-align:center"><div id="hd-mirrorTotal" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--cyan)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Processed</div></div>
+              <div style="text-align:center"><div id="hd-mirrorPassed" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--green)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Passed</div></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="text-align:center"><div id="hd-mirrorAbsorbed" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--amber)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Absorbed</div></div>
+              <div style="text-align:center"><div id="hd-mirrorContained" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--red)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Contained</div></div>
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">⚡ Coherence Gate</div>
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+              <div style="text-align:center"><div id="hd-gateTotal" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--blue)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Evaluated</div></div>
+              <div style="text-align:center"><div id="hd-gatePassed" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--green)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Passed</div></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="text-align:center"><div id="hd-gateSuspicious" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--amber)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Suspicious</div></div>
+              <div style="text-align:center"><div id="hd-gateAbsorbed" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--red)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Absorbed</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 2: CURIOSITY + HEARTBEAT + DRIFT -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">🔍 Behavioral Monitoring</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">🔎 Curiosity Protocol <span id="hd-curiosityCount" style="font-size:10px;background:var(--purpleg);color:var(--purple);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-curiosityPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">💓 Heartbeat Registry</div>
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="text-align:center"><div id="hd-hbRegistered" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--green)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Registered</div></div>
+              <div style="text-align:center"><div id="hd-hbSilent" style="font-family:var(--mono);font-size:24px;font-weight:700;color:var(--red)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Silent</div></div>
+            </div>
+            <div id="hd-hbSilentList" style="margin-top:10px;font-size:10px;color:var(--t3)"></div>
+          </div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">📈 Drift Scores <span id="hd-driftCount" style="font-size:10px;background:var(--amberg);color:var(--amber);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-driftPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- ROW 3: CONTAINMENT + QUARANTINE + GHOST -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">🔒 Containment & Response</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">⛔ Containment Zones <span id="hd-zoneCount" style="font-size:10px;background:var(--redg);color:var(--red);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-containmentPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">🚫 Active Quarantines <span id="hd-quarantineCount" style="font-size:10px;background:var(--amberg);color:var(--amber);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-quarantinePanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">👻 Ghost Swarm <span id="hd-ghostCount" style="font-size:10px;background:var(--purpleg);color:var(--purple);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-ghostPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- ROW 4: HELIX + PROJECTIONS + CONSERVATION -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">🧬 Trinity Helix & Projected Helix</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">🔄 Trinity Helix State</div>
+          <div style="padding:14px 16px">
+            <div style="margin-bottom:8px;font-size:10px;color:var(--t3);text-transform:uppercase">Current Sequence</div>
+            <div id="hd-helixSequence" style="font-family:var(--mono);font-size:15px;color:var(--purple);letter-spacing:2px;margin-bottom:12px">--</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="text-align:center"><div id="hd-helixRotations" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--purple)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Rotations</div></div>
+              <div style="text-align:center"><div id="hd-helixInterval" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--blue)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Interval (ms)</div></div>
+            </div>
+          </div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">🎯 Projected Deployments <span id="hd-projectionCount" style="font-size:10px;background:var(--redg);color:var(--red);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-projectionPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">⚖ Conservation Ledger</div>
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+              <div style="text-align:center"><div id="hd-consEnergy" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--gold)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Total Energy</div></div>
+              <div style="text-align:center"><div id="hd-consValid" style="font-family:var(--mono);font-size:22px;font-weight:700;color:var(--green)">--</div><div style="font-size:10px;color:var(--t3);text-transform:uppercase">Valid</div></div>
+            </div>
+            <div style="font-size:11px;color:var(--t2)"><strong>Violations:</strong> <span id="hd-consViolations" style="font-family:var(--mono)">--</span></div>
+            <div style="font-size:11px;color:var(--t2);margin-top:3px"><strong>Verified:</strong> <span id="hd-consVerified" style="font-family:var(--mono);color:var(--t3)">--</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROW 5: ATTACKERS + FORENSIC LOG -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">🕵 Intelligence & Forensics</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px;display:flex;justify-content:space-between;align-items:center">👹 Attacker Profiles <span id="hd-attackerCount" style="font-size:10px;background:var(--redg);color:var(--red);padding:2px 7px;border-radius:8px;font-weight:600">0</span></div>
+          <div style="padding:14px 16px;max-height:320px;overflow-y:auto" id="hd-attackerPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">📜 Forensic Log</div>
+          <div style="padding:14px 16px;max-height:320px;overflow-y:auto" id="hd-forensicPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- ROW 6: INVERTED + NAMESPACES -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">🔮 Mirror Dimensions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">◆ Inverted Spaces</div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-invertedPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+        <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 16px;border-bottom:1px solid var(--bdr);font-family:var(--serif);font-size:14px">🔧 Mirror Namespaces</div>
+          <div style="padding:14px 16px;max-height:280px;overflow-y:auto" id="hd-namespacesPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- DEFCON HISTORY -->
+      <div style="font-family:var(--serif);font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:8px">📋 DEFCON History</div>
+      <div style="background:var(--glass);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;margin-bottom:24px">
+        <div style="padding:14px 16px;max-height:320px;overflow-y:auto" id="hd-defconHistoryPanel"><div style="color:var(--t3);font-size:12px;text-align:center;padding:20px">Loading...</div></div>
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -1039,6 +1541,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <option value="tiktok">TikTok</option>
         <option value="instagram">Instagram</option>
         <option value="youtube">YouTube</option>
+        <option value="x">X</option>
         <option value="reddit">Reddit</option>
         <option value="linkedin">LinkedIn</option>
         <option value="facebook">Facebook</option>
@@ -1062,6 +1565,20 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 </div>
 
 <script>
+
+function _recoverAuth() {
+  function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+  var hp = new URLSearchParams(location.hash.slice(1));
+  var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+  if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+  if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+  if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+  if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+  if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
+  if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
+  if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+}
+_recoverAuth();
 // =============================================================================
 // API CONFIG
 // =============================================================================
@@ -1070,9 +1587,18 @@ const API = (window.location.hostname === 'localhost' || window.location.hostnam
   ? 'http://localhost:8000'
   : '';
 
+function _authHeaders(contentType) {
+  const h = {};
+  const token = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  if (contentType) h['Content-Type'] = contentType;
+  return h;
+}
+
 async function apiFetch(path) {
   try {
-    const resp = await fetch(`${API}${path}`);
+    const resp = await fetch(`${API}${path}`, { headers: _authHeaders() });
+    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
     if (!resp.ok) throw new Error(`API ${resp.status}`);
     return await resp.json();
   } catch (e) {
@@ -1085,9 +1611,10 @@ async function apiPost(path, body) {
   try {
     const resp = await fetch(`${API}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders('application/json'),
       body: JSON.stringify(body)
     });
+    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
     if (!resp.ok) throw new Error(`API ${resp.status}`);
     return await resp.json();
   } catch (e) {
@@ -1100,9 +1627,10 @@ async function apiPut(path, body) {
   try {
     const resp = await fetch(`${API}${path}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders('application/json'),
       body: JSON.stringify(body)
     });
+    if (resp.status === 401) { window.location.href = 'index.html'; return null; }
     if (!resp.ok) throw new Error(`API ${resp.status}`);
     return await resp.json();
   } catch (e) {
@@ -1116,7 +1644,7 @@ async function apiPut(path, body) {
 // =============================================================================
 const PLATFORM_ICONS = {
   tiktok: '🎵', instagram: '📸', youtube: '🎬', reddit: '🗣️',
-  linkedin: '💼', facebook: '👤', pinterest: '📌'
+  linkedin: '💼', facebook: '👤', pinterest: '📌', x: '𝕏'
 };
 
 const ACTION_BADGES = {
@@ -1205,6 +1733,19 @@ function fmtPct(n) {
   return parseFloat(n).toFixed(1) + '%';
 }
 
+function timeAgo(dateStr) {
+  if (!dateStr) return '';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + 'd ago';
+  return new Date(dateStr).toLocaleDateString();
+}
+
 // =============================================================================
 // NAVIGATION
 // =============================================================================
@@ -1227,13 +1768,14 @@ function switchTab(tabId, el) {
   // Load tab data
   switch (tabId) {
     case 'command-center': loadCommandCenter(); break;
-    case 'platform-grid': loadPlatformGrid(); break;
+    case 'platform-grid': loadPlatformGrid(); loadTokenHealth(); startTokenHealthPolling(); break;
     case 'activity-feed': loadActivityFeed(); break;
     case 'approval-queue': loadApprovalQueue(); break;
     case 'compliance': loadCompliance(); break;
     case 'drip-bridge': loadDripBridge(); break;
     case 'history': loadHistory(); break;
     case 'big-nate-chat': loadChat(); break;
+    case 'go-live': initGoLive(); break;
     case 'expressions-wall': loadExpressions(); break;
     case 'content-queue': loadContentQueueTab(); break;
     case 'growth-dashboard': refreshGrowthData(); break;
@@ -1243,6 +1785,8 @@ function switchTab(tabId, el) {
     case 'showcase': break;
     case 'campaigns': loadCampaigns(); break;
     case 'swarm': loadSwarmOverview(); break;
+    case 'threat-dropbox': refreshHunts(); break;
+    case 'hive-defense': hdRefreshAll(); break;
   }
 }
 
@@ -1262,6 +1806,24 @@ async function loadCommandCenter() {
   loadSessions();
   loadRecentActivity();
   loadPlatformStatus();
+  loadEngineStatus();
+}
+
+async function loadEngineStatus() {
+  const el = document.getElementById('cc-engine-status');
+  if (!el) return;
+  try {
+    const data = await apiFetch('/api/skyeye/engine-status');
+    if (data && data.engine_running) {
+      el.textContent = `Engine: ${data.state || 'running'}`;
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = 'Engine: disabled';
+      el.style.color = 'var(--t3)';
+    }
+  } catch(e) {
+    el.textContent = 'Engine: unknown';
+  }
 }
 
 async function loadPulse() {
@@ -1385,24 +1947,25 @@ async function loadPlatformStatus() {
     return;
   }
 
-  // Build connection lookup
   const connMap = {};
-  if (connData) connData.forEach(c => connMap[c.platform] = c.connection_status);
+  if (connData) connData.forEach(c => connMap[c.platform] = c);
 
-  // Build credential lookup from platform-status endpoint
   const credMap = {};
   if (connData) connData.forEach(c => { credMap[c.platform] = c.has_credentials; });
 
   el.innerHTML = data.map(p => {
     const name = p.name || p.platform;
     const mode = (p.mode || p.control_mode || 'observation').toLowerCase();
-    const connected = connMap[name] === 'connected';
+    const cInfo = connMap[name] || {};
+    const connected = cInfo.connection_status === 'connected';
     const hasCreds = credMap[name] === true;
+    const health = cInfo.health || 'unknown';
+    const daysLeft = cInfo.days_until_expiry;
 
-    // Three states: connected (green), has credentials (amber), no setup (gray)
     let connDot, modeLabel, modeColor;
     if (connected) {
-      connDot = '<span style="width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 4px var(--green)"></span>';
+      const healthColor = health === 'healthy' ? 'var(--green)' : health === 'warning' ? 'var(--amber)' : health === 'expired' ? 'var(--red)' : 'var(--green)';
+      connDot = `<span style="width:6px;height:6px;border-radius:50%;background:${healthColor};display:inline-block;box-shadow:0 0 4px ${healthColor}"></span>`;
       modeLabel = mode.includes('full') ? 'Full Auto' : mode.includes('approval') ? 'Approval' : 'Observe';
       modeColor = mode.includes('full') ? 'var(--green)' : mode.includes('approval') ? 'var(--amber)' : 'var(--t3)';
     } else if (hasCreds) {
@@ -1415,15 +1978,76 @@ async function loadPlatformStatus() {
       modeColor = 'var(--t3)';
     }
 
+    let tokenInfo = '';
+    if (connected && daysLeft !== null && daysLeft !== undefined) {
+      const tkColor = daysLeft > 7 ? 'var(--green)' : daysLeft > 0 ? 'var(--amber)' : 'var(--red)';
+      tokenInfo = `<span style="font-size:10px;color:${tkColor};margin-left:4px">${daysLeft > 0 ? daysLeft + 'd' : 'EXP'}</span>`;
+    }
+
+    const clickable = !connected && (hasCreds || !hasCreds);
+    const clickAttr = clickable ? `onclick="connectPlatform('${name}')" style="cursor:pointer"` : '';
     return `
-      <div class="plat-status-item">
+      <div class="plat-status-item" ${clickAttr}>
         ${connDot}
         <span class="plat-s-icon">${platIcon(name)}</span>
-        <span style="font-size:12px">${name}</span>
-        <span class="plat-s-mode" style="color:${modeColor}">${modeLabel}</span>
+        <span style="font-size:12px">${name}${tokenInfo}</span>
+        <span class="plat-s-mode" style="color:${modeColor}">${connected ? modeLabel : `<span style="text-decoration:underline">${modeLabel}</span>`}</span>
       </div>
     `;
   }).join('');
+}
+
+// Engine control functions
+async function wakeEngine() {
+  const msg = document.getElementById('cc-engine-msg');
+  msg.textContent = 'Waking...';
+  msg.style.color = 'var(--gold)';
+  try {
+    const res = await apiFetch('/api/skyeye/engine/wake', { method: 'POST' });
+    msg.textContent = res ? (res.status || 'Wake signal sent') : 'Wake signal sent';
+    msg.style.color = 'var(--green)';
+    setTimeout(() => { msg.textContent = ''; }, 5000);
+    loadPulse();
+  } catch(e) {
+    msg.textContent = 'Wake failed: ' + (e.message || e);
+    msg.style.color = 'var(--red)';
+  }
+}
+
+async function restEngine() {
+  const msg = document.getElementById('cc-engine-msg');
+  msg.textContent = 'Resting...';
+  try {
+    const res = await apiFetch('/api/skyeye/engine/rest', { method: 'POST' });
+    msg.textContent = res ? (res.status || 'Rest signal sent') : 'Rest signal sent';
+    msg.style.color = 'var(--t3)';
+    setTimeout(() => { msg.textContent = ''; }, 5000);
+    loadPulse();
+  } catch(e) {
+    msg.textContent = 'Rest failed: ' + (e.message || e);
+    msg.style.color = 'var(--red)';
+  }
+}
+
+async function verifyPosts() {
+  const msg = document.getElementById('cc-engine-msg');
+  msg.textContent = 'Verifying posts...';
+  msg.style.color = 'var(--cyan)';
+  try {
+    const res = await apiFetch('/api/skyeye/verify-posts', { method: 'POST' });
+    if (res && res.posts) {
+      const hasUrl = res.posts.filter(p => p.status === 'has_url' || p.status === 'has_external_id').length;
+      msg.textContent = `Verified ${res.verified} posts (${hasUrl} with URLs)`;
+      msg.style.color = hasUrl > 0 ? 'var(--green)' : 'var(--amber)';
+    } else {
+      msg.textContent = 'No recent posts to verify';
+      msg.style.color = 'var(--t3)';
+    }
+    setTimeout(() => { msg.textContent = ''; }, 8000);
+  } catch(e) {
+    msg.textContent = 'Verification failed: ' + (e.message || e);
+    msg.style.color = 'var(--red)';
+  }
 }
 
 // =============================================================================
@@ -1447,7 +2071,7 @@ async function loadPlatformGrid() {
   const tier2 = data.filter(p => (p.tier || 1) === 2);
 
   function renderPlatCard(p) {
-    const currentMode = (p.mode || 'observation_only').toLowerCase();
+    const currentMode = (p.control_mode || p.mode || 'observation').toLowerCase();
     return `
       <div class="plat-card">
         <div class="plat-icon">${platIcon(p.name || p.platform)}</div>
@@ -1457,9 +2081,9 @@ async function loadPlatformGrid() {
         <div class="plat-stat">Posts: <strong style="color:var(--t1)">${fmtNum(p.posts || p.post_count)}</strong></div>
         <div class="plat-mode">
           <select class="sel" style="width:100%" onchange="changePlatformMode('${p.id || p.platform}', this.value)">
-            <option value="full_autonomy" ${currentMode.includes('full') ? 'selected' : ''}>Full Autonomy</option>
-            <option value="approval_required" ${currentMode.includes('approval') ? 'selected' : ''}>Approval Required</option>
-            <option value="observation_only" ${currentMode.includes('observation') ? 'selected' : ''}>Observation Only</option>
+            <option value="full" ${currentMode === 'full' ? 'selected' : ''}>Full Autonomy</option>
+            <option value="approval" ${currentMode === 'approval' ? 'selected' : ''}>Approval Required</option>
+            <option value="observation" ${currentMode === 'observation' ? 'selected' : ''}>Observation Only</option>
           </select>
         </div>
       </div>
@@ -1480,10 +2104,89 @@ async function loadPlatformGrid() {
 }
 
 async function changePlatformMode(platformId, mode) {
-  const result = await apiPut(`/api/skyeye/platforms/${platformId}/mode`, { mode: mode });
+  const modeLabels = { full: 'Full Autonomy', approval: 'Approval Required', observation: 'Observation Only' };
+  const result = await apiPut(`/api/skyeye/platforms/${platformId}/mode`, { mode });
   if (result) {
-    console.log(`Platform ${platformId} mode changed to ${mode}`);
+    const name = result.name || platformId;
+    const label = modeLabels[mode] || mode;
+    if (typeof showToast === 'function') showToast(`${name} → ${label}`, 'success');
+    console.log(`${name} mode set to ${mode}`);
+    loadPlatformGrid();
   }
+}
+
+// =============================================================================
+// TOKEN HEALTH (inside Platform Grid tab)
+// =============================================================================
+let _thInterval = null;
+
+async function loadTokenHealth() {
+  const cards = document.getElementById('th-cards');
+  const summary = document.getElementById('th-summary');
+  const loading = document.getElementById('th-loading');
+  if (!cards) return;
+  if (loading) loading.style.display = 'flex';
+
+  const data = await apiFetch('/api/skyeye/platform-health');
+  if (loading) loading.style.display = 'none';
+
+  if (!data || !data.length) {
+    cards.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--t3)">No platform tokens found</div>';
+    return;
+  }
+
+  const healthColors = { healthy: 'var(--green)', warning: 'var(--amber)', expired: 'var(--red)', unknown: 'var(--t3)' };
+  const healthIcons = { healthy: '🟢', warning: '🟡', expired: '🔴', unknown: '⚪' };
+
+  let greenCount = 0, warnCount = 0, redCount = 0;
+
+  cards.innerHTML = data.map(p => {
+    const h = p.health || 'unknown';
+    if (h === 'healthy') greenCount++;
+    else if (h === 'warning') warnCount++;
+    else if (h === 'expired') redCount++;
+    const color = healthColors[h] || healthColors.unknown;
+    const icon = healthIcons[h] || healthIcons.unknown;
+
+    let expiryText = 'No expiry data';
+    if (p.days_until_expiry !== null && p.days_until_expiry !== undefined) {
+      if (p.days_until_expiry > 0) expiryText = `Expires in ${p.days_until_expiry}d`;
+      else if (p.days_until_expiry === 0) expiryText = 'Expires today';
+      else expiryText = `Expired ${Math.abs(p.days_until_expiry)}d ago`;
+    }
+    if (p.connection_status === 'disconnected') expiryText = 'Not connected';
+
+    const errLine = p.error ? `<div style="font-size:10px;color:var(--red);margin-top:4px;word-break:break-all">${p.error.substring(0,80)}</div>` : '';
+    const showRenew = h === 'expired' || h === 'warning' || p.connection_status === 'disconnected';
+
+    return `
+      <div class="plat-card" style="border-left:3px solid ${color}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span>${icon}</span>
+          <span class="plat-name" style="margin:0">${platIcon(p.platform)} ${p.display_name || p.platform}</span>
+        </div>
+        <div style="font-size:11px;color:${color};margin-bottom:2px">${expiryText}</div>
+        <div style="font-size:10px;color:var(--t3)">${p.account_name || '—'}</div>
+        ${errLine}
+        ${showRenew ? `<button class="btn btn-ghost" style="font-size:10px;padding:3px 10px;margin-top:8px;color:var(--amber);border-color:rgba(255,179,0,.3)" onclick="connectPlatform('${p.platform}')">Renew Token</button>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  if (summary) {
+    const parts = [];
+    if (greenCount) parts.push(`${greenCount} healthy`);
+    if (warnCount) parts.push(`${warnCount} warning`);
+    if (redCount) parts.push(`${redCount} expired`);
+    summary.textContent = parts.length ? `(${parts.join(', ')})` : '';
+  }
+}
+
+function startTokenHealthPolling() {
+  if (_thInterval) clearInterval(_thInterval);
+  _thInterval = setInterval(() => {
+    if (currentTab === 'platform-grid') loadTokenHealth();
+  }, 60000);
 }
 
 // =============================================================================
@@ -1788,6 +2491,111 @@ function scrollChatToBottom() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+async function clearChat(archive) {
+  const label = archive ? 'archive to memory and clear' : 'permanently clear';
+  if (!confirm('Are you sure you want to ' + label + ' all chat history?')) return;
+  try {
+    const res = await fetch(API + '/api/skyeye/chat?archive=' + archive, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.cleared) {
+      const el = document.getElementById('chat-messages');
+      if (el) el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--t3)"><div style="font-size:32px;margin-bottom:12px">💬</div><div style="font-size:14px;margin-bottom:4px">Chat cleared</div><div style="font-size:12px">' + (data.message || '') + '</div></div>';
+      alert(data.message || 'Chat cleared.');
+      if (archive) loadArchiveList();
+    }
+  } catch (e) {
+    alert('Failed to clear chat: ' + e.message);
+  }
+}
+
+let _archivePanelOpen = false;
+let _selectedArchiveId = null;
+
+function toggleArchivePanel() {
+  _archivePanelOpen = !_archivePanelOpen;
+  const sidebar = document.getElementById('archive-sidebar');
+  const btn = document.getElementById('archive-toggle-btn');
+  if (_archivePanelOpen) {
+    sidebar.style.display = 'block';
+    btn.style.background = 'rgba(201,169,98,0.35)';
+    loadArchiveList();
+  } else {
+    sidebar.style.display = 'none';
+    btn.style.background = 'rgba(201,169,98,0.15)';
+  }
+}
+
+async function loadArchiveList() {
+  const listEl = document.getElementById('archive-list');
+  listEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">Loading archives...</div>';
+  closeArchiveViewer();
+  try {
+    const res = await fetch(API + '/api/skyeye/chat/archives');
+    const archives = await res.json();
+    if (!archives || archives.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">No archived conversations yet.<br>Use "Archive & Clear" to save sessions here.</div>';
+      return;
+    }
+    listEl.innerHTML = archives.map(function(a) {
+      var d = a.created_at ? new Date(a.created_at) : null;
+      var dateStr = d ? d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : 'Unknown';
+      var timeStr = d ? d.toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'}) : '';
+      return '<div onclick="viewArchive(\'' + a.entry_id + '\')" style="padding:10px 12px;border-bottom:1px solid var(--bdr);cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background=\'var(--bg2)\'" onmouseleave="this.style.background=\'transparent\'">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+          '<span style="font-size:12px;font-weight:600;color:var(--gold)">' + dateStr + '</span>' +
+          '<span style="font-size:10px;color:var(--t3)">' + (a.message_count || 0) + ' msgs</span>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--t3)">' + timeStr + '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml((a.preview || '').substring(0, 100)) + '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:var(--red);text-align:center;padding:24px;font-size:12px">Failed to load archives: ' + e.message + '</div>';
+  }
+}
+
+async function viewArchive(entryId) {
+  _selectedArchiveId = entryId;
+  var viewer = document.getElementById('archive-viewer');
+  var content = document.getElementById('archive-viewer-content');
+  var title = document.getElementById('archive-viewer-title');
+  var listEl = document.getElementById('archive-list');
+
+  content.textContent = 'Loading...';
+  viewer.style.display = 'block';
+  listEl.style.display = 'none';
+
+  try {
+    var res = await fetch(API + '/api/skyeye/chat/archives/' + entryId);
+    var data = await res.json();
+    var d = data.created_at ? new Date(data.created_at) : null;
+    title.textContent = d ? d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) + ' — ' + (data.message_count || 0) + ' messages' : 'Archived Session';
+    content.textContent = data.transcript || '(empty)';
+  } catch(e) {
+    content.textContent = 'Failed to load: ' + e.message;
+  }
+}
+
+function closeArchiveViewer() {
+  document.getElementById('archive-viewer').style.display = 'none';
+  document.getElementById('archive-list').style.display = 'block';
+  _selectedArchiveId = null;
+}
+
+async function restoreArchive() {
+  if (!_selectedArchiveId) return;
+  if (!confirm('Restore this archived conversation into the active chat? This will add those messages back.')) return;
+  try {
+    var res = await fetch(API + '/api/skyeye/chat/archives/' + _selectedArchiveId + '/restore', { method: 'POST' });
+    var data = await res.json();
+    alert(data.message || 'Restored.');
+    closeArchiveViewer();
+    loadChat();
+  } catch(e) {
+    alert('Failed to restore: ' + e.message);
+  }
+}
+
 async function sendChat() {
   const input = document.getElementById('chat-input');
   const msg = input.value.trim();
@@ -1829,6 +2637,259 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// =============================================================================
+// GO LIVE — Livestream Controls
+// =============================================================================
+
+let _livePolling = null;
+
+async function startLivestream() {
+  var platforms = [];
+  if (document.getElementById('live-platform-x').checked) platforms.push('x');
+  if (document.getElementById('live-platform-youtube').checked) platforms.push('youtube');
+  if (document.getElementById('live-platform-linkedin').checked) platforms.push('linkedin');
+  if (platforms.length === 0) { alert('Select at least one platform'); return; }
+
+  var rtmpKeys = {};
+  platforms.forEach(function(p) {
+    var val = document.getElementById('rtmp-key-' + p);
+    if (val && val.value.trim()) rtmpKeys[p] = val.value.trim();
+  });
+
+  var duration = parseInt(document.getElementById('live-duration').value) || 1800;
+  var topic = document.getElementById('live-topic').value.trim() || null;
+
+  if (!confirm('Go live on ' + platforms.join(', ') + ' for ' + (duration / 60) + ' minutes?')) return;
+
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platforms: platforms, rtmp_keys: rtmpKeys, topic: topic, duration_limit: duration })
+    });
+    var data = await res.json();
+    if (data.error) { alert(data.error); return; }
+    showLiveDashboard();
+    startLivePolling();
+  } catch(e) {
+    alert('Failed to start: ' + e.message);
+  }
+}
+
+async function stopLivestream() {
+  if (!confirm('End the livestream?')) return;
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/stop', { method: 'POST' });
+    var data = await res.json();
+    alert('Stream ended. ' + (data.total_interactions || 0) + ' interactions, ' + (data.unique_viewers || 0) + ' unique viewers.');
+    showLiveConfig();
+    stopLivePolling();
+    loadLiveHistory();
+  } catch(e) {
+    alert('Failed to stop: ' + e.message);
+  }
+}
+
+function showLiveDashboard() {
+  document.getElementById('live-config').style.display = 'none';
+  document.getElementById('live-dashboard').style.display = 'block';
+  var badge = document.getElementById('live-status-badge');
+  badge.textContent = 'LIVE';
+  badge.style.background = 'rgba(239,68,68,0.2)';
+  badge.style.color = '#EF4444';
+  badge.style.borderColor = '#EF4444';
+}
+
+function showLiveConfig() {
+  document.getElementById('live-config').style.display = 'block';
+  document.getElementById('live-dashboard').style.display = 'none';
+  var badge = document.getElementById('live-status-badge');
+  badge.textContent = 'OFFLINE';
+  badge.style.background = 'rgba(120,120,120,0.2)';
+  badge.style.color = 'var(--t3)';
+  badge.style.borderColor = 'var(--bdr)';
+}
+
+function startLivePolling() {
+  _livePolling = setInterval(pollLiveStatusExtended, 3000);
+}
+
+function stopLivePolling() {
+  if (_livePolling) { clearInterval(_livePolling); _livePolling = null; }
+}
+
+async function pollLiveStatus() {
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var data = await res.json();
+    if (data.status !== 'live') { showLiveConfig(); stopLivePolling(); return; }
+    document.getElementById('live-elapsed').textContent = formatTime(data.elapsed_seconds || 0);
+    document.getElementById('live-remaining').textContent = formatTime(data.remaining_seconds || 0);
+    document.getElementById('live-interactions').textContent = data.interactions || 0;
+    document.getElementById('live-viewers').textContent = data.unique_viewers || 0;
+  } catch(e) {}
+}
+
+function formatTime(secs) {
+  var m = Math.floor(secs / 60);
+  var s = Math.floor(secs % 60);
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+async function loadLiveHistory() {
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/history?limit=10');
+    var sessions = await res.json();
+    var el = document.getElementById('live-history');
+    if (!sessions || sessions.length === 0) {
+      el.innerHTML = '<div style="color:var(--t3);text-align:center;padding:12px;font-size:12px">No past sessions yet.</div>';
+      return;
+    }
+    el.innerHTML = sessions.map(function(s) {
+      var d = s.started_at ? new Date(s.started_at) : null;
+      var dateStr = d ? d.toLocaleDateString('en-US', { month:'short', day:'numeric' }) : '?';
+      var timeStr = d ? d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' }) : '';
+      return '<div style="padding:10px 12px;border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:center">' +
+        '<div>' +
+          '<div style="font-size:12px;font-weight:600;color:var(--gold)">' + dateStr + ' ' + timeStr + '</div>' +
+          '<div style="font-size:10px;color:var(--t3);margin-top:2px">' + (s.topic || 'Open mic') + '</div>' +
+        '</div>' +
+        '<div style="text-align:right">' +
+          '<div style="font-size:11px;color:var(--green)">' + (s.total_interactions || 0) + ' interactions</div>' +
+          '<div style="font-size:10px;color:var(--t3)">' + (s.unique_viewers || 0) + ' viewers</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    document.getElementById('live-history').innerHTML = '<div style="color:var(--red);padding:12px;font-size:11px">Failed to load history</div>';
+  }
+}
+
+let _schedulerActive = false;
+
+async function toggleScheduler() {
+  var btn = document.getElementById('scheduler-toggle-btn');
+  var endpoint = _schedulerActive ? '/api/skyeye/livestream/scheduler/stop' : '/api/skyeye/livestream/scheduler/start';
+  try {
+    var res = await fetch(API + endpoint, { method: 'POST' });
+    var data = await res.json();
+    _schedulerActive = data.status === 'started';
+    btn.textContent = _schedulerActive ? 'DISABLE' : 'ENABLE';
+    btn.style.borderColor = _schedulerActive ? 'rgba(239,68,68,0.3)' : 'rgba(0,255,136,0.3)';
+    btn.style.color = _schedulerActive ? 'var(--red)' : 'var(--green)';
+    btn.style.background = _schedulerActive ? 'rgba(239,68,68,0.1)' : 'rgba(0,255,136,0.1)';
+    document.getElementById('scheduler-status').textContent = _schedulerActive
+      ? 'Autonomous mode ACTIVE — Little Nate will schedule and run his own live sessions.'
+      : 'Scheduler is offline.';
+    document.getElementById('scheduler-status').style.color = _schedulerActive ? 'var(--green)' : 'var(--t3)';
+    if (data.scheduled_slots && data.scheduled_slots.length > 0) {
+      showUpcomingSlots(data.scheduled_slots);
+    }
+  } catch(e) { alert('Scheduler error: ' + e.message); }
+}
+
+async function runPreflight() {
+  var el = document.getElementById('preflight-result');
+  el.style.display = 'block';
+  el.textContent = 'Running pre-flight check...';
+  el.style.background = 'rgba(78,205,196,0.1)';
+  el.style.color = 'var(--cyan)';
+  el.style.border = '1px solid rgba(78,205,196,0.3)';
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/preflight', { method: 'POST' });
+    var data = await res.json();
+    if (data.connected) {
+      el.textContent = 'PRE-FLIGHT PASSED — Platform is receiving frames on: ' + (data.platforms || []).join(', ');
+      el.style.background = 'rgba(0,255,136,0.1)';
+      el.style.color = 'var(--green)';
+      el.style.border = '1px solid rgba(0,255,136,0.3)';
+    } else {
+      el.textContent = 'PRE-FLIGHT FAILED — ' + (data.error || 'Platform did not acknowledge. Check RTMP keys.');
+      el.style.background = 'rgba(239,68,68,0.1)';
+      el.style.color = 'var(--red)';
+      el.style.border = '1px solid rgba(239,68,68,0.3)';
+    }
+  } catch(e) {
+    el.textContent = 'Pre-flight error: ' + e.message;
+    el.style.background = 'rgba(239,68,68,0.1)';
+    el.style.color = 'var(--red)';
+    el.style.border = '1px solid rgba(239,68,68,0.3)';
+  }
+}
+
+function showUpcomingSlots(slots) {
+  var el = document.getElementById('scheduler-upcoming');
+  if (!slots || slots.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="font-size:10px;color:var(--gold);margin-bottom:6px;font-weight:600">UPCOMING SCHEDULED</div>' +
+    slots.map(function(s) {
+      var d = new Date(s.time);
+      return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between">' +
+        '<span>' + d.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}) +
+        ' ' + d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) + '</span>' +
+        '<span style="color:var(--t3)">' + (s.topic || 'Open mic') + '</span></div>';
+    }).join('');
+}
+
+async function pollLiveStatusExtended() {
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var data = await res.json();
+    if (data.status !== 'live') {
+      showLiveConfig();
+      stopLivePolling();
+      return;
+    }
+    document.getElementById('live-elapsed').textContent = formatTime(data.elapsed_seconds || 0);
+    document.getElementById('live-remaining').textContent = formatTime(data.remaining_seconds || 0);
+    document.getElementById('live-interactions').textContent = data.interactions || 0;
+    document.getElementById('live-viewers').textContent = data.unique_viewers || 0;
+    var healthDot = document.getElementById('health-dot');
+    var healthText = document.getElementById('health-text');
+    var health = data.stream_health || 'unknown';
+    if (health === 'healthy') {
+      healthDot.style.background = 'var(--green)';
+      healthText.textContent = 'Connected — ' + (data.frames_sent || 0) + ' frames sent';
+      healthText.style.color = 'var(--green)';
+    } else if (health === 'degraded') {
+      healthDot.style.background = '#FFA500';
+      healthText.textContent = 'Degraded — connection unstable';
+      healthText.style.color = '#FFA500';
+    } else if (health === 'dead') {
+      healthDot.style.background = 'var(--red)';
+      healthText.textContent = 'Disconnected — attempting reconnect...';
+      healthText.style.color = 'var(--red)';
+    } else {
+      healthDot.style.background = 'var(--t3)';
+      healthText.textContent = health;
+      healthText.style.color = 'var(--t3)';
+    }
+  } catch(e) {}
+}
+
+async function initGoLive() {
+  try {
+    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var data = await res.json();
+    if (data.status === 'live') { showLiveDashboard(); startLivePolling(); }
+  } catch(e) {}
+  try {
+    var sRes = await fetch(API + '/api/skyeye/livestream/scheduler/config');
+    var sData = await sRes.json();
+    if (sData.scheduled_slots && sData.scheduled_slots.length > 0) {
+      _schedulerActive = true;
+      var btn = document.getElementById('scheduler-toggle-btn');
+      btn.textContent = 'DISABLE';
+      btn.style.borderColor = 'rgba(239,68,68,0.3)';
+      btn.style.color = 'var(--red)';
+      btn.style.background = 'rgba(239,68,68,0.1)';
+      document.getElementById('scheduler-status').textContent = 'Autonomous mode ACTIVE';
+      document.getElementById('scheduler-status').style.color = 'var(--green)';
+      showUpcomingSlots(sData.scheduled_slots);
+    }
+  } catch(e) {}
+  loadLiveHistory();
 }
 
 // =============================================================================
@@ -1943,6 +3004,7 @@ function renderExpressionCard(e, isPendingSection) {
             <option value="tiktok">🎵 TikTok</option>
             <option value="instagram">📸 Instagram</option>
             <option value="youtube">🎬 YouTube</option>
+            <option value="x">𝕏 X</option>
             <option value="reddit">🗣️ Reddit</option>
             <option value="linkedin">💼 LinkedIn</option>
             <option value="facebook">👤 Facebook</option>
@@ -2124,24 +3186,33 @@ async function loadPlatformConnections() {
 }
 
 async function connectPlatform(platform) {
+  // Open the window immediately on user click to avoid popup blocker,
+  // then navigate it once the API responds with the OAuth URL.
+  const authWindow = window.open('about:blank', '_blank', 'width=600,height=700');
+
   const data = await apiPost(`/api/skyeye/platforms/${platform}/connect`, {});
   if (!data) {
+    if (authWindow) authWindow.close();
     alert(`Failed to connect ${platform}. Check the server logs.`);
     return;
   }
 
   if (data.needs_setup) {
-    // No credentials configured — open the developer portal
-    const go = confirm(
-      `${data.message || 'API credentials not configured for ' + platform + '.'}\n\n` +
-      `Open the ${platform} developer portal to create an app?`
-    );
-    if (go && data.developer_portal_url) {
-      window.open(data.developer_portal_url, '_blank');
+    if (authWindow && data.developer_portal_url) {
+      authWindow.location.href = data.developer_portal_url;
+    } else if (authWindow) {
+      authWindow.close();
     }
+    alert(data.message || `API credentials not configured for ${platform}. Set them up in the developer portal.`);
   } else if (data.oauth_url) {
-    // Credentials exist — open OAuth authorization page
-    window.open(data.oauth_url, '_blank', 'width=600,height=700');
+    if (authWindow) {
+      authWindow.location.href = data.oauth_url;
+    } else {
+      // Fallback: navigate current tab if popup was blocked
+      window.location.href = data.oauth_url;
+    }
+  } else {
+    if (authWindow) authWindow.close();
   }
 }
 
@@ -2257,7 +3328,7 @@ async function loadDnsCheck() {
   container.innerHTML = '<div class="loader"><div class="spinner"></div> Checking DNS records...</div>';
 
   try {
-    const data = await apiGet('/api/skyeye/dns-check');
+    const data = await apiFetch('/api/skyeye/dns-check');
     const statusIcon = (s) => s === 'pass' ? '✅' : s === 'warn' ? '⚠️' : '❌';
     const statusColor = (s) => s === 'pass' ? '#4ECDC4' : s === 'warn' ? '#C9A962' : '#EF4444';
 
@@ -2329,10 +3400,15 @@ setInterval(() => {
 
 async function refreshGrowthData() {
   try {
+    const safeFetch = async (url) => {
+      const r = await fetch(url);
+      if (!r.ok) return {};
+      return r.json();
+    };
     const [results, funnel, actions] = await Promise.all([
-      fetch(`${API}/api/marketing/results`).then(r => r.json()),
-      fetch(`${API}/api/marketing/funnel-stats?days=7`).then(r => r.json()),
-      fetch(`${API}/api/marketing/actions?limit=15`).then(r => r.json())
+      safeFetch(`${API}/api/marketing/results`),
+      safeFetch(`${API}/api/marketing/funnel-stats?days=7`),
+      safeFetch(`${API}/api/marketing/actions?limit=15`)
     ]);
 
     // KPI cards
@@ -2379,12 +3455,20 @@ async function refreshGrowthData() {
     }
   } catch(e) {
     console.error('Growth data error:', e);
+    document.getElementById('kpi-prospects').textContent = '0';
+    document.getElementById('kpi-clients').textContent = '0';
+    document.getElementById('kpi-coaches').textContent = '0';
+    document.getElementById('kpi-conversions').textContent = '0';
+    const logEl = document.getElementById('action-log');
+    if (logEl) logEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:30px">Marketing API unavailable</div>';
   }
 }
 
 async function refreshPlaybook() {
   try {
-    const pb = await fetch(`${API}/api/marketing/playbook`).then(r => r.json());
+    const pbRes = await fetch(`${API}/api/marketing/playbook`);
+    if (!pbRes.ok) throw new Error(`HTTP ${pbRes.status}`);
+    const pb = await pbRes.json();
 
     // Render pillars
     const pillarGrid = document.getElementById('pillar-grid');
@@ -2427,7 +3511,8 @@ async function refreshPlaybook() {
     }
 
     // Render pending proposals
-    const proposals = await fetch(`${API}/api/marketing/actions?status=proposed`).then(r => r.json());
+    const proposalsRes = await fetch(`${API}/api/marketing/actions?status=proposed`);
+    const proposals = proposalsRes.ok ? await proposalsRes.json() : [];
     const proposalsList = document.getElementById('proposals-list');
     if (Array.isArray(proposals) && proposals.length > 0) {
       proposalsList.innerHTML = proposals.map(p => `
@@ -2447,6 +3532,12 @@ async function refreshPlaybook() {
     }
   } catch(e) {
     console.error('Playbook error:', e);
+    const pillarGrid = document.getElementById('pillar-grid');
+    if (pillarGrid) pillarGrid.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">Marketing Brain unavailable</div>';
+    const mixGrid = document.getElementById('content-mix-grid');
+    if (mixGrid) mixGrid.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No content mix data</div>';
+    const proposalsList = document.getElementById('proposals-list');
+    if (proposalsList) proposalsList.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No pending proposals</div>';
   }
 }
 
@@ -2490,7 +3581,9 @@ async function runStrategyReview() {
 
 async function refreshFunnelPipeline() {
   try {
-    const data = await fetch(`${API}/api/marketing/funnel-stats?days=7`).then(r => r.json());
+    const funnelRes = await fetch(`${API}/api/marketing/funnel-stats?days=7`);
+    if (!funnelRes.ok) throw new Error(`HTTP ${funnelRes.status}`);
+    const data = await funnelRes.json();
 
     // Overall stats
     const overall = data.overall || {};
@@ -2528,6 +3621,12 @@ async function refreshFunnelPipeline() {
     }
   } catch(e) {
     console.error('Funnel pipeline error:', e);
+    const statsEl = document.getElementById('funnel-stats-detail');
+    if (statsEl) statsEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">Funnel data unavailable</div>';
+    const platEl = document.getElementById('funnel-by-platform');
+    if (platEl) platEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No platform data</div>';
+    const audEl = document.getElementById('funnel-by-audience');
+    if (audEl) audEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No audience data</div>';
   }
 }
 
@@ -2543,10 +3642,12 @@ async function generateQuiz() {
   resultEl.innerHTML = '<div style="padding:16px;color:var(--amber)">Generating quiz with AI...</div>';
 
   try {
-    const data = await fetch(`${API}/api/marketing/quiz-factory/generate`, {
+    const quizRes = await fetch(`${API}/api/marketing/quiz-factory/generate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({audience, topic, question_count: count})
-    }).then(r => r.json());
+    });
+    if (!quizRes.ok) throw new Error(`API returned ${quizRes.status}`);
+    const data = await quizRes.json();
 
     if (data.error) {
       resultEl.innerHTML = `<div style="padding:16px;color:var(--red)">Error: ${data.error}</div>`;
@@ -2572,10 +3673,12 @@ async function generateShowcase(scenario) {
   contentEl.innerHTML = '<div style="padding:20px;color:var(--amber)">Generating showcase...</div>';
 
   try {
-    const data = await fetch(`${API}/api/marketing/showcase/generate`, {
+    const showcaseRes = await fetch(`${API}/api/marketing/showcase/generate`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({scenario, format:'html'})
-    }).then(r => r.json());
+    });
+    if (!showcaseRes.ok) throw new Error(`API returned ${showcaseRes.status}`);
+    const data = await showcaseRes.json();
 
     let html = `<div style="margin-bottom:16px"><h3 style="font-family:var(--serif)">${data.title || scenario}</h3>
       <p style="color:var(--t3)">${data.description || data.narration || ''}</p></div>`;
@@ -2822,7 +3925,9 @@ async function loadCampaignDetail(id) {
       </div>`;
     }).join('');
 
-    const fb = c.audience_feedback || [];
+    let fb = c.audience_feedback || [];
+    if (typeof fb === 'string') { try { fb = JSON.parse(fb); } catch(_) { fb = []; } }
+    if (!Array.isArray(fb)) fb = [];
     const fbEl = document.getElementById('cd-feedback');
     if (fb.length) {
       fbEl.innerHTML = fb.map(f =>
@@ -2860,9 +3965,661 @@ async function campaignAction(action) {
 }
 
 // =============================================================================
+// THREAT DROPBOX
+// =============================================================================
+let _huntPollInterval = null;
+let _pendingFiles = [];
+
+function _tdHeaders(contentType) {
+  const h = {};
+  const token = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  if (contentType) h['Content-Type'] = contentType;
+  return h;
+}
+
+function handleFileDrop(event) {
+  event.preventDefault();
+  const dz = document.getElementById('td-dropzone');
+  dz.style.borderColor = 'var(--bdr2)';
+  dz.style.background = 'rgba(255,255,255,0.01)';
+  const files = event.dataTransfer.files;
+  if (files.length) handleFileSelect(files);
+}
+
+function handleFileSelect(files) {
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    if (f.size > 10 * 1024 * 1024) {
+      alert(`File too large: ${f.name} (max 10 MB)`);
+      continue;
+    }
+    _pendingFiles.push(f);
+  }
+  renderFileQueue();
+}
+
+function removeFile(idx) {
+  _pendingFiles.splice(idx, 1);
+  renderFileQueue();
+}
+
+function renderFileQueue() {
+  const queue = document.getElementById('td-file-queue');
+  const list = document.getElementById('td-file-list');
+  const btn = document.getElementById('td-upload-btn');
+
+  if (_pendingFiles.length === 0) {
+    queue.style.display = 'none';
+    btn.style.display = 'none';
+    return;
+  }
+
+  queue.style.display = 'block';
+  btn.style.display = 'block';
+
+  const typeIcons = {
+    'image/png': '🖼️', 'image/jpeg': '🖼️', 'image/jpg': '🖼️', 'image/gif': '🖼️', 'image/webp': '🖼️',
+    'application/pdf': '📄', 'text/plain': '📝', 'text/html': '🌐', 'text/csv': '📊',
+    'message/rfc822': '📧',
+  };
+
+  list.innerHTML = _pendingFiles.map((f, i) => {
+    const icon = typeIcons[f.type] || '📎';
+    const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(1)+'MB' : (f.size/1024).toFixed(0)+'KB';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.15);border-radius:var(--rs)">
+      <span style="font-size:18px">${icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</div>
+        <div style="font-size:10px;color:var(--t3)">${size} • ${f.type || 'unknown'}</div>
+      </div>
+      <button onclick="removeFile(${i})" style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:4px" title="Remove">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function uploadDroppedFiles() {
+  if (_pendingFiles.length === 0) return;
+
+  const statusEl = document.getElementById('td-status');
+  const resultsEl = document.getElementById('td-upload-results');
+  const resultsContent = document.getElementById('td-upload-results-content');
+  const note = document.getElementById('td-source-note').value.trim();
+
+  statusEl.innerHTML = `<span style="color:var(--amber)">Uploading ${_pendingFiles.length} file(s) and extracting threats...</span>`;
+
+  let allResults = [];
+
+  for (const file of _pendingFiles) {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('source_note', note);
+      formData.append('auto_hunt', 'true');
+
+      const uploadHeaders = {};
+      const tkn = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+      if (tkn) uploadHeaders['Authorization'] = `Bearer ${tkn}`;
+      const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/upload`, {
+        method: 'POST',
+        headers: uploadHeaders,
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      allResults.push({ file: file.name, ...data });
+    } catch (e) {
+      allResults.push({ file: file.name, error: e.message });
+    }
+  }
+
+  // Show extraction results
+  resultsEl.style.display = 'block';
+  resultsContent.innerHTML = allResults.map(r => {
+    if (r.error) {
+      return `<div style="padding:10px;background:rgba(255,59,92,0.06);border:1px solid rgba(255,59,92,0.12);border-radius:var(--rs);margin-bottom:8px;font-size:12px">
+        <span style="color:var(--red)">✕</span> <strong>${r.file}</strong> — ${r.error}
+      </div>`;
+    }
+    const ext = r.extraction || {};
+    return `<div style="padding:10px;background:rgba(0,229,160,0.06);border:1px solid rgba(0,229,160,0.12);border-radius:var(--rs);margin-bottom:8px;font-size:12px">
+      <div style="margin-bottom:6px"><span style="color:var(--green)">✓</span> <strong>${r.file}</strong> — ${r.message || 'Processed'}</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--t2)">
+        ${(ext.urls_found||[]).length ? `<span>🔗 ${ext.urls_found.length} URLs</span>` : ''}
+        ${(ext.emails_found||[]).length ? `<span>📧 ${ext.emails_found.length} emails</span>` : ''}
+        ${(ext.phones_found||[]).length ? `<span>📱 ${ext.phones_found.length} phones</span>` : ''}
+        ${(ext.domains_found||[]).length ? `<span>🌐 ${ext.domains_found.length} domains</span>` : ''}
+      </div>
+      ${(ext.urls_found||[]).length ? `<div style="margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--t3);max-height:60px;overflow:auto">${ext.urls_found.map(u => `<div style="margin:2px 0">${u}</div>`).join('')}</div>` : ''}
+      ${(ext.extracted_preview||'') ? `<div style="margin-top:6px;font-size:10px;color:var(--t4);max-height:40px;overflow:hidden;text-overflow:ellipsis">${ext.extracted_preview.substring(0,200)}</div>` : ''}
+      ${r.hunts_launched ? `<div style="margin-top:6px;color:var(--amber);font-size:11px">🏹 ${r.hunts_launched} hunt(s) launched</div>` : ''}
+    </div>`;
+  }).join('');
+
+  _pendingFiles = [];
+  renderFileQueue();
+  statusEl.innerHTML = `<span style="color:var(--green)">✓ ${allResults.length} file(s) processed</span>`;
+  startHuntPolling();
+  setTimeout(refreshHunts, 1500);
+}
+
+async function detonateUrl(url) {
+  const statusEl = document.getElementById('td-status');
+  statusEl.innerHTML = `<span style="color:var(--purple)">🔬 Deploying shell browser to ${url.substring(0,50)}...</span>`;
+
+  try {
+    const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/detonate`, {
+      method: 'POST',
+      headers: _tdHeaders('application/json'),
+      body: JSON.stringify({ url, inject_decoy: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    statusEl.innerHTML = `<span style="color:var(--green)">Shell browser deployed — ID: ${data.detonation_id || 'pending'}</span>`;
+    startDetonationPolling(data.detonation_id);
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--red)">Detonation failed: ${e.message}</span>`;
+  }
+}
+
+let _detPollInterval = null;
+function startDetonationPolling(detId) {
+  if (_detPollInterval) clearInterval(_detPollInterval);
+  let polls = 0;
+  _detPollInterval = setInterval(async () => {
+    polls++;
+    try {
+      const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/detonation/${detId}`, { headers: _tdHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.status === 'complete' || data.status === 'failed' || data.status === 'blocked') {
+        clearInterval(_detPollInterval);
+        _detPollInterval = null;
+        showDetonationReport(data);
+      }
+    } catch(e) {}
+    if (polls > 30) { clearInterval(_detPollInterval); _detPollInterval = null; }
+  }, 2000);
+}
+
+function showDetonationReport(det) {
+  const modal = document.getElementById('td-report-modal');
+  const content = document.getElementById('td-report-content');
+
+  const scoreColor = det.threat_score >= 60 ? 'var(--red)' : det.threat_score >= 30 ? 'var(--amber)' : 'var(--green)';
+
+  let pagesHtml = '';
+  if (det.pages && det.pages.length) {
+    pagesHtml = det.pages.map((p, i) => {
+      const screenshotHtml = p.has_screenshot
+        ? `<div style="margin-top:10px"><img src="${API}/api/hive-defense/v4/threat-dropbox/detonation/${det.detonation_id}/screenshot/${i}" style="max-width:100%;border:1px solid var(--bdr);border-radius:var(--rs);max-height:400px;object-fit:contain" alt="Screenshot" /></div>`
+        : '';
+
+      const formsHtml = p.forms_found?.length
+        ? `<div style="margin-top:8px"><div style="font-size:10px;color:var(--t3);text-transform:uppercase;margin-bottom:4px">Forms Found (${p.forms_found.length})</div>
+          ${p.forms_found.map(f => `<div style="font-size:11px;color:var(--t2);margin:2px 0">Action: ${f.action||'(self)'} | ${f.fields?.length||0} fields</div>`).join('')}</div>`
+        : '';
+
+      const credsHtml = p.credential_fields?.length
+        ? `<div style="margin-top:8px;padding:8px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.15);border-radius:var(--rs)">
+          <div style="font-size:10px;color:var(--red);text-transform:uppercase;margin-bottom:4px;font-weight:600">⚠️ Credential Harvesting Detected</div>
+          ${p.credential_fields.map(c => `<div style="font-size:11px;color:var(--t1);margin:2px 0">• ${c.type}: <code style="color:var(--amber)">${c.field_name}</code> (${c.input_type})</div>`).join('')}
+          ${p.decoy_submitted ? '<div style="margin-top:6px;color:var(--green);font-size:11px;font-weight:600">✓ Decoy credentials injected — canary active</div>' : ''}</div>`
+        : '';
+
+      return `<div style="background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:14px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--blue);word-break:break-all">${p.final_url || p.url}</div>
+          <div style="font-size:10px;color:var(--t3)">${p.status_code || ''}</div>
+        </div>
+        ${p.title ? `<div style="font-size:13px;color:var(--t1);margin-bottom:6px">${p.title}</div>` : ''}
+        ${p.redirect_chain?.length > 1 ? `<div style="font-size:10px;color:var(--t3);margin-bottom:6px">Redirect chain: ${p.redirect_chain.length} hops</div>` : ''}
+        ${credsHtml}${formsHtml}${screenshotHtml}
+        ${p.error ? `<div style="margin-top:8px;font-size:11px;color:var(--amber)">${p.error}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:24px">
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Threat Score</div>
+        <div style="font-family:var(--mono);font-size:36px;font-weight:700;color:${scoreColor}">${det.threat_score}</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Harvester</div>
+        <div style="font-size:20px;font-weight:700;color:${det.credential_harvester_detected ? 'var(--red)' : 'var(--green)'}">${det.credential_harvester_detected ? 'YES' : 'CLEAN'}</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Decoy Injected</div>
+        <div style="font-size:20px;font-weight:700;color:${det.decoy_injected ? 'var(--purple)' : 'var(--t3)'}">${det.decoy_injected ? 'ACTIVE' : 'N/A'}</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;margin-bottom:6px">Pages Visited</div>
+        <div style="font-family:var(--mono);font-size:20px;color:var(--t1)">${det.pages_visited || 0}</div>
+      </div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:12px;margin-bottom:20px;font-size:13px;color:var(--t1)">${det.threat_summary || ''}</div>
+
+    ${det.harvested_data_types?.length ? `<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--red);text-transform:uppercase;margin-bottom:8px;font-weight:600">Data Types Targeted by Attacker</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${det.harvested_data_types.map(t => `<span style="padding:4px 10px;border-radius:4px;font-size:11px;background:rgba(255,59,92,0.1);color:var(--red);border:1px solid rgba(255,59,92,0.2);text-transform:uppercase">${t}</span>`).join('')}</div></div>` : ''}
+
+    ${pagesHtml ? `<div style="margin-bottom:16px"><div style="font-size:12px;color:var(--t3);text-transform:uppercase;margin-bottom:12px;font-weight:600">Page Captures</div>${pagesHtml}</div>` : ''}
+
+    <div style="border-top:1px solid var(--bdr);padding-top:12px;font-size:10px;color:var(--t4);display:flex;gap:20px">
+      <span>Detonation ID: ${det.detonation_id}</span>
+      <span>Duration: ${det.duration_seconds || 0}s</span>
+      <span>Redirects: ${det.total_redirects || 0}</span>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+}
+
+async function submitThreat() {
+  const type = document.getElementById('td-threat-type').value;
+  const content = document.getElementById('td-content').value.trim();
+  const note = document.getElementById('td-source-note').value.trim();
+  const statusEl = document.getElementById('td-status');
+
+  if (!content) {
+    statusEl.innerHTML = '<span style="color:var(--red)">Content is required</span>';
+    return;
+  }
+
+  statusEl.innerHTML = '<span style="color:var(--amber)">Deploying hunters...</span>';
+
+  try {
+    const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/submit`, {
+      method: 'POST',
+      headers: _tdHeaders('application/json'),
+      body: JSON.stringify({ threat_type: type, content, source_note: note, auto_hunt: true }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    statusEl.innerHTML = `<span style="color:var(--green)">Hunters deployed — Hunt ID: ${data.hunt_id || 'pending'}</span>`;
+    document.getElementById('td-content').value = '';
+    document.getElementById('td-source-note').value = '';
+    startHuntPolling();
+    setTimeout(refreshHunts, 1000);
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--red)">Failed: ${e.message}</span>`;
+  }
+}
+
+async function refreshHunts() {
+  try {
+    const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/hunts`, { headers: _tdHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const hunts = data.hunts || [];
+    renderHunts(hunts);
+
+    const activeCount = hunts.filter(h => h.status === 'hunting' || h.status === 'queued').length;
+    const badge = document.getElementById('hunt-active-count');
+    if (activeCount > 0) {
+      badge.textContent = activeCount;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+      stopHuntPolling();
+    }
+    document.getElementById('td-hunt-count').textContent = `${hunts.length} hunt${hunts.length !== 1 ? 's' : ''}`;
+  } catch (e) {
+    console.warn('Hunt refresh failed:', e);
+  }
+}
+
+function renderHunts(hunts) {
+  const tbody = document.getElementById('td-hunts-body');
+  if (!hunts.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:40px;text-align:center;color:var(--t4)">No hunts yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = hunts.map(h => {
+    const time = h.submitted_at ? new Date(h.submitted_at * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '--';
+    const date = h.submitted_at ? new Date(h.submitted_at * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    const typeIcon = { url: '🔗', email: '📧', phone: '📱', domain: '🌐', raw_text: '📝' }[h.threat_type] || '❓';
+    const statusColor = { complete: 'var(--green)', hunting: 'var(--amber)', queued: 'var(--blue)', failed: 'var(--red)' }[h.status] || 'var(--t3)';
+    const statusBg = { complete: 'var(--greeng)', hunting: 'var(--amberg)', queued: 'var(--blueg)', failed: 'var(--redg)' }[h.status] || 'transparent';
+    const scoreColor = h.phishing_score >= 75 ? 'var(--red)' : h.phishing_score >= 40 ? 'var(--amber)' : 'var(--green)';
+
+    return `<tr style="border-bottom:1px solid var(--bdr);transition:.2s" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+      <td style="padding:10px 14px"><div style="color:var(--t2);font-size:12px">${date}</div><div style="color:var(--t3);font-size:10px">${time}</div></td>
+      <td style="padding:10px 14px"><span style="margin-right:4px">${typeIcon}</span><span style="color:var(--t2);text-transform:uppercase;font-size:10px;letter-spacing:0.5px">${h.threat_type}</span></td>
+      <td style="padding:10px 14px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t2);font-family:var(--mono);font-size:11px" title="${(h.submitted_content||'').replace(/"/g,'&quot;')}">${h.submitted_content || '--'}</td>
+      <td style="padding:10px 14px;text-align:center"><span style="color:${scoreColor};font-family:var(--mono);font-weight:600">${h.phishing_score || 0}</span></td>
+      <td style="padding:10px 14px;text-align:center"><span style="display:inline-block;padding:3px 10px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;background:${statusBg};color:${statusColor}">${h.status}</span></td>
+      <td style="padding:10px 14px;text-align:center;color:var(--t2);font-family:var(--mono)">${h.urls_found || 0}</td>
+      <td style="padding:10px 14px;text-align:center;color:var(--t2);font-family:var(--mono)">${h.traps_deployed || 0}</td>
+      <td style="padding:10px 14px;text-align:center">${h.status === 'complete' || h.status === 'failed' ? `<button onclick="viewHuntReport('${h.hunt_id}')" class="btn" style="padding:4px 10px;font-size:10px;background:rgba(255,255,255,0.04);color:var(--t2);border:1px solid var(--bdr)">View</button>` : '<span style="color:var(--t4);font-size:10px">...</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function viewHuntReport(huntId) {
+  try {
+    const res = await fetch(`${API}/api/hive-defense/v4/threat-dropbox/hunt/${huntId}`, { headers: _tdHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const report = await res.json();
+    renderHuntReport(report);
+  } catch (e) {
+    console.warn('Failed to load hunt report:', e);
+  }
+}
+
+function renderHuntReport(r) {
+  const modal = document.getElementById('td-report-modal');
+  const content = document.getElementById('td-report-content');
+
+  const scoreColor = r.phishing_score >= 75 ? 'var(--red)' : r.phishing_score >= 40 ? 'var(--amber)' : 'var(--green)';
+  const verdictColor = r.phishing_verdict === 'MALICIOUS' ? 'var(--red)' : r.phishing_verdict === 'SUSPICIOUS' ? 'var(--amber)' : 'var(--green)';
+
+  let reconHTML = '';
+  if (r.recon_results && r.recon_results.length) {
+    reconHTML = r.recon_results.map(rc => `
+      <div style="background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:14px;margin-bottom:10px">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--blue);margin-bottom:8px;word-break:break-all">${rc.domain || rc.url}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px">
+          ${rc.ip_addresses?.length ? `<div><span style="color:var(--t3)">IPs:</span> <span style="color:var(--t2);font-family:var(--mono)">${rc.ip_addresses.join(', ')}</span></div>` : ''}
+          ${rc.server_software ? `<div><span style="color:var(--t3)">Server:</span> <span style="color:var(--t2)">${rc.server_software}</span></div>` : ''}
+          ${rc.tls_issuer ? `<div><span style="color:var(--t3)">TLS Issuer:</span> <span style="color:var(--t2)">${rc.tls_issuer}</span></div>` : ''}
+          ${rc.tls_expiry ? `<div><span style="color:var(--t3)">Cert Expiry:</span> <span style="color:var(--t2)">${rc.tls_expiry}</span></div>` : ''}
+          ${rc.whois_registrar ? `<div><span style="color:var(--t3)">Registrar:</span> <span style="color:var(--t2)">${rc.whois_registrar}</span></div>` : ''}
+          ${rc.whois_creation_date ? `<div><span style="color:var(--t3)">Domain Age:</span> <span style="color:var(--t2)">${rc.whois_creation_date}</span></div>` : ''}
+        </div>
+        ${rc.redirect_chain?.length ? `<div style="margin-top:8px;font-size:10px;color:var(--t3)">Redirect chain (${rc.redirect_chain.length} hops):<div style="font-family:var(--mono);color:var(--t4);margin-top:4px">${rc.redirect_chain.map((u,i) => `${i+1}. ${u}`).join('<br>')}</div></div>` : ''}
+        ${rc.error ? `<div style="margin-top:8px;font-size:10px;color:var(--amber)">${rc.error}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  let trapsHTML = '';
+  if (r.traps_deployed && r.traps_deployed.length) {
+    trapsHTML = r.traps_deployed.map(t => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,59,92,0.06);border:1px solid rgba(255,59,92,0.12);border-radius:var(--rs);font-size:11px">
+        <span style="color:var(--red)">⚡</span>
+        <span style="color:var(--t2);text-transform:uppercase;font-weight:600;font-size:10px">${t.type}</span>
+        <span style="color:var(--t3)">${t.seed_type || t.contents || ''}</span>
+        <span style="margin-left:auto;color:var(--t4);font-family:var(--mono);font-size:9px">${t.seed_id || t.package_id || ''}</span>
+      </div>
+    `).join('');
+  }
+
+  let profileHTML = '';
+  const p = r.attacker_profile || {};
+  if (p.domains?.length || p.ip_addresses?.length) {
+    profileHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:11px">
+        ${p.domains?.length ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">Domains</div><div style="color:var(--t2);font-family:var(--mono)">${p.domains.join(', ')}</div></div>` : ''}
+        ${p.ip_addresses?.length ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">IP Addresses</div><div style="color:var(--t2);font-family:var(--mono)">${p.ip_addresses.join(', ')}</div></div>` : ''}
+        ${p.registrars?.length ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">Registrars</div><div style="color:var(--t2)">${p.registrars.join(', ')}</div></div>` : ''}
+        ${p.tls_issuers?.length ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">TLS Issuers</div><div style="color:var(--t2)">${p.tls_issuers.join(', ')}</div></div>` : ''}
+        ${p.server_software?.length ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">Server Software</div><div style="color:var(--t2)">${p.server_software.join(', ')}</div></div>` : ''}
+        ${p.redirect_depth ? `<div><div style="color:var(--t3);font-size:10px;text-transform:uppercase;margin-bottom:4px">Max Redirect Depth</div><div style="color:var(--t2)">${p.redirect_depth} hops</div></div>` : ''}
+      </div>
+    `;
+  }
+
+  content.innerHTML = `
+    <!-- Summary -->
+    <div style="display:flex;gap:20px;margin-bottom:24px">
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Phishing Score</div>
+        <div style="font-family:var(--mono);font-size:36px;font-weight:700;color:${scoreColor}">${r.phishing_score || 0}</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Verdict</div>
+        <div style="font-size:20px;font-weight:700;color:${verdictColor}">${r.phishing_verdict || 'N/A'}</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Duration</div>
+        <div style="font-family:var(--mono);font-size:20px;color:var(--t1)">${r.duration_seconds || 0}s</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,0.02);border:1px solid var(--bdr);border-radius:var(--rs);padding:16px;text-align:center">
+        <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Traps Deployed</div>
+        <div style="font-family:var(--mono);font-size:20px;color:var(--red)">${(r.traps_deployed || []).length}</div>
+      </div>
+    </div>
+
+    <!-- Attacker Profile -->
+    ${profileHTML ? `<div style="margin-bottom:24px"><div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-weight:600">Attacker Infrastructure Profile</div>${profileHTML}</div>` : ''}
+
+    <!-- Recon Results -->
+    ${reconHTML ? `<div style="margin-bottom:24px"><div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-weight:600">Reconnaissance Results (${r.recon_results.length})</div>${reconHTML}</div>` : ''}
+
+    <!-- Deployed Traps -->
+    ${trapsHTML ? `<div style="margin-bottom:24px"><div style="font-size:12px;color:var(--t3);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-weight:600">Counter-Intelligence Deployed</div><div style="display:flex;flex-direction:column;gap:6px">${trapsHTML}</div></div>` : ''}
+
+    <!-- Detonate URLs -->
+    ${(r.urls_found || []).length ? `<div style="margin-bottom:24px">
+      <div style="font-size:12px;color:var(--purple);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;font-weight:600">🔬 Detonate in Shell Browser</div>
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px">Click to visit each URL in a sandboxed headless browser. Captures screenshots, forms, credential harvesting attempts, and injects decoy data.</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${r.urls_found.map(u => `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.12);border-radius:var(--rs)">
+          <div style="flex:1;font-family:var(--mono);font-size:11px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${u}">${u}</div>
+          <button onclick="closeHuntReport();detonateUrl('${u.replace(/'/g,"\\'")}')" style="padding:4px 12px;background:rgba(167,139,250,0.15);color:var(--purple);border:1px solid rgba(167,139,250,0.3);border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap">🔬 Detonate</button>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Meta -->
+    <div style="border-top:1px solid var(--bdr);padding-top:16px;font-size:10px;color:var(--t4);display:flex;gap:20px">
+      <span>Hunt ID: ${r.hunt_id}</span>
+      <span>Source: ${r.source}</span>
+      <span>Type: ${r.threat_type}</span>
+      <span>URLs Found: ${(r.urls_found || []).length}</span>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+}
+
+function closeHuntReport() {
+  document.getElementById('td-report-modal').style.display = 'none';
+}
+
+function startHuntPolling() {
+  if (_huntPollInterval) return;
+  _huntPollInterval = setInterval(refreshHunts, 15000);
+}
+
+function stopHuntPolling() {
+  if (_huntPollInterval) {
+    clearInterval(_huntPollInterval);
+    _huntPollInterval = null;
+  }
+}
+
+// =============================================================================
+// HIVE DEFENSE TAB
+// =============================================================================
+function _hdTs(iso) { if (!iso) return '--'; const d = new Date(iso); return d.toLocaleDateString() + ' ' + d.toLocaleTimeString(); }
+
+async function hdLoadOverview() {
+  const data = await apiFetch('/api/hive-defense/overview');
+  if (!data) return;
+  const $ = id => document.getElementById(id);
+  $('hd-ovDefcon').textContent = data.defcon_level;
+  $('hd-ovServices').textContent = data.services_loaded;
+  $('hd-ovVectors').textContent = data.attack_vectors_defended;
+  $('hd-ovCords').textContent = data.three_cord_coverage;
+  $('hd-ovForensic').textContent = (data.counts||{}).forensic_records||0;
+  $('hd-ovAttackers').textContent = (data.counts||{}).attacker_profiles||0;
+  const badge = $('hd-defconBadge');
+  const lvl = parseInt(data.defcon_level)||5;
+  const colors = {5:'rgba(0,229,160',4:'rgba(56,189,248',3:'rgba(255,184,0',2:'rgba(255,140,0',1:'rgba(255,59,92'};
+  const c = colors[lvl]||colors[5];
+  badge.style.background = c+',0.1)'; badge.style.borderColor = c+',0.25)'; badge.style.color = c.replace('rgba','rgb').replace(/,[^)]+/,'')+')';
+  badge.textContent = 'DEFCON '+lvl;
+}
+async function hdLoadDefcon() {
+  const data = await apiFetch('/api/hive-defense/defcon'); if (!data) return;
+  const $ = id => document.getElementById(id);
+  const lvl = parseInt(data.level)||5;
+  $('hd-defconLevel').textContent = lvl;
+  $('hd-defconInterval').textContent = (data.heartbeat_interval||0)+'s';
+  $('hd-defconTrigger').textContent = data.trigger_reason||'None';
+  $('hd-defconMirror').textContent = data.mirror_mode||'standard';
+  $('hd-defconEsc').textContent = _hdTs(data.last_escalation);
+  const el = $('hd-defconLevel'); el.style.color = lvl>=4?'var(--green)':lvl===3?'var(--amber)':'var(--red)';
+}
+async function hdLoadMirror() {
+  const data = await apiFetch('/api/hive-defense/mirror/stats'); if (!data) return;
+  const $ = id => document.getElementById(id);
+  $('hd-mirrorTotal').textContent = data.total_processed||0;
+  $('hd-mirrorPassed').textContent = data.passed||0;
+  $('hd-mirrorAbsorbed').textContent = data.absorbed||0;
+  $('hd-mirrorContained').textContent = data.contained||0;
+}
+async function hdLoadGate() {
+  const data = await apiFetch('/api/hive-defense/gate/metrics'); if (!data) return;
+  const $ = id => document.getElementById(id);
+  $('hd-gateTotal').textContent = data.total||0;
+  $('hd-gatePassed').textContent = data.passed||0;
+  $('hd-gateSuspicious').textContent = data.suspicious||0;
+  $('hd-gateAbsorbed').textContent = data.absorbed||0;
+}
+async function hdLoadCuriosity() {
+  const data = await apiFetch('/api/hive-defense/curiosity/entities'); if (!data) return;
+  document.getElementById('hd-curiosityCount').textContent = (data.entities||[]).length;
+  const p = document.getElementById('hd-curiosityPanel');
+  if (!data.entities||data.entities.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No entities under observation</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Entity</th><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Level</th><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Events</th></tr>';
+  data.entities.forEach(e=>{const c=e.level==='alarm'?'red':e.level==='concern'?'amber':'blue';h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${e.entity_id.substring(0,8)}...</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--${c}g);color:var(--${c});padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${e.level}</span></td><td style="padding:5px 6px;color:var(--t2);border-bottom:1px solid var(--bdr)">${e.events_count}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadHeartbeat() {
+  const data = await apiFetch('/api/hive-defense/heartbeat/registry'); if (!data) return;
+  const $ = id => document.getElementById(id);
+  $('hd-hbRegistered').textContent = data.registered_entities||0;
+  $('hd-hbSilent').textContent = data.silent_entities||0;
+  const list = $('hd-hbSilentList');
+  if (data.silent_ids&&data.silent_ids.length>0) list.innerHTML='<strong style="color:var(--red)">Silent:</strong> '+data.silent_ids.map(id=>`<span style="font-family:var(--mono)">${id.substring(0,8)}</span>`).join(', ');
+  else list.innerHTML='<span style="color:var(--green)">All entities pulsing normally</span>';
+}
+async function hdLoadDrift() {
+  const data = await apiFetch('/api/hive-defense/drift/scores?min_magnitude=0.1'); if (!data) return;
+  document.getElementById('hd-driftCount').textContent = (data.scores||[]).length;
+  const p = document.getElementById('hd-driftPanel');
+  if (!data.scores||data.scores.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No significant drift</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Entity</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Score</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Data</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Comm</th></tr>';
+  data.scores.forEach(s=>{const c=s.combined>=0.5?'red':s.combined>=0.3?'amber':'blue';h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${s.entity_id.substring(0,8)}...</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--${c}g);color:var(--${c});padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${s.combined.toFixed(3)}</span></td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${(s.data_access||0).toFixed(2)}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${(s.communication||0).toFixed(2)}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadContainment() {
+  const data = await apiFetch('/api/hive-defense/containment/zones'); if (!data) return;
+  document.getElementById('hd-zoneCount').textContent = (data.zones||[]).length;
+  const p = document.getElementById('hd-containmentPanel');
+  if (!data.zones||data.zones.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No active containment zones</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Zone</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Status</th></tr>';
+  data.zones.forEach(z=>{const id=typeof z==='string'?z:(z.id||z.zone_id||JSON.stringify(z));h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${String(id).substring(0,12)}...</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--redg);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Active</span></td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadQuarantine() {
+  const data = await apiFetch('/api/hive-defense/quarantine/active'); if (!data) return;
+  document.getElementById('hd-quarantineCount').textContent = (data.quarantines||[]).length;
+  const p = document.getElementById('hd-quarantinePanel');
+  if (!data.quarantines||data.quarantines.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No fibres in quarantine</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Fibre</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">HB</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Ring</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Started</th></tr>';
+  data.quarantines.forEach(q=>{const ok=v=>v?'<span style="color:var(--green)">OK</span>':'<span style="color:var(--red)">FAIL</span>';h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${q.fibre_id.substring(0,8)}...</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)">${ok(q.heartbeat_ok)}</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)">${ok(q.ring_ok)}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--bdr)">${_hdTs(q.started_at)}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadGhosts() {
+  const data = await apiFetch('/api/hive-defense/ghost/missions'); if (!data) return;
+  document.getElementById('hd-ghostCount').textContent = (data.missions||[]).length;
+  const p = document.getElementById('hd-ghostPanel');
+  if (!data.missions||data.missions.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No active ghost missions</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Zone</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Ghosts</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Status</th></tr>';
+  data.missions.forEach(m=>{const c=m.status==='active'?'green':m.status==='completed'?'blue':'amber';h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${(m.zone||'').substring(0,10)}</td><td style="padding:5px 6px;color:var(--t2);border-bottom:1px solid var(--bdr)">${m.ghosts}</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--${c}g);color:var(--${c});padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${m.status}</span></td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadHelix() {
+  const data = await apiFetch('/api/hive-defense/helix/state'); if (!data) return;
+  document.getElementById('hd-helixSequence').textContent = (data.current_sequence||[]).join(' ');
+  document.getElementById('hd-helixRotations').textContent = data.rotation_count||0;
+  document.getElementById('hd-helixInterval').textContent = (data.rotation_interval_ms||0).toFixed(0);
+}
+async function hdLoadProjections() {
+  const data = await apiFetch('/api/hive-defense/projection/deployments'); if (!data) return;
+  document.getElementById('hd-projectionCount').textContent = (data.deployments||[]).length;
+  const p = document.getElementById('hd-projectionPanel');
+  if (!data.deployments||data.deployments.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No active projections</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">ID</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Status</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Accuracy</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Intercepts</th></tr>';
+  data.deployments.forEach(d=>{h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${d.id.substring(0,8)}...</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--redg);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${d.status}</span></td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${((d.mirror_accuracy||0)*100).toFixed(1)}%</td><td style="padding:5px 6px;color:var(--t2);border-bottom:1px solid var(--bdr)">${d.commands_intercepted||0}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadConservation() {
+  const data = await apiFetch('/api/hive-defense/conservation/latest'); if (!data||!data.entry) return;
+  const e = data.entry;
+  document.getElementById('hd-consEnergy').textContent = (e.total_energy||0).toFixed(2);
+  document.getElementById('hd-consValid').textContent = e.is_valid?'YES':'NO';
+  document.getElementById('hd-consValid').style.color = e.is_valid?'var(--green)':'var(--red)';
+  document.getElementById('hd-consViolations').textContent = e.violations||0;
+  document.getElementById('hd-consVerified').textContent = _hdTs(e.verified_at);
+}
+async function hdLoadAttackers() {
+  const data = await apiFetch('/api/hive-defense/attackers/profiles'); if (!data) return;
+  document.getElementById('hd-attackerCount').textContent = (data.profiles||[]).length;
+  const p = document.getElementById('hd-attackerPanel');
+  if (!data.profiles||data.profiles.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No known attacker profiles</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Profile</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Sophistication</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">First Seen</th></tr>';
+  data.profiles.forEach(pr=>{h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${pr.id.substring(0,8)}...</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${pr.sophistication||'unknown'}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--bdr)">${_hdTs(pr.first_seen)}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadForensics() {
+  const data = await apiFetch('/api/hive-defense/forensics/recent?limit=30'); if (!data) return;
+  const p = document.getElementById('hd-forensicPanel');
+  if (!data.records||data.records.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No forensic records</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Type</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Source</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Hash</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Time</th></tr>';
+  data.records.forEach(r=>{h+=`<tr><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--purpleg);color:var(--purple);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${r.event_type}</span></td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${(r.source||'--').substring(0,10)}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--bdr)">${r.chain_hash||'--'}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--bdr)">${_hdTs(r.timestamp)}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadInverted() {
+  const data = await apiFetch('/api/hive-defense/helix/inverted-spaces'); if (!data) return;
+  const p = document.getElementById('hd-invertedPanel');
+  if (!data.spaces||data.spaces.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No active inverted spaces</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">ID</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Entry Gate</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Interactions</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Tripwires</th></tr>';
+  data.spaces.forEach(s=>{h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${s.id.substring(0,8)}...</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${s.entry_gate||'--'}</td><td style="padding:5px 6px;color:var(--t2);border-bottom:1px solid var(--bdr)">${s.interactions}</td><td style="padding:5px 6px;border-bottom:1px solid var(--bdr)"><span style="background:var(--redg);color:var(--red);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${s.tripwires}</span></td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadNamespaces() {
+  const data = await apiFetch('/api/hive-defense/mirror/namespaces'); if (!data) return;
+  const p = document.getElementById('hd-namespacesPanel');
+  if (!data.namespaces||data.namespaces.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No active mirror namespaces</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Namespace</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Status</th></tr>';
+  data.namespaces.forEach(ns=>{const label=typeof ns==='string'?ns:(ns.id||ns.namespace_id||JSON.stringify(ns));h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">${String(label).substring(0,20)}</td><td style="padding:5px 6px;color:var(--t3);border-bottom:1px solid var(--bdr)">Active</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdLoadDefconHistory() {
+  const data = await apiFetch('/api/hive-defense/defcon/history?limit=20'); if (!data) return;
+  const p = document.getElementById('hd-defconHistoryPanel');
+  if (!data.history||data.history.length===0) { p.innerHTML='<div style="color:var(--t3);font-size:12px;text-align:center;padding:16px">No DEFCON transitions recorded</div>'; return; }
+  let h='<table style="width:100%;border-collapse:collapse;font-size:11px"><tr><th style="text-align:left;padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">From</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">To</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Reason</th><th style="padding:6px;color:var(--t3);border-bottom:1px solid var(--bdr2)">Time</th></tr>';
+  data.history.forEach(hi=>{h+=`<tr><td style="padding:5px 6px;font-family:var(--mono);color:var(--t2);border-bottom:1px solid var(--bdr)">DEFCON ${hi.from_level}</td><td style="padding:5px 6px;font-family:var(--mono);font-weight:600;color:var(--t1);border-bottom:1px solid var(--bdr)">DEFCON ${hi.to_level}</td><td style="padding:5px 6px;color:var(--t2);border-bottom:1px solid var(--bdr)">${hi.reason||'--'}</td><td style="padding:5px 6px;font-family:var(--mono);color:var(--t3);border-bottom:1px solid var(--bdr)">${_hdTs(hi.timestamp)}</td></tr>`;});
+  p.innerHTML=h+'</table>';
+}
+async function hdRefreshAll() {
+  const u = document.getElementById('hd-lastUpdate');
+  if (u) u.textContent = 'Refreshing...';
+  await Promise.all([hdLoadOverview(),hdLoadDefcon(),hdLoadMirror(),hdLoadGate(),hdLoadCuriosity(),hdLoadHeartbeat(),hdLoadDrift(),hdLoadContainment(),hdLoadQuarantine(),hdLoadGhosts(),hdLoadHelix(),hdLoadProjections(),hdLoadConservation(),hdLoadAttackers(),hdLoadForensics(),hdLoadInverted(),hdLoadNamespaces(),hdLoadDefconHistory()]);
+  if (u) u.textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// =============================================================================
 // INIT
 // =============================================================================
 document.addEventListener('DOMContentLoaded', () => {
+  const storedToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+  if (!storedToken) {
+    window.location.href = 'index.html';
+    return;
+  }
+  if (!sessionStorage.getItem('token') && storedToken) {
+    try { sessionStorage.setItem('token', storedToken); } catch(e) {}
+  }
   loadCommandCenter();
 });
 </script>
