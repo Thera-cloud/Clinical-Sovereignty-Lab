@@ -43,8 +43,8 @@ def _log_auth_attempt(request: Request, user_id: str, method: str, success: bool
         db_pool = getattr(request.app.state, "db_pool", None)
         if db_pool:
             asyncio.ensure_future(_write_auth_audit(db_pool, user_id, method, success, ip, endpoint, reason))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Auth audit dispatch failed: %s", e)
 
 
 async def _write_auth_audit(
@@ -61,14 +61,17 @@ async def _write_auth_audit(
             f"method={method}" + (f" reason={reason}" if reason else ""),
         )
     except Exception as exc:
-        logger.debug("Auth audit write failed (non-fatal): %s", exc)
+        logger.warning("Auth audit write failed (non-fatal): %s", exc)
 
 
-async def get_current_user(
+async def get_current_user_id(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
-    """Extract authenticated user_id.
+    """Extract authenticated user_id (returns str, not Dict).
+
+    For the Dict-returning variant used by require_admin/require_coach,
+    see app.services.api_server.get_current_user.
 
     Priority:
     1. JWT Bearer token (production)
@@ -88,11 +91,12 @@ async def get_current_user(
             )
             uid = payload.get("user_id") or payload.get("sub")
             if uid:
+                request.state.user_id = str(uid)
                 _log_auth_attempt(request, str(uid), "jwt_bearer", True)
                 return str(uid)
         except Exception as e:
             _log_auth_attempt(request, "", "jwt_bearer", False, reason=str(e)[:100])
-            logger.debug("JWT decode failed, trying bridge token: %s", e)
+            logger.warning("JWT decode failed, trying bridge token: %s", e)
 
         # 1b. Try bridge session token via Redis
         if credentials and credentials.credentials:
@@ -115,14 +119,17 @@ async def get_current_user(
                 if raw:
                     profile = json.loads(raw) if isinstance(raw, str) else raw
                     uid = profile.get("hardware_id") or profile.get("name") or "bridge_user"
+                    request.state.user_id = str(uid)
+                    request.state.user_role = profile.get("role", "")
                     _log_auth_attempt(request, str(uid), "bridge_token", True)
                     return str(uid)
             except Exception as bt_err:
-                logger.debug("Bridge token Redis check failed (non-fatal): %s", bt_err)
+                logger.warning("Bridge token Redis check failed (non-fatal): %s", bt_err)
 
     # 2. Try X-User-Id header (for internal service-to-service calls)
     header_user_id = request.headers.get("X-User-Id")
     if header_user_id:
+        request.state.user_id = str(header_user_id).strip()
         _log_auth_attempt(request, str(header_user_id).strip(), "x_user_id_header", True)
         return str(header_user_id).strip()
 
@@ -140,6 +147,7 @@ async def get_current_user(
                 status_code=401,
                 detail="Authentication required. user_id query param not accepted."
             )
+        request.state.user_id = str(query_user_id).strip()
         _log_auth_attempt(request, str(query_user_id).strip(), "query_param_dev", True)
         logger.warning("DEV MODE: user_id query param used for auth (localhost only)")
         return str(query_user_id).strip()

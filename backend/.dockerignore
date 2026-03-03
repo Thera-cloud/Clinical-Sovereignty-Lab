@@ -1,0 +1,16 @@
+# Prevent stale/dead files from entering Docker images
+app/websocket/.env
+app/websocket/*.backup*
+app/websocket/SANCTUARY_COACHING_FLOW_V2.py
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Dev/IDE
+.git
+.vscode
+.cursor

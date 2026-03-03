@@ -1,0 +1,81 @@
+---
+description: Trust Enforcer architecture, modification protocol, and 5-location sync requirement for auditors
+alwaysApply: true
+---
+
+# Trust Enforcer Architecture
+
+The Trust Enforcer (`backend/app/services/trust_enforcer.py`) is the meta-agent that aggregates all 26 auditor results into a single trust score (currently 493/493). It runs at minute >= 10 of audit hours (5:10, 17:10, 23:10 UTC) and sends 2 emails per window.
+
+## 5-Location Sync (Critical)
+
+Adding, removing, or changing an auditor's endpoint count requires updates to **all 5 locations** or the enforcer flags `DATA_PIPELINE` mismatches:
+
+| # | Location | What to set | File |
+|---|---|---|---|
+| 1 | `TAB_ENDPOINTS` | Actual endpoint/check definitions | `backend/app/services/<auditor>.py` |
+| 2 | `AUDITOR_ACTIVITY_TYPES` | Activity type string (e.g., `"new_audit_sent"`) | `trust_enforcer.py` line ~52 |
+| 3 | `AUDITOR_LABELS` | Display name (e.g., `"New Auditor"`) | `trust_enforcer.py` line ~74 |
+| 4 | `_baseline_key_for()` | Baseline key mapping (e.g., `"new_check_count"`) | `trust_enforcer.py` line ~488 |
+| 5 | `trust_baseline` table | Expected count JSON | SQL migration or direct UPDATE |
+
+Also update `_service_checks` in `main.py` and the `service-health-49-49.mdc` rule.
+
+## Never Do
+
+- **Never let auditors send email directly.** All notification flows through the Trust Enforcer. Every auditor's `_build_and_send()` must contain: `# Email silenced — Trust Enforcer sends consolidated report`.
+- **Never change the Trust Enforcer to fire at minute < 10.** It must read fresh auditor results from the current window, not stale results from the previous window.
+- **Never modify `AUDITOR_ACTIVITY_TYPES` without updating `AUDITOR_LABELS` and `_baseline_key_for()` simultaneously.** A mismatch causes the enforcer to skip the auditor or log "No audit result found".
+
+## Adding a New Auditor
+
+1. Create `backend/app/services/<name>_auditor.py` with `TAB_ENDPOINTS` and `_build_and_send()` (no email call)
+2. Add its activity type to `AUDITOR_ACTIVITY_TYPES` list
+3. Add its display name to `AUDITOR_LABELS` dict
+4. Add its baseline key to `_baseline_key_for()` mapping
+5. Create a migration: `INSERT INTO trust_baseline (parameter_key, parameter_value) VALUES ('<key>', '{"expected": N}')`
+6. Register in `_service_checks` in `main.py`, assign next 10s stagger slot (current max: 290s, ceiling: 300s)
+7. Verify total count increases in `trust-100-percent.mdc` and `service-health-49-49.mdc`
+
+## Stagger Discipline
+
+All auditors must complete before the enforcer fires at minute 10 (600s). Keep staggers under 300s. Current assignments range from 120s to 290s in 10s increments. A new auditor uses the next available slot.
+
+## Pre-flight Checks (5)
+
+The enforcer runs 5 infrastructure checks before evaluating auditor scores. If any fail, the report is RED regardless of auditor scores:
+
+1. **Audit Token** — `SKYEYE_AUDIT_TOKEN` in env AND Redis
+2. **Test Accounts** — `audit_client` + `audit_coach` in users table
+3. **Admin MFA** — DrNevedal1 has TOTP + SMS + WebAuthn + 2 YubiKeys
+4. **Azure Env** — 5 Azure vars set
+5. **Redis** — responds to PING
+
+## Baseline Governance
+
+Changes to what "trusted" means require approval:
+- `POST /api/trust-enforcer/propose-change` — submit a proposal
+- `POST /api/trust-enforcer/approve/{id}` — admin approves
+
+Or direct SQL: `UPDATE trust_baseline SET parameter_value = '{"expected": N}'::jsonb WHERE parameter_key = '...'`
+
+## Auditor Consistency Requirements
+
+All auditors must follow the same patterns (see `auditor-status-code-consistency.mdc` for full detail):
+
+1. **Status codes**: `(200, 400, 404, 422)` = TRUSTED. Other 4xx = WARNING. 5xx/timeout = FAILED. Never use a stricter subset.
+2. **Detail logging**: Log per-check results (not just summary count) to `skyeye_activity` as JSON. Without this, diagnosing failures requires reproducing the audit manually.
+3. **Email suppression**: `# Email silenced — Trust Enforcer sends consolidated report`
+
+## Remediation Categories
+
+| Category | Meaning |
+|---|---|
+| `ENDPOINT_DOWN` | 5xx or timeout |
+| `AUTH_FAILURE` | Token expired or account missing |
+| `DATA_PIPELINE` | Baseline count mismatch or empty response |
+| `AI_UNREACHABLE` | Azure OpenAI/TTS unreachable |
+| `DEFENSE_DEGRADED` | Hive Defense subsystem offline |
+| `GATE_BYPASS` | Tier gate not enforcing |
+| `WS_TIMEOUT` | WebSocket handshake failed |
+| `PREFLIGHT_FAIL` | Infrastructure prerequisite missing |

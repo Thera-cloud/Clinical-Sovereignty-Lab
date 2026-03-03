@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GKM Ministry — Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+    --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+    --border: #252525; --border-active: #333333;
+    --gold: #FFD700; --gold-dim: rgba(255,215,0,0.2); --gold-text: #C9A962;
+    --cyan: #00D4FF; --cyan-dim: rgba(0,212,255,0.1);
+    --red: #FF3B3B; --red-dim: rgba(255,59,59,0.15);
+    --green: #00FF88; --green-dim: rgba(0,255,136,0.1);
+    --orange: #FF9500; --purple: #9D4EDD;
+    --text-primary: #FFFFFF; --text-secondary: #888888; --text-muted: #555555;
+    --font-body: 'DM Sans', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
+.topbar { position: sticky; top: 0; z-index: 200; background: rgba(10,10,10,0.85); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.back-btn { color: var(--gold-text); text-decoration: none; font-size: 20px; cursor: pointer; }
+.topbar-title { font-size: 18px; font-weight: 700; }
+.topbar-title span { margin-right: 6px; }
+.main-content { padding: 20px; max-width: 1400px; margin: 0 auto; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+.tab-btn.active { background: var(--gold-dim); border-color: var(--gold-text); color: var(--gold); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; }
+.card.full-width { grid-column: 1 / -1; }
+.card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.card-body { padding: 16px; }
+.card-action { background: var(--gold-dim); border: 1px solid var(--gold-text); color: var(--gold); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 11px; font-weight: 600; }
+.icon { font-size: 16px; }
+.icon.gold { color: var(--gold); }
+.icon.cyan { color: var(--cyan); }
+.icon.green { color: var(--green); }
+.icon.purple { color: var(--purple); }
+.stat-box { text-align: center; }
+.stat-value { font-size: 24px; font-weight: 700; font-family: var(--font-mono); }
+.stat-value.gold { color: var(--gold); }
+.stat-value.cyan { color: var(--cyan); }
+.stat-value.green { color: var(--green); }
+.stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.action-btn { padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 11px; font-weight: 600; }
+.action-btn.gold { background: var(--gold); color: #000; }
+.action-btn.cyan { background: var(--cyan-dim); border: 1px solid var(--cyan); color: var(--cyan); }
+.action-btn.red { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+@media (max-width: 768px) { .dashboard-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="topbar-left">
+        <a class="back-btn" id="backBtn" title="Back to Command">&#8592;</a>
+        <div class="topbar-title"><span>⛪</span> Greatest in the Kingdom Ministry</div>
+    </div>
+    <div style="font-size:11px;color:var(--text-secondary);">Tax ID: 84-3879515 &bull; Stafford, TX 77477</div>
+</div>
+
+<div class="main-content">
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="gkmSwitchTab('donations')">Donations Dashboard</button>
+        <button class="tab-btn" onclick="gkmSwitchTab('donors')">Donor Records</button>
+        <button class="tab-btn" onclick="gkmSwitchTab('receipts')">Receipt Management</button>
+        <button class="tab-btn" onclick="gkmSwitchTab('scholarships')">Scholarships & Discounts</button>
+        <button class="tab-btn" onclick="gkmSwitchTab('sharing')">Token Sharing Activity</button>
+    </div>
+
+    <!-- TAB 1: Donations Dashboard -->
+    <div class="tab-panel active" id="tab-donations">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">⛪</div> Donation Overview</div>
+                    <button class="card-action" onclick="gkmRefresh()">Refresh</button>
+                </div>
+                <div class="card-body" style="display:flex;gap:20px;flex-wrap:wrap;">
+                    <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value gold" id="gkm-totalAllTime">—</div><div class="stat-label">All-Time Donations</div></div>
+                    <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value cyan" id="gkm-totalThisYear">—</div><div class="stat-label">This Year</div></div>
+                    <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value green" id="gkm-totalDonors">—</div><div class="stat-label">Total Donors</div></div>
+                    <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value" style="color:var(--purple);" id="gkm-donorsThisYear">—</div><div class="stat-label">Donors This Year</div></div>
+                </div>
+            </div>
+            <div class="card" style="grid-column: span 2;">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">📈</div> Donations Over Time</div></div>
+                <div class="card-body"><canvas id="gkm-donationChart" height="200"></canvas></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title"><div class="icon green">🏆</div> Top Donors</div></div>
+                <div class="card-body" id="gkm-topDonors" style="max-height:300px;overflow-y:auto;font-size:12px;">Loading...</div>
+            </div>
+            <div class="card full-width">
+                <div class="card-header"><div class="card-title"><div class="icon gold">📜</div> Recent Donations</div></div>
+                <div class="card-body" style="max-height:300px;overflow-y:auto;" id="gkm-recentDonations">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: Donor Records -->
+    <div class="tab-panel" id="tab-donors">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">👤</div> Donor Records</div>
+                    <div style="display:flex;gap:8px;">
+                        <select id="gkm-donorYear" onchange="gkmLoadDonorRecords()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                            <option value="2026">2026</option>
+                            <option value="2025">2025</option>
+                        </select>
+                        <select id="gkm-donorFilter" onchange="gkmLoadDonorRecords()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                            <option value="all">All Donors</option>
+                            <option value="250">$250+ (Receipt Eligible)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body" style="max-height:500px;overflow-y:auto;">
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="border-bottom:1px solid var(--border);text-align:left;">
+                            <th style="padding:8px;">Username</th>
+                            <th style="padding:8px;text-align:right;">Total</th>
+                            <th style="padding:8px;text-align:right;"># Donations</th>
+                            <th style="padding:8px;">Receipt Eligible</th>
+                            <th style="padding:8px;">Receipt Sent</th>
+                            <th style="padding:8px;">Actions</th>
+                        </tr></thead>
+                        <tbody id="gkm-donorBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: Receipt Management -->
+    <div class="tab-panel" id="tab-receipts">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon gold">🧾</div> Receipt Management</div>
+                    <div style="display:flex;gap:8px;">
+                        <select id="gkm-receiptYear" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                            <option value="2026">2026</option>
+                            <option value="2025">2025</option>
+                        </select>
+                        <button class="action-btn gold" onclick="gkmGenerateAllReceipts()">Generate All Year-End Receipts</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="background:var(--bg-elevated);padding:12px;border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);">
+                        <strong style="color:var(--gold);">Greatest in the Kingdom Ministry</strong><br>
+                        Tax-Exempt ID: 84-3879515 &bull; Stafford, TX 77477<br>
+                        Contact: support@sovereignsanctuary.net<br>
+                        Receipts generated for donors with $250+ cumulative donations per tax year.
+                    </div>
+                    <div id="gkm-receiptList" style="max-height:400px;overflow-y:auto;">Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 4: Scholarships & Discounts -->
+    <div class="tab-panel" id="tab-scholarships">
+        <div class="dashboard-grid">
+            <div class="card" style="grid-column: span 2;">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🎓</div> Scholarship Funds</div></div>
+                <div class="card-body" id="gkm-scholarshipFunds" style="max-height:400px;overflow-y:auto;">Loading...</div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">🏷️</div> Discount Summary</div></div>
+                <div class="card-body" id="gkm-discountSummary">Loading...</div>
+            </div>
+            <div class="card full-width">
+                <div class="card-header"><div class="card-title"><div class="icon gold">📋</div> Recent Discounts</div></div>
+                <div class="card-body" id="gkm-discountList" style="max-height:300px;overflow-y:auto;">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 5: Token Sharing Activity -->
+    <div class="tab-panel" id="tab-sharing">
+        <div class="dashboard-grid">
+            <div class="card full-width">
+                <div class="card-header">
+                    <div class="card-title"><div class="icon green">🤝</div> Sharing Overview</div>
+                    <select id="gkm-shareDays" onchange="gkmLoadSharing()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                        <option value="7">7 Days</option>
+                        <option value="30" selected>30 Days</option>
+                        <option value="90">90 Days</option>
+                    </select>
+                </div>
+                <div class="card-body" style="display:flex;gap:20px;flex-wrap:wrap;">
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value green" id="gkm-totalShares">—</div><div class="stat-label">Total Shares</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value gold" id="gkm-totalTokensShared">—</div><div class="stat-label">Tokens Shared</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value cyan" id="gkm-totalFees">—</div><div class="stat-label">Fees Collected</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value" style="color:var(--purple);" id="gkm-uniqueSharers">—</div><div class="stat-label">Unique Sharers</div></div>
+                </div>
+            </div>
+            <div class="card full-width">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">📋</div> Recent Shares</div></div>
+                <div class="card-body" style="max-height:400px;overflow-y:auto;" id="gkm-shareList">Loading...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var _gkmToken = '';
+var _gkmDonationChart = null;
+
+(function() {
+    try { _gkmToken = sessionStorage.getItem('sc_token') || ''; } catch(e) {}
+    if (!_gkmToken) {
+        try {
+            var h = window.location.hash;
+            if (h) { var m = h.match(/t=([^&]+)/); if (m) _gkmToken = m[1]; }
+        } catch(e) {}
+    }
+    if (!_gkmToken) { try { _gkmToken = localStorage.getItem('sc_token') || ''; } catch(e) {} }
+    var backBtn = document.getElementById('backBtn');
+    if (backBtn) backBtn.onclick = function() { window.location.href = 'command.html' + window.location.hash; };
+})();
+
+async function _gkmFetch(url, opts) {
+    try {
+        var headers = { 'Authorization': 'Bearer ' + _gkmToken, 'Content-Type': 'application/json' };
+        var r = await fetch(url, Object.assign({ headers: headers }, opts || {}));
+        if (!r.ok) { console.warn('GKM fetch error:', r.status, url); return null; }
+        return await r.json();
+    } catch(e) { console.error('GKM fetch:', e); return null; }
+}
+
+function gkmSwitchTab(tabId) {
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('tab-' + tabId).classList.add('active');
+    event.target.classList.add('active');
+    if (tabId === 'donations') gkmLoadDonations();
+    if (tabId === 'donors') gkmLoadDonorRecords();
+    if (tabId === 'receipts') gkmLoadReceipts();
+    if (tabId === 'scholarships') gkmLoadScholarships();
+    if (tabId === 'sharing') gkmLoadSharing();
+}
+
+function gkmRefresh() { gkmLoadDonations(); }
+
+async function gkmLoadDonations() {
+    var data = await _gkmFetch('/api/gkm/donations');
+    if (!data) return;
+    var s = data.summary || {};
+    document.getElementById('gkm-totalAllTime').textContent = '$' + ((s.total_all_time_cents || 0) / 100).toFixed(2);
+    document.getElementById('gkm-totalThisYear').textContent = '$' + ((s.total_this_year_cents || 0) / 100).toFixed(2);
+    document.getElementById('gkm-totalDonors').textContent = s.total_donors || 0;
+    document.getElementById('gkm-donorsThisYear').textContent = s.donors_this_year || 0;
+
+    var donations = data.donations || [];
+    var html = '';
+    donations.slice(0, 50).forEach(function(d) {
+        html += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;align-items:center;font-size:12px;">';
+        html += '<span style="min-width:100px;color:var(--text-secondary);font-size:10px;">' + (d.created_at || '').substring(0, 16).replace('T', ' ') + '</span>';
+        html += '<span style="min-width:80px;color:var(--gold);font-weight:600;">' + d.username + '</span>';
+        html += '<span style="min-width:80px;color:var(--green);font-weight:700;">$' + (d.donation_amount_cents / 100).toFixed(2) + '</span>';
+        html += '<span style="color:var(--text-secondary);font-size:10px;">Cumulative: $' + (d.cumulative_total_cents / 100).toFixed(2) + '</span>';
+        if (d.receipt_sent) html += '<span style="color:var(--cyan);font-size:10px;margin-left:auto;">✓ Receipt sent</span>';
+        html += '</div>';
+    });
+    document.getElementById('gkm-recentDonations').innerHTML = html || '<div style="color:var(--text-secondary);text-align:center;padding:20px;">No donations yet</div>';
+
+    gkmLoadAnnualSummary();
+}
+
+async function gkmLoadAnnualSummary() {
+    var data = await _gkmFetch('/api/gkm/annual-summary');
+    if (!data) return;
+    var donors = data.donors || [];
+
+    var topHtml = '';
+    donors.slice(0, 10).forEach(function(d, i) {
+        var medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1) + '.';
+        topHtml += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;">';
+        topHtml += '<span>' + medal + ' ' + d.username + '</span>';
+        topHtml += '<span style="color:var(--gold);font-weight:700;">' + d.total_display + '</span>';
+        topHtml += '</div>';
+    });
+    document.getElementById('gkm-topDonors').innerHTML = topHtml || '<div style="color:var(--text-secondary);">No donors yet</div>';
+}
+
+async function gkmLoadDonorRecords() {
+    var year = document.getElementById('gkm-donorYear').value || 2026;
+    var filter = document.getElementById('gkm-donorFilter').value;
+    var data = await _gkmFetch('/api/gkm/annual-summary?year=' + year);
+    if (!data) return;
+    var donors = data.donors || [];
+    if (filter === '250') donors = donors.filter(function(d) { return d.receipt_eligible; });
+    var html = '';
+    donors.forEach(function(d) {
+        html += '<tr>';
+        html += '<td style="padding:8px;color:var(--gold);">' + d.username + '</td>';
+        html += '<td style="padding:8px;text-align:right;font-weight:700;">' + d.total_display + '</td>';
+        html += '<td style="padding:8px;text-align:right;">' + d.donation_count + '</td>';
+        html += '<td style="padding:8px;">' + (d.receipt_eligible ? '<span style="color:var(--green);">Yes</span>' : '<span style="color:var(--text-muted);">No</span>') + '</td>';
+        html += '<td style="padding:8px;">' + (d.receipt_sent ? '<span style="color:var(--cyan);">✓ Sent</span>' : '<span style="color:var(--text-muted);">—</span>') + '</td>';
+        html += '<td style="padding:8px;">';
+        if (d.receipt_eligible) html += '<button class="action-btn cyan" onclick="gkmSendReceipt(\'' + d.username + '\',' + year + ')">Send Receipt</button>';
+        html += '</td></tr>';
+    });
+    document.getElementById('gkm-donorBody').innerHTML = html || '<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text-secondary);">No donors found</td></tr>';
+}
+
+async function gkmLoadReceipts() {
+    var year = document.getElementById('gkm-receiptYear').value || 2026;
+    var data = await _gkmFetch('/api/gkm/annual-summary?year=' + year);
+    if (!data) return;
+    var donors = data.donors || [];
+    var eligible = donors.filter(function(d) { return d.receipt_eligible; });
+    var html = '';
+    if (eligible.length === 0) {
+        html = '<div style="color:var(--text-secondary);text-align:center;padding:30px;">No donors above $250 threshold for ' + year + '</div>';
+    } else {
+        eligible.forEach(function(d) {
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;">';
+            html += '<div><span style="color:var(--gold);font-weight:600;">' + d.username + '</span> &mdash; <span style="color:var(--green);">' + d.total_display + '</span></div>';
+            html += '<div style="display:flex;gap:8px;">';
+            html += '<span style="color:' + (d.receipt_sent ? 'var(--cyan)' : 'var(--orange)') + ';font-size:11px;">' + (d.receipt_sent ? '✓ Sent' : 'Pending') + '</span>';
+            html += '<button class="action-btn cyan" onclick="gkmSendReceipt(\'' + d.username + '\',' + year + ')">' + (d.receipt_sent ? 'Resend' : 'Send') + '</button>';
+            html += '</div></div>';
+        });
+    }
+    document.getElementById('gkm-receiptList').innerHTML = html;
+}
+
+async function gkmSendReceipt(username, year) {
+    if (!confirm('Send donation receipt to ' + username + ' for tax year ' + year + '?')) return;
+    var r = await _gkmFetch('/api/gkm/send-receipt/' + username, { method: 'POST', body: JSON.stringify({ tax_year: year }) });
+    if (r) { alert('Receipt sent for ' + username + ': ' + r.total_display); gkmLoadReceipts(); gkmLoadDonorRecords(); }
+}
+
+async function gkmGenerateAllReceipts() {
+    var year = document.getElementById('gkm-receiptYear').value || 2025;
+    if (!confirm('Generate and send receipts to ALL qualifying donors ($250+) for tax year ' + year + '?')) return;
+    var r = await _gkmFetch('/api/gkm/annual-receipts/generate?year=' + year, { method: 'POST' });
+    if (r) { alert(r.receipts_generated + ' receipts generated for ' + r.tax_year); gkmLoadReceipts(); }
+}
+
+async function gkmLoadScholarships() {
+    var data = await _gkmFetch('/api/gkm/scholarships');
+    if (!data) return;
+    var funds = data.funds || [];
+    var html = '';
+    if (funds.length === 0) {
+        html = '<div style="color:var(--text-secondary);text-align:center;padding:20px;">No scholarship funds created</div>';
+    } else {
+        funds.forEach(function(f) {
+            html += '<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;">';
+            html += '<div style="display:flex;justify-content:space-between;"><span style="color:var(--gold);font-weight:600;">' + (f.fund_name || 'Fund') + '</span>';
+            html += '<span style="color:var(--green);">$' + ((f.balance_cents || 0) / 100).toFixed(2) + ' balance</span></div>';
+            html += '<div style="color:var(--text-secondary);font-size:10px;margin-top:2px;">Sponsor: ' + (f.sponsor_username || '—') + ' | Total deposited: $' + ((f.total_deposited_cents || 0) / 100).toFixed(2) + '</div>';
+            html += '</div>';
+        });
+    }
+    document.getElementById('gkm-scholarshipFunds').innerHTML = html;
+
+    var discounts = await _gkmFetch('/api/gkm/discounts');
+    if (!discounts) return;
+    document.getElementById('gkm-discountSummary').innerHTML = '<div style="font-size:14px;color:var(--gold);font-weight:700;">$' + ((discounts.total_discounts_cents || 0) / 100).toFixed(2) + '</div><div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Total Discounts Applied</div>';
+    var dList = discounts.discounts || [];
+    var dHtml = '';
+    dList.forEach(function(d) {
+        dHtml += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;display:flex;justify-content:space-between;">';
+        dHtml += '<span>' + (d.username || 'System') + ' — ' + (d.discount_type || '') + (d.discount_code ? ' (' + d.discount_code + ')' : '') + '</span>';
+        dHtml += '<span style="color:var(--green);">$' + ((d.amount_cents || 0) / 100).toFixed(2) + '</span></div>';
+    });
+    document.getElementById('gkm-discountList').innerHTML = dHtml || '<div style="color:var(--text-secondary);text-align:center;padding:20px;">No discounts applied</div>';
+}
+
+async function gkmLoadSharing() {
+    var days = document.getElementById('gkm-shareDays').value || 30;
+    var data = await _gkmFetch('/api/gkm/sharing-activity?days=' + days);
+    if (!data) return;
+    var stats = data.stats || {};
+    document.getElementById('gkm-totalShares').textContent = (stats.total_shares || 0).toLocaleString();
+    document.getElementById('gkm-totalTokensShared').textContent = (stats.total_tokens || 0).toLocaleString();
+    document.getElementById('gkm-totalFees').textContent = '$' + ((stats.total_fees_cents || 0) / 100).toFixed(2);
+    document.getElementById('gkm-uniqueSharers').textContent = stats.unique_sharers || 0;
+
+    var shares = data.shares || [];
+    var html = '';
+    shares.forEach(function(s) {
+        html += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;align-items:center;font-size:12px;">';
+        html += '<span style="min-width:100px;color:var(--text-secondary);font-size:10px;">' + (s.created_at || '').substring(0, 16).replace('T', ' ') + '</span>';
+        html += '<span style="color:var(--gold);font-weight:600;">' + s.sharer_username + '</span>';
+        html += '<span style="color:var(--text-secondary);"> → </span>';
+        html += '<span style="color:var(--cyan);">' + s.receiver_username + '</span>';
+        html += '<span style="color:var(--green);font-weight:700;margin-left:auto;">' + (s.tokens_shared || 0).toLocaleString() + ' tokens</span>';
+        html += '<span style="color:var(--text-secondary);font-size:10px;">($' + ((s.share_fee_cents || 0) / 100).toFixed(2) + ' fee)</span>';
+        html += '</div>';
+    });
+    document.getElementById('gkm-shareList').innerHTML = html || '<div style="color:var(--text-secondary);text-align:center;padding:20px;">No sharing activity yet</div>';
+}
+
+gkmLoadDonations();
+</script>
+</body>
+</html>

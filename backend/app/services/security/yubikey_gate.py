@@ -146,7 +146,9 @@ class YubiKeyGate:
         """Check if this user has a YubiKey registered and must present it."""
         if not self._available:
             return False
-        return bool(profile.get("webauthn_enabled") and profile.get("webauthn_credential"))
+        has_legacy = bool(profile.get("webauthn_credential"))
+        has_multi = bool(profile.get("webauthn_credentials"))
+        return bool(profile.get("webauthn_enabled") and (has_legacy or has_multi))
 
     def check_gate(self, profile: Dict[str, Any]) -> GateVerdict:
         """
@@ -275,18 +277,27 @@ class YubiKeyGate:
     def generate_authentication(
         self,
         user_id: str,
-        credential: Dict[str, Any],
+        credential: Any = None,
+        credentials: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[dict]:
-        """Generate WebAuthn authentication options (assertion challenge)."""
+        """Generate WebAuthn authentication options (assertion challenge).
+
+        Supports both single credential (legacy) and multiple credentials.
+        When `credentials` list is provided, all registered keys are allowed.
+        """
         if not self._available:
             return None
 
         allow_credentials = []
-        cred_id = credential.get("credential_id", "")
-        if cred_id:
-            allow_credentials.append(
-                PublicKeyCredentialDescriptor(id=bytes.fromhex(cred_id))
-            )
+        creds_list = credentials or ([credential] if credential else [])
+        for cred in creds_list:
+            if not cred:
+                continue
+            cred_id = cred.get("credential_id", "")
+            if cred_id:
+                allow_credentials.append(
+                    PublicKeyCredentialDescriptor(id=bytes.fromhex(cred_id))
+                )
 
         options = generate_authentication_options(
             rp_id=RP_ID,
@@ -301,11 +312,11 @@ class YubiKeyGate:
         self._pending_challenges[user_id] = {
             "type": "authentication",
             "challenge": challenge_hex,
-            "credential": credential,
+            "credentials": creds_list,
             "created_at": time.time(),
         }
 
-        logger.info("Authentication challenge generated for %s", user_id[:12])
+        logger.info("Authentication challenge generated for %s (%d keys)", user_id[:12], len(creds_list))
         return {
             "options_json": options_to_json(options),
             "challenge_hex": challenge_hex,
@@ -318,6 +329,7 @@ class YubiKeyGate:
     ) -> GateVerdict:
         """
         Verify a WebAuthn authentication response (assertion).
+        Tries all registered credentials until one matches.
         Returns a GateVerdict with passed=True on success.
         """
         self._total_checks += 1
@@ -343,34 +355,45 @@ class YubiKeyGate:
                 method="webauthn",
             )
 
-        stored_cred = pending.get("credential", {})
-        try:
-            challenge_bytes = bytes.fromhex(pending["challenge"])
-            verification = verify_authentication_response(
-                credential=assertion_response,
-                expected_challenge=challenge_bytes,
-                expected_rp_id=RP_ID,
-                expected_origin=EXPECTED_ORIGIN,
-                credential_public_key=bytes.fromhex(stored_cred.get("public_key", "")),
-                credential_current_sign_count=stored_cred.get("sign_count", 0),
-            )
+        challenge_bytes = bytes.fromhex(pending["challenge"])
+        creds_to_try = pending.get("credentials", [])
+        if not creds_to_try:
+            legacy = pending.get("credential")
+            if legacy:
+                creds_to_try = [legacy]
 
-            self._total_passed += 1
-            logger.info("YubiKey authentication PASSED for %s", user_id[:12])
-            return GateVerdict(
-                passed=True,
-                reason="YubiKey verified",
-                method="webauthn",
-            )
+        last_error = None
+        for stored_cred in creds_to_try:
+            if not stored_cred or not stored_cred.get("public_key"):
+                continue
+            try:
+                verify_authentication_response(
+                    credential=assertion_response,
+                    expected_challenge=challenge_bytes,
+                    expected_rp_id=RP_ID,
+                    expected_origin=EXPECTED_ORIGIN,
+                    credential_public_key=bytes.fromhex(stored_cred.get("public_key", "")),
+                    credential_current_sign_count=stored_cred.get("sign_count", 0),
+                )
+                self._total_passed += 1
+                label = stored_cred.get("label", "YubiKey")
+                logger.info("YubiKey authentication PASSED for %s (key: %s)", user_id[:12], label)
+                return GateVerdict(
+                    passed=True,
+                    reason=f"YubiKey verified ({label})",
+                    method="webauthn",
+                )
+            except Exception as e:
+                last_error = e
+                continue
 
-        except Exception as e:
-            self._total_failed += 1
-            logger.warning("YubiKey authentication FAILED for %s: %s", user_id[:12], e)
-            return GateVerdict(
-                passed=False,
-                reason=f"YubiKey verification failed: {e}",
-                method="webauthn",
-            )
+        self._total_failed += 1
+        logger.warning("YubiKey authentication FAILED for %s: %s", user_id[:12], last_error)
+        return GateVerdict(
+            passed=False,
+            reason=f"YubiKey verification failed: {last_error}",
+            method="webauthn",
+        )
 
     # ─── CLEANUP ────────────────────────────────────────────────────────
 

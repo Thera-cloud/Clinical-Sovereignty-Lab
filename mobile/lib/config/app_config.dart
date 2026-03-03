@@ -45,6 +45,11 @@ class AppConfig {
   static String get adminUrl => useProduction
       ? 'https://command.sovereignsanctuary.net'
       : 'http://$serverHost:$adminPort';
+
+  /// Base URL for avatar GLB expression models
+  static String get avatarGlbBaseUrl => useProduction
+      ? 'https://app.sovereignsanctuary.net/avatar-modes'
+      : 'http://$serverHost:8080/avatar-modes';
   
   // ===========================================================================
   // API ENDPOINTS
@@ -111,12 +116,12 @@ class AppConfig {
   static const String appName = 'Sovereign Sanctuary';
   static const String appVersion = '1.0.0';
   static const String buildNumber = '1';
-  
+
   // ===========================================================================
   // ENVIRONMENT
   // ===========================================================================
-  
-  static const String environment = 'development';
+
+  static const String environment = 'production';
   static const bool isProduction = environment == 'production';
   static const bool enableDebugLogs = !isProduction;
 }

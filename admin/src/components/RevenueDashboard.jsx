@@ -213,6 +213,10 @@ const RevenueDashboard = () => {
           { id: 'subscriptions', label: 'Subscriptions' },
           { id: 'failed', label: 'Failed Payments' },
           { id: 'tools', label: 'Admin Tools' },
+          { id: 'specials', label: 'Specials' },
+          { id: 'school', label: 'School Codes' },
+          { id: 'corporate', label: 'Corporate' },
+          { id: 'scholarship', label: 'Scholarships' },
         ].map(tab => (
           <button
             key={tab.id}
@@ -260,6 +264,10 @@ const RevenueDashboard = () => {
           showMessage={showMessage}
         />
       )}
+      {activeTab === 'specials' && <SpecialsTab showMessage={showMessage} />}
+      {activeTab === 'school' && <SchoolCodesTab showMessage={showMessage} />}
+      {activeTab === 'corporate' && <CorporateSponsorsTab showMessage={showMessage} />}
+      {activeTab === 'scholarship' && <ScholarshipFundsTab />}
 
       {/* Override Plan Modal */}
       {showOverrideModal && selectedUser && (
@@ -728,6 +736,391 @@ const AdminToolsTab = ({ couponCode, setCouponCode, couponDiscount, setCouponDis
         </div>
       </div>
     </div>
+  );
+};
+
+// =============================================================================
+// MODAL
+// =============================================================================
+
+// =============================================================================
+// CARD WRAPPER
+// =============================================================================
+
+const Card = ({ title, children }) => (
+  <div style={{
+    background: colors.bgCard,
+    border: `1px solid ${colors.border}`,
+    borderRadius: 10,
+    padding: 16,
+    marginBottom: 16,
+  }}>
+    {title && <h4 style={{ color: colors.gold, margin: '0 0 12px', fontSize: 14, fontFamily: 'Cormorant Garamond' }}>{title}</h4>}
+    {children}
+  </div>
+);
+
+// =============================================================================
+// PROMOTIONAL SPECIALS TAB
+// =============================================================================
+
+const SpecialsTab = ({ showMessage }) => {
+  const [specials, setSpecials] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState('');
+  const [discountType, setDiscountType] = useState('percent');
+  const [discountValue, setDiscountValue] = useState('10');
+  const [tiers, setTiers] = useState('');
+  const [endsAt, setEndsAt] = useState('');
+  const [promoCode, setPromoCode] = useState('');
+  const [maxRedemptions, setMaxRedemptions] = useState('');
+
+  const loadSpecials = useCallback(async () => {
+    const data = await apiFetch('/api/admin/billing/specials');
+    if (data) setSpecials(data.specials || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadSpecials(); }, [loadSpecials]);
+
+  const createSpecial = async () => {
+    if (!name || !endsAt) return showMessage('Name and end date required', true);
+    const token = sessionStorage.getItem('token');
+    try {
+      const res = await fetch(`${API}/api/admin/billing/special`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          name,
+          discount_type: discountType,
+          discount_value: parseInt(discountValue) || 10,
+          applicable_tiers: tiers ? tiers.split(',').map(t => t.trim()) : [],
+          ends_at: new Date(endsAt).toISOString(),
+          max_redemptions: maxRedemptions ? parseInt(maxRedemptions) : null,
+          promo_code: promoCode || null,
+        }),
+      });
+      if (res.ok) {
+        showMessage('Special created');
+        setName(''); setEndsAt(''); setPromoCode(''); setMaxRedemptions('');
+        loadSpecials();
+      } else {
+        showMessage('Failed to create special', true);
+      }
+    } catch { showMessage('Network error', true); }
+  };
+
+  const deactivate = async (id) => {
+    const token = sessionStorage.getItem('token');
+    await fetch(`${API}/api/admin/billing/special/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    loadSpecials();
+  };
+
+  if (loading) return <p style={{ color: colors.textSecondary }}>Loading specials...</p>;
+
+  return (
+    <div>
+      <Card title="Create Promotional Special">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <input style={inputStyle} placeholder="Special name" value={name} onChange={e => setName(e.target.value)} />
+          <input style={inputStyle} type="datetime-local" value={endsAt} onChange={e => setEndsAt(e.target.value)} />
+          <select style={inputStyle} value={discountType} onChange={e => setDiscountType(e.target.value)}>
+            <option value="percent">Percent Off</option>
+            <option value="amount">Fixed Amount Off</option>
+          </select>
+          <input style={inputStyle} placeholder="Discount value" value={discountValue} onChange={e => setDiscountValue(e.target.value)} />
+          <input style={inputStyle} placeholder="Tiers (comma-sep, e.g. STANDARD,TOP_TIER)" value={tiers} onChange={e => setTiers(e.target.value)} />
+          <input style={inputStyle} placeholder="Promo code (optional)" value={promoCode} onChange={e => setPromoCode(e.target.value)} />
+          <input style={inputStyle} placeholder="Max redemptions (optional)" value={maxRedemptions} onChange={e => setMaxRedemptions(e.target.value)} />
+          <button onClick={createSpecial} style={{ ...btnStyle, background: colors.gold, color: '#000' }}>Create Special</button>
+        </div>
+      </Card>
+      <Card title={`Active Specials (${specials.length})`}>
+        {specials.length === 0 ? (
+          <p style={{ color: colors.textSecondary, fontSize: 13 }}>No specials configured</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {specials.map(s => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10, background: colors.bgVoid, borderRadius: 6, border: `1px solid ${s.is_live ? colors.green + '40' : colors.border}` }}>
+                <div>
+                  <div style={{ color: colors.textPrimary, fontSize: 13, fontWeight: 'bold' }}>{s.name}</div>
+                  <div style={{ color: colors.textSecondary, fontSize: 11 }}>
+                    {s.discount_value}{s.discount_type === 'percent' ? '%' : '¢'} off
+                    {s.promo_code ? ` · Code: ${s.promo_code}` : ''}
+                    {s.max_redemptions ? ` · ${s.current_redemptions}/${s.max_redemptions} used` : ''}
+                  </div>
+                  <div style={{ color: s.is_live ? colors.green : colors.textSecondary, fontSize: 10 }}>
+                    {s.is_live ? 'LIVE' : s.active ? 'Scheduled' : 'Inactive'} · Ends {new Date(s.ends_at).toLocaleDateString()}
+                  </div>
+                </div>
+                {s.active && (
+                  <button onClick={() => deactivate(s.id)} style={{ ...miniBtn, background: `${colors.red}20`, color: colors.red }}>Deactivate</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// =============================================================================
+// SCHOOL CODES TAB
+// =============================================================================
+
+const SchoolCodesTab = ({ showMessage }) => {
+  const [codes, setCodes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [schoolName, setSchoolName] = useState('');
+  const [schoolCode, setSchoolCode] = useState('');
+  const [discount, setDiscount] = useState('10');
+  const [maxStudents, setMaxStudents] = useState('');
+
+  const loadCodes = useCallback(async () => {
+    const data = await apiFetch('/api/admin/billing/school-codes');
+    if (data) setCodes(data.school_codes || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadCodes(); }, [loadCodes]);
+
+  const createCode = async () => {
+    if (!schoolName || !schoolCode) return showMessage('School name and code required', true);
+    const token = sessionStorage.getItem('token');
+    try {
+      const res = await fetch(`${API}/api/admin/billing/school-codes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          school_name: schoolName,
+          school_code: schoolCode,
+          discount_percent: parseInt(discount) || 10,
+          max_students: maxStudents ? parseInt(maxStudents) : null,
+        }),
+      });
+      if (res.ok) {
+        showMessage('School code created');
+        setSchoolName(''); setSchoolCode(''); setMaxStudents('');
+        loadCodes();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showMessage(err.detail || 'Failed to create school code', true);
+      }
+    } catch { showMessage('Network error', true); }
+  };
+
+  const deactivate = async (id) => {
+    const token = sessionStorage.getItem('token');
+    await fetch(`${API}/api/admin/billing/school-code/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    loadCodes();
+  };
+
+  if (loading) return <p style={{ color: colors.textSecondary }}>Loading school codes...</p>;
+
+  return (
+    <div>
+      <Card title="Create School Code">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <input style={inputStyle} placeholder="School name" value={schoolName} onChange={e => setSchoolName(e.target.value)} />
+          <input style={inputStyle} placeholder="Code (e.g. STANFORD2026)" value={schoolCode} onChange={e => setSchoolCode(e.target.value)} />
+          <input style={inputStyle} placeholder="Discount % (default 10)" value={discount} onChange={e => setDiscount(e.target.value)} />
+          <input style={inputStyle} placeholder="Max students (optional)" value={maxStudents} onChange={e => setMaxStudents(e.target.value)} />
+        </div>
+        <button onClick={createCode} style={{ ...btnStyle, background: colors.gold, color: '#000', marginTop: 10 }}>Create Code</button>
+      </Card>
+      <Card title={`School Codes (${codes.length})`}>
+        {codes.length === 0 ? (
+          <p style={{ color: colors.textSecondary, fontSize: 13 }}>No school codes configured</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {codes.map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10, background: colors.bgVoid, borderRadius: 6, border: `1px solid ${colors.border}` }}>
+                <div>
+                  <div style={{ color: colors.textPrimary, fontSize: 13, fontWeight: 'bold' }}>{c.school_name}</div>
+                  <div style={{ color: colors.cyan, fontSize: 12 }}>Code: {c.school_code} · {c.discount_percent}% off</div>
+                  <div style={{ color: colors.textSecondary, fontSize: 11 }}>
+                    {c.current_students}{c.max_students ? `/${c.max_students}` : ''} students · {c.active ? 'Active' : 'Inactive'}
+                  </div>
+                </div>
+                {c.active && (
+                  <button onClick={() => deactivate(c.id)} style={{ ...miniBtn, background: `${colors.red}20`, color: colors.red }}>Deactivate</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// =============================================================================
+// CORPORATE SPONSORS TAB
+// =============================================================================
+
+const CorporateSponsorsTab = ({ showMessage }) => {
+  const [sponsors, setSponsors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [companyName, setCompanyName] = useState('');
+  const [sponsorCode, setSponsorCode] = useState('');
+  const [discType, setDiscType] = useState('percent');
+  const [discValue, setDiscValue] = useState('10');
+  const [paysFull, setPaysFull] = useState(false);
+  const [maxEmployees, setMaxEmployees] = useState('');
+  const [billingEmail, setBillingEmail] = useState('');
+
+  const loadSponsors = useCallback(async () => {
+    const data = await apiFetch('/api/admin/billing/corporate-sponsors');
+    if (data) setSponsors(data.sponsors || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadSponsors(); }, [loadSponsors]);
+
+  const createSponsor = async () => {
+    if (!companyName || !sponsorCode) return showMessage('Company name and code required', true);
+    const token = sessionStorage.getItem('token');
+    try {
+      const res = await fetch(`${API}/api/admin/billing/corporate-sponsors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({
+          company_name: companyName,
+          sponsor_code: sponsorCode,
+          discount_type: discType,
+          discount_value: parseInt(discValue) || 0,
+          pays_full: paysFull,
+          max_employees: maxEmployees ? parseInt(maxEmployees) : null,
+          billing_contact_email: billingEmail || null,
+        }),
+      });
+      if (res.ok) {
+        showMessage('Corporate sponsor created');
+        setCompanyName(''); setSponsorCode(''); setBillingEmail(''); setMaxEmployees('');
+        loadSponsors();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showMessage(err.detail || 'Failed to create sponsor', true);
+      }
+    } catch { showMessage('Network error', true); }
+  };
+
+  const deactivate = async (id) => {
+    const token = sessionStorage.getItem('token');
+    await fetch(`${API}/api/admin/billing/corporate-sponsor/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    loadSponsors();
+  };
+
+  if (loading) return <p style={{ color: colors.textSecondary }}>Loading corporate sponsors...</p>;
+
+  return (
+    <div>
+      <Card title="Create Corporate Sponsor">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <input style={inputStyle} placeholder="Company name" value={companyName} onChange={e => setCompanyName(e.target.value)} />
+          <input style={inputStyle} placeholder="Sponsor code (e.g. ACME100)" value={sponsorCode} onChange={e => setSponsorCode(e.target.value)} />
+          <select style={inputStyle} value={discType} onChange={e => setDiscType(e.target.value)}>
+            <option value="percent">Percent Off</option>
+            <option value="amount">Fixed Amount Off</option>
+            <option value="full">Fully Sponsored</option>
+          </select>
+          <input style={inputStyle} placeholder="Discount value" value={discValue} onChange={e => setDiscValue(e.target.value)} disabled={paysFull} />
+          <input style={inputStyle} placeholder="Max employees (optional)" value={maxEmployees} onChange={e => setMaxEmployees(e.target.value)} />
+          <input style={inputStyle} placeholder="Billing contact email" value={billingEmail} onChange={e => setBillingEmail(e.target.value)} />
+          <label style={{ color: colors.textSecondary, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={paysFull} onChange={e => { setPaysFull(e.target.checked); if (e.target.checked) setDiscType('full'); }} />
+            Corp pays 100%
+          </label>
+          <button onClick={createSponsor} style={{ ...btnStyle, background: colors.gold, color: '#000' }}>Create Sponsor</button>
+        </div>
+      </Card>
+      <Card title={`Corporate Sponsors (${sponsors.length})`}>
+        {sponsors.length === 0 ? (
+          <p style={{ color: colors.textSecondary, fontSize: 13 }}>No corporate sponsors configured</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {sponsors.map(s => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 10, background: colors.bgVoid, borderRadius: 6, border: `1px solid ${colors.border}` }}>
+                <div>
+                  <div style={{ color: colors.textPrimary, fontSize: 13, fontWeight: 'bold' }}>{s.company_name}</div>
+                  <div style={{ color: colors.purple, fontSize: 12 }}>
+                    Code: {s.sponsor_code} · {s.pays_full ? 'Fully Sponsored' : `${s.discount_value}${s.discount_type === 'percent' ? '%' : '¢'} off`}
+                  </div>
+                  <div style={{ color: colors.textSecondary, fontSize: 11 }}>
+                    {s.current_employees}{s.max_employees ? `/${s.max_employees}` : ''} employees
+                    {s.billing_contact_email ? ` · ${s.billing_contact_email}` : ''}
+                    {' · '}{s.active ? 'Active' : 'Inactive'}
+                  </div>
+                </div>
+                {s.active && (
+                  <button onClick={() => deactivate(s.id)} style={{ ...miniBtn, background: `${colors.red}20`, color: colors.red }}>Deactivate</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// =============================================================================
+// SCHOLARSHIP FUNDS TAB
+// =============================================================================
+
+const ScholarshipFundsTab = () => {
+  const [funds, setFunds] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const data = await apiFetch('/api/admin/billing/scholarship-funds');
+      if (data) setFunds(data.funds || []);
+      setLoading(false);
+    })();
+  }, []);
+
+  if (loading) return <p style={{ color: colors.textSecondary }}>Loading scholarship funds...</p>;
+
+  return (
+    <Card title={`Scholarship Funds (${funds.length})`}>
+      {funds.length === 0 ? (
+        <p style={{ color: colors.textSecondary, fontSize: 13 }}>No scholarship funds created yet. Sponsors create funds via the API.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {funds.map(f => (
+            <div key={f.id} style={{ padding: 12, background: colors.bgVoid, borderRadius: 8, border: `1px solid ${colors.purple}30` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ color: colors.textPrimary, fontSize: 14, fontWeight: 'bold' }}>{f.fund_name}</div>
+                  {f.sponsor_name && <div style={{ color: colors.purple, fontSize: 12 }}>Sponsor: {f.sponsor_name}</div>}
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ color: colors.gold, fontSize: 16, fontWeight: 'bold' }}>${(f.balance_cents / 100).toFixed(2)}</div>
+                  <div style={{ color: colors.textSecondary, fontSize: 10 }}>Balance</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+                <span style={{ color: colors.green, fontSize: 11 }}>Deposited: ${(f.total_deposited / 100).toFixed(2)}</span>
+                <span style={{ color: colors.cyan, fontSize: 11 }}>Disbursed: ${(f.total_disbursed / 100).toFixed(2)}</span>
+                <span style={{ color: colors.textSecondary, fontSize: 11 }}>{f.active_beneficiaries} beneficiar{f.active_beneficiaries === 1 ? 'y' : 'ies'}</span>
+                <span style={{ color: f.active ? colors.green : colors.red, fontSize: 11 }}>{f.active ? 'Active' : 'Inactive'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 };
 

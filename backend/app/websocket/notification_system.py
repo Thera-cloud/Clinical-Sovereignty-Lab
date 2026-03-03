@@ -68,6 +68,18 @@ class NotificationSystem:
             "subject": "Your free trial ends in {days} days",
             "template_id": None,
         },
+        "checkin_client": {
+            "subject": "Little Nate is checking in",
+            "template_id": None,
+        },
+        "checkin_coach": {
+            "subject": "Little Nate coaching check-in",
+            "template_id": None,
+        },
+        "checkin_coach_alert": {
+            "subject": "Client Activity Alert: {client_name}",
+            "template_id": None,
+        },
     }
     
     def __init__(self, data_dir, sendgrid_key=None):
@@ -277,7 +289,8 @@ class NotificationSystem:
     # =========================================================================
     
     async def _send_email(self, to_email: str, subject: str, content: str,
-                          notification_type: str = "general") -> bool:
+                          notification_type: str = "general",
+                          reply_to: str = None) -> bool:
         """Send email via SendGrid."""
         if not self.sendgrid_enabled:
             print(f">>> [NOTIFY] Email skipped (SendGrid disabled): {to_email}")
@@ -291,6 +304,8 @@ class NotificationSystem:
                 subject=subject,
                 html_content=self._format_email_html(content, notification_type)
             )
+            if reply_to:
+                message.reply_to = Email(reply_to)
             
             response = self.sendgrid_client.send(message)
             
@@ -360,7 +375,7 @@ class NotificationSystem:
                         Clinical Sovereignty Lab • Sovereign Sanctuary
                     </p>
                     <p style="margin: 5px 0 0 0; color: #475569; font-size: 11px;">
-                        This is an automated message. Please do not reply directly.
+                        {'Simply reply to this email to let Little Nate know how you are doing.' if notification_type.startswith('checkin') else 'This is an automated message. Please do not reply directly.'}
                     </p>
                 </div>
             </div>
@@ -1170,6 +1185,44 @@ class NotificationSystem:
         else:
             return await self.send_sms(contact, msg)
     
+    async def send_security_alert(self, to_email: str, name: str,
+                                  to_phone: str = None, reason: str = "",
+                                  ip: str = "", user_agent: str = "") -> bool:
+        """Notify account holder of suspicious login activity and forced disconnection."""
+        timestamp = datetime.datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        content = f"""
+        <h2 style="color: #EF4444;">Security Alert</h2>
+        <p>Hi {name},</p>
+        <p>Suspicious activity was detected on your Sovereign Sanctuary account and the session 
+        was <strong>immediately terminated</strong> for your protection.</p>
+        <table style="border-collapse:collapse; margin:16px 0; width:100%;">
+            <tr><td style="padding:6px 12px; color:#9A9A9A;">When</td>
+                <td style="padding:6px 12px;">{timestamp}</td></tr>
+            <tr><td style="padding:6px 12px; color:#9A9A9A;">Reason</td>
+                <td style="padding:6px 12px;">{reason or 'Anomalous session behavior'}</td></tr>
+            {"<tr><td style='padding:6px 12px; color:#9A9A9A;'>IP Address</td><td style='padding:6px 12px;'>" + ip + "</td></tr>" if ip else ""}
+        </table>
+        <p><strong>If this was you:</strong> Log in again and verify your identity with your security key.</p>
+        <p><strong>If this was NOT you:</strong> Your session was terminated before any changes could be made. 
+        Consider changing your password immediately.</p>
+        <p style="font-size:12px; color:#9A9A9A; margin-top:24px;">
+            This is an automated security notification from Sovereign Sanctuary's Nate Sentinel.
+        </p>
+        """
+        email_sent = await self._send_email(
+            to_email=to_email,
+            subject="Security Alert — Suspicious Activity Detected",
+            content=content,
+            notification_type="security"
+        )
+        if to_phone:
+            sms_body = (
+                f"SOVEREIGN SANCTUARY SECURITY ALERT: Suspicious activity detected on your account. "
+                f"The session was terminated. If this wasn't you, change your password immediately."
+            )
+            await self.send_sms(to_phone, sms_body)
+        return email_sent
+
     def _log_sms(self, to_phone: str, body_preview: str, status: str,
                  details: Any = None):
         """Log SMS send attempt."""

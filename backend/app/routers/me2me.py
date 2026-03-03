@@ -15,14 +15,14 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.auth import get_current_user
+from app.auth import get_current_user_id
 
 logger = logging.getLogger("routers.me2me")
 
 router = APIRouter(
     prefix="/api/me2me",
     tags=["me2me"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user_id)],
 )
 
 
@@ -42,20 +42,53 @@ def _load_registry() -> Dict:
     return {}
 
 
-async def _require_top_tier(user_id: str) -> None:
+async def _require_top_tier(user_id: str, request: Request = None) -> None:
     """Verify the user has TOP_TIER (Sovereign Circle) subscription.
-    Raises HTTP 403 if not."""
+    PG-first with JSON fallback. Raises HTTP 403 if not."""
+    db_pool = getattr(request.app.state, "db_pool", None) if request else None
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT tier, profile_data FROM users "
+                    "WHERE hardware_id = $1 AND deleted_at IS NULL",
+                    user_id,
+                )
+                if row:
+                    plan = (row["tier"] or "").upper()
+                    pd = row.get("profile_data") or {}
+                    if isinstance(pd, str):
+                        try:
+                            pd = json.loads(pd)
+                        except Exception:
+                            pd = {}
+                    if not plan:
+                        plan = (pd.get("subscription_plan") or "").upper()
+                    if plan in ("TOP_TIER", "SOVEREIGN_CIRCLE"):
+                        return
+                    raise HTTPException(
+                        403,
+                        "Me2Me features require Sovereign Circle (TOP_TIER) subscription. "
+                        f"Current plan: {plan or 'TRIAL'}",
+                    )
+                raise HTTPException(404, "User not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("_require_top_tier PG check failed, falling back to JSON: %s", e)
+
+    # JSON fallback
     registry = _load_registry()
     for _k, entry in registry.items():
         profile = entry.get("profile", {})
         if profile.get("hardware_id") == user_id:
             plan = (profile.get("subscription_plan") or "").upper()
             if plan in ("TOP_TIER", "SOVEREIGN_CIRCLE"):
-                return  # Access granted
+                return
             raise HTTPException(
                 403,
                 "Me2Me features require Sovereign Circle (TOP_TIER) subscription. "
-                f"Current plan: {plan or 'TRIAL'}"
+                f"Current plan: {plan or 'TRIAL'}",
             )
     raise HTTPException(404, "User not found")
 
@@ -105,7 +138,7 @@ class MigrationRequest(BaseModel):
 @router.post("/consent/grant")
 async def grant_consent(req: ConsentRequest, request: Request):
     """Grant Me-2-Me consent at the specified level."""
-    await _require_top_tier(req.user_id)
+    await _require_top_tier(req.user_id, request)
     consent_service = getattr(request.app.state, "me2me_consent", None)
     if not consent_service:
         raise HTTPException(503, "Me-2-Me consent service not available")
@@ -127,7 +160,7 @@ async def grant_consent(req: ConsentRequest, request: Request):
 @router.post("/consent/revoke")
 async def revoke_consent(req: RevokeConsentRequest, request: Request):
     """Revoke all Me-2-Me consent."""
-    await _require_top_tier(req.user_id)
+    await _require_top_tier(req.user_id, request)
     consent_service = getattr(request.app.state, "me2me_consent", None)
     if not consent_service:
         raise HTTPException(503, "Me-2-Me consent service not available")
@@ -139,7 +172,7 @@ async def revoke_consent(req: RevokeConsentRequest, request: Request):
 @router.get("/consent/{user_id}")
 async def get_consent(user_id: str, request: Request):
     """Get current consent status."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     consent_service = getattr(request.app.state, "me2me_consent", None)
     if not consent_service:
         raise HTTPException(503, "Me-2-Me consent service not available")
@@ -163,7 +196,7 @@ async def get_consent(user_id: str, request: Request):
 @router.post("/session/start")
 async def start_visitor_session(req: VisitorSessionRequest, request: Request):
     """Start a visitor session with a Me-2-Me avatar."""
-    await _require_top_tier(req.visitor_id)
+    await _require_top_tier(req.visitor_id, request)
     interaction = getattr(request.app.state, "ancestral_interaction", None)
     if not interaction:
         raise HTTPException(503, "Me-2-Me interaction service not available")
@@ -209,8 +242,7 @@ async def end_visitor_session(session_id: str, request: Request):
 @router.post("/growth/add")
 async def add_growth_layer(req: GrowthLayerRequest, request: Request):
     """Add a post-mortem knowledge layer to an avatar. Requires TOP_TIER."""
-    # Avatar ID is the user_id; verify tier
-    await _require_top_tier(req.avatar_id)
+    await _require_top_tier(req.avatar_id, request)
     growth = getattr(request.app.state, "growth_engine", None)
     if not growth:
         raise HTTPException(503, "Me-2-Me growth engine not available")
@@ -231,7 +263,7 @@ async def add_growth_layer(req: GrowthLayerRequest, request: Request):
 @router.post("/migration/initiate")
 async def initiate_migration(req: MigrationRequest, request: Request):
     """Initiate the organic-to-inorganic migration process."""
-    await _require_top_tier(req.user_id)
+    await _require_top_tier(req.user_id, request)
     migration = getattr(request.app.state, "migration_service", None)
     if not migration:
         raise HTTPException(503, "Me-2-Me migration service not available")
@@ -270,7 +302,7 @@ async def advance_migration(migration_id: str, request: Request):
 @router.post("/avatar/{user_id}/activate")
 async def activate_avatar(user_id: str, request: Request):
     """Activate a Me-2-Me avatar for a user."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     avatar = getattr(request.app.state, "avatar_core", None)
     if not avatar:
         raise HTTPException(503, "Avatar service not available")
@@ -284,7 +316,7 @@ async def activate_avatar(user_id: str, request: Request):
 @router.get("/crystal/{user_id}")
 async def get_crystal(user_id: str, request: Request, version: Optional[int] = None):
     """Get the latest (or specific version) identity crystal for a user."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     db = request.app.state.db_pool
     if not db:
         raise HTTPException(503, "Database not available")
@@ -314,7 +346,7 @@ async def get_crystal(user_id: str, request: Request, version: Optional[int] = N
 @router.get("/crystal/{user_id}/versions")
 async def list_crystal_versions(user_id: str, request: Request):
     """List all crystal versions for a user."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     db = request.app.state.db_pool
     try:
         async with db.acquire() as conn:
@@ -336,7 +368,7 @@ async def list_crystal_versions(user_id: str, request: Request):
 @router.get("/vault/{user_id}/integrity")
 async def check_vault_integrity(user_id: str, request: Request):
     """Check Me-2-Me vault integrity for a user."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     vault = getattr(request.app.state, "me2me_vault", None)
     if not vault:
         raise HTTPException(503, "Me-2-Me vault service not available")
@@ -361,11 +393,10 @@ class SharedMemoryRequest(BaseModel):
 @router.post("/fabric/create")
 async def create_fabric(req: FabricCreateRequest, request: Request):
     """Create a new family fabric. Requires TOP_TIER for at least one member."""
-    # Verify at least one member avatar is TOP_TIER
     for avatar_user_id in req.member_avatars.values():
         try:
-            await _require_top_tier(avatar_user_id)
-            break  # At least one TOP_TIER member found
+            await _require_top_tier(avatar_user_id, request)
+            break
         except HTTPException:
             continue
     else:
@@ -416,7 +447,7 @@ class TrustCreateRequest(BaseModel):
 @router.post("/trust/create")
 async def create_trust(req: TrustCreateRequest, request: Request):
     """Create a Sovereign Legacy Trust."""
-    await _require_top_tier(req.user_id)
+    await _require_top_tier(req.user_id, request)
     trust_mgr = getattr(request.app.state, "trust_manager", None)
     if not trust_mgr:
         raise HTTPException(503, "Trust manager not available")
@@ -430,7 +461,7 @@ async def create_trust(req: TrustCreateRequest, request: Request):
 @router.get("/trust/{user_id}")
 async def get_trust(user_id: str, request: Request):
     """Get the Sovereign Legacy Trust for a user."""
-    await _require_top_tier(user_id)
+    await _require_top_tier(user_id, request)
     trust_mgr = getattr(request.app.state, "trust_manager", None)
     if not trust_mgr:
         raise HTTPException(503, "Trust manager not available")
@@ -448,7 +479,7 @@ async def get_trust(user_id: str, request: Request):
 @router.get("/growth/{avatar_id}/layers")
 async def get_growth_layers(avatar_id: str, request: Request):
     """Get all growth layers for an avatar."""
-    await _require_top_tier(avatar_id)
+    await _require_top_tier(avatar_id, request)
     db = request.app.state.db_pool
     try:
         async with db.acquire() as conn:

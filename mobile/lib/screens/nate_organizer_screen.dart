@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../config/app_config.dart';
 
@@ -322,6 +323,22 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
     }
   }
 
+  void _loadFromVault() async {
+    try {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _VaultPickerScreen(profile: widget.profile),
+        ),
+      );
+      if (result != null && result is String && result.isNotEmpty && mounted) {
+        setState(() {
+          _contentController.text = result;
+        });
+      }
+    } catch (_) {}
+  }
+
   void _send(Map<String, dynamic> msg) {
     _channel?.sink.add(jsonEncode(msg));
   }
@@ -447,19 +464,35 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _startOrganizing,
-            icon: const Text('✨', style: TextStyle(fontSize: 16)),
-            label: const Text('Start Organizing', style: TextStyle(
-              fontSize: 14, fontWeight: FontWeight.w600,
-            )),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _OD.gold,
-              foregroundColor: _OD.bgVoid,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            ElevatedButton.icon(
+              onPressed: _startOrganizing,
+              icon: const Text('✨', style: TextStyle(fontSize: 16)),
+              label: const Text('Start Organizing', style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600,
+              )),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _OD.gold,
+                foregroundColor: _OD.bgVoid,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
             ),
-          ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: _loadFromVault,
+              icon: const Icon(Icons.folder_open, size: 18),
+              label: const Text('Load from Vault', style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600,
+              )),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _OD.cyan,
+                side: const BorderSide(color: _OD.cyan),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ]),
           if (_error != null) ...[
             const SizedBox(height: 16),
             Text(_error!, style: const TextStyle(color: _OD.red, fontSize: 12)),
@@ -749,9 +782,8 @@ class _NateOrganizerScreenState extends State<NateOrganizerScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(msg.text, style: TextStyle(
+          SelectableText(msg.text, style: TextStyle(
             fontSize: 13, color: isNate ? _OD.textPrimary : _OD.goldBright,
-            height: 1.5,
           )),
           // Proposal actions
           if (msg.proposal != null) ...[
@@ -866,4 +898,100 @@ class _ChatMessage {
 
   factory _ChatMessage.system(String text) =>
       _ChatMessage(type: _ChatType.system, text: text);
+}
+
+
+// ─── Vault Picker (Minimal) ─────────────────────────────────────────────────
+
+class _VaultPickerScreen extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  const _VaultPickerScreen({required this.profile});
+
+  @override
+  State<_VaultPickerScreen> createState() => _VaultPickerScreenState();
+}
+
+class _VaultPickerScreenState extends State<_VaultPickerScreen> {
+  List<Map<String, dynamic>> _items = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  Future<void> _loadItems() async {
+    try {
+      final storage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      );
+      final token = await storage.read(key: 'session_token');
+      if (token == null) return;
+
+      final url = '${AppConfig.apiBaseUrl}/api/v1/vault/folders/root/items?limit=50';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        final items = (data['items'] as List?)
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .where((i) {
+              final mime = (i['mime_type'] ?? '').toString();
+              return mime.startsWith('text/') ||
+                     mime.contains('pdf') ||
+                     mime.contains('document');
+            })
+            .toList() ?? [];
+        setState(() { _items = items; _loading = false; });
+      } else {
+        if (mounted) setState(() => _loading = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _OD.bgVoid,
+      appBar: AppBar(
+        backgroundColor: _OD.bgChamber,
+        title: const Text('Select Vault Item',
+          style: TextStyle(color: _OD.textPrimary, fontSize: 18)),
+        iconTheme: const IconThemeData(color: _OD.gold),
+      ),
+      body: _loading
+        ? const Center(child: CircularProgressIndicator(color: _OD.gold))
+        : _items.isEmpty
+          ? const Center(child: Text('No text documents in vault',
+              style: TextStyle(color: _OD.textSecondary)))
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _items.length,
+              itemBuilder: (ctx, i) {
+                final item = _items[i];
+                return ListTile(
+                  leading: const Icon(Icons.description, color: _OD.goldDim),
+                  title: Text(
+                    item['display_name']?.toString() ?? 'Untitled',
+                    style: const TextStyle(color: _OD.textPrimary, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    item['mime_type']?.toString() ?? '',
+                    style: const TextStyle(color: _OD.textMuted, fontSize: 11),
+                  ),
+                  onTap: () {
+                    final preview = item['extracted_text_preview']?.toString() ?? '';
+                    Navigator.pop(context, preview);
+                  },
+                );
+              },
+            ),
+    );
+  }
 }

@@ -19,12 +19,21 @@ EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/favicon.ico"}
 class DrumTapMiddleware(BaseHTTPMiddleware):
     """Middleware that feeds request/response data to Pipeline Drum."""
 
-    def __init__(self, app, pipeline_drum=None):
+    def __init__(self, app, pipeline_drum=None, app_state=None):
         super().__init__(app)
         self._drum = pipeline_drum
+        self._app_state = app_state
+
+    def _get_drum(self):
+        if self._drum:
+            return self._drum
+        if self._app_state:
+            return getattr(self._app_state, "hive_v4", {}).get("pipeline_drum")
+        return None
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if not self._drum or request.url.path in EXEMPT_PATHS:
+        drum = self._get_drum()
+        if not drum or request.url.path in EXEMPT_PATHS:
             return await call_next(request)
 
         start_time = time.time()
@@ -43,7 +52,7 @@ class DrumTapMiddleware(BaseHTTPMiddleware):
         # Tap the completed request
         elapsed_ms = (time.time() - start_time) * 1000
         try:
-            self._drum.tap_request(
+            drum.tap_request(
                 endpoint=request.url.path,
                 method=request.method,
                 status_code=response.status_code,

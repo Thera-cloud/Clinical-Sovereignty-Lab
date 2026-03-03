@@ -94,6 +94,12 @@ class GeneratePostRequest(BaseModel):
     topic: str
     context: Optional[dict] = None
 
+class CommentReplyRequest(BaseModel):
+    platform: str
+    post_id: str
+    reply_text: str
+    comment_id: Optional[str] = None
+
 
 # =============================================================================
 # 1. OVERVIEW
@@ -322,6 +328,107 @@ async def reject_item(approval_id: int, request: Request):
 
 
 # =============================================================================
+# 8b. ENGAGEMENT REQUESTS (Tier 3 approval-gated actions)
+# =============================================================================
+
+@router.get("/engagement-requests")
+async def list_engagement_requests(request: Request, status: str = "pending"):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, platform, action_type, target_user, target_user_id,
+                      content_preview, reason, context, status, priority,
+                      session_id, created_at, expires_at, resolved_at, resolved_by
+               FROM engagement_requests
+               WHERE status = $1
+               ORDER BY CASE priority
+                   WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                   WHEN 'normal' THEN 2 ELSE 3 END,
+                   created_at DESC
+               LIMIT 100""",
+            status
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/engagement-requests/count")
+async def engagement_request_count(request: Request):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM engagement_requests WHERE status = 'pending'"
+        )
+    return {"count": count or 0}
+
+
+@router.post("/engagement-requests/{req_id}/approve")
+async def approve_engagement_request(req_id: int, request: Request):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE engagement_requests
+               SET status = 'approved', resolved_at = NOW(), resolved_by = 'admin'
+               WHERE id = $1 AND status = 'pending'
+               RETURNING id, platform, action_type, target_user, target_user_id,
+                         content_preview""",
+            req_id
+        )
+        if not row:
+            raise HTTPException(404, "Request not found or already resolved")
+
+    action = dict(row)
+    result = {"status": "approved", "id": action["id"], "executed": False}
+
+    try:
+        from app.services.platforms import get_adapter
+        adapter = get_adapter(action["platform"], pool)
+        if adapter and await adapter.authenticate():
+            if action["action_type"] == "dm" and action.get("target_user_id"):
+                ok = await adapter.send_dm(
+                    action["target_user_id"], action["content_preview"]
+                )
+                result["executed"] = ok
+            elif action["action_type"] == "follow_outreach" and action.get("target_user_id"):
+                ok = await adapter.follow_user(action["target_user_id"])
+                result["executed"] = ok
+            elif action["action_type"] == "proactive_reply" and action.get("target_user_id"):
+                res = await adapter.reply_to_comment(
+                    action["target_user_id"], action["content_preview"]
+                )
+                result["executed"] = res.success if res else False
+
+            if result["executed"]:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """INSERT INTO skyeye_activity (platform, type, content, severity)
+                           VALUES ($1, 'engagement_executed', $2, 'success')""",
+                        action["platform"],
+                        f"Tier 3 {action['action_type']} to {action.get('target_user', '?')} executed"
+                    )
+    except Exception as e:
+        logger.warning(f"Engagement execution failed for #{req_id}: {e}")
+        result["error"] = str(e)
+
+    return result
+
+
+@router.post("/engagement-requests/{req_id}/reject")
+async def reject_engagement_request(req_id: int, request: Request):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE engagement_requests
+               SET status = 'rejected', resolved_at = NOW(), resolved_by = 'admin'
+               WHERE id = $1 AND status = 'pending'
+               RETURNING id""",
+            req_id
+        )
+        if not row:
+            raise HTTPException(404, "Request not found or already resolved")
+    return {"status": "rejected", "id": row["id"]}
+
+
+# =============================================================================
 # 9. COMPLIANCE
 # =============================================================================
 
@@ -410,7 +517,9 @@ async def get_history(
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT h.id, h.platform, h.action, h.detail, h.session_id, h.created_at
+            """SELECT h.id, h.platform, h.action, h.detail, h.summary,
+                      h.platforms, h.actions_count, h.duration_seconds,
+                      h.session_id, h.created_at
                FROM skyeye_history h
                ORDER BY h.created_at DESC
                LIMIT $1 OFFSET $2""",
@@ -1146,8 +1255,14 @@ async def get_platform_status(request: Request):
             try:
                 _exp_dt = _tok_exp if isinstance(_tok_exp, datetime) else datetime.fromisoformat(str(_tok_exp).replace("Z", "+00:00"))
                 _now = datetime.now(_exp_dt.tzinfo) if _exp_dt.tzinfo else datetime.now()
-                _days_left = (_exp_dt - _now).days
-                _health = "healthy" if _days_left > 7 else ("warning" if _days_left > 0 else "expired")
+                _delta = _exp_dt - _now
+                _days_left = _delta.days
+                if _delta.total_seconds() <= 0:
+                    _health = "expired"
+                elif _days_left > 7:
+                    _health = "healthy"
+                else:
+                    _health = "warning"
             except Exception:
                 pass
         elif tok.get("status") == "connected":
@@ -1247,9 +1362,14 @@ async def initiate_platform_connect(platform: str, request: Request):
         }
 
 
-@router.get("/platforms/{platform}/connect")
+@oauth_router.get("/platforms/{platform}/connect")
 async def platform_connect_redirect(platform: str, request: Request):
-    """Browser-friendly GET redirect — navigates directly to OAuth authorization."""
+    """Browser-friendly GET redirect — navigates directly to OAuth authorization.
+
+    On the public oauth_router (no auth required) because it only builds
+    a redirect URL from the public client_id and sends the browser to
+    LinkedIn/Meta/etc.  The actual token storage happens in the callback.
+    """
     from app.services.platforms import get_adapter
     from app.config import settings as _settings
 
@@ -1655,13 +1775,14 @@ async def get_platform_health(request: Request):
             try:
                 _ph_exp_dt = _ph_tok_exp if isinstance(_ph_tok_exp, datetime) else datetime.fromisoformat(str(_ph_tok_exp).replace("Z", "+00:00"))
                 _ph_now = datetime.now(_ph_exp_dt.tzinfo) if _ph_exp_dt.tzinfo else datetime.now()
-                days_until_expiry = (_ph_exp_dt - _ph_now).days
-                if days_until_expiry > 7:
-                    health = "healthy"
-                elif days_until_expiry > 0:
-                    health = "warning"
-                else:
+                _ph_delta = _ph_exp_dt - _ph_now
+                days_until_expiry = _ph_delta.days
+                if _ph_delta.total_seconds() <= 0:
                     health = "expired"
+                elif days_until_expiry > 7:
+                    health = "healthy"
+                else:
+                    health = "warning"
             except Exception:
                 pass
         elif tok.get("status") == "connected":
@@ -1939,6 +2060,42 @@ async def dns_check():
         results["overall"] = "warn"
 
     return results
+
+
+@router.post("/reply-to-comment")
+async def reply_to_comment(body: CommentReplyRequest, request: Request):
+    """Post a reply to a comment on a social platform."""
+    try:
+        from app.services.platforms import get_adapter
+        adapter = get_adapter(body.platform, request.app.state.db_pool)
+        if not adapter:
+            raise HTTPException(400, f"No adapter for platform: {body.platform}")
+
+        await adapter.authenticate()
+        result = await adapter.reply_to_comment(
+            comment_id=body.comment_id or "",
+            text=body.reply_text,
+            post_id=body.post_id,
+        )
+
+        if result.success:
+            async with request.app.state.db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO skyeye_activity (platform, type, content)
+                    VALUES ($1, 'comment_reply_posted', $2)
+                """, body.platform,
+                    json.dumps({"reply_text": body.reply_text[:500],
+                                "post_id": body.post_id,
+                                "reply_id": result.reply_id or ""}))
+            return {"success": True, "reply_id": result.reply_id, "platform": body.platform}
+        else:
+            return JSONResponse(status_code=422,
+                                content={"success": False, "error": result.error})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("reply-to-comment failed: %s", e)
+        raise HTTPException(500, str(e))
 
 
 class EmergencyRevokeRequest(BaseModel):

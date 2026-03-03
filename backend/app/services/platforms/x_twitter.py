@@ -107,6 +107,7 @@ class XTwitterAdapter(SocialPlatformAdapter):
             return False
 
         try:
+            auth = (self.client_id, self.client_secret) if self.client_secret else None
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
                     X_TOKEN_URL,
@@ -115,6 +116,7 @@ class XTwitterAdapter(SocialPlatformAdapter):
                         "refresh_token": tokens["refresh_token"],
                         "client_id": self.client_id,
                     },
+                    auth=auth,
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 data = resp.json()
@@ -234,9 +236,21 @@ class XTwitterAdapter(SocialPlatformAdapter):
     async def post_content(self, text: str, media_url: Optional[str] = None,
                            content_type: ContentType = ContentType.POST,
                            **kwargs) -> PostResult:
-        """Post a tweet. Max 280 characters for text-only, 4000 for X Premium."""
+        """Post a tweet via POST /2/tweets.
+
+        Supports standard tweets (280 chars) and long-form posts up to
+        4,000 chars for X Premium accounts. The same API endpoint handles
+        both — X enforces the limit based on the account's subscription.
+
+        When content_type is ARTICLE, the post is logged as a long-form
+        article but uses the identical API call.
+        """
         self._ensure_connected()
         await self.rate_limiter.acquire()
+
+        is_article = content_type == ContentType.ARTICLE
+        if is_article:
+            logger.info(f"X: Publishing long-form article ({len(text)} chars)")
 
         tweet_body: Dict[str, Any] = {"text": text}
 
@@ -259,6 +273,8 @@ class XTwitterAdapter(SocialPlatformAdapter):
                 if resp.status_code in (200, 201):
                     data = resp.json().get("data", {})
                     tweet_id = data.get("id", "")
+                    label = "article" if is_article else "tweet"
+                    logger.info(f"X: {label} posted — {tweet_id}")
                     return PostResult(
                         success=True,
                         post_id=tweet_id,
@@ -299,6 +315,8 @@ class XTwitterAdapter(SocialPlatformAdapter):
             params: Dict[str, Any] = {
                 "max_results": min(limit, 100),
                 "tweet.fields": "created_at,author_id,text",
+                "expansions": "author_id",
+                "user.fields": "username,name",
             }
             if since:
                 params["start_time"] = since.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -310,10 +328,15 @@ class XTwitterAdapter(SocialPlatformAdapter):
                     headers=self._auth_headers(),
                 )
                 if resp.status_code == 200:
-                    for tweet in resp.json().get("data", []):
+                    body = resp.json()
+                    users = {u["id"]: u for u in body.get("includes", {}).get("users", [])}
+                    for tweet in body.get("data", []):
+                        author_id = tweet.get("author_id", "")
+                        author = users.get(author_id, {})
+                        handle = author.get("username", author_id)
                         mentions.append(Mention(
                             mention_id=tweet.get("id", ""),
-                            author_handle=tweet.get("author_id", ""),
+                            author_handle=handle,
                             text=tweet.get("text", ""),
                             context_url=f"https://x.com/i/status/{tweet.get('id', '')}",
                             mention_type="mention",
@@ -321,7 +344,7 @@ class XTwitterAdapter(SocialPlatformAdapter):
                                 tweet["created_at"].replace("Z", "+00:00")
                             ) if tweet.get("created_at") else datetime.utcnow(),
                             platform="x",
-                            raw_data=tweet,
+                            raw_data={**tweet, "_author": author},
                         ))
         except Exception as e:
             logger.error(f"X get_mentions error: {e}")
@@ -501,6 +524,347 @@ class XTwitterAdapter(SocialPlatformAdapter):
                     )
         except Exception as e:
             return ModerateResult(success=False, error=str(e), action=ActionResult.FAILED)
+
+    # ── Engagement (Tier 2) ─────────────────────────────────────────
+
+    @retry_on_failure(max_retries=2)
+    async def like_tweet(self, tweet_id: str) -> bool:
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{X_API_BASE}/users/{self._user_id}/likes",
+                    json={"tweet_id": tweet_id},
+                    headers={**self._auth_headers(), "Content-Type": "application/json"},
+                )
+                if resp.status_code in (200, 201):
+                    return True
+                elif resp.status_code == 429:
+                    raise PlatformRateLimitError("x")
+                else:
+                    logger.warning(f"X: Like failed ({resp.status_code}): {resp.text[:200]}")
+                    return False
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X: Like error: {e}")
+            return False
+
+    @retry_on_failure(max_retries=2)
+    async def retweet(self, tweet_id: str) -> bool:
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{X_API_BASE}/users/{self._user_id}/retweets",
+                    json={"tweet_id": tweet_id},
+                    headers={**self._auth_headers(), "Content-Type": "application/json"},
+                )
+                return resp.status_code in (200, 201)
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X: Retweet error: {e}")
+            return False
+
+    @retry_on_failure(max_retries=2)
+    async def follow_user(self, target_user_id: str) -> bool:
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{X_API_BASE}/users/{self._user_id}/following",
+                    json={"target_user_id": target_user_id},
+                    headers={**self._auth_headers(), "Content-Type": "application/json"},
+                )
+                return resp.status_code in (200, 201)
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X: Follow error: {e}")
+            return False
+
+    @retry_on_failure(max_retries=2)
+    async def search_tweets(self, query: str, limit: int = 10,
+                            since: Optional[datetime] = None) -> List[FeedItem]:
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        params: Dict[str, Any] = {
+            "query": f"{query} -is:retweet lang:en",
+            "max_results": min(limit, 100),
+            "tweet.fields": "created_at,public_metrics,author_id,conversation_id",
+            "expansions": "author_id",
+            "user.fields": "username,name,public_metrics,description",
+        }
+        if since:
+            params["start_time"] = since.strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/tweets/search/recent",
+                    params=params,
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code != 200:
+                    logger.warning(f"X: Search failed ({resp.status_code})")
+                    return []
+                body = resp.json()
+                tweets = body.get("data", [])
+                users = {u["id"]: u for u in body.get("includes", {}).get("users", [])}
+                results = []
+                for t in tweets:
+                    author = users.get(t.get("author_id"), {})
+                    metrics = t.get("public_metrics", {})
+                    results.append(FeedItem(
+                        item_id=t["id"],
+                        author_handle=author.get("username", ""),
+                        author_name=author.get("name", ""),
+                        text=t.get("text", ""),
+                        like_count=metrics.get("like_count", 0),
+                        comment_count=metrics.get("reply_count", 0),
+                        share_count=metrics.get("retweet_count", 0),
+                        view_count=metrics.get("impression_count", 0),
+                        created_at=t.get("created_at"),
+                        url=f"https://x.com/i/status/{t['id']}",
+                        platform="x",
+                        raw_data={**t, "_author": author},
+                    ))
+                return results
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X: Search error: {e}")
+            return []
+
+    @retry_on_failure(max_retries=2)
+    async def get_user_by_handle(self, handle: str) -> Optional[UserInfo]:
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        clean = handle.lstrip("@")
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/users/by/username/{clean}",
+                    params={"user.fields": "public_metrics,description,created_at"},
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code != 200:
+                    return None
+                data = resp.json().get("data", {})
+                metrics = data.get("public_metrics", {})
+                return UserInfo(
+                    user_id=data.get("id", ""),
+                    handle=data.get("username", clean),
+                    display_name=data.get("name", ""),
+                    bio=data.get("description", ""),
+                    follower_count=metrics.get("followers_count", 0),
+                    following_count=metrics.get("following_count", 0),
+                    post_count=metrics.get("tweet_count", 0),
+                    is_verified=data.get("verified", False),
+                    profile_url=f"https://x.com/{data.get('username', clean)}",
+                    platform="x",
+                    raw_data=data,
+                )
+        except Exception as e:
+            logger.error(f"X: User lookup error: {e}")
+            return None
+
+    @retry_on_failure(max_retries=2)
+    async def send_dm(self, participant_id: str, text: str) -> bool:
+        """Send a direct message. Requires DM scope in OAuth."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{X_API_BASE}/dm_conversations/with/{participant_id}/messages",
+                    json={"text": text},
+                    headers={**self._auth_headers(), "Content-Type": "application/json"},
+                )
+                if resp.status_code in (200, 201):
+                    return True
+                else:
+                    logger.warning(f"X: DM failed ({resp.status_code}): {resp.text[:200]}")
+                    return False
+        except Exception as e:
+            logger.error(f"X: DM error: {e}")
+            return False
+
+    async def get_trending(self, limit: int = 10) -> List[TrendingTopic]:
+        """Search for trending mental health topics as a proxy for trending."""
+        try:
+            results = await self.search_tweets(
+                "mental health OR therapy OR wellness OR self care",
+                limit=limit,
+                since=datetime.now(timezone.utc) - timedelta(hours=6),
+            )
+            topics = {}
+            for item in results:
+                for word in item.text.split():
+                    if word.startswith("#") and len(word) > 2:
+                        tag = word.lower().rstrip(".,!?")
+                        topics[tag] = topics.get(tag, 0) + 1
+            return [
+                TrendingTopic(name=tag, post_count=count, platform="x")
+                for tag, count in sorted(topics.items(), key=lambda x: -x[1])[:limit]
+            ]
+        except Exception:
+            return []
+
+    # ── Notification / Engagement Discovery ────────────────────────
+
+    @retry_on_failure(max_retries=2)
+    async def get_liking_users(self, tweet_id: str, limit: int = 100) -> List[UserInfo]:
+        """Get users who liked a tweet."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/tweets/{tweet_id}/liking_users",
+                    params={
+                        "max_results": min(limit, 100),
+                        "user.fields": "username,name,description,public_metrics",
+                    },
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code == 200:
+                    return [
+                        UserInfo(
+                            user_id=u.get("id", ""),
+                            handle=u.get("username", ""),
+                            display_name=u.get("name", ""),
+                            bio=u.get("description", ""),
+                            follower_count=u.get("public_metrics", {}).get("followers_count", 0),
+                            following_count=u.get("public_metrics", {}).get("following_count", 0),
+                            post_count=u.get("public_metrics", {}).get("tweet_count", 0),
+                            profile_url=f"https://x.com/{u.get('username', '')}",
+                            platform="x",
+                            raw_data=u,
+                        )
+                        for u in resp.json().get("data", [])
+                    ]
+                elif resp.status_code == 429:
+                    raise PlatformRateLimitError("x")
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X get_liking_users error: {e}")
+        return []
+
+    @retry_on_failure(max_retries=2)
+    async def get_retweeted_by(self, tweet_id: str, limit: int = 100) -> List[UserInfo]:
+        """Get users who retweeted a tweet."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/tweets/{tweet_id}/retweeted_by",
+                    params={
+                        "max_results": min(limit, 100),
+                        "user.fields": "username,name,description,public_metrics",
+                    },
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code == 200:
+                    return [
+                        UserInfo(
+                            user_id=u.get("id", ""),
+                            handle=u.get("username", ""),
+                            display_name=u.get("name", ""),
+                            bio=u.get("description", ""),
+                            follower_count=u.get("public_metrics", {}).get("followers_count", 0),
+                            following_count=u.get("public_metrics", {}).get("following_count", 0),
+                            post_count=u.get("public_metrics", {}).get("tweet_count", 0),
+                            profile_url=f"https://x.com/{u.get('username', '')}",
+                            platform="x",
+                            raw_data=u,
+                        )
+                        for u in resp.json().get("data", [])
+                    ]
+                elif resp.status_code == 429:
+                    raise PlatformRateLimitError("x")
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X get_retweeted_by error: {e}")
+        return []
+
+    @retry_on_failure(max_retries=2)
+    async def get_new_followers(self, limit: int = 100) -> List[UserInfo]:
+        """Get most recent followers (newest first for delta diffing)."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        if not self._user_id:
+            return []
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/users/{self._user_id}/followers",
+                    params={
+                        "max_results": min(limit, 100),
+                        "user.fields": "username,name,description,public_metrics,created_at",
+                    },
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code == 200:
+                    return [
+                        UserInfo(
+                            user_id=u.get("id", ""),
+                            handle=u.get("username", ""),
+                            display_name=u.get("name", ""),
+                            bio=u.get("description", ""),
+                            follower_count=u.get("public_metrics", {}).get("followers_count", 0),
+                            following_count=u.get("public_metrics", {}).get("following_count", 0),
+                            post_count=u.get("public_metrics", {}).get("tweet_count", 0),
+                            profile_url=f"https://x.com/{u.get('username', '')}",
+                            platform="x",
+                            raw_data=u,
+                        )
+                        for u in resp.json().get("data", [])
+                    ]
+                elif resp.status_code == 429:
+                    raise PlatformRateLimitError("x")
+        except (PlatformRateLimitError, PlatformAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"X get_new_followers error: {e}")
+        return []
+
+    @retry_on_failure(max_retries=2)
+    async def resolve_user_id(self, user_id: str) -> Optional[UserInfo]:
+        """Reverse lookup: numeric user ID to full UserInfo with @username."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{X_API_BASE}/users/{user_id}",
+                    params={"user.fields": "username,name,description,public_metrics"},
+                    headers=self._auth_headers(),
+                )
+                if resp.status_code == 200:
+                    data = resp.json().get("data", {})
+                    metrics = data.get("public_metrics", {})
+                    return UserInfo(
+                        user_id=data.get("id", user_id),
+                        handle=data.get("username", ""),
+                        display_name=data.get("name", ""),
+                        bio=data.get("description", ""),
+                        follower_count=metrics.get("followers_count", 0),
+                        following_count=metrics.get("following_count", 0),
+                        post_count=metrics.get("tweet_count", 0),
+                        profile_url=f"https://x.com/{data.get('username', '')}",
+                        platform="x",
+                        raw_data=data,
+                    )
+        except Exception as e:
+            logger.error(f"X resolve_user_id error: {e}")
+        return None
 
     # ── Analytics ───────────────────────────────────────────────────
 

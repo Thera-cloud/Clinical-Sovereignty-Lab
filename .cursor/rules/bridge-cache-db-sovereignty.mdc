@@ -1,0 +1,51 @@
+---
+description: The bridge's in-memory registry cache periodically writes to PostgreSQL, overwriting values set by external services (Token Lab, admin tools). Columns that external services own must be protected in the upsert.
+alwaysApply: true
+---
+
+# Bridge Cache vs Direct DB Writes
+
+## The Problem
+
+The bridge holds an in-memory copy of all user profiles (`_registry_cache`). When `save_registry()` runs, `UserStore.upsert_user()` writes the cache back to PostgreSQL — overwriting values that other services set directly in the DB.
+
+**Feb 2026 incident**: Token Lab adjusted a client's `token_balance` via REST API (direct SQL UPDATE). Within minutes, the bridge's next `save_registry()` call wrote its stale cached value back, reverting the balance.
+
+## Two Overwrite Vectors
+
+1. **`token_balance` column**: `COALESCE(EXCLUDED.token_balance, users.token_balance)` — if the bridge cache has a stale number (not NULL), it takes precedence over the DB value
+2. **`profile_data` JSONB**: `profile_data = EXCLUDED.profile_data` — full replacement, nuking any keys set externally
+
+## The Fix (Applied)
+
+In `user_store.py` `upsert_user()`:
+
+```sql
+-- Preserve DB-authoritative columns over bridge cache
+profile_data = jsonb_set(
+    COALESCE(EXCLUDED.profile_data::jsonb, users.profile_data),
+    '{token_balance}',
+    COALESCE(to_jsonb(users.token_balance), '0'::jsonb)
+),
+token_balance = COALESCE(users.token_balance, EXCLUDED.token_balance, 0),
+```
+
+## Rules
+
+1. **Never let the bridge be authoritative for columns owned by external services.** The upsert must use `users.<column>` (DB value) instead of `EXCLUDED.<column>` (bridge cache) for these columns.
+2. **When adding a new externally-managed column** (like `token_balance`), add it to the protected list in the upsert's `ON CONFLICT DO UPDATE` clause.
+3. **After any direct DB update to a user row**, the bridge's in-memory cache is stale. The cache refreshes on bridge restart (`_row_to_entry` reads from DB). Between restarts, the upsert protection prevents overwrite.
+4. **Test after direct DB writes**: Set a value via SQL, wait 2 minutes (bridge save cycle), query again — value must be unchanged.
+
+## Currently Protected Columns
+
+| Column | Owned by | Protection |
+|---|---|---|
+| `token_balance` | Token Lab (REST API) | `users.token_balance` preserved over `EXCLUDED` |
+| `family_id` | Admin assignment | `COALESCE(EXCLUDED.family_id, users.family_id)` |
+
+## If Adding a New Protected Column
+
+1. Add the column to `upsert_user()` INSERT and ON CONFLICT clauses
+2. Use `COALESCE(users.new_col, EXCLUDED.new_col)` to prefer DB value
+3. If the column is also inside `profile_data`, patch it back with `jsonb_set()` after the profile replacement

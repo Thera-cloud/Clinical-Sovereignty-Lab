@@ -450,9 +450,11 @@ _recoverAuth();
             loadClients();
         }
 
+        var _nateReconnectAttempts = 0;
         function connect() {
             socket = new WebSocket(SERVER_URL);
             socket.onopen = () => {
+                _nateReconnectAttempts = 0;
                 const profile = JSON.parse((sessionStorage.getItem('profile') || localStorage.getItem('sc_profile')) || '{}');
                 socket.send(JSON.stringify({
                     type: 'auth',
@@ -460,6 +462,14 @@ _recoverAuth();
                     hardware_id: profile.hardware_id || 'WEB_ADMIN'
                 }));
             };
+            socket.onclose = () => {
+                var attempt = Math.min(_nateReconnectAttempts, 10);
+                var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+                var jitter = Math.floor(baseMs * 0.2 * Math.random());
+                _nateReconnectAttempts++;
+                setTimeout(connect, baseMs + jitter);
+            };
+            socket.onerror = (e) => { console.warn('Ask Nate WS error:', e); };
             socket.onmessage = handleMessage;
         }
         let streamingMessageEl = null;

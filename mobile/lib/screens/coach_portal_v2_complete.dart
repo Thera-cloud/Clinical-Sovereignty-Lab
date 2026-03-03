@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
 import 'settings_screen.dart';
 import '../config/app_config.dart' as central_config;
 
@@ -57,6 +58,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
     _TabItem(icon: Icons.calendar_today, label: 'Calendar'),
     _TabItem(icon: Icons.videocam, label: 'Sessions'),
     _TabItem(icon: Icons.psychology, label: 'Nate AI'),
+    _TabItem(icon: Icons.account_balance, label: 'QuickBooks'),
   ];
 
   @override
@@ -260,6 +262,10 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
       case 3:
         return AskNateTab(
           socket: _socket,
+          coachProfile: widget.currentUserProfile,
+        );
+      case 4:
+        return CoachQuickBooksTab(
           coachProfile: widget.currentUserProfile,
         );
       default:
@@ -2843,7 +2849,7 @@ class _AskNateTabState extends State<AskNateTab> {
                   bottomLeft: Radius.circular(isUser ? 16 : 4), bottomRight: Radius.circular(isUser ? 4 : 16),
                 ),
               ),
-              child: Text(message['content'] ?? '', style: TextStyle(color: isUser ? Colors.black : Colors.white, fontSize: 13, height: 1.5)),
+              child: SelectableText(message['content'] ?? '', style: TextStyle(color: isUser ? Colors.black : Colors.white, fontSize: 13, height: 1.5)),
             ),
           ),
         ],
@@ -3565,6 +3571,268 @@ class _CancelSessionDialogState extends State<CancelSessionDialog> {
     ]));
   }
 }
+
+// =============================================================================
+// COACH QUICKBOOKS TAB
+// =============================================================================
+class CoachQuickBooksTab extends StatefulWidget {
+  final Map<String, dynamic> coachProfile;
+  const CoachQuickBooksTab({super.key, required this.coachProfile});
+  @override
+  State<CoachQuickBooksTab> createState() => _CoachQuickBooksTabState();
+}
+
+class _CoachQuickBooksTabState extends State<CoachQuickBooksTab> {
+  bool _loading = true;
+  bool _connected = false;
+  String? _companyName;
+  String? _lastSync;
+  bool _tokenExpired = false;
+  String? _errorMessage;
+  List<dynamic> _syncHistory = [];
+  List<dynamic> _mappings = [];
+  bool _syncing = false;
+
+  String get _apiBase => central_config.AppConfig.apiBaseUrl;
+  String get _token => widget.coachProfile['token'] ?? '';
+  Map<String, String> get _headers => {'Authorization': 'Bearer $_token', 'Content-Type': 'application/json'};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatus();
+  }
+
+  Future<void> _loadStatus() async {
+    setState(() => _loading = true);
+    try {
+      final resp = await http.get(Uri.parse('$_apiBase/api/coach/quickbooks/status'), headers: _headers);
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _connected = data['connected'] == true;
+          _companyName = data['company_name'] as String?;
+          _lastSync = data['last_sync_at'] as String?;
+          _tokenExpired = data['token_expired'] == true;
+          _errorMessage = data['error_message'] as String?;
+          _loading = false;
+        });
+        if (_connected) {
+          _loadSyncHistory();
+          _loadMappings();
+        }
+      } else {
+        setState(() { _loading = false; _connected = false; });
+      }
+    } catch (e) {
+      debugPrint('[CoachQB] status error: $e');
+      if (mounted) setState(() { _loading = false; _connected = false; });
+    }
+  }
+
+  Future<void> _loadSyncHistory() async {
+    try {
+      final resp = await http.get(Uri.parse('$_apiBase/api/coach/quickbooks/sync/history?limit=20'), headers: _headers);
+      if (resp.statusCode == 200 && mounted) {
+        final parsed = jsonDecode(resp.body);
+        if (parsed is List) setState(() => _syncHistory = parsed);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadMappings() async {
+    try {
+      final resp = await http.get(Uri.parse('$_apiBase/api/coach/quickbooks/account-mapping'), headers: _headers);
+      if (resp.statusCode == 200 && mounted) {
+        final parsed = jsonDecode(resp.body);
+        if (parsed is List) setState(() => _mappings = parsed);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _connect() async {
+    try {
+      final resp = await http.get(Uri.parse('$_apiBase/api/coach/quickbooks/connect'), headers: _headers);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (data['oauth_url'] != null) {
+          final url = Uri.parse(data['oauth_url'] as String);
+          if (await canLaunchUrl(url)) {
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+          }
+          return;
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not get OAuth URL'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _disconnect() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Disconnect QuickBooks?', style: TextStyle(color: Colors.white)),
+        content: const Text('This will revoke your QuickBooks connection.', style: TextStyle(color: Colors.grey)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Disconnect', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await http.post(Uri.parse('$_apiBase/api/coach/quickbooks/disconnect'), headers: _headers);
+    } catch (_) {}
+    _loadStatus();
+  }
+
+  Future<void> _syncNow() async {
+    setState(() => _syncing = true);
+    try {
+      final resp = await http.post(Uri.parse('$_apiBase/api/coach/quickbooks/sync/trigger'), headers: _headers);
+      if (!mounted) return;
+      setState(() => _syncing = false);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final total = data['total_synced'] ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sync complete: $total records'), backgroundColor: const Color(0xFF22C55E)),
+        );
+        _loadSyncHistory();
+        _loadStatus();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sync failed'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _syncing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sync error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700)));
+    }
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      _buildStatusCard(),
+      const SizedBox(height: 16),
+      if (_connected) ...[
+        _buildMappingCard(),
+        const SizedBox(height: 16),
+        _buildSyncHistoryCard(),
+      ],
+    ]);
+  }
+
+  Widget _buildStatusCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF252525))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('QuickBooks Connection', style: TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 16),
+        Row(children: [
+          Icon(_connected ? Icons.check_circle : Icons.cancel, color: _connected ? const Color(0xFF22C55E) : Colors.grey, size: 20),
+          const SizedBox(width: 8),
+          Text(_connected ? 'Connected' : 'Not Connected', style: TextStyle(color: _connected ? const Color(0xFF22C55E) : Colors.grey, fontSize: 14)),
+        ]),
+        if (_connected && _companyName != null) ...[
+          const SizedBox(height: 8),
+          Text('Company: $_companyName', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        ],
+        if (_connected && _lastSync != null) ...[
+          const SizedBox(height: 4),
+          Text('Last Sync: ${_lastSync!.length >= 16 ? _lastSync!.substring(0, 16).replaceAll('T', ' ') : _lastSync!}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        ],
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 8),
+          Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ],
+        const SizedBox(height: 16),
+        Wrap(spacing: 8, children: [
+          if (!_connected)
+            ElevatedButton.icon(onPressed: _connect, icon: const Icon(Icons.link, size: 16), label: const Text('Connect to QuickBooks'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2CA01C), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+          if (_connected) ...[
+            ElevatedButton.icon(
+              onPressed: _syncing ? null : _syncNow,
+              icon: _syncing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)) : const Icon(Icons.sync, size: 16),
+              label: Text(_syncing ? 'Syncing...' : 'Sync Now'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))),
+            OutlinedButton(onPressed: _disconnect, style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+              child: const Text('Disconnect')),
+          ],
+        ]),
+      ]),
+    );
+  }
+
+  Widget _buildMappingCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF252525))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Account Mapping', style: TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        const Text('Map your coaching income categories to QuickBooks accounts.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+        const SizedBox(height: 12),
+        if (_mappings.isEmpty)
+          const Text('No mappings configured yet.', style: TextStyle(color: Colors.grey, fontSize: 13))
+        else
+          ..._mappings.map((m) => Padding(padding: const EdgeInsets.only(bottom: 6), child: Row(children: [
+            Expanded(child: Text(m['internal_category'] ?? '', style: const TextStyle(color: Colors.white70, fontSize: 13))),
+            Text('\u2192 ${m['qb_account_name'] ?? m['qb_account_id'] ?? ''}', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 13)),
+          ]))),
+      ]),
+    );
+  }
+
+  Widget _buildSyncHistoryCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF252525))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Sync History', style: TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        if (_syncHistory.isEmpty)
+          const Text('No sync history yet.', style: TextStyle(color: Colors.grey, fontSize: 13))
+        else
+          ..._syncHistory.take(10).map((h) => Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
+            Icon(h['status'] == 'synced' ? Icons.check_circle_outline : Icons.error_outline, color: h['status'] == 'synced' ? const Color(0xFF22C55E) : Colors.red, size: 16),
+            const SizedBox(width: 8),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(h['sync_type'] ?? '', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              if (h['created_at'] != null)
+                Text((h['created_at'] as String).length >= 16 ? (h['created_at'] as String).substring(0, 16).replaceAll('T', ' ') : h['created_at'] as String,
+                    style: const TextStyle(color: Colors.grey, fontSize: 10)),
+            ])),
+            if (h['amount_cents'] != null)
+              Text('\$${(h['amount_cents'] / 100).toStringAsFixed(2)}', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12)),
+          ]))),
+      ]),
+    );
+  }
+}
+
 
 class SchedulerDialog extends StatefulWidget {
   final Function(String slot) onPublish;

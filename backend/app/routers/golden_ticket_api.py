@@ -3,7 +3,9 @@ LITTLE NATE — Golden Ticket API
 Issue, redeem, manage, and track Golden Tickets for prospect conversion.
 """
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+
+from app.services.api_server import require_admin
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -11,7 +13,7 @@ import secrets
 
 from app.config import settings
 
-router = APIRouter(prefix="/api/golden-ticket", tags=["golden-ticket"])
+router = APIRouter(prefix="/api/golden-ticket", tags=["golden-ticket"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================

@@ -3,13 +3,15 @@ LITTLE NATE — Response API
 Public endpoint for quiz submissions. Triggers insight pipeline.
 """
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+
+from app.services.api_server import require_admin
 from pydantic import BaseModel
 from typing import Optional, List, Any
 from datetime import datetime
 import json
 
-router = APIRouter(prefix="/api/responses", tags=["responses"])
+router = APIRouter(prefix="/api/responses", tags=["responses"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================

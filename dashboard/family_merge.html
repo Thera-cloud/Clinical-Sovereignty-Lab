@@ -110,6 +110,31 @@
         .tab-btn.active { color: var(--gold); border-bottom-color: var(--gold); }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
+        .pill-bar { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+        .pill-btn { padding: 8px 16px; font-size: 11px; font-weight: 600; color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 20px; cursor: pointer; letter-spacing: 0.5px; transition: all 0.2s; }
+        .pill-btn:hover { color: var(--text-primary); border-color: var(--gold-dim); }
+        .pill-btn.active { color: var(--gold); border-color: var(--gold); background: var(--gold-dim); }
+        .assign-sub { display: none; }
+        .assign-sub.active { display: block; }
+        .multi-select { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; padding: 4px; }
+        .ms-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: border-color 0.2s; }
+        .ms-row:hover { border-color: var(--gold-dim); }
+        .ms-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--gold); cursor: pointer; }
+        .ms-name { font-size: 13px; font-weight: 600; }
+        .ms-meta { font-size: 10px; color: var(--text-secondary); }
+        .assign-preview { background: rgba(157,78,221,0.08); border: 1px solid rgba(157,78,221,0.3); border-radius: 8px; padding: 16px; margin-top: 16px; display: none; }
+        .assign-preview.visible { display: block; }
+        .assign-result { margin-top: 16px; padding: 16px; border-radius: 8px; display: none; }
+        .assign-result.visible { display: block; }
+        .assign-result.success { background: var(--green-dim); border: 1px solid var(--green); }
+        .assign-result.error { background: var(--red-dim); border: 1px solid var(--red); }
+        .btn-assign { background: var(--purple); color: #fff; font-weight: 700; }
+        .btn-assign:hover { background: #B266FF; }
+        .btn-assign:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn-revoke { padding: 6px 14px; font-size: 11px; background: var(--red-dim); color: var(--red); border: 1px solid var(--red); border-radius: 6px; cursor: pointer; }
+        .btn-revoke:hover { background: rgba(255,59,59,0.25); }
+        .btn-remove-coach { padding: 6px 14px; font-size: 11px; background: var(--orange); color: #000; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        .hierarchy-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -140,6 +165,7 @@
             <!-- Tab Bar -->
             <div class="tab-bar">
                 <button class="tab-btn active" onclick="switchTab('merge')">MERGE</button>
+                <button class="tab-btn" onclick="switchTab('assign')">ASSIGN COACH</button>
                 <button class="tab-btn" onclick="switchTab('separate')">SEPARATE</button>
                 <button class="tab-btn" onclick="switchTab('history')">HISTORY</button>
             </div>
@@ -179,6 +205,113 @@
 
                 <!-- Merge Result -->
                 <div id="resultBox" class="result-box"></div>
+            </div>
+
+            <!-- ==================== TAB: ASSIGN COACH ==================== -->
+            <div id="tab-assign" class="tab-content">
+                <div class="card">
+                    <div class="card-title">ASSIGN COACHES</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6;">
+                        Assign one or more coaches to clients, families, groups, or companies. Manage master/assistant hierarchy.
+                    </p>
+
+                    <!-- Sub-mode pills -->
+                    <div class="pill-bar">
+                        <button class="pill-btn active" onclick="acSwitchSub('client')">Coach(es) → Client</button>
+                        <button class="pill-btn" onclick="acSwitchSub('family')">Coach(es) → Family</button>
+                        <button class="pill-btn" onclick="acSwitchSub('group')">Coach(es) → Group</button>
+                        <button class="pill-btn" onclick="acSwitchSub('company')">Coach(es) → Company</button>
+                        <button class="pill-btn" onclick="acSwitchSub('hierarchy')">Assistant → Master</button>
+                    </div>
+
+                    <!-- SUB A: Coach(es) -> Client -->
+                    <div id="ac-sub-client" class="assign-sub active">
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Client</label>
+                            <select class="form-select" id="acClientSelect" style="font-size:15px;"></select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Coach(es)</label>
+                            <div id="acClientCoaches" class="multi-select"></div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-assign" onclick="acAssign('client')">Assign Coach(es) to Client</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB B: Coach(es) -> Family -->
+                    <div id="ac-sub-family" class="assign-sub">
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Family (Head of Household)</label>
+                            <select class="form-select" id="acFamilySelect" style="font-size:15px;"></select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Coach(es)</label>
+                            <div id="acFamilyCoaches" class="multi-select"></div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-assign" onclick="acAssign('family')">Assign Coach(es) to Family</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB C: Coach(es) -> Group -->
+                    <div id="ac-sub-group" class="assign-sub">
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Group ID</label>
+                            <input type="text" class="form-input" id="acGroupId" placeholder="Enter group ID">
+                        </div>
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Coach(es)</label>
+                            <div id="acGroupCoaches" class="multi-select"></div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-assign" onclick="acAssign('group')">Assign Coach(es) to Group</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB D: Coach(es) -> Company -->
+                    <div id="ac-sub-company" class="assign-sub">
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Company ID</label>
+                            <input type="text" class="form-input" id="acCompanyId" placeholder="Enter company ID">
+                        </div>
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Coach(es)</label>
+                            <div id="acCompanyCoaches" class="multi-select"></div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-assign" onclick="acAssign('company')">Assign Coach(es) to Company</button>
+                        </div>
+                    </div>
+
+                    <!-- SUB E: Assistant(s) -> Master -->
+                    <div id="ac-sub-hierarchy" class="assign-sub">
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Master Coach</label>
+                            <select class="form-select" id="acMasterSelect" style="font-size:15px;"></select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:16px;">
+                            <label class="form-label">Select Assistant Coach(es)</label>
+                            <div id="acHierarchyCoaches" class="multi-select"></div>
+                        </div>
+                        <div class="btn-row">
+                            <button class="btn btn-assign" onclick="acAssignHierarchy()">Create Hierarchy</button>
+                        </div>
+
+                        <div style="margin-top:24px;">
+                            <div class="card-title" style="font-size:12px;">ACTIVE HIERARCHY</div>
+                            <div id="acHierarchyList" style="font-size:12px; color:var(--text-secondary);">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Current assignments display -->
+                    <div style="margin-top:24px;">
+                        <div class="card-title" style="font-size:12px;">CURRENT ASSIGNMENTS</div>
+                        <div id="acCurrentList" style="font-size:12px; color:var(--text-secondary);">Loading...</div>
+                    </div>
+
+                    <div id="acResult" class="assign-result"></div>
+                </div>
             </div>
 
             <!-- ==================== TAB: SEPARATE ==================== -->
@@ -231,6 +364,40 @@
 
                 <!-- Separation Result -->
                 <div id="sepResultBox" class="sep-result-box"></div>
+
+                <hr class="sep-divider">
+
+                <!-- Coach Separation Section -->
+                <div class="card">
+                    <div class="card-title">REMOVE COACH ASSIGNMENT</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6;">
+                        Remove a coach from a client, family, group, or company. If the removed coach was primary, the next-oldest is promoted.
+                    </p>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label">Entity Type</label>
+                        <select class="form-select" id="sepCoachEntityType" style="font-size:15px;" onchange="sepLoadEntityCoaches()">
+                            <option value="">-- Select type --</option>
+                            <option value="client">Client</option>
+                            <option value="family">Family</option>
+                            <option value="group">Group</option>
+                            <option value="company">Company</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label class="form-label">Entity ID</label>
+                        <input type="text" class="form-input" id="sepCoachEntityId" placeholder="hardware_id / family_id / group_id / company_id" oninput="sepLoadEntityCoaches()">
+                    </div>
+                    <div id="sepCoachList" style="margin-top:12px;"></div>
+                </div>
+
+                <!-- Hierarchy Revocation Section -->
+                <div class="card" style="margin-top:20px;">
+                    <div class="card-title">REVOKE COACH HIERARCHY</div>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6;">
+                        Break a master/assistant coach hierarchy link.
+                    </p>
+                    <div id="sepHierarchyList" style="font-size:12px; color:var(--text-secondary);">Loading...</div>
+                </div>
             </div>
 
             <!-- ==================== TAB: HISTORY ==================== -->
@@ -289,7 +456,9 @@ _recoverAuth();
         }
         var SERVER_URL = getWsUrl();
         var socket = null;
+        var _wsRetry = 0;
         var allUsers = [];
+        var allCoaches = [];
         var previewData = null;
         var sepPreviewData = null;
 
@@ -302,12 +471,14 @@ _recoverAuth();
             document.getElementById("connectionStatus").textContent = "Connecting...";
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
+                _wsRetry = 0;
                 var profileStr = (sessionStorage.getItem("profile") || localStorage.getItem("sc_profile"));
                 var profile = profileStr ? JSON.parse(profileStr) : {};
                 socket.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setStatus(false); setTimeout(connect, 3000); };
+            socket.onerror = function(e) { console.warn('WS error:', e); };
+            socket.onclose = function() { setStatus(false); var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random())); };
         }
 
         function setStatus(online) {
@@ -316,14 +487,17 @@ _recoverAuth();
         }
 
         /* ==================== TAB SWITCHING ==================== */
+        var _TAB_LABELS = {merge:'MERGE', assign:'ASSIGN COACH', separate:'SEPARATE', history:'HISTORY'};
         function switchTab(tab) {
             document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
             document.querySelectorAll(".tab-content").forEach(function(c) { c.classList.remove("active"); });
             document.getElementById("tab-" + tab).classList.add("active");
-            // highlight the matching button
+            var label = _TAB_LABELS[tab] || tab.toUpperCase();
             document.querySelectorAll(".tab-btn").forEach(function(b) {
-                if (b.textContent.trim().toLowerCase() === tab) b.classList.add("active");
+                if (b.textContent.trim() === label) b.classList.add("active");
             });
+            if (tab === 'assign') { acPopulate(); acLoadCurrent(); acLoadHierarchy(); }
+            if (tab === 'separate') { sepLoadHierarchyList(); }
         }
 
         /* ==================== MESSAGE HANDLER ==================== */
@@ -336,10 +510,12 @@ _recoverAuth();
                 socket.send(JSON.stringify({ type: "admin_get_users" }));
             }
             else if (data.type === "admin_users") {
-                allUsers = (data.users || []).filter(function(u) { return u.role === "CLIENT"; });
+                var allRaw = data.users || [];
+                allUsers = allRaw.filter(function(u) { return u.role === "CLIENT"; });
+                allCoaches = allRaw.filter(function(u) { return u.role === "COACH"; });
                 document.getElementById("connectionStatus").style.display = "none";
                 document.getElementById("mergeForm").style.display = "block";
-                document.getElementById("userCount").textContent = allUsers.length + " clients loaded";
+                document.getElementById("userCount").textContent = allUsers.length + " clients, " + allCoaches.length + " coaches loaded";
                 populateDropdowns();
                 populateSeparateDropdown();
                 renderMergedUsers();
@@ -669,6 +845,263 @@ _recoverAuth();
             html += '<div class="result-detail" style="margin-top:8px; color:var(--text-secondary);">Backup: ' + esc(data.backup_file) + '</div>';
             showResult("resultBox", "success", "", html);
             socket.send(JSON.stringify({ type: "admin_get_users" }));
+        }
+
+        /* ==================== ASSIGN COACH TAB ==================== */
+        function _apiBase() {
+            var h = location.hostname;
+            if (h.includes('sovereignsanctuary')) return 'https://' + h.replace('command.','api.');
+            return location.protocol + '//' + h + ':8000';
+        }
+        function _authHeaders() {
+            var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            return { 'Authorization': 'Bearer ' + t, 'Content-Type': 'application/json' };
+        }
+
+        function acSwitchSub(sub) {
+            document.querySelectorAll('.assign-sub').forEach(function(d) { d.classList.remove('active'); });
+            document.querySelectorAll('.pill-btn').forEach(function(b) { b.classList.remove('active'); });
+            var el = document.getElementById('ac-sub-' + sub);
+            if (el) el.classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function acPopulate() {
+            var coaches = allCoaches.sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+            var clients = allUsers.sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+
+            function renderCoachList(containerId) {
+                var c = document.getElementById(containerId);
+                if (!c) return;
+                var html = '';
+                coaches.forEach(function(co) {
+                    var hw = co.hardware_id || co.username || '';
+                    var label = (co.name || co.username || hw);
+                    html += '<label class="ms-row"><input type="checkbox" value="' + esc(hw) + '">';
+                    html += '<div><div class="ms-name">' + esc(label) + '</div>';
+                    html += '<div class="ms-meta">' + esc(co.username || '') + '</div></div></label>';
+                });
+                c.innerHTML = html || '<div style="color:var(--text-secondary);">No coaches found</div>';
+            }
+
+            // Client select
+            var cs = document.getElementById('acClientSelect');
+            if (cs) {
+                cs.innerHTML = '<option value="">-- Select client --</option>';
+                clients.forEach(function(u) {
+                    var hw = u.hardware_id || u.username || '';
+                    var label = (u.name || u.username || hw) + ' (' + (u.tier || u.plan || '?') + ')';
+                    var opt = document.createElement('option'); opt.value = hw; opt.textContent = label;
+                    cs.appendChild(opt);
+                });
+            }
+
+            // Family select (heads only)
+            var fs = document.getElementById('acFamilySelect');
+            if (fs) {
+                fs.innerHTML = '<option value="">-- Select family --</option>';
+                var heads = clients.filter(function(u) { return u.family_role === 'HEAD' && u.family_id; });
+                heads.forEach(function(u) {
+                    var hw = u.hardware_id || u.username || '';
+                    var label = (u.name || u.username) + ' — Family: ' + (u.family_id || '?');
+                    var opt = document.createElement('option'); opt.value = hw; opt.textContent = label;
+                    fs.appendChild(opt);
+                });
+            }
+
+            // Master coach select
+            var ms = document.getElementById('acMasterSelect');
+            if (ms) {
+                ms.innerHTML = '<option value="">-- Select master coach --</option>';
+                coaches.forEach(function(co) {
+                    var hw = co.hardware_id || co.username || '';
+                    var opt = document.createElement('option'); opt.value = hw; opt.textContent = (co.name || co.username || hw);
+                    ms.appendChild(opt);
+                });
+            }
+
+            renderCoachList('acClientCoaches');
+            renderCoachList('acFamilyCoaches');
+            renderCoachList('acGroupCoaches');
+            renderCoachList('acCompanyCoaches');
+            renderCoachList('acHierarchyCoaches');
+        }
+
+        function _getCheckedCoaches(containerId) {
+            var ids = [];
+            document.querySelectorAll('#' + containerId + ' input[type="checkbox"]:checked').forEach(function(cb) {
+                ids.push(cb.value);
+            });
+            return ids;
+        }
+
+        function acAssign(entityType) {
+            var entityId = '';
+            var coachContainer = '';
+            if (entityType === 'client') { entityId = document.getElementById('acClientSelect').value; coachContainer = 'acClientCoaches'; }
+            else if (entityType === 'family') { entityId = document.getElementById('acFamilySelect').value; coachContainer = 'acFamilyCoaches'; }
+            else if (entityType === 'group') { entityId = document.getElementById('acGroupId').value.trim(); coachContainer = 'acGroupCoaches'; }
+            else if (entityType === 'company') { entityId = document.getElementById('acCompanyId').value.trim(); coachContainer = 'acCompanyCoaches'; }
+
+            var coachIds = _getCheckedCoaches(coachContainer);
+            if (!entityId) { alert('Please select an entity.'); return; }
+            if (coachIds.length === 0) { alert('Please select at least one coach.'); return; }
+
+            var msg = 'Assign ' + coachIds.length + ' coach(es) to ' + entityType + ' ' + entityId + '?';
+            if (!confirm(msg)) return;
+
+            fetch(_apiBase() + '/api/admin/assign-coaches', {
+                method: 'POST', headers: _authHeaders(),
+                body: JSON.stringify({ coach_ids: coachIds, entity_type: entityType, entity_id: entityId })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                _acShowResult('success', d.message || 'Assigned');
+                acLoadCurrent();
+            }).catch(function(e) { _acShowResult('error', 'Failed: ' + e.message); });
+        }
+
+        function acAssignHierarchy() {
+            var master = document.getElementById('acMasterSelect').value;
+            var assistants = _getCheckedCoaches('acHierarchyCoaches');
+            if (!master) { alert('Select a master coach.'); return; }
+            if (assistants.length === 0) { alert('Select at least one assistant.'); return; }
+            assistants = assistants.filter(function(a) { return a !== master; });
+            if (assistants.length === 0) { alert('Assistants cannot include the master coach.'); return; }
+
+            fetch(_apiBase() + '/api/admin/assign-coach-hierarchy', {
+                method: 'POST', headers: _authHeaders(),
+                body: JSON.stringify({ master_coach_id: master, assistant_coach_ids: assistants })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                _acShowResult('success', d.message || 'Hierarchy created');
+                acLoadHierarchy();
+            }).catch(function(e) { _acShowResult('error', 'Failed: ' + e.message); });
+        }
+
+        function acLoadCurrent() {
+            fetch(_apiBase() + '/api/admin/assignments', { headers: _authHeaders() })
+            .then(function(r) { return r.json(); }).then(function(data) {
+                var el = document.getElementById('acCurrentList');
+                if (!data || data.length === 0) { el.innerHTML = '<div>No assignments yet.</div>'; return; }
+                var html = '';
+                data.forEach(function(a) {
+                    html += '<div class="hierarchy-row">';
+                    html += '<div><strong>' + esc(a.coach_name || a.coach_username || a.coach_id) + '</strong>';
+                    html += (a.is_primary ? ' <span class="badge badge-head">PRIMARY</span>' : '');
+                    html += ' → ' + esc(a.entity_type) + ':' + esc(a.entity_id);
+                    html += '<div class="ms-meta">Since ' + (a.assigned_at || '?').substring(0,10) + '</div></div>';
+                    html += '<button class="btn-remove-coach" onclick="acUnassign(\'' + esc(a.coach_id) + '\',\'' + esc(a.entity_type) + '\',\'' + esc(a.entity_id) + '\')">Remove</button>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(function(e) { console.error('acLoadCurrent:', e); });
+        }
+
+        function acUnassign(coachId, entityType, entityId) {
+            if (!confirm('Remove this coach assignment?')) return;
+            fetch(_apiBase() + '/api/admin/unassign-coach', {
+                method: 'DELETE', headers: _authHeaders(),
+                body: JSON.stringify({ coach_id: coachId, entity_type: entityType, entity_id: entityId })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                _acShowResult('success', d.message || 'Unassigned');
+                acLoadCurrent();
+            }).catch(function(e) { _acShowResult('error', 'Failed: ' + e.message); });
+        }
+
+        function acLoadHierarchy() {
+            fetch(_apiBase() + '/api/admin/coach-hierarchy', { headers: _authHeaders() })
+            .then(function(r) { return r.json(); }).then(function(data) {
+                var el = document.getElementById('acHierarchyList');
+                if (!data || data.length === 0) { el.innerHTML = '<div>No hierarchy links.</div>'; return; }
+                var html = '';
+                data.forEach(function(h) {
+                    html += '<div class="hierarchy-row">';
+                    html += '<div><strong>' + esc(h.master_name || h.master_username) + '</strong> (master)';
+                    html += ' → <strong>' + esc(h.assistant_name || h.assistant_username) + '</strong> (assistant)';
+                    html += '<div class="ms-meta">Since ' + (h.created_at || '?').substring(0,10) + '</div></div>';
+                    html += '<button class="btn-revoke" onclick="acRevokeHierarchy(\'' + esc(h.master_coach_id) + '\',\'' + esc(h.assistant_coach_id) + '\')">Revoke</button>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(function(e) { console.error('acLoadHierarchy:', e); });
+        }
+
+        function acRevokeHierarchy(masterId, assistantId) {
+            if (!confirm('Revoke this hierarchy link?')) return;
+            fetch(_apiBase() + '/api/admin/remove-coach-hierarchy', {
+                method: 'DELETE', headers: _authHeaders(),
+                body: JSON.stringify({ master_coach_id: masterId, assistant_coach_id: assistantId })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                _acShowResult('success', d.message || 'Revoked');
+                acLoadHierarchy();
+            }).catch(function(e) { _acShowResult('error', 'Failed: ' + e.message); });
+        }
+
+        function _acShowResult(type, msg) {
+            var el = document.getElementById('acResult');
+            el.className = 'assign-result visible ' + type;
+            el.innerHTML = '<div class="result-detail" style="color:var(--' + (type==='success'?'green':'red') + ');font-weight:600;">' + esc(msg) + '</div>';
+            setTimeout(function() { el.classList.remove('visible'); }, 6000);
+        }
+
+        /* ==================== SEPARATE TAB — COACH REMOVAL ==================== */
+        function sepLoadEntityCoaches() {
+            var entityType = document.getElementById('sepCoachEntityType').value;
+            var entityId = document.getElementById('sepCoachEntityId').value.trim();
+            var el = document.getElementById('sepCoachList');
+            if (!entityType || !entityId) { el.innerHTML = ''; return; }
+
+            fetch(_apiBase() + '/api/admin/assignments?entity_type=' + encodeURIComponent(entityType) + '&entity_id=' + encodeURIComponent(entityId), { headers: _authHeaders() })
+            .then(function(r) { return r.json(); }).then(function(data) {
+                if (!data || data.length === 0) { el.innerHTML = '<div style="color:var(--text-secondary);">No coaches assigned to this entity.</div>'; return; }
+                var html = '';
+                data.forEach(function(a) {
+                    html += '<div class="hierarchy-row">';
+                    html += '<div><strong>' + esc(a.coach_name || a.coach_username || a.coach_id) + '</strong>';
+                    html += (a.is_primary ? ' <span class="badge badge-head">PRIMARY</span>' : '');
+                    html += '<div class="ms-meta">Assigned ' + (a.assigned_at || '?').substring(0,10) + '</div></div>';
+                    html += '<button class="btn-remove-coach" onclick="sepRemoveCoach(\'' + esc(a.coach_id) + '\',\'' + esc(entityType) + '\',\'' + esc(entityId) + '\')">Remove</button>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(function(e) { el.innerHTML = '<div style="color:var(--red);">Error loading assignments</div>'; });
+        }
+
+        function sepRemoveCoach(coachId, entityType, entityId) {
+            if (!confirm('Remove this coach assignment?')) return;
+            fetch(_apiBase() + '/api/admin/unassign-coach', {
+                method: 'DELETE', headers: _authHeaders(),
+                body: JSON.stringify({ coach_id: coachId, entity_type: entityType, entity_id: entityId })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                alert(d.message || 'Unassigned');
+                sepLoadEntityCoaches();
+            }).catch(function(e) { alert('Failed: ' + e.message); });
+        }
+
+        function sepLoadHierarchyList() {
+            fetch(_apiBase() + '/api/admin/coach-hierarchy', { headers: _authHeaders() })
+            .then(function(r) { return r.json(); }).then(function(data) {
+                var el = document.getElementById('sepHierarchyList');
+                if (!data || data.length === 0) { el.innerHTML = '<div>No hierarchy links to revoke.</div>'; return; }
+                var html = '';
+                data.forEach(function(h) {
+                    html += '<div class="hierarchy-row">';
+                    html += '<div><strong>' + esc(h.master_name || h.master_username) + '</strong> (master)';
+                    html += ' → <strong>' + esc(h.assistant_name || h.assistant_username) + '</strong> (assistant)</div>';
+                    html += '<button class="btn-revoke" onclick="sepRevokeHierarchy(\'' + esc(h.master_coach_id) + '\',\'' + esc(h.assistant_coach_id) + '\')">Revoke</button>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(function(e) { console.error('sepLoadHierarchyList:', e); });
+        }
+
+        function sepRevokeHierarchy(masterId, assistantId) {
+            if (!confirm('Revoke this master/assistant hierarchy link?')) return;
+            fetch(_apiBase() + '/api/admin/remove-coach-hierarchy', {
+                method: 'DELETE', headers: _authHeaders(),
+                body: JSON.stringify({ master_coach_id: masterId, assistant_coach_id: assistantId })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                alert(d.message || 'Revoked');
+                sepLoadHierarchyList();
+            }).catch(function(e) { alert('Failed: ' + e.message); });
         }
 
         /* ==================== SHARED UTILITIES ==================== */

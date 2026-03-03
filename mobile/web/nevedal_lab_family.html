@@ -4,100 +4,138 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nevedal Lab | Family Dynamics</title>
+    <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        :root {
-            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
-            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
-            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
-            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
-            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
-            --red-critical: #FF3B3B; --blue: #4A90D9;
-            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        *{margin:0;padding:0;box-sizing:border-box;}
+        :root{
+            --bg-dark:#0A0A0A;--bg-card:#111111;--bg-elevated:#1A1A1A;
+            --purple:#9D4EDD;--purple-dim:rgba(157,78,221,0.15);
+            --cyan:#00D4FF;--cyan-dim:rgba(0,212,255,0.1);
+            --green:#00FF88;--green-dim:rgba(0,255,136,0.1);
+            --orange:#FF9500;--gold:#C9A962;--gold-bright:#E8D5A3;--gold-dim:rgba(201,169,98,0.2);
+            --red:#FF3B3B;--blue:#4A90D9;
+            --text-primary:#FFFFFF;--text-secondary:#888888;--border:#252525;
         }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
-        
-        /* Header */
-        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { display: flex; align-items: center; gap: 12px; }
-        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-        .logo-text { display: flex; flex-direction: column; }
-        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
-        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
-        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
-        .back-btn:hover { border-color: var(--purple); }
-        
-        /* Navigation */
-        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
-        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
-        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
-        .sub-nav-item:hover { color: var(--purple); }
-        
-        /* Main Layout */
-        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 300px; gap: 20px; min-height: calc(100vh - 140px); }
-        
-        /* Cards */
-        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-        .card.research { border-color: var(--purple-dim); }
-        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
-        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-        .icon.purple { background: var(--purple-dim); }
-        .icon.cyan { background: var(--cyan-dim); }
-        .icon.green { background: var(--green-dim); }
-        .icon.gold { background: var(--gold-dim); }
-        .card-body { padding: 20px; }
-        
-        /* Family Selector */
-        .family-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 12px; cursor: pointer; border: 1px solid var(--border); }
-        .family-card.active { border-color: var(--purple); background: var(--purple-dim); }
-        .family-card:hover { border-color: var(--purple); }
-        .family-id { font-size: 11px; color: var(--purple); font-weight: 600; margin-bottom: 6px; }
-        .family-members-list { font-size: 10px; color: var(--text-secondary); }
-        .family-stat { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
-        
-        /* Coherence Matrix */
-        .matrix-container { background: var(--bg-elevated); border-radius: 10px; padding: 20px; }
-        .matrix-table { width: 100%; border-collapse: collapse; }
-        .matrix-table th { font-size: 11px; font-weight: 600; padding: 10px; text-align: center; }
-        .matrix-table td { font-size: 12px; padding: 12px; text-align: center; border: 1px solid var(--border); }
-        .matrix-score { font-weight: 700; }
-        .matrix-score.high { color: var(--green); }
-        .matrix-score.medium { color: var(--gold); }
-        .matrix-score.low { color: var(--orange); }
-        .matrix-diagonal { background: var(--bg-dark); color: var(--text-secondary); }
-        
-        /* Network Visualization */
-        .network-visual { height: 280px; background: var(--bg-elevated); border-radius: 10px; padding: 20px; position: relative; }
-        .network-placeholder { text-align: center; padding: 100px 20px; color: var(--text-secondary); font-size: 11px; }
-        
-        /* Member Scores */
-        .member-score { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
-        .member-name { font-size: 11px; font-weight: 600; }
-        .member-c-emo { font-size: 14px; font-weight: 700; color: var(--purple); }
-        
-        /* Family Wellness */
-        .wellness-display { text-align: center; padding: 32px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
-        .wellness-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
-        .wellness-value { font-size: 52px; font-weight: 700; color: var(--purple); margin: 8px 0; }
-        .wellness-grade { font-size: 14px; font-weight: 600; color: var(--green); }
-        
-        /* Bond Strength */
-        .bond-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
-        .bond-label { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
-        .bond-pair { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
-        .bond-score { font-size: 14px; font-weight: 700; }
-        .bond-item.strongest { border-left: 3px solid var(--green); }
-        .bond-item.weakest { border-left: 3px solid var(--orange); }
-        
-        /* Collective CEE */
-        .cee-collective { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
-        .cee-time { font-size: 10px; color: var(--text-secondary); }
-        .cee-sync { font-size: 11px; font-weight: 600; margin-top: 4px; }
+        body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg-dark);color:var(--text-primary);}
+        .header{background:linear-gradient(180deg,#0A0A1A 0%,#0A0A0A 100%);border-bottom:1px solid var(--purple-dim);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;}
+        .logo{display:flex;align-items:center;gap:12px;}
+        .logo-icon{width:48px;height:48px;background:linear-gradient(135deg,var(--purple),var(--blue));border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;}
+        .logo-text{display:flex;flex-direction:column;}
+        .logo-title{font-size:18px;font-weight:700;color:var(--purple);letter-spacing:2px;}
+        .logo-subtitle{font-size:11px;color:var(--text-secondary);}
+        .back-btn{padding:10px 20px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);text-decoration:none;font-size:12px;}
+        .sub-nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:24px;}
+        .sub-nav-item{padding:14px 0;font-size:12px;color:var(--text-secondary);border-bottom:2px solid transparent;cursor:pointer;display:flex;align-items:center;gap:8px;text-decoration:none;}
+        .sub-nav-item.active{color:var(--purple);border-bottom-color:var(--purple);}
+        .sub-nav-item:hover{color:var(--purple);}
+
+        .main-grid{padding:16px;display:grid;grid-template-columns:210px 1fr 270px;gap:14px;min-height:calc(100vh - 130px);}
+        .left-panel{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 140px);overflow-y:auto;}
+        .center-panel{display:flex;flex-direction:column;gap:14px;}
+        .right-panel{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 140px);overflow-y:auto;}
+
+        .card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+        .card.research{border-color:var(--purple-dim);}
+        .card-header{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+        .card-title{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;}
+        .card-title .icon{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;}
+        .icon.purple{background:var(--purple-dim);}
+        .icon.cyan{background:var(--cyan-dim);}
+        .icon.green{background:var(--green-dim);}
+        .icon.gold{background:var(--gold-dim);}
+        .icon.red{background:rgba(255,59,59,0.15);}
+        .card-body{padding:12px;}
+
+        .type-tabs{display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border);margin-bottom:10px;}
+        .type-tab{flex:1;padding:6px 4px;text-align:center;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;cursor:pointer;background:var(--bg-elevated);color:var(--text-secondary);transition:all 0.2s;border-right:1px solid var(--border);}
+        .type-tab:last-child{border-right:none;}
+        .type-tab.active{background:var(--purple-dim);color:var(--purple);}
+        .type-tab:hover{color:var(--purple);}
+
+        .group-card{background:var(--bg-elevated);border-radius:6px;padding:10px;margin-bottom:6px;cursor:pointer;border:1px solid var(--border);transition:border-color 0.2s;}
+        .group-card.active{border-color:var(--purple);background:var(--purple-dim);}
+        .group-card:hover{border-color:var(--purple);}
+        .group-type-badge{display:inline-block;font-size:7px;font-weight:700;padding:2px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.3px;}
+        .badge-family{background:var(--purple-dim);color:var(--purple);}
+        .badge-coach{background:var(--cyan-dim);color:var(--cyan);}
+        .badge-company{background:var(--gold-dim);color:var(--gold);}
+        .group-name{font-size:10px;font-weight:600;margin-top:3px;}
+        .group-members-preview{font-size:9px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .group-count{font-size:8px;color:var(--text-secondary);margin-top:1px;}
+
+        .member-check{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-elevated);border-radius:6px;margin-bottom:4px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;}
+        .member-check:hover{border-color:var(--purple-dim);}
+        .member-check.checked{border-color:var(--purple);background:rgba(157,78,221,0.08);}
+        .member-check.nate-check.checked{border-color:var(--gold);background:rgba(201,169,98,0.08);}
+        .mc-box{width:14px;height:14px;border-radius:3px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;transition:all 0.15s;}
+        .member-check.checked .mc-box{border-color:var(--purple);background:var(--purple);color:#fff;}
+        .member-check.nate-check.checked .mc-box{border-color:var(--gold);background:var(--gold);color:#000;}
+        .mc-name{font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .mc-role{font-size:7px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;}
+        .sel-actions{display:flex;gap:6px;margin-bottom:8px;}
+        .sel-btn{flex:1;padding:5px;font-size:8px;font-weight:600;text-align:center;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);transition:all 0.15s;}
+        .sel-btn:hover{border-color:var(--purple);color:var(--purple);}
+
+        .info-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+        .wellness-card{text-align:center;padding:16px 10px;background:linear-gradient(135deg,var(--purple-dim),var(--bg-elevated));border-radius:10px;}
+        .wellness-card.nate{background:linear-gradient(135deg,var(--gold-dim),var(--bg-elevated));}
+        .wellness-label{font-size:8px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;}
+        .wellness-value{font-size:32px;font-weight:700;margin:4px 0;}
+        .wellness-value.purple{color:var(--purple);}
+        .wellness-value.gold{color:var(--gold);}
+        .wellness-grade{font-size:10px;font-weight:600;}
+        .delta-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;margin-top:4px;}
+        .delta-positive{background:var(--green-dim);color:var(--green);}
+        .delta-negative{background:rgba(255,59,59,0.15);color:var(--red);}
+        .delta-neutral{background:rgba(136,136,136,0.15);color:var(--text-secondary);}
+
+        .graphs-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+        .graph-label{font-size:9px;color:var(--text-secondary);text-align:center;padding:4px 0;text-transform:uppercase;letter-spacing:1px;}
+        .network-canvas-wrap{height:220px;background:var(--bg-elevated);border-radius:8px;position:relative;overflow:hidden;}
+        .network-canvas-wrap canvas{width:100%;height:100%;}
+
+        .graph-3d-wrap{height:360px;background:var(--bg-elevated);border-radius:8px;position:relative;overflow:hidden;}
+        .graph-3d-controls{position:absolute;top:8px;right:8px;z-index:10;display:flex;flex-direction:column;gap:4px;}
+        .g3d-btn{padding:4px 8px;font-size:8px;background:rgba(10,10,10,0.85);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);cursor:pointer;}
+        .g3d-btn.active{border-color:var(--gold);color:var(--gold);}
+
+        .matrix-container{background:var(--bg-elevated);border-radius:8px;padding:12px;overflow-x:auto;}
+        .matrix-table{width:100%;border-collapse:collapse;}
+        .matrix-table th{font-size:9px;font-weight:600;padding:6px;text-align:center;}
+        .matrix-table th.nate-col{color:var(--gold);}
+        .matrix-table td{font-size:10px;padding:8px;text-align:center;border:1px solid var(--border);}
+        .matrix-score{font-weight:700;}
+        .matrix-score.high{color:var(--green);}
+        .matrix-score.medium{color:var(--gold);}
+        .matrix-score.low{color:var(--orange);}
+        .matrix-diagonal{background:var(--bg-dark);color:var(--text-secondary);}
+        .nate-row td,.nate-col-cell{background:rgba(201,169,98,0.05);}
+        .toggle-row{display:flex;justify-content:flex-end;align-items:center;gap:6px;}
+        .toggle-label{font-size:9px;color:var(--text-secondary);}
+        .toggle-switch{position:relative;width:30px;height:16px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:background 0.2s;}
+        .toggle-switch.on{background:var(--gold-dim);border-color:var(--gold);}
+        .toggle-switch::after{content:'';position:absolute;width:10px;height:10px;border-radius:50%;background:var(--text-secondary);top:2px;left:2px;transition:transform 0.2s;}
+        .toggle-switch.on::after{transform:translateX(14px);background:var(--gold);}
+
+        .member-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-elevated);border-radius:5px;margin-bottom:4px;}
+        .member-bar-name{font-size:9px;flex:0 0 60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .member-bar-track{flex:1;height:5px;background:var(--bg-dark);border-radius:3px;overflow:hidden;}
+        .member-bar-fill{height:100%;border-radius:3px;transition:width 0.4s;}
+        .member-bar-val{font-size:10px;font-weight:700;flex:0 0 32px;text-align:right;}
+        .member-bar-detail{font-size:7px;color:var(--text-secondary);flex:0 0 60px;text-align:right;}
+
+        .decoherence-item{padding:8px;background:rgba(255,59,59,0.06);border-radius:6px;margin-bottom:4px;border-left:3px solid var(--red);display:flex;justify-content:space-between;align-items:center;}
+        .decoherence-item.watch{border-left-color:var(--orange);background:rgba(255,149,0,0.06);}
+        .decoherence-item.stable{border-left-color:var(--green);background:rgba(0,255,136,0.04);}
+        .deco-pair{font-size:10px;font-weight:600;}
+        .deco-risk{font-size:11px;font-weight:700;}
+        .deco-trend{font-size:8px;color:var(--text-secondary);text-transform:uppercase;}
+
+        .empty-state{text-align:center;padding:16px;color:var(--text-secondary);font-size:10px;}
+        .selected-count{font-size:9px;color:var(--text-secondary);margin-bottom:6px;}
     </style>
 </head>
 <body>
-    <!-- Header -->
     <div class="header">
         <div class="logo">
             <div class="logo-icon">🧬</div>
@@ -108,8 +146,6 @@
         </div>
         <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
     </div>
-
-    <!-- Sub Navigation -->
     <nav class="sub-nav">
         <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
         <a href="nevedal_lab_longitudinal.html" class="sub-nav-item"><span>📈</span> Longitudinal Study</a>
@@ -118,381 +154,584 @@
         <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
     </nav>
 
-    <!-- Main Content -->
-    <main class="main-content">
-        <!-- LEFT PANEL: Family Selection -->
-        <aside>
+    <main class="main-grid">
+        <!-- LEFT: Group Selection -->
+        <div class="left-panel">
             <div class="card research">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon purple">👨‍👩‍👧</div> Family Selection</div>
-                </div>
+                <div class="card-header"><div class="card-title"><div class="icon purple">👥</div> Groups</div></div>
                 <div class="card-body">
-                    <div class="family-card active">
-                        <div class="family-id">FAM_0023</div>
-                        <div class="family-members-list">👨 Dad • 👩 Mom • 👦 Son (12)</div>
-                        <div class="family-stat">23 family sessions • Index: 0.74</div>
+                    <div class="type-tabs" id="type-tabs">
+                        <div class="type-tab active" data-filter="all" onclick="filterGroups('all')">All</div>
+                        <div class="type-tab" data-filter="family" onclick="filterGroups('family')">Family</div>
+                        <div class="type-tab" data-filter="coach_team" onclick="filterGroups('coach_team')">Coach</div>
+                        <div class="type-tab" data-filter="company" onclick="filterGroups('company')">Corp</div>
                     </div>
-                    <div class="family-card">
-                        <div class="family-id">FAM_0015</div>
-                        <div class="family-members-list">👩 Mom • 👧 Daughter (16) • 👦 Son (9)</div>
-                        <div class="family-stat">14 family sessions • Index: 0.68</div>
-                    </div>
-                    <div class="family-card">
-                        <div class="family-id">FAM_0042</div>
-                        <div class="family-members-list">👨 Dad • 👩 Mom • 👧 Daughter (8) • 👧 Daughter (5)</div>
-                        <div class="family-stat">31 family sessions • Index: 0.81</div>
+                    <div id="group-list"><div class="empty-state">Loading...</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER: Visualizations -->
+        <div class="center-panel">
+            <div class="info-row">
+                <div class="wellness-card"><div class="wellness-label">With Little Nate</div><div class="wellness-value purple" id="wi-with">--</div><div class="wellness-grade" id="wg-with">AWAITING</div></div>
+                <div class="wellness-card"><div class="wellness-label">Without Little Nate</div><div class="wellness-value purple" id="wi-without">--</div><div class="wellness-grade" id="wg-without">AWAITING</div></div>
+                <div class="wellness-card nate"><div class="wellness-label">Nate's Contribution</div><div class="wellness-value gold" id="wi-delta">--</div><div id="delta-badge"></div></div>
+            </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon cyan">🕸️</div> Coherence Network</div></div>
+                <div class="card-body" style="padding:10px;">
+                    <div class="graphs-row">
+                        <div><div class="graph-label">With Little Nate</div><div class="network-canvas-wrap"><canvas id="canvas-with-nate"></canvas></div></div>
+                        <div><div class="graph-label">Without Little Nate</div><div class="network-canvas-wrap"><canvas id="canvas-without-nate"></canvas></div></div>
                     </div>
                 </div>
             </div>
-
-            <!-- Session Info -->
-            <div class="card research" style="margin-top: 20px;">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon cyan">📅</div> Session Info</div>
-                </div>
-                <div class="card-body">
-                    <div style="font-size: 11px; margin-bottom: 8px;">
-                        <strong>Family Therapy Session</strong>
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                        📅 January 24, 2026 • 6:00 PM
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 4px;">
-                        ⏱️ Duration: 60 minutes
-                    </div>
-                    <div style="font-size: 10px; color: var(--text-secondary);">
-                        👥 All 3 members present
-                    </div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- CENTER PANEL: Matrix & Network -->
-        <section>
-            <!-- Coherence Matrix -->
             <div class="card research">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div>
-                </div>
-                <div class="card-body">
-                    <div class="matrix-container">
-                        <div id="coherence-matrix" style="font-size: 11px; color: var(--text-secondary); text-align: center; padding: 12px;">
-                            Waiting for live family metrics…
+                <div class="card-header"><div class="card-title"><div class="icon purple">🌐</div> 3D Coherence Explorer</div></div>
+                <div class="card-body" style="padding:10px;">
+                    <div class="graph-3d-wrap" id="three-container">
+                        <div class="graph-3d-controls">
+                            <button class="g3d-btn active" id="btn-force" onclick="setLayout('force')">Force</button>
+                            <button class="g3d-btn" id="btn-helix" onclick="setLayout('helix')">DNA Helix</button>
                         </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Network Visualization -->
-            <div class="card research" style="margin-top: 20px;">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon cyan">🕸️</div> Coherence Network</div>
-                </div>
-                <div class="card-body">
-                    <div class="network-visual">
-                        <div class="network-placeholder">
-                            Visual network diagram<br>
-                            <span style="font-size: 10px; margin-top: 8px; display: block;">Nodes = Family members</span>
-                            <span style="font-size: 10px; margin-top: 4px; display: block;">Edge thickness = Bond strength</span>
-                            <span style="font-size: 10px; margin-top: 4px; display: block;">Requires admin_get_family_metrics handler</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Individual Scores -->
-            <div class="card research" style="margin-top: 20px;">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon green">👤</div> Individual C<sub>emo</sub> Scores</div>
-                </div>
-                <div class="card-body">
-                    <div id="member-scores" style="font-size: 11px; color: var(--text-secondary); text-align: center; padding: 12px;">
-                        Waiting for live member scores…
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- RIGHT PANEL: Analysis -->
-        <aside>
-            <!-- Family Wellness Index -->
             <div class="card research">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon purple">💚</div> Family Index</div>
+                <div class="card-header"><div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div>
+                    <div class="toggle-row"><span class="toggle-label">Show Nate</span><div class="toggle-switch on" id="nate-matrix-toggle" onclick="toggleNateMatrix()"></div></div>
                 </div>
-                <div class="card-body">
-                    <div class="wellness-display">
-                        <div class="wellness-label">Family Wellness Index</div>
-                        <div class="wellness-value" id="family-index">0.74</div>
-                        <div class="wellness-grade">GOOD</div>
-                    </div>
-                </div>
+                <div class="card-body"><div class="matrix-container"><div id="coherence-matrix" class="empty-state">Select members...</div></div></div>
             </div>
+        </div>
 
-            <!-- Bond Strength -->
-            <div class="card research" style="margin-top: 20px;">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon green">🔗</div> Bond Analysis</div>
-                </div>
+        <!-- RIGHT: Member Selection + Metrics -->
+        <div class="right-panel">
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">✓</div> Members</div><div class="selected-count" id="sel-count">0 selected</div></div>
                 <div class="card-body">
-                    <div class="bond-item strongest">
-                        <div class="bond-label">STRONGEST BOND</div>
-                        <div class="bond-pair" id="strongest-pair">—</div>
-                        <div class="bond-score" id="strongest-score" style="color: var(--green);">—</div>
+                    <div class="sel-actions">
+                        <div class="sel-btn" onclick="selectAll()">Select All</div>
+                        <div class="sel-btn" onclick="deselectAll()">Deselect All</div>
                     </div>
-                    <div class="bond-item weakest">
-                        <div class="bond-label">DEVELOPING BOND</div>
-                        <div class="bond-pair" id="weakest-pair">—</div>
-                        <div class="bond-score" id="weakest-score" style="color: var(--orange);">—</div>
-                    </div>
-                    <div id="bond-note" style="font-size: 10px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4; padding: 10px; background: var(--bg-elevated); border-radius: 6px;">
-                        Waiting for live bond analysis…
-                    </div>
+                    <div id="member-list"><div class="empty-state">Select a group</div></div>
                 </div>
             </div>
-
-            <!-- Collective CEE Events -->
-            <div class="card research" style="margin-top: 20px;">
-                <div class="card-header">
-                    <div class="card-title"><div class="icon gold">⭐</div> Collective CEEs</div>
-                </div>
-                <div class="card-body">
-                    <div style="font-size: 10px; color: var(--text-secondary); margin-bottom: 12px;">
-                        Moments when all members synchronized
-                    </div>
-                    <div id="collective-cees"></div>
-                    <div id="collective-note" style="font-size: 10px; color: var(--text-secondary); margin-top: 12px; line-height: 1.4; padding: 10px; background: var(--bg-elevated); border-radius: 6px;">
-                        Waiting for live collective events…
-                    </div>
-                </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon gold">🤝</div> Nate Bonds</div></div>
+                <div class="card-body" id="nate-bonds-body"><div class="empty-state">Select members</div></div>
             </div>
-        </aside>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon red">⚠️</div> Decoherence</div><span id="deco-count" style="font-size:9px;color:var(--red);">0</span></div>
+                <div class="card-body" id="deco-alerts-body"><div class="empty-state">No alerts</div></div>
+            </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon green">📊</div> Engagement</div></div>
+                <div class="card-body" id="engagement-body"><div class="empty-state">Select members</div></div>
+            </div>
+        </div>
     </main>
 
-    <script>
-        // Authentication check
-        const username = sessionStorage.getItem("username");
-        const password = sessionStorage.getItem("password");
-        const profile = JSON.parse(sessionStorage.getItem("profile") || "{}");
+<script>
+/* ======================== AUTH ======================== */
+function _recoverAuth(){
+    function _ck(n){var m=document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)'));return m?decodeURIComponent(m[2]):'';}
+    var hp=new URLSearchParams(location.hash.slice(1));
+    var ht=hp.get('t'),hu=hp.get('u'),hpf=hp.get('p');
+    if(ht){try{sessionStorage.setItem('token',decodeURIComponent(ht));}catch(e){}try{localStorage.setItem('sc_token',decodeURIComponent(ht));}catch(e){}}
+    if(hu){try{sessionStorage.setItem('username',decodeURIComponent(hu));}catch(e){}try{localStorage.setItem('sc_username',decodeURIComponent(hu));}catch(e){}}
+    if(hpf){try{sessionStorage.setItem('profile',decodeURIComponent(hpf));}catch(e){}try{localStorage.setItem('sc_profile',decodeURIComponent(hpf));}catch(e){}}
+    if(location.hash)try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+    if(!sessionStorage.getItem('token')){var ct=_ck('sc_token')||localStorage.getItem('sc_token');if(ct){try{sessionStorage.setItem('token',ct);}catch(e){}}}
+    if(!sessionStorage.getItem('username')){var cu=_ck('sc_username')||localStorage.getItem('sc_username');if(cu){try{sessionStorage.setItem('username',cu);}catch(e){}}}
+    if(!sessionStorage.getItem('profile')){var cp=_ck('sc_profile')||localStorage.getItem('sc_profile');if(cp){try{sessionStorage.setItem('profile',cp);}catch(e){}}}
+}
+_recoverAuth();
+var username=sessionStorage.getItem("username")||localStorage.getItem("sc_username");
+var token=sessionStorage.getItem("token")||localStorage.getItem("sc_token");
+var profile=JSON.parse((sessionStorage.getItem("profile")||localStorage.getItem("sc_profile"))||"{}");
+if(!username)window.location.href="index.html";
 
-        if (!username) {
-            window.location.href = "index.html";
+/* ======================== STATE ======================== */
+var ws=null,authenticated=false,refreshTimer=null;
+var allGroups=[];
+var currentGroupId="",currentGroupType="family";
+var currentFilter="all";
+var lastData=null;
+var allMembers=[];
+var selectedMembers={};
+var includeNate=true;
+var showNateInMatrix=true;
+var layoutMode="force";
+var _selectionChanged=false;
+
+function esc(s){return String(s||"").replace(/[&<>"']/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c];});}
+
+/* ======================== WEBSOCKET ======================== */
+function getWsUrl(){
+    var h=location.hostname;
+    if(!h||h==="localhost"||h==="127.0.0.1"||location.protocol==="file:")return "wss://api.sovereignsanctuary.net/ws";
+    if(h.includes("sovereignsanctuary"))return "wss://"+h+"/ws";
+    return(location.protocol==="https:"?"wss":"ws")+"://"+h+":8765";
+}
+function connectWebSocket(){
+    ws=new WebSocket(getWsUrl());
+    ws.onopen=function(){ws.send(JSON.stringify({type:"auth",token:token,hardware_id:profile.hardware_id||"WEB_ADMIN"}));};
+    ws.onmessage=function(event){
+        var data;try{data=JSON.parse(event.data);}catch(e){return;}
+        if(data.type==="login_success"||data.type==="auth_success"){
+            authenticated=true;
+            ws.send(JSON.stringify({type:"admin_get_all_groups"}));
+            ws.send(JSON.stringify({type:"admin_get_families"}));
+            if(currentGroupId)requestGroupCoherence();
+            if(refreshTimer)clearInterval(refreshTimer);
+            refreshTimer=setInterval(function(){if(currentGroupId&&getSelectedIds().length>0)requestGroupCoherence();},30000);
         }
-
-        // WebSocket connection
-        let ws = null;
-        let authenticated = false;
-        let currentFamily = profile.family_id || "FAM_0023";
-        let refreshTimer = null;
-
-        function getWsUrl() {
-            const proto = (location.protocol === "https:") ? "wss" : "ws";
-            const host = location.hostname || "localhost";
-            return `${proto}://${host}:8765`;
-        }
-
-        function connectWebSocket() {
-            ws = new WebSocket(getWsUrl());
-            
-            ws.onopen = function() {
-                console.log("✅ WebSocket connected");
-                ws.send(JSON.stringify({
-                    type: "login_request",
-                    username: username,
-                    password: password,
-                    expected_role: profile.role || "ADMIN",
-                    hardware_id: profile.hardware_id || "WEB_ADMIN"
-                }));
-            };
-            
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                console.log("📩 Received:", data.type);
-                
-                if (data.type === "login_success" || data.type === "auth_success") {
-                    authenticated = true;
-                    console.log("🔓 Authenticated! Requesting family metrics...");
-                    try {
-                        ws.send(JSON.stringify({ type: "nevedal_subscribe", session_id: "admin" }));
-                    } catch (e) {}
-                    requestFamilyMetrics();
-
-                    if (refreshTimer) clearInterval(refreshTimer);
-                    refreshTimer = setInterval(() => {
-                        try { requestFamilyMetrics(); } catch (e) {}
-                    }, 4000);
-                }
-                
-                if (data.type === "family_metrics") {
-                    displayFamilyMetrics(data);
-                }
-
-                if (data.type === "nevedal_update") {
-                    // Optional: if you want family metrics to react immediately,
-                    // keep the polling interval above; this is just a fast path.
-                    if (authenticated) requestFamilyMetrics();
-                }
-            };
-            
-            ws.onerror = function(error) {
-                console.error("❌ WebSocket error:", error);
-            };
-
-            ws.onclose = function() {
-                console.log("⚠️ WebSocket closed; retrying…");
-                authenticated = false;
-                if (refreshTimer) clearInterval(refreshTimer);
-                setTimeout(connectWebSocket, 1200);
-            };
-        }
-
-        function requestFamilyMetrics() {
-            if (ws && authenticated) {
-                ws.send(JSON.stringify({
-                    type: "admin_get_family_metrics",
-                    family_id: currentFamily
-                }));
-                console.log("📡 Requested family metrics for:", currentFamily);
+        if(data.type==="all_groups_list"){allGroups=data.groups||[];renderGroupList();}
+        if(data.type==="families_list"||data.type==="admin_families_list"){
+            if(allGroups.length===0){
+                allGroups=(data.families||[]).map(function(f){
+                    return{group_type:"family",group_id:f.family_id||f.id,group_name:"Family "+(f.family_id||f.id).substring(0,12),member_count:(f.members||[]).length,members:f.members||[]};
+                });
+                renderGroupList();
             }
         }
-
-        function displayFamilyMetrics(data) {
-            console.log("👨‍👩‍👧 Displaying family metrics:", data);
-            
-            // Update family wellness index
-            if (data.family_wellness_index !== undefined) {
-                document.getElementById("family-index").textContent = data.family_wellness_index.toFixed(2);
-            }
-            
-            // Update individual scores
-            const members = Array.isArray(data.members) ? data.members : [];
-            const memberScoresEl = document.getElementById("member-scores");
-            if (memberScoresEl) {
-                if (!members.length) {
-                    memberScoresEl.textContent = "No members found for this family_id.";
-                } else {
-                    memberScoresEl.innerHTML = members.map(m => {
-                        const name = (m.name || m.id || "Unknown");
-                        const c = (m.c_emo_avg ?? 0.5);
-                        return `
-                            <div class="member-score">
-                                <span class="member-name">${escapeHtml(name)}</span>
-                                <span class="member-c-emo">${Number(c).toFixed(2)}</span>
-                            </div>
-                        `;
-                    }).join("");
-                }
-            }
-
-            // Render coherence matrix dynamically from member C_emo values
-            const matrixEl = document.getElementById("coherence-matrix");
-            if (matrixEl) {
-                if (members.length < 2) {
-                    matrixEl.textContent = "Need at least 2 family members to compute a matrix.";
-                } else {
-                    matrixEl.innerHTML = buildMatrixTable(members);
-                }
-            }
-
-            // Strongest / weakest bonds
-            const strongest = data.strongest_bond || {};
-            const weakest = data.weakest_bond || {};
-            const sp = document.getElementById("strongest-pair");
-            const ss = document.getElementById("strongest-score");
-            const wp = document.getElementById("weakest-pair");
-            const wsScore = document.getElementById("weakest-score");
-            if (sp) sp.textContent = formatPair(strongest.pair);
-            if (ss) ss.textContent = (strongest.score != null) ? Number(strongest.score).toFixed(2) : "—";
-            if (wp) wp.textContent = formatPair(weakest.pair);
-            if (wsScore) wsScore.textContent = (weakest.score != null) ? Number(weakest.score).toFixed(2) : "—";
-
-            const bondNote = document.getElementById("bond-note");
-            if (bondNote) {
-                if (sp && wp && members.length) {
-                    bondNote.textContent = "Live bonds reflect current Nevedal C_emo alignment (higher = more synchronized).";
-                }
-            }
-
-            // Collective CEEs
-            const ceesEl = document.getElementById("collective-cees");
-            const cees = Array.isArray(data.collective_cees) ? data.collective_cees : [];
-            if (ceesEl) {
-                if (!cees.length) {
-                    ceesEl.innerHTML = `<div style="font-size: 10px; color: var(--text-secondary);">No collective CEE events detected right now.</div>`;
-                } else {
-                    ceesEl.innerHTML = cees.map(e => `
-                        <div class="cee-collective">
-                            <div class="cee-time">${escapeHtml(e.timestamp || "—")} into session</div>
-                            <div class="cee-sync">All members synced (C<sub>emo</sub> &gt; 0.75)</div>
-                        </div>
-                    `).join("");
-                }
-            }
-            const collectiveNote = document.getElementById("collective-note");
-            if (collectiveNote) {
-                collectiveNote.textContent = cees.length
-                    ? `${cees.length} collective synchrony event(s) indicates meaningful shared alignment.`
-                    : "Collective synchrony events will appear here during high-alignment moments.";
-            }
+        if(data.type==="group_coherence_metrics"){
+            var isFirstLoad=!lastData;
+            lastData=data;allMembers=data.members||[];
+            if(isFirstLoad)buildMemberCheckboxes();
+            renderAll(data);
         }
+        if(data.type==="family_metrics"&&!lastData){convertFamilyMetrics(data);}
+    };
+    ws.onclose=function(){authenticated=false;if(refreshTimer)clearInterval(refreshTimer);setTimeout(connectWebSocket,1500);};
+}
 
-        // Family selection
-        document.querySelectorAll(".family-card").forEach(card => {
-            card.addEventListener("click", function() {
-                document.querySelectorAll(".family-card").forEach(c => c.classList.remove("active"));
-                this.classList.add("active");
-                console.log("👨‍👩‍👧 Selected family");
-                const fidEl = this.querySelector(".family-id");
-                if (fidEl) currentFamily = fidEl.textContent.trim();
-                requestFamilyMetrics();
-            });
+function convertFamilyMetrics(data){
+    var members=data.members||[];
+    var fakeData={type:"group_coherence_metrics",group_id:data.family_id,group_type:"family",members:members,
+        nate_node:{nate_coherence_per_member:{},nate_wellness_contribution:0,engagement_breakdown:{}},
+        with_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:{},network_bonds:[]},
+        without_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:data.coherence_matrix||{},network_bonds:[]},
+        decoherence_signals:{}};
+    members.forEach(function(m){fakeData.nate_node.nate_coherence_per_member[m.id]=0.5;});
+    lastData=fakeData;allMembers=members;buildMemberCheckboxes();renderAll(fakeData);
+}
+
+/* ======================== SELECTION HELPERS ======================== */
+function getSelectedIds(){
+    var ids=[];
+    Object.keys(selectedMembers).forEach(function(k){if(selectedMembers[k])ids.push(k);});
+    return ids;
+}
+function getSelectedData(){
+    if(!lastData)return[];
+    var sel=getSelectedIds();
+    if(sel.length===0)return[];
+    return(lastData.members||[]).filter(function(m){return sel.indexOf(m.id)>=0;});
+}
+
+function requestGroupCoherence(){
+    if(!ws||ws.readyState!==1||!authenticated||!currentGroupId)return;
+    var sel=getSelectedIds();
+    ws.send(JSON.stringify({type:"admin_get_group_coherence",group_id:currentGroupId,group_type:currentGroupType,selected_members:sel.length>0?sel:null}));
+    ws.send(JSON.stringify({type:"admin_get_family_metrics",family_id:currentGroupId}));
+}
+
+/* ======================== GROUP TYPE FILTER ======================== */
+function filterGroups(filter){
+    currentFilter=filter;
+    document.querySelectorAll(".type-tab").forEach(function(t){t.classList.toggle("active",t.dataset.filter===filter);});
+    renderGroupList();
+}
+
+/* ======================== GROUP LIST ======================== */
+function renderGroupList(){
+    var el=document.getElementById("group-list");
+    var filtered=currentFilter==="all"?allGroups:allGroups.filter(function(g){return g.group_type===currentFilter;});
+    if(!filtered.length){el.innerHTML='<div class="empty-state">No groups found</div>';return;}
+    filtered.sort(function(a,b){var o={family:0,coach_team:1,company:2};return(o[a.group_type]||9)-(o[b.group_type]||9);});
+    el.innerHTML=filtered.map(function(g){
+        var badgeCls=g.group_type==="family"?"badge-family":g.group_type==="coach_team"?"badge-coach":"badge-company";
+        var label=g.group_type==="family"?"FAMILY":g.group_type==="coach_team"?"COACH TEAM":"COMPANY";
+        var names=(g.members||[]).slice(0,4).map(function(m){return esc((m.name||"?").split(" ")[0]);}).join(", ");
+        if((g.members||[]).length>4)names+=" +"+((g.members||[]).length-4);
+        var isActive=currentGroupId===g.group_id;
+        return '<div class="group-card'+(isActive?' active':'')+'" data-gid="'+esc(g.group_id)+'" data-gtype="'+esc(g.group_type)+'">'+
+            '<span class="group-type-badge '+badgeCls+'">'+label+'</span>'+
+            '<div class="group-name">'+esc(g.group_name||g.group_id)+'</div>'+
+            '<div class="group-members-preview">'+names+'</div>'+
+            '<div class="group-count">'+(g.members||[]).length+' members</div></div>';
+    }).join('');
+    wireGroups();
+}
+
+function wireGroups(){
+    document.querySelectorAll(".group-card").forEach(function(card){
+        card.addEventListener("click",function(){
+            document.querySelectorAll(".group-card").forEach(function(c){c.classList.remove("active");});
+            this.classList.add("active");
+            currentGroupId=this.dataset.gid;currentGroupType=this.dataset.gtype;
+            lastData=null;selectedMembers={};includeNate=true;allMembers=[];_selectionChanged=true;
+            document.getElementById("member-list").innerHTML='<div class="empty-state">Loading...</div>';
+            requestGroupCoherence();
         });
+    });
+}
 
-        function buildMatrixTable(members) {
-            const safeNames = members.map(m => escapeHtml(m.name || m.id || "Unknown"));
-            const cemos = members.map(m => Number(m.c_emo_avg ?? 0.5));
+/* ======================== MEMBER CHECKBOXES (RIGHT SIDEBAR) ======================== */
+function buildMemberCheckboxes(){
+    var el=document.getElementById("member-list");
+    if(allMembers.length===0){el.innerHTML='<div class="empty-state">No members</div>';return;}
+    var isFirstLoad=Object.keys(selectedMembers).length===0;
+    if(isFirstLoad){allMembers.forEach(function(m){selectedMembers[m.id]=true;});}
+    var html='<div class="member-check nate-check'+(includeNate?" checked":"")+'" data-mid="__nate__" onclick="toggleMember(this)">'+
+        '<div class="mc-box">'+(includeNate?"✓":"")+'</div><div class="mc-name" style="color:var(--gold);">Little Nate</div><div class="mc-role">AI</div></div>';
+    allMembers.forEach(function(m){
+        var on=selectedMembers[m.id]!==false;
+        html+='<div class="member-check'+(on?" checked":"")+'" data-mid="'+esc(m.id)+'" onclick="toggleMember(this)">'+
+            '<div class="mc-box">'+(on?"✓":"")+'</div><div class="mc-name">'+esc(m.name||"?")+'</div><div class="mc-role">'+(m.role||"")+'</div></div>';
+    });
+    el.innerHTML=html;
+    updateSelCount();
+}
 
-            let html = `<table class="matrix-table"><thead><tr><th></th>`;
-            for (const n of safeNames) html += `<th>${n}</th>`;
-            html += `</tr></thead><tbody>`;
+function toggleMember(el){
+    var mid=el.dataset.mid;
+    if(mid==="__nate__"){
+        includeNate=!includeNate;
+        el.classList.toggle("checked",includeNate);
+        el.querySelector(".mc-box").textContent=includeNate?"✓":"";
+    }else{
+        selectedMembers[mid]=!selectedMembers[mid];
+        el.classList.toggle("checked",selectedMembers[mid]);
+        el.querySelector(".mc-box").textContent=selectedMembers[mid]?"✓":"";
+    }
+    _selectionChanged=true;
+    updateSelCount();
+    if(lastData)renderAll(lastData);
+}
 
-            for (let i = 0; i < members.length; i++) {
-                html += `<tr><th>${safeNames[i]}</th>`;
-                for (let j = 0; j < members.length; j++) {
-                    if (i === j) {
-                        html += `<td class="matrix-diagonal">—</td>`;
-                    } else {
-                        const score = Math.max(0, Math.min(1, 1 - Math.abs(cemos[i] - cemos[j])));
-                        const cls = score >= 0.85 ? "high" : (score >= 0.70 ? "medium" : "low");
-                        html += `<td><span class="matrix-score ${cls}">${score.toFixed(2)}</span></td>`;
-                    }
-                }
-                html += `</tr>`;
+function selectAll(){
+    allMembers.forEach(function(m){selectedMembers[m.id]=true;});
+    includeNate=true;_selectionChanged=true;
+    buildMemberCheckboxes();
+    if(lastData)renderAll(lastData);
+}
+function deselectAll(){
+    allMembers.forEach(function(m){selectedMembers[m.id]=false;});
+    includeNate=false;_selectionChanged=true;
+    buildMemberCheckboxes();
+    if(lastData)renderAll(lastData);
+}
+function updateSelCount(){
+    var cnt=getSelectedIds().length+(includeNate?1:0);
+    document.getElementById("sel-count").textContent=cnt+" selected";
+}
+
+/* ======================== RENDER ALL ======================== */
+function renderAll(data){
+    var selected=getSelectedData();
+    renderWellnessSummary(data,selected);
+    draw2DNetwork(document.getElementById("canvas-with-nate"),selected,data,true);
+    draw2DNetwork(document.getElementById("canvas-without-nate"),selected,data,false);
+    renderMatrix(selected,data);
+    renderNateBonds(selected,data.nate_node||{});
+    renderDecoherence(data.decoherence_signals||{},selected);
+    renderEngagement(selected,data.nate_node||{});
+    if(_selectionChanged||!renderer){render3DGraph(data,selected);_selectionChanged=false;}
+}
+
+/* ======================== WELLNESS SUMMARY ======================== */
+function renderWellnessSummary(data,selected){
+    if(selected.length<2){
+        document.getElementById("wi-with").textContent="--";document.getElementById("wi-without").textContent="--";document.getElementById("wi-delta").textContent="--";
+        setGrade("wg-with",null);setGrade("wg-without",null);document.getElementById("delta-badge").innerHTML='';return;
+    }
+    var wW=(data.with_nate||{}).wellness_index;
+    var woW=(data.without_nate||{}).wellness_index;
+    if(wW==null||woW==null){wW=0;woW=0;}
+    var delta=(data.nate_node||{}).nate_wellness_contribution;
+    if(delta==null)delta=wW-woW;
+    document.getElementById("wi-with").textContent=wW.toFixed(2);
+    document.getElementById("wi-without").textContent=woW.toFixed(2);
+    document.getElementById("wi-delta").textContent=(delta>=0?"+":"")+delta.toFixed(3);
+    setGrade("wg-with",wW);setGrade("wg-without",woW);
+    var db=document.getElementById("delta-badge");
+    if(delta>0.01)db.innerHTML='<span class="delta-badge delta-positive">↑ Nate lifts coherence</span>';
+    else if(delta<-0.01)db.innerHTML='<span class="delta-badge delta-negative">↓ Below baseline</span>';
+    else db.innerHTML='<span class="delta-badge delta-neutral">≈ Neutral</span>';
+}
+function setGrade(id,val){
+    var el=document.getElementById(id);
+    if(val==null){el.textContent="AWAITING";el.style.color="var(--text-secondary)";return;}
+    if(val>=0.8){el.textContent="EXCELLENT";el.style.color="var(--green)";}
+    else if(val>=0.65){el.textContent="GOOD";el.style.color="var(--cyan)";}
+    else if(val>=0.5){el.textContent="MODERATE";el.style.color="var(--gold)";}
+    else{el.textContent="DEVELOPING";el.style.color="var(--orange)";}
+}
+
+/* ======================== 2D NETWORK ======================== */
+function draw2DNetwork(canvas,selected,data,withNate){
+    var ctx=canvas.getContext("2d");
+    var rect=canvas.parentElement.getBoundingClientRect();
+    canvas.width=rect.width;canvas.height=rect.height;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(selected.length===0){ctx.fillStyle="#555";ctx.font="11px sans-serif";ctx.textAlign="center";ctx.fillText("Select members",canvas.width/2,canvas.height/2);return;}
+    var nateMap=((data||{}).nate_node||{}).nate_coherence_per_member||{};
+    var nodes=selected.map(function(m){return{id:m.id,name:(m.name||"?").split(" ")[0],c_emo:m.c_emo_avg||0.5,isNate:false};});
+    if(withNate&&includeNate)nodes.push({id:"nate",name:"Nate",c_emo:0.85,isNate:true});
+    if(nodes.length===0)return;
+    var cx=canvas.width/2,cy=canvas.height/2,radius=Math.min(cx,cy)*0.55,n=nodes.length,positions=[];
+    for(var i=0;i<n;i++){var angle=(2*Math.PI*i/n)-Math.PI/2;positions.push({x:cx+radius*Math.cos(angle),y:cy+radius*Math.sin(angle)});}
+    var nodeMap={};nodes.forEach(function(nd,i){nodeMap[nd.id]=i;});
+    var cemos=nodes.filter(function(nd){return!nd.isNate;}).map(function(nd){return nd.c_emo;});
+    for(var i=0;i<n;i++)for(var j=i+1;j<n;j++){
+        var a=nodes[i],b=nodes[j],bond;
+        if(a.isNate)bond=nateMap[b.id]||0.5;
+        else if(b.isNate)bond=nateMap[a.id]||0.5;
+        else bond=Math.max(0,1-Math.abs(a.c_emo-b.c_emo));
+        var lw=1+bond*3,alpha=0.15+bond*0.6;
+        var isNB=a.isNate||b.isNate;
+        var color=isNB?"201,169,98":bond>=0.85?"0,212,255":bond>=0.7?"157,78,221":"239,68,68";
+        ctx.beginPath();ctx.moveTo(positions[i].x,positions[i].y);ctx.lineTo(positions[j].x,positions[j].y);
+        ctx.strokeStyle="rgba("+color+","+alpha+")";ctx.lineWidth=lw;ctx.stroke();
+    }
+    for(var i=0;i<n;i++){
+        var nd=nodes[i],nodeR=nd.isNate?22:16;
+        ctx.beginPath();ctx.arc(positions[i].x,positions[i].y,nodeR,0,2*Math.PI);
+        if(nd.isNate){ctx.fillStyle="rgba(201,169,98,0.25)";ctx.fill();ctx.strokeStyle="#C9A962";ctx.lineWidth=2;ctx.stroke();}
+        else{var c=nd.c_emo;ctx.fillStyle=c>=0.7?"rgba(0,255,136,0.2)":c>=0.5?"rgba(255,215,0,0.2)":"rgba(255,59,59,0.2)";ctx.fill();ctx.strokeStyle=c>=0.7?"#00FF88":c>=0.5?"#FFD700":"#FF3B3B";ctx.lineWidth=1.5;ctx.stroke();}
+        ctx.fillStyle=nd.isNate?"#C9A962":"#fff";ctx.font="bold 8px sans-serif";ctx.textAlign="center";ctx.fillText(nd.name,positions[i].x,positions[i].y-2);
+        ctx.fillStyle=nd.isNate?"#E8D5A3":"#9D4EDD";ctx.font="bold 9px sans-serif";ctx.fillText(nd.c_emo.toFixed(2),positions[i].x,positions[i].y+9);
+    }
+}
+
+/* ======================== MATRIX ======================== */
+function toggleNateMatrix(){showNateInMatrix=!showNateInMatrix;document.getElementById("nate-matrix-toggle").classList.toggle("on",showNateInMatrix);if(lastData)renderMatrix(getSelectedData(),lastData);}
+function renderMatrix(selected,data){
+    var el=document.getElementById("coherence-matrix");
+    if(selected.length<2){el.innerHTML='<div class="empty-state">Select 2+ members</div>';return;}
+    var nodes=selected.slice();
+    if(showNateInMatrix&&includeNate)nodes.push({id:"nate",name:"Little Nate",c_emo_avg:0.85,isNate:true});
+    var nateMap=((data||{}).nate_node||{}).nate_coherence_per_member||{};
+    var html='<table class="matrix-table"><thead><tr><th></th>';
+    nodes.forEach(function(nd){html+='<th'+(nd.isNate?' class="nate-col"':'')+'>'+esc((nd.name||"?").split(" ")[0])+'</th>';});
+    html+='</tr></thead><tbody>';
+    for(var i=0;i<nodes.length;i++){
+        html+='<tr'+(nodes[i].isNate?' class="nate-row"':'')+'><th'+(nodes[i].isNate?' class="nate-col"':'')+'>'+esc((nodes[i].name||"?").split(" ")[0])+'</th>';
+        for(var j=0;j<nodes.length;j++){
+            if(i===j){html+='<td class="matrix-diagonal">—</td>';}
+            else{
+                var score;
+                if(nodes[i].isNate)score=nateMap[nodes[j].id]||0.5;
+                else if(nodes[j].isNate)score=nateMap[nodes[i].id]||0.5;
+                else score=Math.max(0,Math.min(1,1-Math.abs((nodes[i].c_emo_avg||0.5)-(nodes[j].c_emo_avg||0.5))));
+                var cls=score>=0.85?"high":score>=0.70?"medium":"low";
+                html+='<td'+(nodes[i].isNate||nodes[j].isNate?' class="nate-col-cell"':'')+'><span class="matrix-score '+cls+'">'+score.toFixed(2)+'</span></td>';
             }
-
-            html += `</tbody></table>`;
-            return html;
         }
+        html+='</tr>';
+    }
+    html+='</tbody></table>';el.innerHTML=html;
+}
 
-        function formatPair(pair) {
-            if (!Array.isArray(pair) || pair.length < 2) return "—";
-            return `${pair[0]} ⟷ ${pair[1]}`;
+/* ======================== NATE BONDS (RIGHT) ======================== */
+function renderNateBonds(selected,nateNode){
+    var el=document.getElementById("nate-bonds-body");
+    var perMember=nateNode.nate_coherence_per_member||{};
+    var engagement=nateNode.engagement_breakdown||{};
+    if(selected.length===0){el.innerHTML='<div class="empty-state">Select members</div>';return;}
+    el.innerHTML=selected.map(function(m){
+        var bond=perMember[m.id]||0;
+        var eng=engagement[m.id]||{};
+        var color=bond>=0.7?"var(--green)":bond>=0.4?"var(--gold)":"var(--orange)";
+        var detail=(eng.sessions||0)+"s "+(eng.messages||0)+"m";
+        return '<div class="member-bar"><span class="member-bar-name">'+esc((m.name||"?").split(" ")[0])+'</span>'+
+            '<div class="member-bar-track"><div class="member-bar-fill" style="width:'+(bond*100)+'%;background:'+color+';"></div></div>'+
+            '<span class="member-bar-val" style="color:'+color+';">'+bond.toFixed(2)+'</span>'+
+            '<span class="member-bar-detail">'+detail+'</span></div>';
+    }).join('');
+}
+
+/* ======================== DECOHERENCE (RIGHT) ======================== */
+function renderDecoherence(signals,selected){
+    var el=document.getElementById("deco-alerts-body");
+    var selIds=new Set(selected.map(function(m){return m.id;}));
+    var entries=Object.entries(signals||{}).filter(function(e){
+        var pair=e[0].split(":");
+        return selIds.has(pair[0])&&selIds.has(pair[1]);
+    });
+    var count=entries.filter(function(e){return e[1].trend!=="stable";}).length;
+    document.getElementById("deco-count").textContent=count;
+    if(entries.length===0){el.innerHTML='<div class="empty-state">No signals</div>';return;}
+    entries.sort(function(a,b){return b[1].risk-a[1].risk;});
+    el.innerHTML=entries.map(function(e){
+        var sig=e[1],names=sig.names||e[0].split(":");
+        var cls=sig.trend==="diverging"?"":sig.trend==="watch"?"watch":"stable";
+        var riskColor=sig.risk>=0.4?"var(--red)":sig.risk>=0.2?"var(--orange)":"var(--green)";
+        var shameFactor=sig.shame_factor!=null?sig.shame_factor:0;
+        var distressFactor=sig.distress_factor!=null?sig.distress_factor:0;
+        var factors='';
+        if(shameFactor>0||distressFactor>0){
+            factors='<div style="font-size:7px;color:var(--text-secondary);margin-top:2px;">'+
+                (shameFactor>0?'shame:'+shameFactor.toFixed(2)+' ':'')+(distressFactor>0?'distress:'+distressFactor.toFixed(2):'')+'</div>';
         }
+        return '<div class="decoherence-item '+cls+'"><div><div class="deco-pair">'+esc((names[0]||"").split(" ")[0])+' ↔ '+esc((names[1]||"").split(" ")[0])+'</div><div class="deco-trend">'+sig.trend+'</div>'+factors+'</div>'+
+            '<div class="deco-risk" style="color:'+riskColor+';">'+sig.risk.toFixed(2)+'</div></div>';
+    }).join('');
+}
 
-        function escapeHtml(s) {
-            return String(s ?? "").replace(/[&<>"']/g, ch => ({
-                "&": "&amp;",
-                "<": "&lt;",
-                ">": "&gt;",
-                '"': "&quot;",
-                "'": "&#039;"
-            }[ch]));
+/* ======================== ENGAGEMENT (RIGHT) ======================== */
+function renderEngagement(selected,nateNode){
+    var el=document.getElementById("engagement-body");
+    var engagement=nateNode.engagement_breakdown||{};
+    if(selected.length===0){el.innerHTML='<div class="empty-state">Select members</div>';return;}
+    var html='';
+    selected.forEach(function(m){
+        var eng=engagement[m.id]||{};
+        var coh=eng.coherence!=null?eng.coherence:m.c_emo_avg||0;
+        var gap=eng.gap!=null?eng.gap:0;
+        var quant=eng.quantum!=null?eng.quantum:0;
+        var anx=eng.anxiety!=null?eng.anxiety:0;
+        var str=eng.stress!=null?eng.stress:0;
+        var engage=eng.engage!=null?eng.engage:0;
+        function statColor(v,invert){if(invert)return v<=0.2?"var(--green)":v<=0.5?"var(--gold)":"var(--red)";return v>=0.7?"var(--green)":v>=0.4?"var(--gold)":"var(--orange)";}
+        html+='<div style="background:var(--bg-elevated);border-radius:5px;padding:7px 8px;margin-bottom:6px;">'+
+            '<div style="font-size:9px;font-weight:600;margin-bottom:4px;">'+esc((m.name||"?").split(" ")[0])+'</div>'+
+            '<div style="display:flex;gap:8px;font-size:7px;color:var(--text-secondary);margin-bottom:3px;">'+
+            '<span>📊 '+(eng.sessions||0)+'s</span><span>💬 '+(eng.messages||0)+'m</span><span>🪙 '+(eng.tokens||0).toLocaleString()+'t</span></div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;">'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Coherence</div><div style="font-size:10px;font-weight:700;color:'+statColor(coh,false)+';">'+coh.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">GAP</div><div style="font-size:10px;font-weight:700;color:'+statColor(gap,false)+';">'+gap.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Quantum</div><div style="font-size:10px;font-weight:700;color:'+statColor(quant,false)+';">'+quant.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Anxiety</div><div style="font-size:10px;font-weight:700;color:'+statColor(anx,true)+';">'+anx.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Stress</div><div style="font-size:10px;font-weight:700;color:'+statColor(str,true)+';">'+str.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Engage</div><div style="font-size:10px;font-weight:700;color:'+statColor(engage,false)+';">'+engage.toFixed(2)+'</div></div>'+
+            '</div></div>';
+    });
+    el.innerHTML=html;
+}
+
+/* ======================== 3D GRAPH with click-to-toggle ======================== */
+var scene,camera,renderer,controls,animId,_THREE=null,_raycaster=null,_mouse=null;
+var _clickableMeshes=[];
+var _savedCamPos=null,_savedCamTarget=null,_OrbitMod=null;
+function setLayout(mode){layoutMode=mode;_savedCamPos=null;_savedCamTarget=null;document.getElementById("btn-force").classList.toggle("active",mode==="force");document.getElementById("btn-helix").classList.toggle("active",mode==="helix");if(lastData)render3DGraph(lastData,getSelectedData());}
+
+function _onGraphClick(event){
+    if(!_THREE||!_raycaster||!renderer||!camera||_clickableMeshes.length===0)return;
+    var rect=renderer.domElement.getBoundingClientRect();
+    _mouse.x=((event.clientX-rect.left)/rect.width)*2-1;
+    _mouse.y=-((event.clientY-rect.top)/rect.height)*2+1;
+    _raycaster.setFromCamera(_mouse,camera);
+    var intersects=_raycaster.intersectObjects(_clickableMeshes);
+    if(intersects.length>0){
+        var hit=intersects[0].object;
+        var mid=hit.userData.memberId;
+        if(!mid)return;
+        if(mid==="__nate__"){
+            includeNate=!includeNate;
+        }else{
+            selectedMembers[mid]=!selectedMembers[mid];
         }
+        buildMemberCheckboxes();
+        _selectionChanged=true;
+        if(lastData)renderAll(lastData);
+    }
+}
 
-        // Initialize
-        connectWebSocket();
-        
-        console.log("👨‍👩‍👧 Nevedal Lab Family Dynamics initialized");
-    </script>
+async function render3DGraph(data,selected){
+    var container=document.getElementById("three-container");
+    if(!_THREE){try{_THREE=await import("three");}catch(e){container.innerHTML='<div class="empty-state" style="padding-top:150px;">Three.js loading failed</div>';return;}}
+    var THREE=_THREE;
+    if(!_raycaster){_raycaster=new THREE.Raycaster();_mouse=new THREE.Vector2();}
+    if(!_OrbitMod){try{_OrbitMod=await import("three/addons/controls/OrbitControls.js");}catch(e){}}
+    if(renderer){
+        if(animId)cancelAnimationFrame(animId);
+        renderer.domElement.removeEventListener("click",_onGraphClick);
+        renderer.dispose();var oldCanvas=container.querySelector("canvas");if(oldCanvas)oldCanvas.remove();
+    }
+    _clickableMeshes=[];
+    scene=new THREE.Scene();scene.background=new THREE.Color(0x1A1A1A);
+    var w=container.clientWidth,h=container.clientHeight;
+    camera=new THREE.PerspectiveCamera(55,w/h,0.1,1000);
+    camera.position.set(0,2,6);
+    renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(w,h);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    container.insertBefore(renderer.domElement,container.firstChild);
+    renderer.domElement.addEventListener("click",_onGraphClick);
+    renderer.domElement.style.cursor="pointer";
+    if(_OrbitMod){controls=new _OrbitMod.OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=0.08;}
+    if(_savedCamPos&&controls){
+        camera.position.set(_savedCamPos.x,_savedCamPos.y,_savedCamPos.z);
+        if(_savedCamTarget)controls.target.set(_savedCamTarget.x,_savedCamTarget.y,_savedCamTarget.z);
+        controls.update();
+    }
+    scene.add(new THREE.AmbientLight(0xffffff,0.4));
+    var dirLight=new THREE.DirectionalLight(0xffffff,0.8);dirLight.position.set(5,5,5);scene.add(dirLight);
+
+    var allMembersForGraph=(lastData||{}).members||[];
+    if(allMembersForGraph.length===0){
+        var geo=new THREE.SphereGeometry(0.15,16,16);scene.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x555555})));
+        function animEmpty(){animId=requestAnimationFrame(animEmpty);if(controls)controls.update();renderer.render(scene,camera);}animEmpty();return;
+    }
+    var natePerMember=((data||{}).nate_node||{}).nate_coherence_per_member||{};
+    var selIds=new Set(getSelectedIds());
+    var nodes=allMembersForGraph.map(function(m){return{id:m.id,name:(m.name||"?").split(" ")[0],c_emo:m.c_emo_avg||0.5,isNate:false,active:selIds.has(m.id)};});
+    nodes.push({id:"nate",name:"Nate",c_emo:0.85,isNate:true,active:includeNate});
+    var n=nodes.length;if(n===0)return;
+    var positions3d=[];
+    if(layoutMode==="helix"){
+        var turns=1.5,heightRange=3;
+        for(var i=0;i<n;i++){var nd=nodes[i];if(nd.isNate){positions3d.push(new THREE.Vector3(0,0,0));}else{var t=i/((n-1)||1);var angle=t*turns*2*Math.PI;positions3d.push(new THREE.Vector3(1.8*Math.cos(angle),-heightRange/2+t*heightRange,1.8*Math.sin(angle)));}}
+    }else{
+        var humanCount=nodes.filter(function(nd){return!nd.isNate;}).length;var hIdx=0;
+        for(var i=0;i<n;i++){
+            if(nodes[i].isNate){positions3d.push(new THREE.Vector3(0,0,0));}
+            else{var angle=(2*Math.PI*hIdx/(humanCount||1))-Math.PI/2;positions3d.push(new THREE.Vector3(2.5*Math.cos(angle),0,2.5*Math.sin(angle)));hIdx++;}
+        }
+    }
+    for(var i=0;i<n;i++){
+        var nd=nodes[i],sz=nd.isNate?0.22:0.12+nd.c_emo*0.1;
+        var activeAlpha=nd.active?1.0:0.25;
+        var baseColor=nd.isNate?0xC9A962:nd.c_emo>=0.7?0x00FF88:nd.c_emo>=0.5?0xFFD700:0xFF3B3B;
+        var mesh=new THREE.Mesh(new THREE.SphereGeometry(sz,24,24),new THREE.MeshStandardMaterial({color:baseColor,emissive:baseColor,emissiveIntensity:nd.active?0.3:0.05,metalness:0.3,roughness:0.6,transparent:true,opacity:activeAlpha}));
+        mesh.position.copy(positions3d[i]);mesh.userData.memberId=nd.isNate?"__nate__":nd.id;
+        scene.add(mesh);_clickableMeshes.push(mesh);
+        var c2d=document.createElement("canvas");c2d.width=160;c2d.height=40;var c2=c2d.getContext("2d");
+        c2.globalAlpha=nd.active?1.0:0.3;
+        c2.fillStyle=nd.isNate?"#C9A962":"#ffffff";c2.font="bold 18px sans-serif";c2.textAlign="center";c2.fillText(nd.name,80,18);
+        c2.fillStyle=nd.active?"#9D4EDD":"#555";c2.font="bold 14px sans-serif";c2.fillText(nd.c_emo.toFixed(2),80,34);
+        var sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c2d),transparent:true}));sprite.scale.set(1.0,0.25,1);sprite.position.copy(positions3d[i]);sprite.position.y+=sz+0.18;scene.add(sprite);
+    }
+    for(var i=0;i<n;i++)for(var j=i+1;j<n;j++){
+        var a=nodes[i],b=nodes[j];
+        if(!a.active&&!b.active)continue;
+        var bond;
+        if(a.isNate)bond=natePerMember[b.id]||0.5;
+        else if(b.isNate)bond=natePerMember[a.id]||0.5;
+        else bond=Math.max(0,1-Math.abs(a.c_emo-b.c_emo));
+        var bothActive=a.active&&b.active;
+        var isNB=a.isNate||b.isNate;
+        var col=isNB?0xC9A962:bond>=0.85?0x4ECDC4:bond>=0.7?0x9D4EDD:0xEF4444;
+        var line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([positions3d[i],positions3d[j]]),new THREE.LineBasicMaterial({color:col,transparent:true,opacity:bothActive?(0.2+bond*0.6):0.08}));
+        scene.add(line);
+    }
+    function animate(){
+        animId=requestAnimationFrame(animate);
+        if(controls)controls.update();
+        if(camera&&controls){
+            _savedCamPos={x:camera.position.x,y:camera.position.y,z:camera.position.z};
+            _savedCamTarget={x:controls.target.x,y:controls.target.y,z:controls.target.z};
+        }
+        renderer.render(scene,camera);
+    }
+    animate();
+}
+
+/* ======================== INIT ======================== */
+connectWebSocket();
+</script>
 </body>
 </html>

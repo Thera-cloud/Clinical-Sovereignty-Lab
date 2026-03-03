@@ -41,8 +41,14 @@ class VaultBrowserScreen extends StatefulWidget {
 
 class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   String get _userId => (widget.profile['hardware_id'] ?? widget.profile['id'] ?? '').toString();
+  String get _token => (widget.profile['token'] ?? '').toString();
   String get _baseUrl =>
       AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+  Map<String, String> get _authHeaders => {
+    'X-User-Id': _userId,
+    'Content-Type': 'application/json',
+    if (_token.isNotEmpty) 'Authorization': 'Bearer $_token',
+  };
 
   List<Map<String, dynamic>> _folders = [];
   List<Map<String, dynamic>> _items = [];
@@ -92,7 +98,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     );
     final resp = await http.get(
       uri,
-      headers: {'X-User-Id': _userId, 'Content-Type': 'application/json'},
+      headers: _authHeaders,
     ).timeout(const Duration(seconds: 10));
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       final data = jsonDecode(resp.body);
@@ -124,7 +130,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     );
     final resp = await http.get(
       uri,
-      headers: {'X-User-Id': _userId, 'Content-Type': 'application/json'},
+      headers: _authHeaders,
     ).timeout(const Duration(seconds: 10));
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       final data = jsonDecode(resp.body);
@@ -149,7 +155,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     );
     final resp = await http.get(
       uri,
-      headers: {'X-User-Id': _userId, 'Content-Type': 'application/json'},
+      headers: _authHeaders,
     ).timeout(const Duration(seconds: 10));
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       final data = jsonDecode(resp.body);
@@ -169,7 +175,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     );
     final resp = await http.get(
       uri,
-      headers: {'X-User-Id': _userId, 'Content-Type': 'application/json'},
+      headers: _authHeaders,
     ).timeout(const Duration(seconds: 5));
     if (resp.statusCode >= 200 && resp.statusCode < 300) {
       setState(() => _stats = Map<String, dynamic>.from(jsonDecode(resp.body) as Map));
@@ -493,12 +499,10 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
         bytes = await _readFileBytes(file.path!);
       }
       if (bytes == null) return;
-      final uri = Uri.parse('$_baseUrl/api/v1/upload').replace(
-        queryParameters: {'user_id': _userId},
-      );
+      final uri = Uri.parse('$_baseUrl/api/v1/upload');
       final request = http.MultipartRequest('POST', uri);
       request.headers['X-User-Id'] = _userId;
-      request.fields['user_id'] = _userId;
+      if (_token.isNotEmpty) request.headers['Authorization'] = 'Bearer $_token';
       request.files.add(http.MultipartFile.fromBytes(
         'file',
         bytes,
@@ -594,6 +598,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       final uri = Uri.parse('$_baseUrl/api/v1/vault/import');
       final request = http.MultipartRequest('POST', uri);
       request.headers['X-User-Id'] = _userId;
+      if (_token.isNotEmpty) request.headers['Authorization'] = 'Bearer $_token';
       request.fields['source'] = source;
       request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: file.name));
       final streamed = await request.send().timeout(const Duration(seconds: 120));
@@ -693,7 +698,7 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       );
       final resp = await http.post(
         uri,
-        headers: {'X-User-Id': _userId, 'Content-Type': 'application/json'},
+        headers: _authHeaders,
       ).timeout(const Duration(seconds: 5));
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         setState(() {

@@ -493,6 +493,30 @@ class YouTubeAdapter(SocialPlatformAdapter):
         except Exception as e:
             return ModerateResult(success=False, error=str(e), action=ActionResult.FAILED)
 
+    # ── Notification / Engagement Discovery ────────────────────────
+
+    async def get_follower_count(self) -> int:
+        """Get current subscriber count for delta tracking."""
+        if not self._connected or not self._channel_id:
+            return 0
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{YT_API_BASE}/channels",
+                    params={
+                        "part": "statistics",
+                        "id": self._channel_id,
+                    },
+                    headers={"Authorization": f"Bearer {self._access_token}"}
+                )
+                if resp.status_code == 200:
+                    items = resp.json().get("items", [])
+                    if items:
+                        return int(items[0].get("statistics", {}).get("subscriberCount", 0))
+        except Exception as e:
+            logger.error(f"YouTube get_follower_count error: {e}")
+        return 0
+
     # ── Analytics ───────────────────────────────────────────────────
 
     async def get_analytics(self) -> PlatformAnalytics:

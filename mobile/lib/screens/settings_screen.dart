@@ -14,7 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
-import '../main.dart' show LobbyScreen, HardwareIdentity;
+import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen;
 import 'billing_screens.dart';
 import '../config/app_config.dart';
 import 'vault_browser_screen.dart';
@@ -23,6 +23,8 @@ import 'quiz_screen.dart';
 import 'nevedal_reports_screen.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
+import 'coaching_mesh_screen.dart';
+import 'community_mesh_screen.dart';
 import 'night_school_screen.dart';
 import 'ai_modes_screen.dart';
 
@@ -35,6 +37,7 @@ class _Design {
   static const bgElevated = Color(0xFF1A1A1A);
   static const gold = Color(0xFFC9A962);
   static const goldBright = Color(0xFFE8D5A3);
+  static const goldDim = Color(0xFF8B7355);
   static const cyan = Color(0xFF4ECDC4);
   static const red = Color(0xFFEF4444);
   static const green = Color(0xFF00FF88);
@@ -76,6 +79,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   bool _notifSessionReminders = true;
   bool _notifCrisisAlerts = true;
   bool _voiceModeDefault = false;
+  String _preferredContact = 'email';
 
   // Vault stats (for STANDARD+ tiers)
   int? _vaultUsageBytes;
@@ -85,12 +89,18 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   List<Map<String, dynamic>> _familyMembers = [];
   List<Map<String, dynamic>> _pendingInvites = [];
   bool _familyLoading = false;
-  StreamSubscription? _familySocketSub;
+  // Family members fetched via REST (see _fetchFamilyMembers)
 
   // Biometric login toggle
   final HardwareIdentity _bioIdentity = HardwareIdentity();
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
+
+  // Assigned coach info
+  String _coachName = '';
+  String _coachEmail = '';
+  List<dynamic> _coachSpecializations = [];
+  bool _coachInfoLoaded = false;
 
   @override
   void initState() {
@@ -103,10 +113,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _notifPush = _profile['notif_push'] ?? true;
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
-    _voiceModeDefault = _profile['voice_mode_default'] ?? false;
+    _voiceModeDefault = _profile['voice_mode_default'] ??
+        (_profile['notification_prefs'] is Map ? _profile['notification_prefs']['voice_mode_default'] : null) ?? false;
+    _preferredContact = _profile['preferred_contact'] ?? 'email';
     if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) _loadVaultStats();
     if (_isSovereignCircle) _fetchFamilyMembers();
     _loadBiometricState();
+    _fetchCoachInfo();
   }
 
   Future<void> _loadBiometricState() async {
@@ -117,6 +130,38 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         _biometricEnabled = enabled;
         _biometricAvailable = available;
       });
+    }
+  }
+
+  Future<void> _fetchCoachInfo() async {
+    final coachId = (_profile['coach_id'] ?? _profile['assigned_coach_id'] ?? '').toString();
+    if (coachId.isEmpty) {
+      if (mounted) setState(() { _coachName = 'Not Assigned'; _coachInfoLoaded = true; });
+      return;
+    }
+    final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+    try {
+      final token = _profile['token']?.toString() ?? widget.profile['token']?.toString() ?? '';
+      final resp = await http.get(
+        Uri.parse('$base/api/client/coach-info/$coachId'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 8));
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _coachName = (data['coach_name'] ?? 'Coach').toString();
+          _coachEmail = (data['coach_email'] ?? '').toString();
+          _coachSpecializations = data['specializations'] as List<dynamic>? ?? [];
+          _coachInfoLoaded = true;
+        });
+      } else if (mounted) {
+        setState(() { _coachName = 'Unavailable'; _coachInfoLoaded = true; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _coachName = 'Unavailable'; _coachInfoLoaded = true; });
     }
   }
 
@@ -157,60 +202,46 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _phoneCtrl.dispose();
     _emergencyCtrl.dispose();
     _timezoneCtrl.dispose();
-    _familySocketSub?.cancel();
     super.dispose();
   }
 
-  // ---- Fetch family members + pending invites via WebSocket ----
+  // ---- Fetch family members + pending invites via REST ----
   Future<void> _fetchFamilyMembers() async {
     if (_familyLoading) return;
     setState(() => _familyLoading = true);
 
-    WebSocketChannel? sock;
-    StreamSubscription? sub;
-    final completer = Completer<void>();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    if (hwId.isEmpty || token.isEmpty) {
+      if (mounted) setState(() => _familyLoading = false);
+      return;
+    }
 
     try {
-      sock = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
-      sub = sock.stream.listen((raw) {
-        try {
-          final data = jsonDecode(raw) as Map<String, dynamic>;
-          final type = (data['type'] ?? '').toString();
-          if (type == 'connected') {
-            sock?.sink.add(jsonEncode({
-              'type': 'auth',
-              'token': _profile['token'] ?? widget.profile['token'] ?? '',
-              'hardware_id': _profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '',
-            }));
-          } else if (type == 'auth_success' || type == 'login_success') {
-            sock?.sink.add(jsonEncode({'type': 'get_family_members'}));
-          } else if (type == 'family_members') {
-            if (mounted) {
-              setState(() {
-                _familyMembers = List<Map<String, dynamic>>.from(
-                  (data['members'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
-                );
-                _pendingInvites = List<Map<String, dynamic>>.from(
-                  (data['pending_invites'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
-                );
-                _familyLoading = false;
-              });
-            }
-            if (!completer.isCompleted) completer.complete();
-          }
-        } catch (_) {}
-      }, onError: (_) {
-        if (!completer.isCompleted) completer.complete();
-      }, onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      });
+      final url = '${AppConfig.apiBaseUrl}/api/client/family/members/$hwId';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 10));
 
-      await completer.future.timeout(const Duration(seconds: 10), onTimeout: () {});
-    } catch (_) {}
-
-    if (mounted && _familyLoading) setState(() => _familyLoading = false);
-    try { sub?.cancel(); } catch (_) {}
-    try { sock?.sink.close(); } catch (_) {}
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _familyMembers = List<Map<String, dynamic>>.from(
+            (data['members'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
+          );
+          _pendingInvites = List<Map<String, dynamic>>.from(
+            (data['pending_invites'] as List?)?.map((e) => Map<String, dynamic>.from(e)) ?? [],
+          );
+          _familyLoading = false;
+        });
+      } else {
+        setState(() => _familyLoading = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _familyLoading = false);
+    }
   }
 
   // ---- Remove family member via WebSocket ----
@@ -374,7 +405,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
   bool get _isSovereignCircle {
     final plan = (_profile['subscription_plan'] ?? _profile['tier'] ?? '').toString().toUpperCase();
-    return plan.contains('TOP') || plan.contains('SOVEREIGN') || plan.contains('FAMILY');
+    return plan == 'TOP_TIER' || plan.contains('SOVEREIGN') || plan == 'TOP';
   }
 
   String get _currentPlanKey {
@@ -393,6 +424,114 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       case 'TOP_TIER': return 2;
       case 'FAMILY': return 3;
       default: return 0;
+    }
+  }
+
+  // ---- Buy Tokens ----
+  void _showBuyTokensSheet() {
+    final packs = [
+      {'id': 'light', 'label': 'Light Pack', 'tokens': '15,000', 'price': '\$3.00', 'icon': Icons.flash_on},
+      {'id': 'standard', 'label': 'Standard Pack', 'tokens': '50,000', 'price': '\$7.00', 'icon': Icons.bolt},
+      {'id': 'power', 'label': 'Power Pack', 'tokens': '150,000', 'price': '\$20.00', 'icon': Icons.local_fire_department},
+      {'id': 'ultimate', 'label': 'Ultimate Pack', 'tokens': '1,000,000', 'price': '\$125.00', 'icon': Icons.diamond},
+    ];
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF111111),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            ),
+            const SizedBox(height: 16),
+            const Text('Buy Token Packs', style: TextStyle(color: Color(0xFFC9A962), fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            const Text('Add tokens to your balance instantly.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 20),
+            ...packs.map((pack) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _purchaseTokenPack(pack['id'] as String);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0A0A0A),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(pack['icon'] as IconData, color: const Color(0xFFC9A962), size: 28),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(pack['label'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            Text('${pack['tokens']} tokens', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      Text(pack['price'] as String, style: const TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.bold, fontSize: 16)),
+                    ],
+                  ),
+                ),
+              ),
+            )),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _purchaseTokenPack(String packId) async {
+    try {
+      final token = _profile['token'] ?? '';
+      final username = _profile['username'] ?? '';
+      final resp = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/token-packs/purchase'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'pack_id': packId,
+          'username': username,
+        }),
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final url = data['checkout_url'];
+        if (url != null && mounted) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Purchase failed: ${resp.body}'), backgroundColor: Colors.red),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 
@@ -637,7 +776,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   // ---- Invite a Friend ----
   void _inviteFriend() {
     try {
-      const downloadLink = 'https://sovereignsanctuary.net/download';
+      const downloadLink = 'https://app.sovereignsanctuary.net';
       const message =
           "Hey! I've been working with Little Nate — an AI companion that's "
           "helped me understand myself in ways I didn't expect. If you're "
@@ -927,6 +1066,128 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
+  // ---- Upgrade to Coach ----
+  void _requestCoachUpgrade() {
+    final upgradeStatus = _profile['upgrade_to_coach_status'] ?? '';
+    if (upgradeStatus == 'PENDING') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your coach upgrade request is pending admin approval'), backgroundColor: Color(0xFFC9A962)),
+      );
+      return;
+    }
+    final dojoPrices = <String, double>{
+      'therapist': 175.0, 'project_pm': 250.0, 'business': 325.0,
+      'cnc': 150.0, 'mcat': 500.0, 'teacher': 225.0, 'judge': 2100.0,
+    };
+    final dojoLabels = <String, String>{
+      'therapist': 'Therapist', 'project_pm': 'Project PM', 'business': 'Business',
+      'cnc': 'CNC', 'mcat': 'MCAT', 'teacher': 'Teacher', 'judge': 'Judge',
+    };
+    final selected = <String>{};
+    final feeCtrl = TextEditingController();
+    final zoomCtrl = TextEditingController();
+    final emailCtrl = TextEditingController(text: _profile['email'] ?? '');
+    final phoneCtrl = TextEditingController(text: _profile['phone'] ?? '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDlgState) {
+        final nonJudge = selected.where((d) => d != 'judge').length;
+        final discounts = [0, 0, 10, 15, 20, 25, 30];
+        final disc = nonJudge < discounts.length ? discounts[nonJudge] : 30;
+        double total = 0;
+        for (final d in selected) {
+          final price = dojoPrices[d] ?? 0;
+          total += d == 'judge' ? price : price * (1 - disc / 100);
+        }
+
+        return AlertDialog(
+          backgroundColor: _Design.bgCard,
+          title: const Text('UPGRADE TO COACH', style: TextStyle(color: _Design.gold, fontFamily: 'Courier', fontSize: 16)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Select your DOJO mentoring domains:', style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                const SizedBox(height: 8),
+                ...dojoPrices.entries.map((e) {
+                  final key = e.key;
+                  final price = e.value;
+                  final label = dojoLabels[key] ?? key;
+                  return CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    activeColor: _Design.gold,
+                    checkColor: Colors.black,
+                    value: selected.contains(key),
+                    onChanged: (v) => setDlgState(() { v == true ? selected.add(key) : selected.remove(key); }),
+                    title: Text('$label — \$${price.toStringAsFixed(0)}/mo', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  );
+                }),
+                if (disc > 0)
+                  Padding(padding: const EdgeInsets.only(top: 4),
+                    child: Text('$disc% multi-DOJO discount applied', style: const TextStyle(color: _Design.cyan, fontSize: 11))),
+                if (selected.contains('judge'))
+                  const Padding(padding: EdgeInsets.only(top: 2),
+                    child: Text('Judge (\$2,100/mo) is always full price', style: TextStyle(color: Colors.orange, fontSize: 11))),
+                Padding(padding: const EdgeInsets.only(top: 8),
+                  child: Text('Monthly total: \$${total.toStringAsFixed(2)}', style: const TextStyle(color: _Design.gold, fontSize: 14, fontWeight: FontWeight.bold))),
+                const SizedBox(height: 16),
+                TextField(controller: feeCtrl, style: const TextStyle(color: Colors.white, fontSize: 13),
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Your Coaching Fee (\$/hr)', labelStyle: TextStyle(color: Colors.grey, fontSize: 12),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF252525))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _Design.gold)))),
+                const SizedBox(height: 8),
+                TextField(controller: zoomCtrl, style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(labelText: 'Zoom Meeting Link (optional)', labelStyle: TextStyle(color: Colors.grey, fontSize: 12),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF252525))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _Design.gold)))),
+                const SizedBox(height: 8),
+                TextField(controller: emailCtrl, style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(labelText: 'Professional Email', labelStyle: TextStyle(color: Colors.grey, fontSize: 12),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF252525))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _Design.gold)))),
+                const SizedBox(height: 8),
+                TextField(controller: phoneCtrl, style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: const InputDecoration(labelText: 'Phone Number', labelStyle: TextStyle(color: Colors.grey, fontSize: 12),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF252525))),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _Design.gold)))),
+                const SizedBox(height: 12),
+                Text('Your existing session history and data will be preserved. Admin approval required.',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+              ],
+            )),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+              onPressed: selected.isEmpty ? null : () {
+                widget.socket?.sink.add(jsonEncode({
+                  "type": "request_coach_upgrade",
+                  "selected_dojos": selected.toList(),
+                  "coaching_fee": double.tryParse(feeCtrl.text) ?? 0,
+                  "zoom_link": zoomCtrl.text.trim(),
+                  "email": emailCtrl.text.trim(),
+                  "phone": phoneCtrl.text.trim(),
+                }));
+                Navigator.pop(ctx);
+                setState(() { _profile['upgrade_to_coach_status'] = 'PENDING'; });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Coach upgrade request submitted!'), backgroundColor: Color(0xFF4ECDC4)),
+                );
+              },
+              child: const Text('Submit Request', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
   // ---- Account Deletion ----
   void _requestAccountDeletion() {
     showDialog(
@@ -1001,6 +1262,60 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
+  // ---- Data Export ----
+  void _requestDataExport() async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Download My Data', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+        content: const Text(
+          'This will export all your personal data including:\n\n'
+          '• Profile information\n'
+          '• Session summaries\n'
+          '• Coherence metrics\n'
+          '• Wisdom extractions\n'
+          '• Community attendance records\n'
+          '• Billing history\n\n'
+          'The export will be downloaded as a JSON file.',
+          style: TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final userId = _profile['hardware_id'] ?? _profile['user_id'] ?? '';
+              final token = _profile['token'] ?? '';
+              try {
+                final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
+                final response = await http.get(url, headers: {'Authorization': 'Bearer $token'});
+                if (response.statusCode == 200) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Data exported successfully'), backgroundColor: Colors.green),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: const Text('Export Data', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ---- Legal Viewer ----
   void _showLegalAgreement() {
     Navigator.push(context, MaterialPageRoute(
@@ -1014,6 +1329,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     final plan = _profile['subscription_plan'] ?? _profile['tier'] ?? 'STANDARD';
     final tokenBalance = _profile['token_balance'] ?? 0;
     final tokenUsage = _profile['token_usage_month'] ?? 0;
+    final tokenUsageToday = _profile['token_usage_today'] ?? 0;
     final consentVersion = _profile['consent_version'] ?? 'Unknown';
 
     return Scaffold(
@@ -1082,14 +1398,14 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                   const SizedBox(width: 8),
                   const Expanded(
                     child: SelectableText(
-                      'https://sovereignsanctuary.net/download',
+                      'https://app.sovereignsanctuary.net',
                       style: TextStyle(color: _Design.cyan, fontSize: 12, fontFamily: 'Courier'),
                     ),
                   ),
                   const SizedBox(width: 8),
                   InkWell(
                     onTap: () {
-                      Clipboard.setData(const ClipboardData(text: 'https://sovereignsanctuary.net/download'));
+                      Clipboard.setData(const ClipboardData(text: 'https://app.sovereignsanctuary.net'));
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                           content: Text('Link copied!'),
@@ -1352,6 +1668,88 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          // --- Token Vault ---
+          _sectionHeader('TOKEN VAULT', Icons.toll),
+          _settingsCard([
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [_Design.gold.withOpacity(0.15), _Design.bgElevated],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Balance', style: TextStyle(color: _Design.textSecondary, fontSize: 11)),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${tokenBalance.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},')} tokens',
+                        style: const TextStyle(color: _Design.gold, fontSize: 22, fontWeight: FontWeight.bold, fontFamily: 'Courier'),
+                      ),
+                    ],
+                  ),
+                  const Icon(Icons.toll, color: _Design.gold, size: 32),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _Design.bgElevated,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(children: [
+                      const Text('Today', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                      const SizedBox(height: 4),
+                      Text('$tokenUsageToday', style: const TextStyle(color: _Design.cyan, fontSize: 16, fontWeight: FontWeight.bold)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: _Design.bgElevated,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(children: [
+                      const Text('This Month', style: TextStyle(color: _Design.textSecondary, fontSize: 10)),
+                      const SizedBox(height: 4),
+                      Text('$tokenUsage', style: const TextStyle(color: _Design.cyan, fontSize: 16, fontWeight: FontWeight.bold)),
+                    ]),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _Design.gold,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.add_circle_outline, color: Colors.black, size: 18),
+                label: const Text('Buy Tokens', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+                onPressed: _showBuyTokensSheet,
+              ),
+            ),
+          ]),
+          const SizedBox(height: 20),
+
           // --- Sovereign Vault (STANDARD / TOP_TIER only) ---
           if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) ...[
             _sectionHeader('SOVEREIGN VAULT', Icons.folder),
@@ -1426,6 +1824,55 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               setState(() => _voiceModeDefault = v);
               _saveVoicePref();
             }),
+            const Divider(color: _Design.border, height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Preferred Contact',
+                            style: TextStyle(color: _Design.textPrimary, fontSize: 14)),
+                        SizedBox(height: 2),
+                        Text('How Little Nate reaches you for check-ins',
+                            style: TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'email', label: Text('Email')),
+                      ButtonSegment(value: 'sms', label: Text('SMS')),
+                    ],
+                    selected: {_preferredContact},
+                    onSelectionChanged: (v) {
+                      setState(() => _preferredContact = v.first);
+                      _sendWs({
+                        'type': 'update_profile',
+                        'preferred_contact': _preferredContact,
+                      });
+                    },
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return _Design.gold.withValues(alpha: 0.3);
+                        }
+                        return _Design.bgElevated;
+                      }),
+                      foregroundColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return _Design.gold;
+                        }
+                        return _Design.textSecondary;
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ]),
           const SizedBox(height: 20),
 
@@ -1447,7 +1894,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             }),
             _actionRow(Icons.history, 'Memory Search', 'Search past conversations with Nate', () {
               Navigator.push(context, MaterialPageRoute(
-                builder: (_) => SecureSearchScreen(profile: _profile, socket: widget.socket),
+                builder: (_) => SecureSearchScreen(profile: _profile),
               ));
             }),
             _actionRow(Icons.sos, 'Distress Beacon', 'Emergency support resources', () {
@@ -1455,6 +1902,78 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 builder: (_) => DistressBeaconScreen(profile: _profile, socket: widget.socket),
               ));
             }, danger: true),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Assigned Coach ---
+          _sectionHeader('ASSIGNED COACH', Icons.person_pin),
+          _settingsCard([
+            if (!_coachInfoLoaded)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: _Design.gold))),
+              )
+            else ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Row(children: [
+                  const Icon(Icons.person, color: _Design.gold, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_coachName, style: const TextStyle(color: _Design.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+                      if (_coachEmail.isNotEmpty)
+                        Text(_coachEmail, style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                      if (_coachSpecializations.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Wrap(
+                            spacing: 6, runSpacing: 4,
+                            children: _coachSpecializations.map((s) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(color: _Design.gold.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+                              child: Text(s.toString(), style: const TextStyle(color: _Design.gold, fontSize: 11)),
+                            )).toList(),
+                          ),
+                        ),
+                    ],
+                  )),
+                ]),
+              ),
+              if (_coachName != 'Not Assigned' && _coachName != 'Unavailable')
+                _actionRow(Icons.calendar_month, 'View Availability & Book Session', 'Schedule a live session with your coach', () {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ClientScheduleScreen(
+                      currentUserProfile: _profile,
+                      username: (_profile['username'] ?? '').toString(),
+                      password: (_profile['password'] ?? '').toString(),
+                    ),
+                  ));
+                }),
+            ],
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Coaching Tools ---
+          _sectionHeader('COACHING TOOLS', Icons.fitness_center),
+          _settingsCard([
+            _actionRow(Icons.group_work, 'Group Session', 'Join a coach-led training mesh', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => CoachingMeshScreen(
+                  profile: _profile,
+                  token: _profile['token'] ?? '',
+                  isMaster: false,
+                ),
+              ));
+            }),
+            _actionRow(Icons.diversity_3, 'Community Circle', 'Nate-to-Nate peer wisdom sessions', () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => CommunityMeshScreen(
+                  profile: _profile,
+                ),
+              ));
+            }),
           ]),
           const SizedBox(height: 20),
 
@@ -1504,6 +2023,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           _sectionHeader('LEGAL & PRIVACY', Icons.gavel),
           _settingsCard([
             _actionRow(Icons.description, 'Terms, Privacy & Waivers', 'Full legal agreement', _showLegalAgreement),
+            _actionRow(Icons.download, 'Download My Data', 'Export your personal data', _requestDataExport),
             _infoRow('Consent Version', consentVersion),
           ]),
           const SizedBox(height: 20),
@@ -1520,6 +2040,18 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             _actionRow(Icons.email_outlined, 'Contact Support', 'support@sovereignsanctuary.net', () {
               launchUrl(Uri.parse('mailto:support@sovereignsanctuary.net'));
             }),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Become a Coach ---
+          _sectionHeader('BECOME A COACH', Icons.school),
+          _settingsCard([
+            if (_profile['upgrade_to_coach_status'] == 'PENDING')
+              _infoRow('Status', 'Upgrade pending admin approval')
+            else if (_profile['upgrade_to_coach_status'] == 'REJECTED')
+              _actionRow(Icons.refresh, 'Re-apply as Coach', 'Previous request was declined', _requestCoachUpgrade)
+            else
+              _actionRow(Icons.trending_up, 'Upgrade to Coach', 'Access DOJOs, mentoring, and client tools', _requestCoachUpgrade),
           ]),
           const SizedBox(height: 20),
 
@@ -2135,12 +2667,14 @@ class CoachSettingsScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
   final WebSocketChannel? socket;
   final VoidCallback? onLogout;
+  final Stream<Map<String, dynamic>>? messageStream;
 
   const CoachSettingsScreen({
     super.key,
     required this.profile,
     this.socket,
     this.onLogout,
+    this.messageStream,
   });
 
   @override
@@ -2170,11 +2704,37 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   bool _notifSessionReminders = true;
   bool _notifCrisisAlerts = true;
   bool _notifNightSchool = true;
+  String _preferredContact = 'email';
 
   // Biometric login toggle
   final HardwareIdentity _bioIdentity = HardwareIdentity();
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
+
+  // Coach hierarchy state
+  List<Map<String, dynamic>> _assistants = [];
+  Map<String, dynamic>? _masterCoach;
+  bool _assistantsLoading = false;
+  bool _masterLoading = false;
+  List<Map<String, dynamic>> _supervisedHours = [];
+
+  // Sheet-state callbacks so WS listener can rebuild open modals
+  void Function(void Function())? _assistantsSheetState;
+  void Function(void Function())? _masterSheetState;
+  String _totalHours = '—';
+  String _attestedHours = '—';
+  String _pendingHours = '—';
+  StreamSubscription? _wsSubscription;
+  final Set<String> _consultationUsedToday = {};
+  bool _consultationStarting = false;
+
+  bool get _isMasterCoachApproved =>
+      _profile['master_coach_approved'] == true ||
+      _profile['master_coach_approved'] == 'true';
+
+  bool get _isMasterCoachRequested =>
+      _profile['master_coach_requested'] == true ||
+      _profile['master_coach_requested'] == 'true';
 
   @override
   void initState() {
@@ -2193,7 +2753,123 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
     _notifNightSchool = _profile['notif_night_school'] ?? true;
+    _preferredContact = _profile['preferred_contact'] ?? 'email';
     _loadBiometricState();
+    _setupHierarchyListener();
+  }
+
+  void _setupHierarchyListener() {
+    _wsSubscription = widget.messageStream?.listen((data) {
+      if (!mounted) return;
+      try {
+        final type = (data['type'] ?? '').toString();
+        if (type == 'coach_hierarchy_assistants') {
+          _assistants = List<Map<String, dynamic>>.from(data['assistants'] ?? []);
+          _assistantsLoading = false;
+          setState(() {});
+          _assistantsSheetState?.call(() {});
+        } else if (type == 'coach_master_info') {
+          _masterCoach = data['master'] as Map<String, dynamic>?;
+          _masterLoading = false;
+          setState(() {});
+          _masterSheetState?.call(() {});
+        } else if (type == 'coach_hours_data') {
+          setState(() {
+            final hours = data['hours'] as List<dynamic>? ?? [];
+            _supervisedHours = List<Map<String, dynamic>>.from(hours);
+            final total = (data['total_hours'] ?? 0).toString();
+            final attested = (data['attested_hours'] ?? 0).toString();
+            final pending = (data['pending_hours'] ?? 0).toString();
+            _totalHours = total;
+            _attestedHours = attested;
+            _pendingHours = pending;
+          });
+        } else if (type == 'master_status_response') {
+          final status = (data['status'] ?? '').toString();
+          if (status == 'requested') {
+            setState(() {
+              _profile['master_coach_requested'] = 'true';
+            });
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Master coach status requested — awaiting admin approval')),
+              );
+            }
+          } else if (status == 'already_approved') {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('You are already an approved master coach')),
+              );
+            }
+          } else if (status == 'already_pending') {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Request already pending — awaiting admin approval')),
+              );
+            }
+          }
+        } else if (type == 'consultation_started') {
+          setState(() {
+            _consultationStarting = false;
+            final session = data['session'] as Map<String, dynamic>?;
+            final assistantId = session?['client_id']?.toString() ?? '';
+            if (assistantId.isNotEmpty) _consultationUsedToday.add(assistantId);
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(data['message']?.toString() ?? 'Consultation started'),
+                backgroundColor: _Design.green,
+              ),
+            );
+          }
+        } else if (type == 'error' && (data['message'] == 'DAILY_LIMIT_REACHED' || data['message'] == 'MASTER_NOT_APPROVED' || data['message'] == 'NO_ACTIVE_HIERARCHY')) {
+          setState(() => _consultationStarting = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(data['detail']?.toString() ?? data['message']?.toString() ?? 'Consultation error'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        } else if (type == 'coach_hierarchy_error') {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(data['message']?.toString() ?? 'Hierarchy error')),
+            );
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
+  void _requestMasterCoachStatus() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Request Master Coach Status', style: TextStyle(color: _Design.gold)),
+        content: const Text(
+          'As a Master Coach, you can invite and manage assistant coaches under your supervision.\n\nThis request will be reviewed by an administrator.',
+          style: TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _sendWs({'type': 'coach_request_master_status'});
+            },
+            child: const Text('Request', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadBiometricState() async {
@@ -2216,6 +2892,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _specialtiesCtrl.dispose();
     _zoomLinkCtrl.dispose();
     _feeCtrl.dispose();
+    _wsSubscription?.cancel();
     super.dispose();
   }
 
@@ -2270,6 +2947,315 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       'crisis_alerts': _notifCrisisAlerts,
       'night_school_updates': _notifNightSchool,
     });
+  }
+
+  void _showAssistantManagementPanel() {
+    final inviteController = TextEditingController();
+    setState(() => _assistantsLoading = true);
+    _sendWs({'type': 'coach_list_assistants'});
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _Design.bgCard,
+      isScrollControlled: true,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          _assistantsSheetState = setSheetState;
+          void refreshList() {
+            _sendWs({'type': 'coach_list_assistants'});
+            _assistantsLoading = true;
+            setState(() {});
+            setSheetState(() {});
+          }
+          return DraggableScrollableSheet(
+            initialChildSize: 0.6,
+            maxChildSize: 0.9,
+            expand: false,
+            builder: (_, scrollCtrl) => Container(
+              padding: const EdgeInsets.all(16),
+              child: ListView(
+                controller: scrollCtrl,
+                children: [
+                  const Text('ASSISTANT COACHES', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: inviteController,
+                          style: const TextStyle(color: _Design.textPrimary),
+                          decoration: const InputDecoration(
+                            hintText: 'Coach username to invite',
+                            hintStyle: TextStyle(color: _Design.textSecondary),
+                            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _Design.goldDim)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+                        onPressed: () {
+                          if (inviteController.text.isNotEmpty && widget.socket != null) {
+                            widget.socket!.sink.add(jsonEncode({
+                              'type': 'coach_invite_assistant',
+                              'assistant_username': inviteController.text.trim(),
+                            }));
+                            inviteController.clear();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Invitation submitted — awaiting admin approval'), backgroundColor: _Design.gold),
+                            );
+                            Future.delayed(const Duration(seconds: 1), refreshList);
+                          }
+                        },
+                        child: const Text('Invite', style: TextStyle(color: Colors.black)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Current Assistants', style: TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                      IconButton(
+                        icon: const Icon(Icons.refresh, color: _Design.gold, size: 18),
+                        onPressed: refreshList,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (_assistantsLoading)
+                    const Center(child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: CircularProgressIndicator(color: _Design.gold),
+                    ))
+                  else if (_assistants.isEmpty)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text('No assistant coaches yet.\nInvite a coach above to get started.',
+                            style: TextStyle(color: _Design.textSecondary), textAlign: TextAlign.center),
+                      ),
+                    )
+                  else
+                    ..._assistants.map((a) {
+                      final aId = (a['hardware_id'] ?? a['assistant_id'] ?? '').toString();
+                      final aUsername = (a['username'] ?? '').toString();
+                      final isActive = a['status'] == 'active';
+                      final usedToday = _consultationUsedToday.contains(aId);
+                      return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _Design.bgElevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: _Design.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isActive ? Icons.check_circle : Icons.pending,
+                            color: isActive ? _Design.green : _Design.goldDim,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(a['display_name'] ?? aUsername, style: const TextStyle(color: _Design.textPrimary, fontWeight: FontWeight.w600)),
+                                Text('@$aUsername', style: const TextStyle(color: _Design.textSecondary, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          if (_isMasterCoachApproved && isActive)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: SizedBox(
+                                height: 28,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: usedToday ? _Design.bgElevated : _Design.cyan,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  ),
+                                  onPressed: (usedToday || _consultationStarting)
+                                      ? null
+                                      : () => _confirmConsultation(aId, aUsername, a['display_name'] ?? aUsername),
+                                  child: Text(
+                                    usedToday ? 'Used Today' : 'Consult',
+                                    style: TextStyle(
+                                      color: usedToday ? _Design.textSecondary : Colors.black,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isActive ? _Design.green.withOpacity(0.15) : _Design.goldDim.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              (a['status'] ?? 'unknown').toString().toUpperCase(),
+                              style: TextStyle(color: isActive ? _Design.green : _Design.goldDim, fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    }),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ).whenComplete(() => _assistantsSheetState = null);
+  }
+
+  void _confirmConsultation(String assistantId, String assistantUsername, String displayName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Start Free Consultation', style: TextStyle(color: _Design.gold)),
+        content: Text(
+          'Start a free 15-minute consultation with $displayName?\n\nLittle Nate will be active during this session.',
+          style: const TextStyle(color: _Design.textPrimary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.cyan),
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() => _consultationStarting = true);
+              _sendWs({
+                'type': 'master_consultation_request',
+                'assistant_id': assistantId,
+                'assistant_username': assistantUsername,
+              });
+            },
+            child: const Text('Start Consultation', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMasterCoachPanel() {
+    setState(() => _masterLoading = true);
+    _sendWs({'type': 'coach_get_master'});
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _Design.bgCard,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          _masterSheetState = setSheetState;
+          return Container(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('MASTER COACH', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(color: _Design.goldDim),
+                const SizedBox(height: 12),
+                if (_masterLoading)
+                  const Center(child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: CircularProgressIndicator(color: _Design.gold),
+                  ))
+                else if (_masterCoach != null) ...[
+                  ListTile(
+                    leading: const Icon(Icons.star, color: _Design.gold),
+                    title: Text(_masterCoach!['name'] ?? _masterCoach!['username'] ?? '', style: const TextStyle(color: _Design.textPrimary)),
+                    subtitle: Text('@${_masterCoach!['username'] ?? ''}\nStatus: ${(_masterCoach!['status'] ?? 'active').toString().toUpperCase()}',
+                        style: const TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                  ),
+                ] else
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text('No master coach assigned yet.\nAccept an invitation to join a hierarchy.',
+                          style: TextStyle(color: _Design.textSecondary), textAlign: TextAlign.center),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    ).whenComplete(() => _masterSheetState = null);
+  }
+
+  void _showSupervisedHoursPanel() {
+    _sendWs({
+      'type': 'coach_get_hours',
+      'assistant_id': _profile['hardware_id'],
+    });
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _Design.bgCard,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollCtrl) => Container(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            controller: scrollCtrl,
+            children: [
+              const Text('SUPERVISED HOURS', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+              const Divider(color: _Design.goldDim),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _hoursStatCard('Total', _totalHours, _Design.gold),
+                  _hoursStatCard('Attested', _attestedHours, _Design.green),
+                  _hoursStatCard('Pending', _pendingHours, _Design.goldDim),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Center(
+                child: Text('Hours are auto-logged from coaching mesh sessions\nand manually logged by your master coach.',
+                    style: TextStyle(color: _Design.textSecondary, fontSize: 12),
+                    textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(side: const BorderSide(color: _Design.gold)),
+                onPressed: () {
+                  _sendWs({
+                    'type': 'coach_get_hours',
+                    'assistant_id': _profile['hardware_id'],
+                  });
+                },
+                icon: const Icon(Icons.refresh, color: _Design.gold),
+                label: const Text('Refresh Hours', style: TextStyle(color: _Design.gold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _hoursStatCard(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(color: _Design.textSecondary, fontSize: 11)),
+      ],
+    );
   }
 
   void _requestAccountDeletion() {
@@ -2357,6 +3343,58 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           ],
         );
       },
+    );
+  }
+
+  void _requestDataExport() async {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Download My Data', style: TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+        content: const Text(
+          'This will export all your personal data including:\n\n'
+          '• Profile information\n'
+          '• Session summaries & coaching records\n'
+          '• Coherence metrics\n'
+          '• Wisdom extractions\n'
+          '• Billing history\n\n'
+          'The export will be downloaded as a JSON file.',
+          style: TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final userId = _profile['hardware_id'] ?? _profile['user_id'] ?? '';
+              final token = _profile['token'] ?? '';
+              try {
+                final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
+                final response = await http.get(url, headers: {'Authorization': 'Bearer $token'});
+                if (response.statusCode == 200) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Data exported successfully'), backgroundColor: Colors.green),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
+                  );
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: const Text('Export Data', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2650,6 +3688,25 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          // --- Payments ---
+          _sectionHeader('PAYMENTS', Icons.credit_card),
+          _settingsCard([
+            Row(children: [
+              Expanded(child: _coachBillingLink(Icons.credit_card, 'Payment Methods', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => PaymentMethodsScreen(currentUserProfile: widget.profile),
+                ));
+              })),
+              const SizedBox(width: 8),
+              Expanded(child: _coachBillingLink(Icons.receipt_long, 'Invoices', () {
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => PaymentMethodsScreen(currentUserProfile: widget.profile, initialTab: 1),
+                ));
+              })),
+            ]),
+          ]),
+          const SizedBox(height: 20),
+
           // --- Invite Client ---
           _sectionHeader('CLIENTS', Icons.people_outline),
           _settingsCard([
@@ -2686,6 +3743,55 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
               setState(() => _notifNightSchool = v);
               _saveNotificationPrefs();
             }),
+            const Divider(color: _Design.border, height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Preferred Contact',
+                            style: TextStyle(color: _Design.textPrimary, fontSize: 14)),
+                        SizedBox(height: 2),
+                        Text('How Little Nate reaches you for check-ins',
+                            style: TextStyle(color: _Design.textSecondary, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'email', label: Text('Email')),
+                      ButtonSegment(value: 'sms', label: Text('SMS')),
+                    ],
+                    selected: {_preferredContact},
+                    onSelectionChanged: (v) {
+                      setState(() => _preferredContact = v.first);
+                      _sendWs({
+                        'type': 'update_profile',
+                        'preferred_contact': _preferredContact,
+                      });
+                    },
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return _Design.gold.withValues(alpha: 0.3);
+                        }
+                        return _Design.bgElevated;
+                      }),
+                      foregroundColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
+                          return _Design.gold;
+                        }
+                        return _Design.textSecondary;
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ]),
           const SizedBox(height: 20),
 
@@ -2697,10 +3803,33 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                 builder: (_) => NightSchoolScreen(profile: _profile),
               ));
             }),
-            _actionRow(Icons.psychology_alt, 'AI Modes', 'Tri-Corder, Archivist, Guardian, Supervisor', () {
+            _actionRow(Icons.psychology_alt, 'AI Modes', 'Tri-Corder, Archivist, Guardian, Supervisor, Editor', () {
               Navigator.push(context, MaterialPageRoute(
-                builder: (_) => const AIModesSelectorScreen(sessionId: 'coach_session'),
+                builder: (_) => AIModesSelectorScreen(sessionId: 'coach_session', profile: _profile),
               ));
+            }),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Coach Hierarchy ---
+          _sectionHeader('COACH HIERARCHY', Icons.account_tree),
+          _settingsCard([
+            if (_isMasterCoachApproved) ...[
+              _actionRow(Icons.people_alt, 'My Assistants', 'Manage assistant coaches under you', () {
+                _showAssistantManagementPanel();
+              }),
+            ] else if (_isMasterCoachRequested) ...[
+              _infoRow('Master Coach Status', 'Pending Approval'),
+            ] else ...[
+              _actionRow(Icons.star_border, 'Request Master Coach Status', 'Become a master coach to invite assistants', () {
+                _requestMasterCoachStatus();
+              }),
+            ],
+            _actionRow(Icons.supervisor_account, 'My Master Coach', 'View your supervising coach', () {
+              _showMasterCoachPanel();
+            }),
+            _actionRow(Icons.access_time, 'Supervised Hours', 'Review and export logged hours', () {
+              _showSupervisedHoursPanel();
             }),
           ]),
           const SizedBox(height: 20),
@@ -2759,6 +3888,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
           _sectionHeader('LEGAL & PRIVACY', Icons.gavel),
           _settingsCard([
             _actionRow(Icons.description, 'Terms, Privacy & Waivers', 'Full legal agreement', _showLegalAgreement),
+            _actionRow(Icons.download, 'Download My Data', 'Export your personal data', _requestDataExport),
             _infoRow('Consent Version', consentVersion),
           ]),
           const SizedBox(height: 20),
@@ -2863,6 +3993,26 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
         border: Border.all(color: _Design.border),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+    );
+  }
+
+  Widget _coachBillingLink(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: _Design.bgElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _Design.border),
+        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: _Design.gold, size: 20),
+          const SizedBox(height: 4),
+          Text(label, style: const TextStyle(color: _Design.textPrimary, fontSize: 11)),
+        ]),
+      ),
     );
   }
 
@@ -3164,7 +4314,7 @@ class _HelpFAQScreenState extends State<_HelpFAQScreen> {
         },
         {
           'q': 'How do I switch between Little Nate modes?',
-          'a': 'Tap the brain/mode icon in the chat input bar (next to the microphone and send buttons). A picker will appear showing all available modes: Tri-Corder, Archivist, Guardian, and Supervisor. Tap one to activate it. Nate will let you know when the mode is active and when it deactivates.',
+          'a': 'Tap the brain/mode icon in the chat input bar (next to the microphone and send buttons). A picker will appear showing all available modes: Tri-Corder, Archivist, Guardian, Supervisor, and Editor. Tap one to activate it. Nate will let you know when the mode is active and when it deactivates.',
         },
         {
           'q': 'How do I read my stats and coherence reports?',

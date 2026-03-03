@@ -15,8 +15,9 @@ Capabilities:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
+from urllib.parse import quote as _url_quote
 
 import httpx
 from app.config import settings
@@ -71,6 +72,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
         self._access_token: Optional[str] = None
         self._person_urn: Optional[str] = None   # urn:li:person:XXXX
         self._org_urn: Optional[str] = None       # urn:li:organization:XXXX
+        self._community_token: Optional[str] = None
 
     @property
     def _has_credentials(self) -> bool:
@@ -99,10 +101,10 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
         # Check if token is already expired
         token_expiry = tokens.get("token_expiry")
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if token_expiry:
-            if token_expiry.tzinfo is not None:
-                token_expiry = token_expiry.replace(tzinfo=None)
+            if token_expiry.tzinfo is None:
+                token_expiry = token_expiry.replace(tzinfo=timezone.utc)
         if token_expiry and token_expiry < now:
             logger.info("LinkedIn: Token expired, attempting refresh")
             return await self.refresh_token()
@@ -134,6 +136,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     self._person_urn = f"urn:li:person:{data.get('sub', '')}"
                     self._connected = True
                     await self._update_token_status("connected")
+
+                    # Load community token if available (separate app for comments)
+                    await self._load_community_token()
 
                     # Resolve organization URN for analytics (non-blocking)
                     try:
@@ -175,7 +180,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
 
                 if "access_token" in data:
                     self._access_token = data["access_token"]
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 5184000)
                     )
                     await self._save_tokens(
@@ -197,6 +202,39 @@ class LinkedInAdapter(SocialPlatformAdapter):
             logger.error(f"LinkedIn: Token refresh exception: {e}")
             self._connected = False
             return False
+
+    async def _load_community_token(self):
+        """Load the Community Management API token from skyeye_platform_tokens.
+
+        The community token is stored under platform='linkedin_community'
+        and is used for socialActions endpoints (comments, reactions)
+        which require the Community Management API product.
+        """
+        if not self.db_pool:
+            return
+        try:
+            from app.services.skyeye_platform_base import TokenCipher
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT access_token FROM skyeye_platform_tokens "
+                    "WHERE platform = 'linkedin_community' "
+                    "AND access_token IS NOT NULL AND access_token != ''",
+                )
+                if row and row["access_token"]:
+                    cipher = TokenCipher.get()
+                    self._community_token = cipher.decrypt(row["access_token"])
+                    logger.info("LinkedIn: Community Management token loaded")
+        except Exception as e:
+            logger.debug("LinkedIn: No community token available: %s", e)
+
+    @property
+    def _social_actions_token(self) -> str:
+        """Token to use for socialActions endpoints (comments, reactions).
+
+        Prefers the Community Management app token if available,
+        falls back to the main posting token.
+        """
+        return self._community_token or self._access_token
 
     async def check_token_health(self) -> Dict[str, Any]:
         """
@@ -229,7 +267,9 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 "connected": self._connected,
             }
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+        if token_expiry.tzinfo is None:
+            token_expiry = token_expiry.replace(tzinfo=timezone.utc)
         days_until_expiry = (token_expiry - now).days if token_expiry > now else 0
         is_expired = token_expiry < now
         needs_refresh = is_expired or days_until_expiry <= PROACTIVE_REFRESH_DAYS
@@ -258,7 +298,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
             "response_type": "code",
             "client_id": self.client_id,
             "redirect_uri": redirect_uri,
-            "scope": "openid profile email w_member_social",
+            "scope": "openid profile email w_member_social r_member_social",
             "state": "skyeye_linkedin",
         }
         return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"
@@ -290,7 +330,7 @@ class LinkedInAdapter(SocialPlatformAdapter):
                 person_id = me_data.get("sub", "")
                 person_name = me_data.get("name", "")
 
-                expiry = datetime.utcnow() + timedelta(
+                expiry = datetime.now(timezone.utc) + timedelta(
                     seconds=data.get("expires_in", 5184000)
                 )
                 await self._save_tokens(
@@ -562,23 +602,35 @@ class LinkedInAdapter(SocialPlatformAdapter):
         start = 0
 
         try:
+            encoded_post_id = _url_quote(post_id, safe="")
             async with httpx.AsyncClient(timeout=15.0) as client:
                 while len(comments) < limit:
                     resp = await client.get(
-                        f"{LINKEDIN_REST_BASE}/socialActions/{post_id}/comments",
+                        f"{LINKEDIN_REST_BASE}/socialActions/{encoded_post_id}/comments",
                         params={
                             "start": start,
                             "count": page_size,
                         },
-                        headers=_linkedin_headers(self._access_token),
+                        headers=_linkedin_headers(self._social_actions_token),
                     )
 
                     if resp.status_code != 200:
                         if resp.status_code == 401:
                             raise PlatformAuthError("linkedin")
+                        if resp.status_code == 403:
+                            logger.debug(
+                                "LinkedIn: get_comments 403 for %s (Community Management API not enabled)",
+                                post_id,
+                            )
+                            break
+                        body = ""
+                        try:
+                            body = resp.json().get("message", resp.text[:200])
+                        except Exception:
+                            body = resp.text[:200]
                         logger.warning(
-                            f"LinkedIn: get_comments returned {resp.status_code} "
-                            f"for post {post_id}"
+                            "LinkedIn: get_comments %s for post %s — %s",
+                            resp.status_code, post_id, body,
                         )
                         break
 
@@ -679,15 +731,18 @@ class LinkedInAdapter(SocialPlatformAdapter):
                                action=ActionResult.FAILED)
 
         try:
+            encoded_post_id = _url_quote(post_id, safe="")
             async with httpx.AsyncClient(timeout=15.0) as client:
+                body = {
+                    "actor": self._person_urn,
+                    "object": post_id,
+                    "message": {"text": text},
+                    "parentComment": comment_id,
+                }
                 resp = await client.post(
-                    f"{LINKEDIN_REST_BASE}/socialActions/{post_id}/comments",
-                    json={
-                        "actor": self._person_urn,
-                        "message": {"text": text},
-                        "parentComment": comment_id,
-                    },
-                    headers=_linkedin_headers(self._access_token, content_type=True),
+                    f"{LINKEDIN_REST_BASE}/socialActions/{encoded_post_id}/comments",
+                    json=body,
+                    headers=_linkedin_headers(self._social_actions_token, content_type=True),
                 )
 
                 if resp.status_code in (200, 201):
@@ -707,10 +762,26 @@ class LinkedInAdapter(SocialPlatformAdapter):
                     raise PlatformAuthError("linkedin")
                 elif resp.status_code == 429:
                     raise PlatformRateLimitError("linkedin")
-                else:
+                elif resp.status_code == 403:
+                    err_msg = ""
+                    try:
+                        err_msg = resp.json().get("message", "")
+                    except Exception:
+                        pass
                     return ReplyResult(
                         success=False,
-                        error=f"Reply failed: {resp.status_code}",
+                        error=f"Permission denied (Community Management API required): {err_msg}",
+                        action=ActionResult.FAILED,
+                    )
+                else:
+                    err_body = ""
+                    try:
+                        err_body = resp.json().get("message", resp.text[:200])
+                    except Exception:
+                        err_body = resp.text[:200]
+                    return ReplyResult(
+                        success=False,
+                        error=f"Reply failed: {resp.status_code} — {err_body}",
                         action=ActionResult.FAILED,
                     )
         except (PlatformRateLimitError, PlatformAuthError):
@@ -728,10 +799,11 @@ class LinkedInAdapter(SocialPlatformAdapter):
         await self.rate_limiter.acquire()
 
         try:
+            encoded_post_id = _url_quote(post_id or "", safe="")
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.delete(
-                    f"{LINKEDIN_REST_BASE}/socialActions/{post_id}/comments/{comment_id}",
-                    headers=_linkedin_headers(self._access_token),
+                    f"{LINKEDIN_REST_BASE}/socialActions/{encoded_post_id}/comments/{comment_id}",
+                    headers=_linkedin_headers(self._social_actions_token),
                 )
                 if resp.status_code == 204:
                     return ModerateResult(success=True, action_taken="deleted")
@@ -747,6 +819,62 @@ class LinkedInAdapter(SocialPlatformAdapter):
             raise
         except Exception as e:
             return ModerateResult(success=False, error=str(e), action=ActionResult.FAILED)
+
+    # ── Notification / Engagement Discovery ────────────────────────
+
+    @retry_on_failure(max_retries=2)
+    async def get_post_reactions(self, post_id: str, limit: int = 100) -> List[Dict]:
+        """Get likes/reactions on a LinkedIn post via socialActions."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+
+        reactions: List[Dict] = []
+        try:
+            encoded_post_id = _url_quote(post_id, safe="")
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{LINKEDIN_REST_BASE}/socialActions/{encoded_post_id}/likes",
+                    params={"start": 0, "count": min(limit, 100)},
+                    headers=_linkedin_headers(self._social_actions_token),
+                )
+                if resp.status_code == 200:
+                    for el in resp.json().get("elements", []):
+                        reactions.append({
+                            "actor": el.get("actor", ""),
+                            "created_at": el.get("created", {}).get("time"),
+                        })
+                elif resp.status_code == 401:
+                    raise PlatformAuthError("linkedin")
+                elif resp.status_code == 429:
+                    raise PlatformRateLimitError("linkedin")
+        except (PlatformAuthError, PlatformRateLimitError):
+            raise
+        except Exception as e:
+            logger.error(f"LinkedIn get_post_reactions error: {e}")
+
+        return reactions
+
+    async def get_follower_count(self) -> int:
+        """Get current follower/connection count for delta tracking."""
+        if not self._connected:
+            return 0
+
+        urn = self._org_urn or self._person_urn
+        if not urn:
+            return 0
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{LINKEDIN_REST_BASE}/networkSizes/{urn}",
+                    params={"edgeType": "CompanyFollowedByMember"},
+                    headers=_linkedin_headers(self._access_token),
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("firstDegreeSize", 0)
+        except Exception as e:
+            logger.error(f"LinkedIn get_follower_count error: {e}")
+        return 0
 
     # ── Analytics (Pages Data Portability API) ──────────────────────
 
@@ -925,3 +1053,37 @@ class LinkedInAdapter(SocialPlatformAdapter):
             logger.debug(f"LinkedIn: Person analytics fallback error: {e}")
 
         return analytics
+
+
+class LinkedInCommunityAdapter(LinkedInAdapter):
+    """LinkedIn adapter for the Community Management API app.
+
+    Uses separate OAuth credentials (LINKEDIN_COMMUNITY_CLIENT_ID/SECRET)
+    and stores its token under platform='linkedin_community' in
+    skyeye_platform_tokens. This token is also loaded by the main
+    LinkedInAdapter for socialActions calls (comments, reactions).
+    """
+
+    def __init__(self, db_pool, rate_limit_seconds: float = 20.0):
+        SocialPlatformAdapter.__init__(self, "linkedin_community", db_pool, rate_limit_seconds)
+        self.client_id = getattr(settings, "LINKEDIN_COMMUNITY_CLIENT_ID", "")
+        self.client_secret = getattr(settings, "LINKEDIN_COMMUNITY_CLIENT_SECRET", "")
+        self._access_token: Optional[str] = None
+        self._person_urn: Optional[str] = None
+        self._org_urn: Optional[str] = None
+        self._community_token: Optional[str] = None
+
+    @property
+    def _has_credentials(self) -> bool:
+        return bool(self.client_id and self.client_secret)
+
+    async def get_oauth_url(self, redirect_uri: str) -> str:
+        import urllib.parse
+        params = {
+            "response_type": "code",
+            "client_id": self.client_id,
+            "redirect_uri": redirect_uri,
+            "scope": "openid profile email w_member_social",
+            "state": "skyeye_linkedin_community",
+        }
+        return f"{LINKEDIN_AUTH_URL}?{urllib.parse.urlencode(params)}"

@@ -1,0 +1,88 @@
+---
+description: Patterns for keeping SkyEye backend queries, frontend renderers, platform adapters, and token logic in sync
+alwaysApply: true
+---
+
+# SkyEye Data Integrity
+
+## 1. New Platform Adapter Completeness Checklist
+
+Adding or enabling a social platform requires changes in **all** of these locations. Missing any one causes blank UI sections or silent omissions.
+
+| Step | File / Location | What to add |
+|------|----------------|-------------|
+| 1 | `backend/app/services/platforms/<platform>.py` | Platform adapter class |
+| 2 | `marketing_playbook.content_mix` (live DB) | `UPDATE marketing_playbook SET content_mix = content_mix \|\| '{"<platform>": {...}}'::jsonb` |
+| 3 | `backend/app/services/marketing_brain.py` → `default_content_mix` | Platform entry (for future DB seeds) |
+| 4 | `dashboard/skyeye.html` → `PLATFORM_ICONS` | Icon emoji for the platform |
+| 5 | SkyEye Platform Grid / Command Center UI | Platform card |
+| 6 | `skyeye_session_engine.py` platform iteration | Ensure engine iterates over new platform |
+| 7 | `skyeye_api.py` token health logic | Health check covers new platform |
+| 8 | Auditor endpoint lists (if new routes added) | Add to `TAB_ENDPOINTS` in relevant auditor |
+
+**Why**: X (Twitter) was fully wired as an adapter but missing from the live `marketing_playbook.content_mix` because the DB was seeded before X was added. The code default had it, the DB did not.
+
+## 2. Backend Query Must SELECT All Rendered Columns
+
+When a DB table has columns that the UI needs to display, the API endpoint's `SELECT` statement must include **every column the frontend references**.
+
+- After adding columns via migration, update the corresponding router query
+- After changing a query, verify the frontend renderer uses the correct field names from the response
+- Common miss: table has `summary`, `platforms`, `actions_count`, `duration_seconds` but query only selects `id, platform, action, detail, created_at`
+
+**Why**: The History tab showed 128 blank rows because the `/api/skyeye/history` endpoint never selected `summary`, `platforms`, `actions_count`, or `duration_seconds` — the columns where session data actually lived.
+
+## 3. Frontend Field Names Must Match API Response Keys
+
+The frontend renderer must reference the **exact key names** returned by the API, not assumed names.
+
+| Common Mismatch | API returns | Frontend used |
+|----------------|------------|---------------|
+| Timestamp | `created_at` | `h.timestamp` or `h.time` |
+| Content | `summary` | `h.detail` or `h.content` |
+| Platform list | `platforms` (JSON array string) | `h.platform` (single string) |
+
+- After any API response shape change, grep the frontend for every old field name
+- Test by inspecting the network response in DevTools and comparing to what the renderer destructures
+
+## 4. Token Renewal Must Clear Error State
+
+When saving renewed OAuth tokens to `skyeye_platform_tokens`, the `ON CONFLICT DO UPDATE` clause **must** include `error_message = NULL`.
+
+```sql
+ON CONFLICT (platform) DO UPDATE SET
+  access_token  = EXCLUDED.access_token,
+  refresh_token = EXCLUDED.refresh_token,
+  token_expiry  = EXCLUDED.token_expiry,
+  error_message = NULL   -- ← CRITICAL: clear stale errors
+```
+
+**Why**: After successfully renewing an X/Twitter token, the platform still displayed "Missing valid authorization header" because the stale `error_message` was never cleared.
+
+## 5. Token Expiry: Use `total_seconds()`, Never `.days`
+
+When comparing a token's expiry datetime to `now`, always use:
+
+```python
+remaining = (expiry - now).total_seconds()
+```
+
+Never use:
+
+```python
+remaining = (expiry - now).days  # WRONG: truncates to whole days
+```
+
+A token expiring in 23 hours has `.days == 0`, which evaluates as falsy and marks it "expired" when it's still valid.
+
+**Why**: X token health showed `"expired"` for a token that still had hours of validity left.
+
+## 6. HTTP Method Consistency (UI ↔ Backend)
+
+When adding a backend endpoint, verify the frontend `fetch()` call uses the **same HTTP method**.
+
+- `@router.post(...)` → frontend must use `method: 'POST'`
+- `@router.get(...)` → frontend must use default GET (or explicit `method: 'GET'`)
+- A mismatch produces `405 Method Not Allowed` with no other useful error context
+
+**Why**: The "Wake Session" button sent GET but the endpoint was `@router.post("/engine/wake")`, returning 405.

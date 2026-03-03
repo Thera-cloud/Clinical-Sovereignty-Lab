@@ -158,8 +158,10 @@ class FamilySanctuaryEngine:
     ) -> str:
         """Create new Family Sanctuary session"""
         
-        # Generate sanctuary ID
-        sanctuary_id = f"SANC_{datetime.now().strftime('%Y%m%d')}_{len(self.data['active_sanctuaries']) + 1:03d}"
+        # Generate sanctuary ID using a persistent counter that never resets
+        counter = self.data.get("sanctuary_counter", 0) + 1
+        self.data["sanctuary_counter"] = counter
+        sanctuary_id = f"SANC_{datetime.now().strftime('%Y%m%d')}_{counter:03d}"
         
         # Create sanctuary record
         sanctuary = {
@@ -322,6 +324,8 @@ class FamilySanctuaryEngine:
             })
         except Exception:
             pass
+
+        await self._broadcast_charge_update(sanctuary_id, charges[-1])
 
         if charge_status == "TEST_MODE":
             return True, "Base fee recorded (test mode)"
@@ -635,7 +639,61 @@ class FamilySanctuaryEngine:
                 logger.error(f"[SANCTUARY] Broadcast failed to {user_id}: {e}")
                 # Mark as disconnected but don't remove - they might reconnect
                 self.member_disconnect(sanctuary_id, user_id)
-    
+
+    async def _broadcast_charge_update(self, sanctuary_id: str, latest_charge: Dict):
+        """Broadcast a charge update with itemized billing to all sanctuary members.
+        Also sends a spending alert to HoH for every charge."""
+        sanctuary = self.data["active_sanctuaries"].get(sanctuary_id)
+        if not sanctuary:
+            return
+        billing = sanctuary.get("billing", {})
+        total = billing.get("total_charges", 0.0)
+        await self.broadcast_to_sanctuary(
+            sanctuary_id=sanctuary_id,
+            message_data={
+                "type": "sanctuary_charge_update",
+                "sanctuary_id": sanctuary_id,
+                "total_charges": total,
+                "latest_charge": latest_charge,
+            },
+        )
+        hoh_id = sanctuary.get("head_of_household_id")
+        hoh_ws = self.get_member_websocket(sanctuary_id, hoh_id) if hoh_id else None
+        if hoh_ws:
+            try:
+                await hoh_ws.send(json.dumps({
+                    "type": "sanctuary_spending_alert",
+                    "sanctuary_id": sanctuary_id,
+                    "charge_type": latest_charge.get("type", "CHARGE"),
+                    "amount": latest_charge.get("amount", 0),
+                    "total_charges": total,
+                    "message": f"${latest_charge.get('amount', 0):.2f} charged ({latest_charge.get('type', 'CHARGE')}). Session total: ${total:.2f}",
+                }))
+            except Exception:
+                pass
+
+    async def get_pre_session_estimate(self, sanctuary_id: str) -> Dict:
+        """Generate a pre-session cost estimate for HoH before a dependent starts."""
+        sanctuary = self.data["active_sanctuaries"].get(sanctuary_id)
+        if not sanctuary:
+            return {"estimate": 0, "items": []}
+        billing = sanctuary.get("billing", {})
+        items = []
+        est = 0.0
+        if not billing.get("base_fee_charged"):
+            items.append({"type": "Base Fee", "amount": 20.00})
+            est += 20.00
+        items.append({"type": "First Coaching (per member)", "amount": 0.0, "note": "Free"})
+        items.append({"type": "Additional Coaching (if used)", "amount": 5.00, "note": "Each"})
+        items.append({"type": "Group Coaching (if requested)", "amount": 20.00, "note": "Per round, requires approval"})
+        items.append({"type": "Assisted Response (if used)", "amount": 3.00, "note": "Each"})
+        return {
+            "sanctuary_id": sanctuary_id,
+            "minimum_estimate": est,
+            "items": items,
+            "current_total": billing.get("total_charges", 0.0),
+        }
+
     # =========================================================================
     # VENTRILOQUISM DETECTION (Patent 3)
     # =========================================================================
@@ -727,9 +785,14 @@ class FamilySanctuaryEngine:
         if not sanctuary:
             return False
         
-        # Quick keyword check
-        keywords = ["angry", "furious", "hate", "frustrated", "upset", "scared",
-                    "hopeless", "worthless", "hurt", "kill", "die", "suicide"]
+        # Quick keyword check — broad enough to catch common distress language
+        keywords = [
+            "angry", "furious", "hate", "frustrated", "upset", "scared",
+            "hopeless", "worthless", "hurt", "kill", "die", "suicide",
+            "stuck", "overwhelmed", "anxious", "panicking", "panic",
+            "can't cope", "breaking down", "falling apart", "desperate",
+            "terrified", "depressed", "miserable", "helpless", "alone",
+        ]
         
         if not any(kw in message_content.lower() for kw in keywords):
             return False
@@ -993,10 +1056,9 @@ class FamilySanctuaryEngine:
             
             self._save()
             
-            # Check thresholds
             await self._check_billing_thresholds(sanctuary_id)
+            await self._broadcast_charge_update(sanctuary_id, sanctuary["billing"]["charges"][-1])
             
-            # Record analytics
             self._record_analytics("sanctuary_coaching_charged", member_id, {
                 "sanctuary_id": sanctuary_id,
                 "family_id": sanctuary.get("family_id"),
@@ -1104,6 +1166,7 @@ class FamilySanctuaryEngine:
             self._save()
 
             await self._check_billing_thresholds(sanctuary_id)
+            await self._broadcast_charge_update(sanctuary_id, sanctuary["billing"]["charges"][-1])
 
             self._record_analytics("sanctuary_assisted_response_charged", member_id, {
                 "sanctuary_id": sanctuary_id,
@@ -1170,6 +1233,7 @@ class FamilySanctuaryEngine:
             sanctuary["metrics"]["paid_interventions"] += 1
             self._save()
             await self._check_billing_thresholds(sanctuary_id)
+            await self._broadcast_charge_update(sanctuary_id, sanctuary["billing"]["charges"][-1])
             self._record_analytics("sanctuary_group_coaching_charged", hoh_id, {
                 "sanctuary_id": sanctuary_id,
                 "family_id": sanctuary.get("family_id"),
@@ -1205,6 +1269,7 @@ class FamilySanctuaryEngine:
             self._save()
 
             await self._check_billing_thresholds(sanctuary_id)
+            await self._broadcast_charge_update(sanctuary_id, sanctuary["billing"]["charges"][-1])
             self._record_analytics("sanctuary_group_coaching_charged", hoh_id, {
                 "sanctuary_id": sanctuary_id,
                 "amount": amount,

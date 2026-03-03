@@ -1,0 +1,80 @@
+---
+description: When editing any auditor file, enforce 5-location sync so the Trust Enforcer doesn't flag DATA_PIPELINE mismatches
+globs: backend/app/services/*_auditor.py
+alwaysApply: false
+---
+
+# Auditor Endpoint Sync
+
+When you add, remove, or change endpoints in an auditor's `TAB_ENDPOINTS`, you must update **all 5 locations** or the Trust Enforcer flags `DATA_PIPELINE`.
+
+## The 5 Locations
+
+| # | File | What to Update |
+|---|---|---|
+| 1 | **This auditor file** | `TAB_ENDPOINTS` list — the actual checks |
+| 2 | `trust_enforcer.py` → `AUDITOR_ACTIVITY_TYPES` | Activity type string (line ~52) |
+| 3 | `trust_enforcer.py` → `AUDITOR_LABELS` | Display name (line ~74) |
+| 4 | `trust_enforcer.py` → `_baseline_key_for()` | Baseline key mapping (line ~488) |
+| 5 | `trust_baseline` DB table | Expected count: `UPDATE trust_baseline SET parameter_value = '{"expected": N}'::jsonb WHERE parameter_key = '...'` |
+
+## Also Update
+
+- `_service_checks` in `main.py` (if new auditor)
+- `service-health-49-49.mdc` rule (if new auditor — increment denominator)
+- Stagger assignment (next 10s slot, max 290s, ceiling 300s)
+
+## Count Endpoints Programmatically
+
+Never hand-count. Always verify:
+
+```bash
+python3 -c "
+exec(open('backend/app/services/AUDITOR_FILE.py').read())
+total = sum(len(t['endpoints']) for t in TAB_ENDPOINTS)
+print(f'{total} endpoints across {len(TAB_ENDPOINTS)} tabs')
+for t in TAB_ENDPOINTS:
+    print(f'  Tab {t[\"tab_num\"]}: {t[\"tab\"]} — {len(t[\"endpoints\"])}')
+"
+```
+
+## Current Auditor Registry (26 Auditors, 493 Total Checks)
+
+| Auditor | Activity Type | Baseline Key | Expected | Stagger |
+|---|---|---|---|---|
+| Data Uniformity | `data_uniformity_audit_sent` | `data_uniformity_check_count` | 21 | 85s |
+| PMB Command Center | `pmb_command_center_audit_sent` | `pmb_command_center_check_count` | 13 | 90s |
+| Liminal Presence | `liminal_presence_audit_sent` | `liminal_presence_check_count` | 3 | 95s |
+| Token Lab | `token_lab_audit_sent` | `token_lab_check_count` | 15 | 100s |
+| QuickBooks Sync | `quickbooks_audit_sent` | `quickbooks_check_count` | 10 | 105s |
+| GKM Ministry | `gkm_audit_sent` | `gkm_check_count` | 11 | 110s |
+| Corporate Command | `corporate_command_audit_sent` | `corporate_command_check_count` | 21 | 115s |
+| SkyEye Tab | `skyeye_tab_audit_sent` | `skyeye_endpoint_count` | 58 | 120s |
+| Sovereign Command | `command_tab_audit_sent` | `command_endpoint_count` | 25 | 130s |
+| The Eye | `eye_tab_audit_sent` | `eye_endpoint_count` | 21 | 140s |
+| Login | `login_audit_sent` | `login_test_accounts` | 2 | 150s |
+| Client App | `client_app_audit_sent` | `client_app_endpoint_count` | 23 | 160s |
+| Coach & DOJO | `coach_dojo_audit_sent` | `coach_dojo_endpoint_count` | 55 | 170s |
+| Billing | `billing_audit_sent` | `billing_endpoint_count` | 32 | 180s |
+| Defense | `defense_audit_sent` | `defense_subsystem_count` | 8 | 190s |
+| AI Pipeline | `ai_pipeline_audit_sent` | `ai_pipeline_check_count` | 6 | 200s |
+| WS Flows | `ws_flow_audit_sent` | `ws_flow_test_count` | 10 | 210s |
+| Tier Gating | `tier_gating_audit_sent` | `tier_gate_test_count` | 12 | 220s |
+| Nevedal Lab | `nevedal_lab_audit_sent` | `nevedal_lab_endpoint_count` | 30 | 230s |
+| HW Security | `hardware_security_audit_sent` | `hardware_security_check_count` | 11 | 240s |
+| System Integrity | `system_integrity_audit_sent` | `system_integrity_check_count` | 18 | 250s |
+| DOJO Sessions | `dojo_session_audit_sent` | `dojo_session_endpoint_count` | 29 | 260s |
+| Wisdom Pipeline | `wisdom_pipeline_audit_sent` | `wisdom_pipeline_check_count` | 12 | 270s |
+| Settings Tab | `settings_tab_audit_sent` | `settings_tab_check_count` | 15 | 280s |
+| Coach Hierarchy | `coach_hierarchy_audit_sent` | `coach_hierarchy_check_count` | 20 | 290s |
+| Nate Check-In | `nate_checkin_audit_sent` | `nate_checkin_check_count` | 8 | 300s |
+
+## Email Suppression
+
+Every auditor's `_build_and_send()` must contain:
+
+```python
+# Email silenced — Trust Enforcer sends consolidated report
+```
+
+Auditors never send email directly. All notification flows through the Trust Enforcer.

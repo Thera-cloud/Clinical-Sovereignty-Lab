@@ -3,7 +3,9 @@ LITTLE NATE — Prospect API
 Prospect management, journey tracking, subscription, and CSV export.
 """
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+
+from app.services.api_server import require_admin
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
@@ -15,7 +17,7 @@ import json
 
 from app.config import settings
 
-router = APIRouter(prefix="/api/prospects", tags=["prospects"])
+router = APIRouter(prefix="/api/prospects", tags=["prospects"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================

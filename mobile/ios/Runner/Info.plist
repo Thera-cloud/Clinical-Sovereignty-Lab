@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>NSMicrophoneUsageDescription</key>
+    <key>NSFaceIDUsageDescription</key>
+	<string>Sovereign Sanctuary uses Face ID to protect your therapeutic data and authenticate sensitive actions.</string>
+	<key>NSMicrophoneUsageDescription</key>
 	<string>We need access to your microphone for speech-to-text</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>We need access to speech recognition for accessibility</string>
@@ -12,6 +14,10 @@
 	<string>Sovereign Sanctuary uses Bluetooth to share wellness signals with nearby members of your support network.</string>
 	<key>NSNFCReaderUsageDescription</key>
 	<string>Sovereign Sanctuary uses NFC to securely provision your device into the swarm network.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Sovereign Sanctuary needs access to your photo library to upload files to your secure vault.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Sovereign Sanctuary uses the camera to capture images for your secure vault.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
@@ -62,8 +68,6 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
-	<true/>
-	<key>ITSEncryptionExportComplianceCode</key>
-	<string></string>
+	<false/>
 </dict>
 </plist>

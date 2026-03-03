@@ -22,6 +22,12 @@ Anomaly scoring per action:
 Thresholds:
     - Score >= 50: Log warning, send email alert
     - Score >= 80: FREEZE session — require full re-auth
+
+Score decay: 10% per minute of inactivity prevents slow-drip false positives.
+
+On freeze, fires on_freeze_callback (if set) to activate House of Mirrors
+(Patent Claims 30-56) — SASE ban, DEFCON escalation, Mirror Shell containment,
+Ghost Swarm deployment, and forensic logging.
 """
 
 from __future__ import annotations
@@ -29,13 +35,16 @@ from __future__ import annotations
 import json
 import datetime
 import hashlib
+import time
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 from pathlib import Path
 
 
 WARN_THRESHOLD = 50
 FREEZE_THRESHOLD = 80
+SCORE_DECAY_RATE = 0.10
+SCORE_DECAY_INTERVAL_SEC = 60
 DESTRUCTIVE_ACTIONS = frozenset({
     "admin_delete_user", "admin_ban_user", "admin_delete_admin_account",
     "freeze_account",
@@ -44,17 +53,45 @@ CREDENTIAL_ACTIONS = frozenset({
     "admin_reset_password", "admin_setup_totp", "admin_webauthn_register_start",
 })
 
+AUTH_METHOD_MULTIPLIERS = {
+    "yubikey": 0.3,
+    "totp": 0.5,
+    "password": 1.0,
+}
+AUTH_METHOD_WARN_THRESHOLD = {
+    "yubikey": 100,
+    "totp": 75,
+    "password": WARN_THRESHOLD,
+}
+AUTH_METHOD_FREEZE_THRESHOLD = {
+    "yubikey": 150,
+    "totp": 120,
+    "password": FREEZE_THRESHOLD,
+}
+
 
 class NateSentinel:
     """Session fingerprinting, anomaly scoring, and freeze logic for admin sessions."""
 
-    def __init__(self, registry_path: str | Path, db_pool=None):
+    def __init__(self, registry_path: str | Path, db_pool=None,
+                 on_freeze_callback: Optional[Callable[..., Coroutine]] = None):
         self.registry_path = Path(registry_path)
         self.db_pool = db_pool
+        self._on_freeze_callback = on_freeze_callback
         # In-memory per-session tracking (keyed by hardware_id)
         self._session_scores: Dict[str, int] = defaultdict(int)
         self._session_actions: Dict[str, List[dict]] = defaultdict(list)
         self._frozen_sessions: set = set()
+        self._session_auth_method: Dict[str, str] = {}
+        self._last_action_ts: Dict[str, float] = {}
+        self._frozen_at: Dict[str, datetime.datetime] = {}
+
+    def set_auth_method(self, uid: str, method: str):
+        """Record auth method for a session (password, yubikey, totp)."""
+        self._session_auth_method[uid] = method
+
+    def get_auth_method(self, uid: str) -> str:
+        return self._session_auth_method.get(uid, "password")
 
     def _load_registry(self) -> dict:
         try:
@@ -124,9 +161,10 @@ class NateSentinel:
     # ─── Anomaly Scoring ──────────────────────────────────────────────────
 
     def score_action(self, uid: str, action_type: str, ip: str = "",
-                     user_agent: str = "") -> Dict[str, Any]:
+                     user_agent: str = "", pg_profile: dict = None) -> Dict[str, Any]:
         """
         Score an admin action for anomaly.
+        pg_profile: optional profile_data dict from PostgreSQL (overrides JSON baseline).
         Returns: {"score": int, "total_session_score": int, "frozen": bool, "reasons": [...]}
         """
         registry = self._load_registry()
@@ -140,18 +178,26 @@ class NateSentinel:
         now = datetime.datetime.now()
         device_hash = self._device_hash(user_agent, ip) if user_agent else ""
 
+        pg = pg_profile or {}
+        all_known_ips = set(baseline.get("known_ips", []))
+        all_known_ips.update(pg.get("typical_ips", []))
+        all_typical_hours = set(baseline.get("typical_hours", list(range(24))))
+        all_typical_hours.update(pg.get("typical_hours", []))
+
+        ip_trusted = ip and ip in all_known_ips
+
         # 1. Unknown IP
-        if ip and ip not in baseline.get("known_ips", []):
+        if ip and not ip_trusted:
             score += 40
             reasons.append(f"Unknown IP: {ip}")
 
-        # 2. Unknown device
-        if device_hash and device_hash not in baseline.get("known_devices", []):
+        # 2. Unknown device — skip if IP is already trusted via PG typical_ips
+        if device_hash and not ip_trusted and device_hash not in baseline.get("known_devices", []):
             score += 30
             reasons.append("Unknown device fingerprint")
 
         # 3. Unusual hour
-        if now.hour not in baseline.get("typical_hours", list(range(24))):
+        if now.hour not in all_typical_hours:
             score += 20
             reasons.append(f"Unusual hour: {now.hour}:00")
 
@@ -186,22 +232,66 @@ class NateSentinel:
             score += 60
             reasons.append(f"Credential modification: {action_type}")
 
+        # Apply auth-method multiplier
+        auth_method = self._session_auth_method.get(uid, "password")
+        multiplier = AUTH_METHOD_MULTIPLIERS.get(auth_method, 1.0)
+        adjusted_score = int(score * multiplier)
+
+        if multiplier < 1.0 and score > 0:
+            reasons.append(f"Auth-method '{auth_method}' multiplier: {multiplier}x ({score} -> {adjusted_score})")
+
+        # Score decay: reduce cumulative score by 10% per minute of inactivity
+        now_ts = time.monotonic()
+        last_ts = self._last_action_ts.get(uid, now_ts)
+        elapsed_sec = now_ts - last_ts
+        if elapsed_sec > SCORE_DECAY_INTERVAL_SEC and self._session_scores[uid] > 0:
+            decay_periods = int(elapsed_sec / SCORE_DECAY_INTERVAL_SEC)
+            decay_factor = (1.0 - SCORE_DECAY_RATE) ** decay_periods
+            self._session_scores[uid] = int(self._session_scores[uid] * decay_factor)
+        self._last_action_ts[uid] = now_ts
+
         # Accumulate session score
-        self._session_scores[uid] += score
+        self._session_scores[uid] += adjusted_score
         total = self._session_scores[uid]
 
-        # Check thresholds
-        frozen = uid in self._frozen_sessions
-        if total >= FREEZE_THRESHOLD and not frozen:
+        # Check thresholds (adjusted per auth method)
+        warn_thresh = AUTH_METHOD_WARN_THRESHOLD.get(auth_method, WARN_THRESHOLD)
+        freeze_thresh = AUTH_METHOD_FREEZE_THRESHOLD.get(auth_method, FREEZE_THRESHOLD)
+
+        was_frozen = uid in self._frozen_sessions
+        frozen = was_frozen
+        if total >= freeze_thresh and not was_frozen:
             self._frozen_sessions.add(uid)
+            self._frozen_at[uid] = now
             frozen = True
 
-        return {
-            "score": score,
+        result = {
+            "score": adjusted_score,
+            "raw_score": score,
             "total_session_score": total,
             "frozen": frozen,
+            "freeze_transition": frozen and not was_frozen,
+            "frozen_at": self._frozen_at.get(uid, now).isoformat() if frozen else None,
             "reasons": reasons,
+            "auth_method": auth_method,
+            "multiplier": multiplier,
+            "warn_threshold": warn_thresh,
+            "freeze_threshold": freeze_thresh,
         }
+
+        # Fire freeze callback on transition to frozen (House of Mirrors activation)
+        if frozen and not was_frozen and self._on_freeze_callback:
+            try:
+                import asyncio
+                asyncio.ensure_future(self._on_freeze_callback(
+                    uid=uid, ip=ip, user_agent=user_agent,
+                    score=total, reasons=reasons, auth_method=auth_method,
+                    frozen_at=self._frozen_at[uid],
+                ))
+            except Exception as e:
+                print(f">>> [SENTINEL] Freeze callback failed: {e}")
+
+        return result
 
     def is_frozen(self, uid: str) -> bool:
         return uid in self._frozen_sessions
@@ -217,6 +307,13 @@ class NateSentinel:
         self._session_scores.pop(uid, None)
         self._session_actions.pop(uid, None)
         self._frozen_sessions.discard(uid)
+        self._session_auth_method.pop(uid, None)
+        self._last_action_ts.pop(uid, None)
+        self._frozen_at.pop(uid, None)
+
+    def get_frozen_at(self, uid: str) -> Optional[datetime.datetime]:
+        """Return the datetime when a session was frozen, or None."""
+        return self._frozen_at.get(uid)
 
     # ─── Trusted Device Management ────────────────────────────────────────
 

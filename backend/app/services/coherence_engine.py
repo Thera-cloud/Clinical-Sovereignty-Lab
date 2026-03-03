@@ -187,7 +187,8 @@ class CoherenceEngine:
     async def measure_family(self, family_id) -> CoherenceMeasurement:
         """
         Calculate family system coherence by examining correlated
-        coherence movements across family members.
+        coherence movements across family members, enriched with
+        Sanctuary emotional weather data when available.
         """
         async with self.db_pool.acquire() as conn:
             # Get family members
@@ -234,33 +235,74 @@ class CoherenceEngine:
         # Interruption efficacy (improvement trend)
         efficacy = await self._measure_family_improvement(family_id)
 
+        # Emotional weather enrichment from Sanctuary sessions
+        weather_data = await self._get_sanctuary_weather_enrichment(str(family_id))
+
         from app.swarm_config import swarm_settings
         _fw = swarm_settings.COHERENCE_FAMILY_WEIGHTS
-        score = (
-            _fw["mean_score"] * mean_score +
-            _fw["resonance"] * resonance +
-            _fw["transmission"] * transmission +
-            _fw["efficacy"] * efficacy
-        )
+
+        if weather_data and weather_data["session_count"] > 0:
+            # Blend individual-metric score with relational Sanctuary data.
+            # Weather enrichment modulates resonance and adds a relational signal.
+            sanctuary_coherence = weather_data["avg_system_coherence"]
+            sanctuary_volatility = weather_data["avg_volatility"]
+            cee_frequency = weather_data["cee_frequency"]
+
+            # Relational resonance: blend dyadic weather coherence with individual variance
+            relational_resonance = (resonance * 0.6) + (sanctuary_coherence * 0.4)
+            # Volatility penalty: high volatility reduces effective resonance
+            volatility_dampener = max(0.0, 1.0 - sanctuary_volatility * 2.0)
+            relational_resonance *= (0.7 + 0.3 * volatility_dampener)
+            # CEE windows in relational context boost efficacy
+            relational_efficacy = efficacy + (cee_frequency * 0.15)
+            relational_efficacy = min(1.0, relational_efficacy)
+
+            score = (
+                _fw["mean_score"] * mean_score +
+                _fw["resonance"] * relational_resonance +
+                _fw["transmission"] * transmission +
+                _fw["efficacy"] * relational_efficacy
+            )
+        else:
+            score = (
+                _fw["mean_score"] * mean_score +
+                _fw["resonance"] * resonance +
+                _fw["transmission"] * transmission +
+                _fw["efficacy"] * efficacy
+            )
+
         score = max(0.0, min(1.0, score))
         confidence = min(1.0, len(member_scores) / 4.0)
+        if weather_data and weather_data["session_count"] > 0:
+            confidence = min(1.0, confidence + 0.1)
 
         delta_24h = await self._calculate_delta(
             CoherenceLayer.FAMILY, score, hours=24, family_id=family_id
         )
+
+        components = {
+            "mean_individual": round(mean_score, 4),
+            "resonance": round(resonance, 4),
+            "transmission": round(transmission, 4),
+            "efficacy": round(efficacy, 4),
+            "member_count": len(member_scores),
+        }
+
+        if weather_data and weather_data["session_count"] > 0:
+            components["sanctuary_sessions"] = weather_data["session_count"]
+            components["sanctuary_avg_coherence"] = round(weather_data["avg_system_coherence"], 4)
+            components["sanctuary_avg_volatility"] = round(weather_data["avg_volatility"], 4)
+            components["sanctuary_cee_frequency"] = round(weather_data["cee_frequency"], 4)
+            components["relational_resonance"] = round(
+                (resonance * 0.6) + (weather_data["avg_system_coherence"] * 0.4), 4
+            )
 
         measurement = CoherenceMeasurement(
             layer=CoherenceLayer.FAMILY,
             score=round(score, 4),
             confidence=round(confidence, 2),
             family_id=family_id,
-            components={
-                "mean_individual": round(mean_score, 4),
-                "resonance": round(resonance, 4),
-                "transmission": round(transmission, 4),
-                "efficacy": round(efficacy, 4),
-                "member_count": len(member_scores),
-            },
+            components=components,
             delta_24h=delta_24h,
             sample_size=len(member_scores),
         )
@@ -677,8 +719,40 @@ class CoherenceEngine:
             improvement = second_half - first_half
             return max(0.0, min(1.0, 0.5 + improvement))
         except Exception as e:
-            print(f">>> [COHERENCE] Family improvement measurement error: {e}")
+            logger.warning("Family improvement measurement error: %s", e)
             return 0.5  # neutral fallback on error
+
+    async def _get_sanctuary_weather_enrichment(self, family_id: str) -> Optional[dict]:
+        """Pull aggregate Sanctuary weather data from emotional_weather_snapshots.
+        Returns None if no Sanctuary sessions exist for this family.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as snapshot_count,
+                        COUNT(DISTINCT sanctuary_id) as session_count,
+                        AVG(system_coherence) as avg_system_coherence,
+                        AVG(system_volatility) as avg_volatility,
+                        SUM(CASE WHEN cee_window_open THEN 1 ELSE 0 END) as cee_count
+                    FROM emotional_weather_snapshots
+                    WHERE family_id = $1
+                      AND created_at > NOW() - INTERVAL '90 days'
+                """, family_id)
+
+            if not row or row["session_count"] == 0:
+                return None
+
+            return {
+                "snapshot_count": row["snapshot_count"],
+                "session_count": row["session_count"],
+                "avg_system_coherence": float(row["avg_system_coherence"] or 0),
+                "avg_volatility": float(row["avg_volatility"] or 0),
+                "cee_frequency": row["cee_count"] / max(row["snapshot_count"], 1),
+            }
+        except Exception as e:
+            logger.debug("Sanctuary weather enrichment query: %s", e)
+            return None
 
     async def _get_skyeye_sentiment(self) -> float:
         """Get aggregate sentiment from SkyEye social media monitoring."""

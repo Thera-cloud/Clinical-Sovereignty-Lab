@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
@@ -34,14 +34,10 @@ class NevedalReportsScreen extends StatefulWidget {
 }
 
 class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
-  WebSocketChannel? _socket;
-  StreamSubscription? _socketSub;
-
-  bool _authenticating = true;
-  bool _authenticated = false;
   bool _loading = true;
   String? _error;
   Map<String, dynamic>? _report;
+  String? _token;
 
   String _selectedRange = 'All';
   bool _showCEE = true;
@@ -51,66 +47,53 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
   @override
   void initState() {
     super.initState();
-    _connectAndLoad();
+    _loadReport();
   }
 
-  Future<void> _connectAndLoad() async {
-    try {
-      _socket = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
-      _socketSub = _socket!.stream.listen(
-        (msg) { try { _handleMessage(jsonDecode(msg)); } catch (_) {} },
-        onError: (_) { if (mounted) setState(() { _error = 'Connection lost.'; _authenticating = false; _loading = false; }); },
-      );
-
-      final hwId = (widget.profile['hardware_id'] ?? '').toString();
-      if (hwId.isEmpty) { setState(() { _error = 'Missing identity.'; _authenticating = false; _loading = false; }); return; }
-
-      const storage = FlutterSecureStorage(aOptions: AndroidOptions(encryptedSharedPreferences: true));
-      final token = await storage.read(key: 'session_token');
-      if (token == null || token.isEmpty) { setState(() { _error = 'Session expired.'; _authenticating = false; _loading = false; }); return; }
-
-      _socket!.sink.add(jsonEncode({'type': 'auth', 'hardware_id': hwId, 'token': token}));
-    } catch (e) {
-      if (mounted) setState(() { _error = 'Failed to connect: $e'; _authenticating = false; _loading = false; });
+  Future<void> _loadReport() async {
+    final hwId = (widget.profile['hardware_id'] ?? '').toString();
+    if (hwId.isEmpty) {
+      if (mounted) setState(() { _error = 'Missing identity.'; _loading = false; });
+      return;
     }
-  }
 
-  void _handleMessage(Map<String, dynamic> data) {
-    if (!mounted) return;
-    final type = data['type']?.toString() ?? '';
+    const storage = FlutterSecureStorage(aOptions: AndroidOptions(encryptedSharedPreferences: true));
+    _token ??= await storage.read(key: 'session_token');
+    if (_token == null || _token!.isEmpty) {
+      if (mounted) setState(() { _error = 'Session expired.'; _loading = false; });
+      return;
+    }
 
-    switch (type) {
-      case 'auth_success':
-      case 'login_success':
-        setState(() { _authenticated = true; _authenticating = false; });
-        _requestReport();
-        break;
+    try {
+      final dates = _computeDateRange(_selectedRange);
+      var url = '${AppConfig.apiBaseUrl}/api/coherence/report/$hwId';
+      final params = <String>[];
+      if (dates != null) {
+        if (dates['from'] != null) params.add('date_from=${dates['from']}');
+        if (dates['to'] != null) params.add('date_to=${dates['to']}');
+      }
+      if (params.isNotEmpty) url += '?${params.join('&')}';
 
-      case 'auth_failed':
-      case 'login_failed':
-        setState(() { _authenticated = false; _authenticating = false; _loading = false;
-          _error = data['message']?.toString() ?? 'Authentication failed.'; });
-        break;
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 15));
 
-      case 'coherence_report':
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
         setState(() { _report = data; _loading = false; _error = null; });
-        break;
-
-      case 'coherence_report_error':
-        setState(() { _error = data['error']?.toString() ?? 'Failed to load report'; _loading = false; });
-        break;
+      } else {
+        setState(() { _error = 'Failed to load report (${resp.statusCode})'; _loading = false; });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _error = 'Connection error: $e'; _loading = false; });
     }
   }
 
   void _requestReport() {
-    final dates = _computeDateRange(_selectedRange);
-    final msg = <String, dynamic>{'type': 'get_coherence_report'};
-    if (dates != null) {
-      msg['date_from'] = dates['from'];
-      msg['date_to'] = dates['to'];
-    }
     setState(() { _loading = true; });
-    _socket?.sink.add(jsonEncode(msg));
+    _loadReport();
   }
 
   Map<String, String>? _computeDateRange(String range) {
@@ -140,8 +123,6 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
 
   @override
   void dispose() {
-    _socketSub?.cancel();
-    _socket?.sink.close();
     super.dispose();
   }
 
@@ -155,7 +136,7 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
             style: TextStyle(color: _Design.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: _Design.gold),
       ),
-      body: _authenticating || (_loading && _report == null)
+      body: (_loading && _report == null)
           ? _buildLoading()
           : _error != null && _report == null
               ? _buildError()
@@ -279,9 +260,28 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
         const SizedBox(height: 20),
 
         // Multi-line chart
-        if (cEmoVals.length >= 2) ...[
-          _sectionLabel('COHERENCE METRICS'),
-          const SizedBox(height: 8),
+        _sectionLabel('COHERENCE METRICS'),
+        const SizedBox(height: 8),
+        if (cEmoVals.length < 2) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: _Design.bgElevated, borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _Design.goldDim.withOpacity(0.2))),
+            child: Column(children: [
+              const Icon(Icons.show_chart, color: _Design.goldDim, size: 40),
+              const SizedBox(height: 12),
+              Text(
+                _selectedRange == 'All'
+                    ? 'Not enough sessions yet to show a chart.\nChat with Nate to build your timeline.'
+                    : 'No coherence data for $_selectedRange.\nTry a different range or chat with Nate.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _Design.textSecondary, fontSize: 14)),
+            ]),
+          ),
+          const SizedBox(height: 20),
+        ] else ...[
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -517,13 +517,10 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
                 backgroundColor: _Design.green.withOpacity(0.15),
                 foregroundColor: _Design.green),
               onPressed: () {
-                _socket?.sink.add(jsonEncode({
-                  'type': 'memory_push_to_nate',
-                  'entries': [{'timestamp': ts, 'user_preview': 'CEE moment at $ts'}],
-                }));
                 Navigator.pop(context);
+                Navigator.pop(context, {'push_cee': ts});
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Pushed to Little Nate'), backgroundColor: _Design.green));
+                  const SnackBar(content: Text('Returned to chat — share this moment with Nate'), backgroundColor: _Design.green));
               },
             )),
           ]),
@@ -592,12 +589,9 @@ class _NevedalReportsScreenState extends State<NevedalReportsScreen> {
           }),
           const SizedBox(width: 8),
           _miniButton('Push to Nate', Icons.send, () {
-            _socket?.sink.add(jsonEncode({
-              'type': 'memory_push_to_nate',
-              'entries': [{'timestamp': ts, 'user_preview': 'CEE moment at $ts'}],
-            }));
+            Navigator.pop(context, {'push_cee': ts});
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Pushed to Little Nate'), backgroundColor: _Design.green));
+              const SnackBar(content: Text('Returned to chat — share this moment with Nate'), backgroundColor: _Design.green));
           }),
         ]),
       ]),

@@ -399,6 +399,18 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="nav-item" data-tab="hive-defense" onclick="switchTab('hive-defense',this)">
       <span class="nav-icon">🛡️</span><span class="nav-label">Hive Defense</span>
     </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" data-tab="hardware-security" onclick="switchTab('hardware-security',this)">
+      <span class="nav-icon">🔑</span><span class="nav-label">Hardware Security</span>
+    </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" data-tab="engagement-requests" onclick="switchTab('engagement-requests',this)">
+      <span class="nav-icon">🤝</span><span class="nav-label">Engagement Requests</span>
+      <span class="nav-badge" id="engagement-req-count" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-tab="social-developer" onclick="switchTab('social-developer',this)">
+      <span class="nav-icon">🔧</span><span class="nav-label">Social Developer</span>
+    </div>
   </aside>
 
   <!-- MAIN CONTENT -->
@@ -991,6 +1003,22 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         </div>
       </div>
 
+      <!-- Post Performance -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">📈 Post Performance (7 Days)</span></div>
+        <div class="glass-body" id="post-performance-table" style="max-height:360px;overflow-y:auto">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading post analytics...</div>
+        </div>
+      </div>
+
+      <!-- Engagement Notifications -->
+      <div class="glass" style="margin-bottom:24px">
+        <div class="glass-header"><span class="glass-title">🔔 Engagement Notifications</span></div>
+        <div class="glass-body" id="engagement-notifications" style="max-height:360px;overflow-y:auto">
+          <div style="color:var(--t3);text-align:center;padding:20px">Loading notifications...</div>
+        </div>
+      </div>
+
       <!-- Action Log -->
       <div class="glass">
         <div class="glass-header"><span class="glass-title">📋 Recent Marketing Actions</span></div>
@@ -1528,6 +1556,153 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       </div>
     </section>
 
+    <!-- TAB: HARDWARE SECURITY -->
+    <section class="tab-content" id="tab-hardware-security">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">🔑 Hardware Security</h2>
+        <button class="btn btn-green" onclick="hwRegisterYubiKey()" style="gap:6px">+ Register YubiKey</button>
+      </div>
+
+      <!-- Registered Keys -->
+      <div class="glass mb-24" style="padding:20px">
+        <div style="font-family:var(--serif);font-size:17px;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+          Registered YubiKeys
+          <span id="hw-keyCount" style="background:var(--green);color:#000;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:bold">0</span>
+        </div>
+        <div id="hw-keysList" style="display:flex;flex-direction:column;gap:10px">
+          <div style="color:var(--t3);font-size:13px;text-align:center;padding:24px">No YubiKeys registered. Click "Register YubiKey" to add your first key.</div>
+        </div>
+        <div id="hw-registerStatus" style="margin-top:12px;font-size:12px;color:var(--t3)"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:16px;border-top:1px solid var(--bdr)">
+          <div>
+            <div style="font-size:12px;color:var(--t3)">Active Key</div>
+            <div id="hw-activeKey" style="font-size:14px;font-weight:bold;color:var(--t3)">Not verified</div>
+            <div id="hw-lastVerified" style="font-size:11px;color:var(--t3)"></div>
+          </div>
+          <button class="btn" onclick="hwVerifyPresence()" style="font-size:12px;background:var(--bg2);border:1px solid var(--bdr);color:var(--t1)">Verify Plugged-In Key</button>
+        </div>
+      </div>
+
+      <!-- Sentinel Session Status -->
+      <div class="glass mb-24" style="padding:20px">
+        <div style="font-family:var(--serif);font-size:17px;margin-bottom:16px">Sentinel Session Status</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px">
+          <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center">
+            <div style="font-size:28px;font-weight:bold;color:var(--green)" id="hw-sentinelScore">0</div>
+            <div style="font-size:11px;color:var(--t3)">Anomaly Score</div>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center">
+            <div style="font-size:28px;font-weight:bold;color:var(--green)" id="hw-sentinelStatus">CLEAR</div>
+            <div style="font-size:11px;color:var(--t3)">Session State</div>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center">
+            <div style="font-size:28px;font-weight:bold;color:var(--cyan)" id="hw-authMethod">--</div>
+            <div style="font-size:11px;color:var(--t3)">Auth Method</div>
+          </div>
+          <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:16px;text-align:center">
+            <div style="font-size:28px;font-weight:bold;color:var(--amber)" id="hw-knownDevices">--</div>
+            <div style="font-size:11px;color:var(--t3)">Known Devices</div>
+          </div>
+        </div>
+        <div id="hw-unfreezeBtn" style="display:none;margin-top:16px;text-align:center">
+          <button class="btn" onclick="hwUnfreezeSession()" style="font-size:13px;background:var(--red);color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-weight:700">
+            🔓 Unfreeze Session — Tap YubiKey to Verify
+          </button>
+        </div>
+      </div>
+
+      <!-- TOTP Setup -->
+      <div class="glass" style="padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-family:var(--serif);font-size:17px">TOTP Authenticator</div>
+          <span id="hw-totp-badge" style="font-size:12px;font-weight:bold;color:var(--t3)">NOT CONFIGURED</span>
+        </div>
+        <div id="hw-totp-setup">
+          <p style="font-size:13px;color:var(--t3);margin:0 0 12px 0">Add a time-based one-time password using Google Authenticator, Authy, or any TOTP app.</p>
+          <button class="btn btn-green" onclick="hwSetupTOTP()" id="hw-totp-btn" style="font-size:13px">Configure TOTP</button>
+          <div id="hw-totp-secret" style="display:none;margin-top:16px">
+            <div id="hw-totp-qr" style="display:none;text-align:center"></div>
+            <div style="font-size:12px;color:var(--t3);margin-bottom:4px">Or enter this secret manually:</div>
+            <code id="hw-totp-key" style="display:block;background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:12px;font-size:14px;color:var(--gold);word-break:break-all;margin-bottom:12px"></code>
+            <div style="font-size:12px;color:var(--t3);margin-bottom:4px">Then enter the 6-digit code to confirm:</div>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="hw-totp-code" maxlength="6" placeholder="000000" style="background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:8px 12px;color:var(--t1);font-size:16px;width:120px;text-align:center;font-family:monospace">
+              <button class="btn btn-green" onclick="hwVerifyTOTP()" style="font-size:13px">Verify</button>
+            </div>
+          </div>
+          <div id="hw-totp-status" style="font-size:13px;margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- SMS Setup -->
+      <div class="glass" style="padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="font-family:var(--serif);font-size:17px">SMS Verification</div>
+          <span id="hw-sms-badge" style="font-size:12px;font-weight:bold;color:var(--t3)">NOT CONFIGURED</span>
+        </div>
+        <div id="hw-sms-setup">
+          <p style="font-size:13px;color:var(--t3);margin:0 0 12px 0">Set your phone number for SMS verification when Sentinel detects anomalies.</p>
+          <div id="hw-sms-phone-entry" style="display:flex;gap:8px;margin-bottom:8px">
+            <input type="tel" id="hw-sms-phone" placeholder="+1 (555) 123-4567" style="background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:8px 12px;color:var(--t1);font-size:14px;flex:1">
+            <button class="btn btn-green" onclick="hwSetPhone()" style="font-size:13px">Set Phone</button>
+          </div>
+          <div id="hw-sms-verify-section" style="display:none;margin-top:12px">
+            <button class="btn" onclick="hwSendSMSCode()" id="hw-sms-send-btn" style="font-size:13px;margin-bottom:8px;background:var(--bg2);border:1px solid var(--bdr);color:var(--t1)">Send Verification Code</button>
+            <div id="hw-sms-code-entry" style="display:none;gap:8px;margin-top:8px">
+              <input type="text" id="hw-sms-code" maxlength="6" placeholder="000000" style="background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:8px 12px;color:var(--t1);font-size:16px;width:120px;text-align:center;font-family:monospace">
+              <button class="btn btn-green" onclick="hwConfirmSMS()" style="font-size:13px">Verify Code</button>
+            </div>
+          </div>
+          <div id="hw-sms-status" style="font-size:13px;margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- Security Posture -->
+      <div class="glass" style="padding:20px">
+        <div style="font-family:var(--serif);font-size:17px;margin-bottom:16px">Security Posture</div>
+        <div id="hw-recommendations" style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span id="hw-chk-key1" style="color:var(--t3)">&#x25cb;</span>
+            <span>Primary YubiKey registered</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span id="hw-chk-key2" style="color:var(--t3)">&#x25cb;</span>
+            <span>Backup YubiKey registered</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span id="hw-chk-totp" style="color:var(--t3)">&#x25cb;</span>
+            <span>TOTP authenticator configured</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <span id="hw-chk-sms" style="color:var(--t3)">&#x25cb;</span>
+            <span>SMS verification phone set</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: ENGAGEMENT REQUESTS -->
+    <section class="tab-content" id="tab-engagement-requests">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        <h2 style="font-family:var(--serif);font-size:26px">🤝 Engagement Requests</h2>
+        <button onclick="loadEngagementRequests()" style="padding:6px 16px;border-radius:6px;background:transparent;color:var(--gold);border:1px solid var(--gold);cursor:pointer;font-size:12px">Refresh</button>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <button onclick="erFilterStatus('pending')" class="er-filter active" id="er-filter-pending" style="padding:6px 14px;border-radius:6px;background:var(--gold);color:#050505;border:none;cursor:pointer;font-size:12px;font-weight:600">Pending</button>
+        <button onclick="erFilterStatus('approved')" class="er-filter" id="er-filter-approved" style="padding:6px 14px;border-radius:6px;background:transparent;color:var(--green);border:1px solid var(--green);cursor:pointer;font-size:12px">Approved</button>
+        <button onclick="erFilterStatus('rejected')" class="er-filter" id="er-filter-rejected" style="padding:6px 14px;border-radius:6px;background:transparent;color:var(--red);border:1px solid var(--red);cursor:pointer;font-size:12px">Rejected</button>
+      </div>
+      <div id="er-list" style="display:grid;gap:12px"></div>
+      <div class="empty-text" id="er-empty" style="display:none">No engagement requests. Little Nate hasn't asked for anything yet.</div>
+    </section>
+
+    <!-- TAB: SOCIAL DEVELOPER -->
+    <section class="tab-content" id="tab-social-developer">
+      <h2 style="font-family:var(--serif);font-size:26px;margin-bottom:24px">🔧 Social Developer Consoles</h2>
+      <p style="font-size:13px;color:var(--t3);margin-bottom:20px">Quick access to platform developer portals. Each opens in a new tab.</p>
+      <div id="sd-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px"></div>
+    </section>
+
   </main>
 </div>
 
@@ -1615,7 +1790,13 @@ async function apiPost(path, body) {
       body: JSON.stringify(body)
     });
     if (resp.status === 401) { window.location.href = 'index.html'; return null; }
-    if (!resp.ok) throw new Error(`API ${resp.status}`);
+    if (!resp.ok) {
+      try {
+        const errBody = await resp.json();
+        return { _error: true, status: resp.status, detail: errBody.detail || JSON.stringify(errBody) };
+      } catch (_) {}
+      return { _error: true, status: resp.status, detail: `HTTP ${resp.status}` };
+    }
     return await resp.json();
   } catch (e) {
     console.warn(`API POST error ${path}:`, e);
@@ -1787,6 +1968,9 @@ function switchTab(tabId, el) {
     case 'swarm': loadSwarmOverview(); break;
     case 'threat-dropbox': refreshHunts(); break;
     case 'hive-defense': hdRefreshAll(); break;
+    case 'hardware-security': loadHardwareSecurity(); break;
+    case 'engagement-requests': loadEngagementRequests(); break;
+    case 'social-developer': loadSocialDeveloper(); break;
   }
 }
 
@@ -2415,15 +2599,33 @@ async function loadHistory() {
     return;
   }
 
-  el.innerHTML = data.map(h => `
-    <div class="act-row">
-      <span class="act-time" style="width:80px;flex-shrink:0">${fmtTime(h.timestamp || h.time)}</span>
-      <span class="act-plat">${platIcon(h.platform)}</span>
-      ${actionBadge(h.type || h.action_type || h.action)}
-      <span style="font-size:12px;color:var(--t2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${h.detail || h.description || h.content || ''}</span>
-      <span class="act-time">${h.timestamp ? fmtDateTime(h.timestamp) : fmtDateTime(h.time)}</span>
-    </div>
-  `).join('');
+  el.innerHTML = data.map(h => {
+    const ts = h.created_at || h.timestamp || h.time;
+    const dur = h.duration_seconds || 0;
+    const durStr = dur >= 60 ? Math.floor(dur / 60) + 'm ' + (dur % 60) + 's' : dur + 's';
+    const acts = h.actions_count || 0;
+    let platBadges = '';
+    try {
+      const pArr = typeof h.platforms === 'string' ? JSON.parse(h.platforms) : (h.platforms || []);
+      platBadges = pArr.map(p => `<span style="display:inline-block;margin:0 2px">${platIcon(p)}</span>`).join('');
+    } catch(e) { platBadges = platIcon(h.platform); }
+    if (!platBadges) platBadges = platIcon(h.platform);
+    const content = h.summary || h.detail || '';
+    return `<div style="display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-bottom:1px solid var(--bdr)">
+      <div style="flex-shrink:0;min-width:90px">
+        <div style="font-size:12px;color:var(--t1);font-weight:500">${fmtTime(ts)}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px">${fmtDateTime(ts)}</div>
+      </div>
+      <div style="flex-shrink:0;display:flex;gap:1px;align-items:center;min-width:60px">${platBadges}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--t2);line-height:1.5;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${content}</div>
+      </div>
+      <div style="flex-shrink:0;text-align:right;min-width:70px">
+        <div style="font-size:11px;color:var(--gold)">${acts} action${acts !== 1 ? 's' : ''}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:2px">⏱ ${durStr}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // =============================================================================
@@ -2495,7 +2697,7 @@ async function clearChat(archive) {
   const label = archive ? 'archive to memory and clear' : 'permanently clear';
   if (!confirm('Are you sure you want to ' + label + ' all chat history?')) return;
   try {
-    const res = await fetch(API + '/api/skyeye/chat?archive=' + archive, { method: 'DELETE' });
+    const res = await fetch(API + '/api/skyeye/chat?archive=' + archive, { method: 'DELETE', headers: _authHeaders() });
     const data = await res.json();
     if (data.cleared) {
       const el = document.getElementById('chat-messages');
@@ -2530,7 +2732,7 @@ async function loadArchiveList() {
   listEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">Loading archives...</div>';
   closeArchiveViewer();
   try {
-    const res = await fetch(API + '/api/skyeye/chat/archives');
+    const res = await fetch(API + '/api/skyeye/chat/archives', { headers: _authHeaders() });
     const archives = await res.json();
     if (!archives || archives.length === 0) {
       listEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:24px;font-size:12px">No archived conversations yet.<br>Use "Archive & Clear" to save sessions here.</div>';
@@ -2566,7 +2768,7 @@ async function viewArchive(entryId) {
   listEl.style.display = 'none';
 
   try {
-    var res = await fetch(API + '/api/skyeye/chat/archives/' + entryId);
+    var res = await fetch(API + '/api/skyeye/chat/archives/' + entryId, { headers: _authHeaders() });
     var data = await res.json();
     var d = data.created_at ? new Date(data.created_at) : null;
     title.textContent = d ? d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) + ' — ' + (data.message_count || 0) + ' messages' : 'Archived Session';
@@ -2586,7 +2788,7 @@ async function restoreArchive() {
   if (!_selectedArchiveId) return;
   if (!confirm('Restore this archived conversation into the active chat? This will add those messages back.')) return;
   try {
-    var res = await fetch(API + '/api/skyeye/chat/archives/' + _selectedArchiveId + '/restore', { method: 'POST' });
+    var res = await fetch(API + '/api/skyeye/chat/archives/' + _selectedArchiveId + '/restore', { method: 'POST', headers: _authHeaders() });
     var data = await res.json();
     alert(data.message || 'Restored.');
     closeArchiveViewer();
@@ -2666,7 +2868,7 @@ async function startLivestream() {
   try {
     var res = await fetch(API + '/api/skyeye/livestream/start', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders('application/json'),
       body: JSON.stringify({ platforms: platforms, rtmp_keys: rtmpKeys, topic: topic, duration_limit: duration })
     });
     var data = await res.json();
@@ -2681,7 +2883,7 @@ async function startLivestream() {
 async function stopLivestream() {
   if (!confirm('End the livestream?')) return;
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/stop', { method: 'POST' });
+    var res = await fetch(API + '/api/skyeye/livestream/stop', { method: 'POST', headers: _authHeaders() });
     var data = await res.json();
     alert('Stream ended. ' + (data.total_interactions || 0) + ' interactions, ' + (data.unique_viewers || 0) + ' unique viewers.');
     showLiveConfig();
@@ -2722,7 +2924,7 @@ function stopLivePolling() {
 
 async function pollLiveStatus() {
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var res = await fetch(API + '/api/skyeye/livestream/status', { headers: _authHeaders() });
     var data = await res.json();
     if (data.status !== 'live') { showLiveConfig(); stopLivePolling(); return; }
     document.getElementById('live-elapsed').textContent = formatTime(data.elapsed_seconds || 0);
@@ -2740,7 +2942,7 @@ function formatTime(secs) {
 
 async function loadLiveHistory() {
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/history?limit=10');
+    var res = await fetch(API + '/api/skyeye/livestream/history?limit=10', { headers: _authHeaders() });
     var sessions = await res.json();
     var el = document.getElementById('live-history');
     if (!sessions || sessions.length === 0) {
@@ -2773,7 +2975,7 @@ async function toggleScheduler() {
   var btn = document.getElementById('scheduler-toggle-btn');
   var endpoint = _schedulerActive ? '/api/skyeye/livestream/scheduler/stop' : '/api/skyeye/livestream/scheduler/start';
   try {
-    var res = await fetch(API + endpoint, { method: 'POST' });
+    var res = await fetch(API + endpoint, { method: 'POST', headers: _authHeaders() });
     var data = await res.json();
     _schedulerActive = data.status === 'started';
     btn.textContent = _schedulerActive ? 'DISABLE' : 'ENABLE';
@@ -2798,7 +3000,7 @@ async function runPreflight() {
   el.style.color = 'var(--cyan)';
   el.style.border = '1px solid rgba(78,205,196,0.3)';
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/preflight', { method: 'POST' });
+    var res = await fetch(API + '/api/skyeye/livestream/preflight', { method: 'POST', headers: _authHeaders() });
     var data = await res.json();
     if (data.connected) {
       el.textContent = 'PRE-FLIGHT PASSED — Platform is receiving frames on: ' + (data.platforms || []).join(', ');
@@ -2834,7 +3036,7 @@ function showUpcomingSlots(slots) {
 
 async function pollLiveStatusExtended() {
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var res = await fetch(API + '/api/skyeye/livestream/status', { headers: _authHeaders() });
     var data = await res.json();
     if (data.status !== 'live') {
       showLiveConfig();
@@ -2870,12 +3072,12 @@ async function pollLiveStatusExtended() {
 
 async function initGoLive() {
   try {
-    var res = await fetch(API + '/api/skyeye/livestream/status');
+    var res = await fetch(API + '/api/skyeye/livestream/status', { headers: _authHeaders() });
     var data = await res.json();
     if (data.status === 'live') { showLiveDashboard(); startLivePolling(); }
   } catch(e) {}
   try {
-    var sRes = await fetch(API + '/api/skyeye/livestream/scheduler/config');
+    var sRes = await fetch(API + '/api/skyeye/livestream/scheduler/config', { headers: _authHeaders() });
     var sData = await sRes.json();
     if (sData.scheduled_slots && sData.scheduled_slots.length > 0) {
       _schedulerActive = true;
@@ -3146,7 +3348,7 @@ async function approveQueueItem(id) {
 
 async function deleteQueueItem(id) {
   try {
-    await fetch(`${API}/api/skyeye/content-queue/${id}`, { method: 'DELETE' });
+    await fetch(`${API}/api/skyeye/content-queue/${id}`, { method: 'DELETE', headers: _authHeaders() });
     loadContentQueue();
   } catch (e) { console.warn('Delete failed:', e); }
 }
@@ -3401,7 +3603,7 @@ setInterval(() => {
 async function refreshGrowthData() {
   try {
     const safeFetch = async (url) => {
-      const r = await fetch(url);
+      const r = await fetch(url, {headers: _authHeaders()});
       if (!r.ok) return {};
       return r.json();
     };
@@ -3453,6 +3655,62 @@ async function refreshGrowthData() {
     } else {
       logEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:30px">No marketing actions yet</div>';
     }
+
+    // Post Performance table
+    try {
+      const paResp = await fetch(`${API}/api/marketing/post-analytics?days=7`, { headers: _authHeaders() });
+      const postAnalytics = paResp.ok ? await paResp.json() : [];
+      const ppEl = document.getElementById('post-performance-table');
+      if (Array.isArray(postAnalytics) && postAnalytics.length > 0) {
+        const pIcons = {x:'𝕏',linkedin:'🔗',instagram:'📸',facebook:'📘',youtube:'▶',tiktok:'🎵'};
+        ppEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="color:var(--t3);text-align:left;border-bottom:1px solid var(--bdr)">
+            <th style="padding:8px">Plat</th><th style="padding:8px">Post</th>
+            <th style="padding:8px;text-align:right">❤️</th><th style="padding:8px;text-align:right">🔁</th>
+            <th style="padding:8px;text-align:right">💬</th><th style="padding:8px;text-align:right">👁</th>
+          </tr></thead><tbody>` + postAnalytics.slice(0,15).map(p => {
+            const snippet = (p.post_text||'').substring(0,50);
+            const icon = pIcons[p.platform]||p.platform;
+            return `<tr style="border-bottom:1px solid var(--bdr)">
+              <td style="padding:8px">${icon}</td>
+              <td style="padding:8px;color:var(--t2)">${snippet}${snippet.length>=50?'…':''}</td>
+              <td style="padding:8px;text-align:right;color:var(--red)">${p.likes||0}</td>
+              <td style="padding:8px;text-align:right;color:var(--cyan)">${p.reposts||0}</td>
+              <td style="padding:8px;text-align:right;color:var(--green)">${p.comments||0}</td>
+              <td style="padding:8px;text-align:right;color:var(--t3)">${p.impressions||0}</td>
+            </tr>`;
+          }).join('') + '</tbody></table>';
+      } else {
+        ppEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No post analytics yet — data populates after Notification Observer runs</div>';
+      }
+    } catch(pe) { console.debug('Post analytics load:', pe); }
+
+    // Engagement Notifications feed
+    try {
+      const nResp = await fetch(`${API}/api/marketing/notifications?limit=30`, { headers: _authHeaders() });
+      const notifs = nResp.ok ? await nResp.json() : [];
+      const nEl = document.getElementById('engagement-notifications');
+      if (Array.isArray(notifs) && notifs.length > 0) {
+        const typeIcons = {like:'❤️',repost:'🔁',new_follower:'👤',reaction:'👍',quote:'💬'};
+        nEl.innerHTML = notifs.slice(0,25).map(n => {
+          const icon = typeIcons[n.notification_type]||'🔔';
+          const time = n.created_at ? new Date(n.created_at).toLocaleDateString() : '';
+          const processed = n.processed ? '✔' : '⏳';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--bdr)">
+            <span style="font-size:18px">${icon}</span>
+            <div style="flex:1">
+              <span style="font-weight:600;font-size:13px">@${n.actor_handle}</span>
+              <span style="color:var(--t3);font-size:12px;margin-left:6px">${n.notification_type}${n.post_id?' on post':''}${n.actor_followers?' · '+n.actor_followers+' followers':''}</span>
+            </div>
+            <span style="color:var(--t3);font-size:11px">${time}</span>
+            <span style="font-size:12px" title="${n.processed?'Processed':'Pending'}">${processed}</span>
+          </div>`;
+        }).join('');
+      } else {
+        nEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No engagement notifications yet — data populates after Notification Observer runs</div>';
+      }
+    } catch(ne) { console.debug('Notifications load:', ne); }
+
   } catch(e) {
     console.error('Growth data error:', e);
     document.getElementById('kpi-prospects').textContent = '0';
@@ -3466,7 +3724,7 @@ async function refreshGrowthData() {
 
 async function refreshPlaybook() {
   try {
-    const pbRes = await fetch(`${API}/api/marketing/playbook`);
+    const pbRes = await fetch(`${API}/api/marketing/playbook`, { headers: _authHeaders() });
     if (!pbRes.ok) throw new Error(`HTTP ${pbRes.status}`);
     const pb = await pbRes.json();
 
@@ -3511,7 +3769,7 @@ async function refreshPlaybook() {
     }
 
     // Render pending proposals
-    const proposalsRes = await fetch(`${API}/api/marketing/actions?status=proposed`);
+    const proposalsRes = await fetch(`${API}/api/marketing/actions?status=proposed`, { headers: _authHeaders() });
     const proposals = proposalsRes.ok ? await proposalsRes.json() : [];
     const proposalsList = document.getElementById('proposals-list');
     if (Array.isArray(proposals) && proposals.length > 0) {
@@ -3544,7 +3802,7 @@ async function refreshPlaybook() {
 async function approveAction(id) {
   try {
     await fetch(`${API}/api/marketing/actions/${id}/decide`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: _authHeaders('application/json'),
       body: JSON.stringify({decision:'approved'})
     });
     refreshPlaybook();
@@ -3556,7 +3814,7 @@ async function rejectAction(id) {
   const reason = prompt('Rejection reason (optional):') || '';
   try {
     await fetch(`${API}/api/marketing/actions/${id}/decide`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: _authHeaders('application/json'),
       body: JSON.stringify({decision:'rejected', reason})
     });
     refreshPlaybook();
@@ -3568,7 +3826,7 @@ async function runStrategyReview() {
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
   try {
-    const result = await fetch(`${API}/api/marketing/playbook/review`, {method:'POST'}).then(r => r.json());
+    const result = await fetch(`${API}/api/marketing/playbook/review`, {method:'POST', headers: _authHeaders()}).then(r => r.json());
     alert('Strategy Review Complete!\n\nTop Insight: ' + (result.top_insight || 'Review completed'));
     refreshPlaybook();
   } catch(e) {
@@ -3581,7 +3839,7 @@ async function runStrategyReview() {
 
 async function refreshFunnelPipeline() {
   try {
-    const funnelRes = await fetch(`${API}/api/marketing/funnel-stats?days=7`);
+    const funnelRes = await fetch(`${API}/api/marketing/funnel-stats?days=7`, { headers: _authHeaders() });
     if (!funnelRes.ok) throw new Error(`HTTP ${funnelRes.status}`);
     const data = await funnelRes.json();
 
@@ -3601,11 +3859,13 @@ async function refreshFunnelPipeline() {
       platEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px">' +
         byPlatform.map(p => `
           <div style="background:var(--panel);border:1px solid var(--bdr);border-radius:10px;padding:14px">
-            <div style="font-weight:600;text-transform:capitalize;margin-bottom:6px">${p.platform}</div>
-            <div style="color:var(--t3);font-size:12px">Total: ${p.total} | Conv: ${p.conversions}</div>
+            <div style="font-weight:600;text-transform:capitalize;margin-bottom:6px">${(PLATFORM_ICONS[p.platform]||'🌐')} ${p.platform}</div>
+            <div style="color:var(--t3);font-size:12px">Routed: ${p.total} | Conv: ${p.conversions}</div>
             <div style="color:var(--green);font-size:12px">Avg Score: ${(p.avg_score||0).toFixed(2)}</div>
           </div>
         `).join('') + '</div>';
+    } else {
+      platEl.innerHTML = '<div style="color:var(--t3);text-align:center;padding:20px">No funnel activity recorded yet across platforms</div>';
     }
 
     // By audience
@@ -3643,7 +3903,7 @@ async function generateQuiz() {
 
   try {
     const quizRes = await fetch(`${API}/api/marketing/quiz-factory/generate`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: _authHeaders('application/json'),
       body: JSON.stringify({audience, topic, question_count: count})
     });
     if (!quizRes.ok) throw new Error(`API returned ${quizRes.status}`);
@@ -3674,7 +3934,7 @@ async function generateShowcase(scenario) {
 
   try {
     const showcaseRes = await fetch(`${API}/api/marketing/showcase/generate`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: _authHeaders('application/json'),
       body: JSON.stringify({scenario, format:'html'})
     });
     if (!showcaseRes.ok) throw new Error(`API returned ${showcaseRes.status}`);
@@ -3729,7 +3989,7 @@ async function generateShowcase(scenario) {
 
 async function loadSwarmOverview() {
   try {
-    const res = await fetch(`${API}/api/coherence/pulse`);
+    const res = await fetch(`${API}/api/coherence/pulse`, { headers: _authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
@@ -3783,7 +4043,7 @@ async function loadSwarmOverview() {
 
   // Load fibre list from fibre API
   try {
-    const res = await fetch(`${API}/api/fibres`);
+    const res = await fetch(`${API}/api/fibres`, { headers: _authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const listEl = document.getElementById('swarm-fibre-list');
@@ -3803,7 +4063,7 @@ async function loadSwarmOverview() {
 
   // Load mesh health
   try {
-    const res = await fetch(`${API}/api/mesh/health`);
+    const res = await fetch(`${API}/api/mesh/health`, { headers: _authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const meshEl = document.getElementById('swarm-mesh-health');
@@ -3832,7 +4092,7 @@ async function loadCampaigns() {
     ? `${API}/api/skyeye/campaigns?status=${statusFilter}`
     : `${API}/api/skyeye/campaigns`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, {headers: _authHeaders()});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const campaigns = await res.json();
 
@@ -3883,7 +4143,7 @@ async function loadCampaigns() {
 async function loadCampaignDetail(id) {
   _selectedCampaignId = id;
   try {
-    const res = await fetch(`${API}/api/skyeye/campaigns/${id}`);
+    const res = await fetch(`${API}/api/skyeye/campaigns/${id}`, { headers: _authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const c = await res.json();
 
@@ -3955,7 +4215,7 @@ function closeCampaignDetail() {
 async function campaignAction(action) {
   if (!_selectedCampaignId) return;
   try {
-    const res = await fetch(`${API}/api/skyeye/campaigns/${_selectedCampaignId}/${action}`, { method: 'POST' });
+    const res = await fetch(`${API}/api/skyeye/campaigns/${_selectedCampaignId}/${action}`, { method: 'POST', headers: _authHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await loadCampaignDetail(_selectedCampaignId);
     await loadCampaigns();
@@ -4609,6 +4869,489 @@ async function hdRefreshAll() {
 }
 
 // =============================================================================
+// HARDWARE SECURITY — YubiKey Registration (REST API)
+// =============================================================================
+
+function _hwStatus(msg, color) {
+  const el = document.getElementById('hw-registerStatus');
+  if (el) { el.textContent = msg; el.style.color = color || 'var(--t3)'; }
+}
+
+function _hwB64toBuffer(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64.length % 4 === 0 ? '' : '='.repeat(4 - (b64.length % 4));
+  const bin = atob(b64 + pad);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function _hwBufferToB64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function loadHardwareSecurity() {
+  const keysList = document.getElementById('hw-keysList');
+  const keyCount = document.getElementById('hw-keyCount');
+  const chk1 = document.getElementById('hw-chk-key1');
+  const chk2 = document.getElementById('hw-chk-key2');
+  const chkTotp = document.getElementById('hw-chk-totp');
+  const chkSms = document.getElementById('hw-chk-sms');
+  const methodEl = document.getElementById('hw-authMethod');
+  const devicesEl = document.getElementById('hw-knownDevices');
+
+  const keysData = await apiFetch('/api/admin/webauthn/keys');
+  const keys = (keysData && keysData.keys) ? keysData.keys : [];
+
+  keyCount.textContent = keys.length;
+
+  if (keys.length === 0) {
+    keysList.innerHTML = '<div style="color:var(--t3);font-size:13px;text-align:center;padding:24px">No YubiKeys registered. Click "Register YubiKey" to add your first key.</div>';
+  } else {
+    keysList.innerHTML = '';
+    keys.forEach((k, i) => {
+      const card = document.createElement('div');
+      card.style.cssText = 'display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px';
+      const left = document.createElement('div');
+      left.style.cssText = 'display:flex;align-items:center;gap:12px';
+      const icon = document.createElement('span');
+      icon.style.fontSize = '22px';
+      icon.textContent = '\uD83D\uDD11';
+      const info = document.createElement('div');
+      const nameEl = document.createElement('div');
+      nameEl.style.cssText = 'font-weight:bold;font-size:14px;color:var(--gold)';
+      nameEl.textContent = k.label || ('YubiKey ' + (i + 1));
+      const detailEl = document.createElement('div');
+      detailEl.style.cssText = 'font-size:11px;color:var(--t3)';
+      detailEl.textContent = 'ID: ' + (k.credential_id_prefix || '').substring(0, 16) + '... \u2022 ' + (k.registered_at ? new Date(k.registered_at).toLocaleDateString() : 'Unknown date');
+      info.appendChild(nameEl);
+      info.appendChild(detailEl);
+      left.appendChild(icon);
+      left.appendChild(info);
+      const badge = document.createElement('span');
+      badge.style.cssText = 'color:var(--green);font-weight:bold;font-size:12px';
+      badge.textContent = '\u2713 REGISTERED';
+      card.appendChild(left);
+      card.appendChild(badge);
+      keysList.appendChild(card);
+    });
+  }
+
+  if (keys.length >= 1) { chk1.textContent = '\u2713'; chk1.style.color = 'var(--green)'; }
+  if (keys.length >= 2) { chk2.textContent = '\u2713'; chk2.style.color = 'var(--green)'; }
+
+  const totpData = await apiFetch('/api/admin/totp/status');
+  if (totpData && totpData.totp_enabled) {
+    chkTotp.textContent = '\u2713'; chkTotp.style.color = 'var(--green)';
+    document.getElementById('hw-totp-badge').textContent = 'ACTIVE';
+    document.getElementById('hw-totp-badge').style.color = 'var(--green)';
+    document.getElementById('hw-totp-btn').style.display = 'none';
+    document.getElementById('hw-totp-status').textContent = '\u2713 TOTP authenticator is active.';
+    document.getElementById('hw-totp-status').style.color = 'var(--green)';
+  }
+
+  const smsData = await apiFetch('/api/admin/sms/status');
+  if (smsData) {
+    if (smsData.sms_verified) {
+      chkSms.textContent = '\u2713'; chkSms.style.color = 'var(--green)';
+      document.getElementById('hw-sms-badge').textContent = 'VERIFIED';
+      document.getElementById('hw-sms-badge').style.color = 'var(--green)';
+      document.getElementById('hw-sms-phone-entry').style.display = 'none';
+      document.getElementById('hw-sms-status').textContent = '\u2713 SMS verification is active.';
+      document.getElementById('hw-sms-status').style.color = 'var(--green)';
+    } else if (smsData.phone_set) {
+      document.getElementById('hw-sms-verify-section').style.display = 'block';
+      document.getElementById('hw-sms-status').textContent = 'Phone set but not yet verified. Send a code to confirm.';
+      document.getElementById('hw-sms-status').style.color = 'var(--gold)';
+    }
+  }
+
+  devicesEl.textContent = keys.length;
+
+  const presenceData = await apiFetch('/api/admin/webauthn/presence');
+  if (presenceData && presenceData.active_key) {
+    document.getElementById('hw-activeKey').textContent = presenceData.active_key;
+    document.getElementById('hw-activeKey').style.color = 'var(--green)';
+    if (presenceData.last_verified) {
+      document.getElementById('hw-lastVerified').textContent = 'Last verified: ' + new Date(presenceData.last_verified).toLocaleString();
+    }
+    methodEl.textContent = 'YubiKey';
+    methodEl.style.color = 'var(--green)';
+  } else if (keys.length > 0) {
+    methodEl.textContent = 'YubiKey (tap to verify)';
+    methodEl.style.color = 'var(--gold)';
+  } else {
+    methodEl.textContent = 'Password';
+    methodEl.style.color = 'var(--amber)';
+  }
+
+  // Update Sentinel session status from presence data
+  if (presenceData) {
+    const scoreEl = document.getElementById('hw-sentinelScore');
+    const statusEl = document.getElementById('hw-sentinelStatus');
+    const isFrozen = presenceData.sentinel_frozen === true;
+    const authMethod = presenceData.sentinel_auth_method || 'password';
+    statusEl.textContent = isFrozen ? 'FROZEN' : 'CLEAR';
+    statusEl.style.color = isFrozen ? 'var(--red)' : 'var(--green)';
+    scoreEl.textContent = isFrozen ? '!' : '\u2713';
+    scoreEl.style.color = isFrozen ? 'var(--red)' : 'var(--green)';
+    methodEl.textContent = authMethod === 'yubikey' ? 'YubiKey' : (authMethod === 'totp' ? 'TOTP' : methodEl.textContent);
+    const unfBtn = document.getElementById('hw-unfreezeBtn');
+    if (unfBtn) unfBtn.style.display = isFrozen ? 'block' : 'none';
+  }
+}
+
+let _hwBusy = false;
+async function hwRegisterYubiKey() {
+  if (_hwBusy) return;
+  if (!window.PublicKeyCredential) {
+    alert('Your browser does not support WebAuthn/FIDO2. Use Chrome, Edge, or Firefox.');
+    return;
+  }
+  _hwBusy = true;
+  const label = prompt('Enter a label for this YubiKey (e.g. "Primary" or "Backup"):');
+  if (!label) return;
+
+  _hwStatus('Generating challenge from server...', 'var(--gold)');
+
+  try {
+    const optionsResp = await apiPost('/api/admin/webauthn/register-options', {});
+    if (!optionsResp || !optionsResp.options) {
+      _hwStatus('Failed to get registration options from server.', 'var(--red)');
+      return;
+    }
+
+    const options = optionsResp.options;
+    options.challenge = _hwB64toBuffer(options.challenge);
+    options.user.id = _hwB64toBuffer(options.user.id);
+    if (options.excludeCredentials) {
+      options.excludeCredentials = options.excludeCredentials.map(c => ({
+        ...c, id: _hwB64toBuffer(c.id)
+      }));
+    }
+
+    _hwStatus('Touch your YubiKey now...', 'var(--gold)');
+
+    const credential = await navigator.credentials.create({ publicKey: options });
+
+    const attestation = {
+      id: credential.id,
+      rawId: _hwBufferToB64(credential.rawId),
+      type: credential.type,
+      response: {
+        attestationObject: _hwBufferToB64(credential.response.attestationObject),
+        clientDataJSON: _hwBufferToB64(credential.response.clientDataJSON),
+      },
+    };
+
+    _hwStatus('Verifying with server...', 'var(--cyan)');
+
+    const result = await apiPost('/api/admin/webauthn/register-complete', {
+      credential: attestation,
+      label: label,
+    });
+
+    if (result && result.success) {
+      _hwStatus(
+        '\u2713 ' + (result.label || 'YubiKey') + ' registered successfully! (' + result.total_keys + ' key' + (result.total_keys > 1 ? 's' : '') + ' total)',
+        'var(--green)'
+      );
+      setTimeout(() => loadHardwareSecurity(), 1000);
+    } else {
+      _hwStatus('Registration failed: ' + (result && result.detail ? result.detail : 'Unknown error'), 'var(--red)');
+    }
+  } catch (err) {
+    _hwStatus('Registration error: ' + err.message, 'var(--red)');
+  } finally {
+    _hwBusy = false;
+  }
+}
+
+// =============================================================================
+// YUBIKEY PRESENCE DETECTION
+// =============================================================================
+
+// =============================================================================
+// YUBIKEY PRESENCE VERIFICATION
+// =============================================================================
+
+async function hwVerifyPresence() {
+  if (_hwBusy) return;
+  if (!window.PublicKeyCredential) {
+    _hwStatus('WebAuthn not supported in this browser.', 'var(--red)');
+    return;
+  }
+  _hwBusy = true;
+  _hwStatus('Requesting challenge...', 'var(--gold)');
+
+  try {
+    const optionsResp = await apiPost('/api/admin/webauthn/auth-options', {});
+    if (!optionsResp || !optionsResp.options) {
+      _hwStatus('Failed to get auth challenge from server.', 'var(--red)');
+      _hwBusy = false;
+      return;
+    }
+
+    const options = optionsResp.options;
+    options.challenge = _hwB64toBuffer(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map(c => ({
+        ...c, id: _hwB64toBuffer(c.id)
+      }));
+    }
+
+    _hwStatus('Touch your YubiKey to verify...', 'var(--gold)');
+
+    const credential = await navigator.credentials.get({ publicKey: options });
+
+    const assertion = {
+      id: credential.id,
+      rawId: _hwBufferToB64(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: _hwBufferToB64(credential.response.clientDataJSON),
+        authenticatorData: _hwBufferToB64(credential.response.authenticatorData),
+        signature: _hwBufferToB64(credential.response.signature),
+      },
+    };
+
+    _hwStatus('Verifying with server...', 'var(--cyan)');
+
+    const result = await apiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+    if (result && result.verified) {
+      _hwStatus('\u2713 ' + result.active_key + ' key verified and active!', 'var(--green)');
+      document.getElementById('hw-activeKey').textContent = result.active_key;
+      document.getElementById('hw-activeKey').style.color = 'var(--green)';
+      document.getElementById('hw-lastVerified').textContent = 'Verified: ' + new Date(result.verified_at).toLocaleString();
+      document.getElementById('hw-authMethod').textContent = 'YubiKey';
+      document.getElementById('hw-authMethod').style.color = 'var(--green)';
+      document.getElementById('hw-sentinelStatus').textContent = 'CLEAR';
+      document.getElementById('hw-sentinelStatus').style.color = 'var(--green)';
+      document.getElementById('hw-sentinelScore').textContent = '\u2713';
+      document.getElementById('hw-sentinelScore').style.color = 'var(--green)';
+      const unfBtn = document.getElementById('hw-unfreezeBtn');
+      if (unfBtn) unfBtn.style.display = 'none';
+    } else {
+      _hwStatus('Key verification failed.', 'var(--red)');
+    }
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      _hwStatus('Verification cancelled.', 'var(--t3)');
+    } else {
+      _hwStatus('Verification error: ' + err.message, 'var(--red)');
+    }
+  } finally {
+    _hwBusy = false;
+  }
+}
+
+// =============================================================================
+// SENTINEL UNFREEZE VIA YUBIKEY
+// =============================================================================
+
+async function hwUnfreezeSession() {
+  if (_hwBusy) return;
+  if (!window.PublicKeyCredential) {
+    _hwStatus('WebAuthn not supported in this browser.', 'var(--red)');
+    return;
+  }
+  _hwBusy = true;
+  _hwStatus('Requesting YubiKey challenge to unfreeze...', 'var(--gold)');
+
+  try {
+    const optionsResp = await apiPost('/api/admin/webauthn/auth-options', {});
+    if (!optionsResp || !optionsResp.options) {
+      _hwStatus('Failed to get auth challenge from server.', 'var(--red)');
+      _hwBusy = false;
+      return;
+    }
+
+    const options = optionsResp.options;
+    options.challenge = _hwB64toBuffer(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map(c => ({
+        ...c, id: _hwB64toBuffer(c.id)
+      }));
+    }
+
+    _hwStatus('Touch your YubiKey to unfreeze session...', 'var(--gold)');
+    const credential = await navigator.credentials.get({ publicKey: options });
+
+    const assertion = {
+      id: credential.id,
+      rawId: _hwBufferToB64(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: _hwBufferToB64(credential.response.clientDataJSON),
+        authenticatorData: _hwBufferToB64(credential.response.authenticatorData),
+        signature: _hwBufferToB64(credential.response.signature),
+      },
+    };
+
+    _hwStatus('Verifying identity and unfreezing...', 'var(--cyan)');
+    const result = await apiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+
+    if (result && result.verified) {
+      _hwStatus('\u2713 Session unfrozen! Verified with ' + result.active_key + ' key.', 'var(--green)');
+      document.getElementById('hw-sentinelStatus').textContent = 'CLEAR';
+      document.getElementById('hw-sentinelStatus').style.color = 'var(--green)';
+      document.getElementById('hw-sentinelScore').textContent = '\u2713';
+      document.getElementById('hw-sentinelScore').style.color = 'var(--green)';
+      document.getElementById('hw-authMethod').textContent = 'YubiKey';
+      document.getElementById('hw-authMethod').style.color = 'var(--green)';
+      document.getElementById('hw-activeKey').textContent = result.active_key;
+      document.getElementById('hw-activeKey').style.color = 'var(--green)';
+      document.getElementById('hw-lastVerified').textContent = 'Verified: ' + new Date(result.verified_at).toLocaleString();
+      const unfBtn = document.getElementById('hw-unfreezeBtn');
+      if (unfBtn) unfBtn.style.display = 'none';
+    } else {
+      _hwStatus('Verification failed — session remains frozen.', 'var(--red)');
+    }
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      _hwStatus('Verification cancelled — session remains frozen.', 'var(--amber)');
+    } else {
+      _hwStatus('Unfreeze error: ' + err.message, 'var(--red)');
+    }
+  } finally {
+    _hwBusy = false;
+  }
+}
+
+// =============================================================================
+// TOTP AUTHENTICATOR SETUP
+// =============================================================================
+
+async function hwSetupTOTP() {
+  const btn = document.getElementById('hw-totp-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  const statusEl = document.getElementById('hw-totp-status');
+  statusEl.textContent = '';
+
+  const data = await apiPost('/api/admin/totp/setup', {});
+  if (!data || !data.secret) {
+    statusEl.textContent = (data && data._error) ? data.detail : 'Failed to generate TOTP secret.';
+    statusEl.style.color = 'var(--red)';
+    btn.disabled = false;
+    btn.textContent = 'Configure TOTP';
+    return;
+  }
+
+  document.getElementById('hw-totp-key').textContent = data.secret;
+  const qrContainer = document.getElementById('hw-totp-qr');
+  if (data.qr_code && qrContainer) {
+    qrContainer.innerHTML = '<img src="data:image/png;base64,' + data.qr_code + '" alt="TOTP QR Code" style="border-radius:8px;border:2px solid var(--bdr);margin:12px 0">';
+    qrContainer.style.display = 'block';
+  }
+  document.getElementById('hw-totp-secret').style.display = 'block';
+  btn.style.display = 'none';
+  statusEl.textContent = 'Scan the QR code with your authenticator app (or enter the secret manually), then enter the 6-digit code below.';
+  statusEl.style.color = 'var(--gold)';
+}
+
+async function hwVerifyTOTP() {
+  const code = document.getElementById('hw-totp-code').value.trim();
+  if (!code || code.length !== 6) {
+    document.getElementById('hw-totp-status').textContent = 'Enter a 6-digit code.';
+    document.getElementById('hw-totp-status').style.color = 'var(--red)';
+    return;
+  }
+  const statusEl = document.getElementById('hw-totp-status');
+  statusEl.textContent = 'Verifying...';
+  statusEl.style.color = 'var(--cyan)';
+
+  const result = await apiPost('/api/admin/totp/verify', { code: code });
+  if (result && result.success) {
+    statusEl.textContent = '\u2713 TOTP authenticator configured successfully!';
+    statusEl.style.color = 'var(--green)';
+    document.getElementById('hw-totp-badge').textContent = 'ACTIVE';
+    document.getElementById('hw-totp-badge').style.color = 'var(--green)';
+    document.getElementById('hw-chk-totp').textContent = '\u2713';
+    document.getElementById('hw-chk-totp').style.color = 'var(--green)';
+    document.getElementById('hw-totp-secret').style.display = 'none';
+  } else {
+    statusEl.textContent = (result && result._error) ? result.detail : 'Invalid code. Make sure your authenticator clock is synced.';
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+// =============================================================================
+// SMS VERIFICATION SETUP
+// =============================================================================
+
+async function hwSetPhone() {
+  const phone = document.getElementById('hw-sms-phone').value.trim();
+  if (!phone) {
+    document.getElementById('hw-sms-status').textContent = 'Enter a phone number.';
+    document.getElementById('hw-sms-status').style.color = 'var(--red)';
+    return;
+  }
+  const statusEl = document.getElementById('hw-sms-status');
+  statusEl.textContent = 'Saving...';
+  statusEl.style.color = 'var(--cyan)';
+
+  const result = await apiPost('/api/admin/sms/set-phone', { phone: phone });
+  if (result && result.phone_set) {
+    statusEl.textContent = 'Phone set: ' + result.phone_masked + '. Now send a verification code.';
+    statusEl.style.color = 'var(--gold)';
+    document.getElementById('hw-sms-verify-section').style.display = 'block';
+  } else {
+    statusEl.textContent = (result && result._error) ? result.detail : 'Failed to set phone number.';
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+async function hwSendSMSCode() {
+  const btn = document.getElementById('hw-sms-send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  const statusEl = document.getElementById('hw-sms-status');
+
+  const result = await apiPost('/api/admin/sms/send-verify', {});
+  if (result && result.sent) {
+    statusEl.textContent = 'Code sent! Check your phone and enter it below.';
+    statusEl.style.color = 'var(--gold)';
+    document.getElementById('hw-sms-code-entry').style.display = 'flex';
+  } else {
+    statusEl.textContent = (result && result._error) ? result.detail : 'Failed to send SMS. Check Twilio configuration.';
+    statusEl.style.color = 'var(--red)';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Resend Code';
+}
+
+async function hwConfirmSMS() {
+  const code = document.getElementById('hw-sms-code').value.trim();
+  if (!code || code.length < 4) {
+    document.getElementById('hw-sms-status').textContent = 'Enter the code from your phone.';
+    document.getElementById('hw-sms-status').style.color = 'var(--red)';
+    return;
+  }
+  const statusEl = document.getElementById('hw-sms-status');
+  statusEl.textContent = 'Verifying...';
+  statusEl.style.color = 'var(--cyan)';
+
+  const result = await apiPost('/api/admin/sms/confirm', { code: code });
+  if (result && result.success) {
+    statusEl.textContent = '\u2713 SMS verification confirmed!';
+    statusEl.style.color = 'var(--green)';
+    document.getElementById('hw-sms-badge').textContent = 'VERIFIED';
+    document.getElementById('hw-sms-badge').style.color = 'var(--green)';
+    document.getElementById('hw-chk-sms').textContent = '\u2713';
+    document.getElementById('hw-chk-sms').style.color = 'var(--green)';
+    document.getElementById('hw-sms-verify-section').style.display = 'none';
+    document.getElementById('hw-sms-phone-entry').style.display = 'none';
+  } else {
+    statusEl.textContent = (result && result._error) ? result.detail : 'Invalid or expired code. Try again.';
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+// =============================================================================
 // INIT
 // =============================================================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -4621,7 +5364,145 @@ document.addEventListener('DOMContentLoaded', () => {
     try { sessionStorage.setItem('token', storedToken); } catch(e) {}
   }
   loadCommandCenter();
+  loadEngagementRequestCount();
 });
+
+// ── Social Developer Tab ──────────────────────────────────────
+const SD_PLATFORMS = [
+  {name:'X (Twitter)', icon:'𝕏', url:'https://console.x.com/accounts/2024064090092806144', key:'x'},
+  {name:'LinkedIn', icon:'in', url:'https://www.linkedin.com/developers/apps', key:'linkedin'},
+  {name:'Instagram / Facebook', icon:'📸', url:'https://developers.facebook.com/apps', key:'instagram'},
+  {name:'YouTube', icon:'▶', url:'https://console.cloud.google.com/apis/credentials', key:'youtube'},
+  {name:'TikTok', icon:'♪', url:'https://developers.tiktok.com/apps', key:'tiktok'},
+  {name:'Pinterest', icon:'📌', url:'https://developers.pinterest.com/apps', key:'pinterest'},
+  {name:'Reddit', icon:'🔴', url:'https://www.reddit.com/prefs/apps', key:'reddit'},
+];
+
+async function loadSocialDeveloper() {
+  const container = document.getElementById('sd-cards');
+  let statusMap = {};
+  try {
+    const data = await apiFetch('/api/skyeye/platform-status');
+    if (data) data.forEach(p => { statusMap[p.platform] = p; });
+  } catch(e) {}
+
+  container.innerHTML = SD_PLATFORMS.map(p => {
+    const s = statusMap[p.key] || {};
+    const health = s.health || 'unknown';
+    const hColors = {healthy:'var(--green)', warning:'var(--amber)', expired:'var(--red)', unknown:'var(--t3)'};
+    const hColor = hColors[health] || hColors.unknown;
+    const connText = s.connection_status === 'connected' ? s.account_name || 'Connected' : (s.connection_status || 'Not configured');
+    return `<div style="background:var(--chamber);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:22px;width:32px;text-align:center">${p.icon}</span>
+        <span style="font-size:15px;font-weight:600;color:var(--t1)">${p.name}</span>
+        <span style="width:8px;height:8px;border-radius:50%;background:${hColor};margin-left:auto;box-shadow:0 0 6px ${hColor}"></span>
+      </div>
+      <div style="font-size:11px;color:var(--t3)">${connText}</div>
+      <button onclick="window.open('${p.url}','_blank')" style="padding:8px 16px;border-radius:8px;background:var(--gold);color:#050505;border:none;cursor:pointer;font-weight:600;font-size:12px;margin-top:auto">Open Console</button>
+    </div>`;
+  }).join('');
+}
+
+// ── Engagement Requests Tab ───────────────────────────────────
+let erCurrentFilter = 'pending';
+
+function erFilterStatus(status) {
+  erCurrentFilter = status;
+  document.querySelectorAll('.er-filter').forEach(b => {
+    b.style.background = 'transparent';
+    b.style.color = 'var(--t2)';
+    b.style.border = '1px solid var(--t3)';
+  });
+  const btn = document.getElementById('er-filter-' + status);
+  if (btn) {
+    const colors = {pending:'var(--gold)', approved:'var(--green)', rejected:'var(--red)'};
+    btn.style.background = colors[status] || 'var(--gold)';
+    btn.style.color = '#050505';
+    btn.style.border = 'none';
+  }
+  loadEngagementRequests();
+}
+
+async function loadEngagementRequests() {
+  const list = document.getElementById('er-list');
+  const empty = document.getElementById('er-empty');
+  try {
+    const data = await apiFetch(`/api/skyeye/engagement-requests?status=${erCurrentFilter}`);
+    if (!data || !data.length) {
+      list.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    list.innerHTML = data.map(r => {
+      const typeLabels = {dm:'Direct Message', proactive_reply:'Proactive Reply', follow_outreach:'Follow Outreach'};
+      const typeColors = {dm:'var(--purple)', proactive_reply:'var(--cyan)', follow_outreach:'var(--green)'};
+      const typeLabel = typeLabels[r.action_type] || r.action_type;
+      const typeColor = typeColors[r.action_type] || 'var(--t2)';
+      const age = r.created_at ? _timeAgo(new Date(r.created_at)) : '';
+      const expiry = r.expires_at ? _timeAgo(new Date(r.expires_at)) : '';
+      const isPending = r.status === 'pending';
+      const buttons = isPending ? `
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button onclick="erApprove(${r.id})" style="padding:6px 16px;border-radius:6px;background:var(--green);color:#050505;border:none;cursor:pointer;font-weight:600;font-size:12px">Approve</button>
+          <button onclick="erReject(${r.id})" style="padding:6px 16px;border-radius:6px;background:transparent;color:var(--red);border:1px solid var(--red);cursor:pointer;font-size:12px">Reject</button>
+        </div>` : `<div style="font-size:11px;color:var(--t3);margin-top:8px">${r.status === 'approved' ? 'Approved' : 'Rejected'} ${r.resolved_at ? _timeAgo(new Date(r.resolved_at)) : ''}</div>`;
+      return `<div style="background:var(--chamber);border:1px solid var(--border);border-radius:12px;padding:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="padding:3px 10px;border-radius:20px;background:${typeColor}22;color:${typeColor};font-size:11px;font-weight:600">${typeLabel}</span>
+            <span style="font-size:13px;font-weight:600;color:var(--t1)">${r.target_user || 'Unknown'}</span>
+            <span style="font-size:11px;color:var(--t3)">${r.platform}</span>
+          </div>
+          <span style="font-size:11px;color:var(--t3)">${age}</span>
+        </div>
+        <div style="font-size:13px;color:var(--t1);background:var(--elevated);padding:10px;border-radius:8px;margin-bottom:8px;line-height:1.5">${(r.content_preview||'').substring(0,300)}</div>
+        ${r.reason ? `<div style="font-size:11px;color:var(--t3)"><strong>Why:</strong> ${r.reason}</div>` : ''}
+        ${buttons}
+      </div>`;
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load requests</div>';
+  }
+}
+
+async function loadEngagementRequestCount() {
+  try {
+    const data = await apiFetch('/api/skyeye/engagement-requests/count');
+    const badge = document.getElementById('engagement-req-count');
+    if (data && data.count > 0) {
+      badge.textContent = data.count;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function erApprove(id) {
+  try {
+    await apiPost(`/api/skyeye/engagement-requests/${id}/approve`);
+    loadEngagementRequests();
+    loadEngagementRequestCount();
+  } catch(e) { alert('Approve failed: ' + e.message); }
+}
+
+async function erReject(id) {
+  try {
+    await apiPost(`/api/skyeye/engagement-requests/${id}/reject`);
+    loadEngagementRequests();
+    loadEngagementRequestCount();
+  } catch(e) { alert('Reject failed: ' + e.message); }
+}
+
+function _timeAgo(d) {
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
 </script>
 </body>
 </html>

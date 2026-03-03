@@ -1,0 +1,78 @@
+---
+description: Token Lab dashboard data integrity — source tagging, usage map rendering, and transaction logging
+alwaysApply: true
+---
+# Token Lab Data Integrity
+
+## Usage Map Must Always Show 4 Categories
+
+The `/api/token-lab/usage-by-source` endpoint must return all 4 canonical sources even when no usage data exists:
+
+| Source Tag | Display Name | Color |
+|---|---|---|
+| `ai_chat` | AI Chat | #C9A962 (gold) |
+| `sanctuary_ai` | Sanctuary AI Response | #4ECDC4 (cyan) |
+| `group_coaching` | Group Coaching | #9D4EDD (purple) |
+| `private_coaching` | Private Coaching | #22C55E (green) |
+
+The endpoint uses `CANONICAL_SOURCES` to fill missing categories with `total_tokens: 0, tx_count: 0`. Non-canonical sources (e.g., `admin_adjust`, `token_share`) are appended after the 4 core categories.
+
+**Why**: When the endpoint returns `[]`, Chart.js renders with a default 0–1 x-axis and no labels. The chart becomes an empty gray rectangle with no actionable information.
+
+## Transaction Action Types
+
+| Action | Source Required | Logged By |
+|---|---|---|
+| `deduct` | Yes (`ai_chat`) | `BillingSystem.use_tokens()` — deducts balance |
+| `usage` | Yes (all 4 sources) | `BillingSystem.add_token_usage()` — tracks usage without deduction |
+| `adjust` | Optional (`admin_adjust`) | Admin token grants/adjustments |
+| `share_out` / `share_in` | Yes (`token_share`) | GKM token sharing |
+| `reward_free_month` | Yes (`sharing_reward`) | 100k sharing milestone |
+
+## Query Filter for Usage Map
+
+The usage-by-source query must filter by `action IN ('deduct', 'usage')` and `source IS NOT NULL`:
+
+```python
+conditions = ["t.created_at >= $1", "t.source IS NOT NULL", "t.action IN ('deduct', 'usage')"]
+```
+
+**Never filter by `amount < 0`** — `add_token_usage()` logs positive amounts with `action = 'usage'` when `deduct_balance=False` (the default for sanctuary_ai, group_coaching, private_coaching).
+
+## Bridge Token Logging Pipeline
+
+```
+User AI interaction
+  → BillingSystem.use_tokens(uid, tokens, source="ai_chat")
+    OR BillingSystem.add_token_usage(uid, tokens, source="sanctuary_ai")
+  → _log_token_transaction(username, action, amount, before, after, source)
+  → _async_log_token_tx()  [fire-and-forget asyncio task]
+  → INSERT INTO token_transactions (..., source, ...)
+```
+
+Requirements for this pipeline to work:
+1. `self.db_pool` must be set on the BillingSystem instance (injected at bridge startup)
+2. The asyncio event loop must be running (`loop.is_running()`)
+3. The `source` parameter must be a non-empty string
+
+If `db_pool` is None, the transaction is silently dropped. The bridge logs `>>> [TOKEN TX LOG] Failed: ...` on PostgreSQL errors.
+
+## Token Lab Auditor Coverage
+
+15 checks across 5 tabs (baseline key: `token_lab_check_count`):
+
+| Tab | Checks | Endpoints |
+|---|---|---|
+| Token Overview | 3 | health, balances, transactions |
+| Analytics | 4 | stats, families, groups, usage-by-source |
+| Token Actions | 3 | adjust, reward, mass-drop (POST) |
+| Cost & Config | 2 | cost-analysis, cost-config (POST) |
+| Data Integrity | 3 | balance_consistency, cost_config_exists, transaction_table_health (DB) |
+
+## Rules
+
+1. **Never add a consumption point without a source tag** — any call to `use_tokens()` or `add_token_usage()` without `source=` produces an unattributed transaction that shows as "Other" in the map.
+2. **usage-by-source must always return canonical sources** — even with empty data, the 4 core categories must be present with `total_tokens: 0`.
+3. **DB checks validate schema, not data volume** — `balance_consistency` checks column vs JSONB sync, `cost_config_exists` checks for positive margins, `transaction_table_health` checks the table exists. These should pass even on a fresh deployment.
+4. **Admin adjustments use `admin_adjust` source** — never leave admin token grants with `source = NULL`.
+5. **After modifying `token_lab_auditor.py`**, update the `token_lab_check_count` row in `trust_baseline` to match the new total.

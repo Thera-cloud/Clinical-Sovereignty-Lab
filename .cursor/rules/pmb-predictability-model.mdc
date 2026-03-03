@@ -1,0 +1,62 @@
+---
+description: Predictability Model of Behavior (PMB) — crisis perception, shame profile, reactivity, reconsolidation readiness, and transgenerational legacy analysis computed per client per session.
+alwaysApply: false
+globs: backend/app/websocket/bridge_server.py, mobile/lib/screens/*pmb*, mobile/lib/screens/coach_portal*, dashboard/my_clients.html, dashboard/nevedal_lab*
+---
+
+# Predictability Model of Behavior (PMB)
+
+Located in `MetricsEngine` within `bridge_server.py`. Runs after every `analyze_and_update()` call. Four subsystems execute in sequence, each reloading fresh metrics before computing:
+
+1. `_compute_crisis_perception()` — objective vs expressed distress
+2. `_compute_shame_profile()` — shame index, core beliefs, masking
+3. `_compute_pmb()` — reactivity, triggers, cycles, reconsolidation readiness
+4. `_extract_legacy_patterns()` — family-of-origin pattern detection
+
+## Data Structures (stored in `nevedal_state`)
+
+| Key | Type | Description |
+|---|---|---|
+| `crisis_perception` | dict | Distress discrepancy, minimization, sensitivity, normalization, baseline enum |
+| `shame_profile` | dict | Shame index (0-1), baseline, core beliefs list, shame map, masking pattern enum |
+| `pmb` | dict | Cyclical patterns, trigger map, reactivity indicators, reconsolidation readiness, predictions |
+| `pmb.legacy_patterns` | list | Transgenerational entries with source, pattern, `reflected_in_client`, `cross_validated` |
+
+## Crisis Perception Baselines
+
+| Baseline | Meaning |
+|---|---|
+| CALIBRATED | Self-report matches objective distress |
+| MINIMIZER | Understates distress (discrepancy < -0.15) |
+| AMPLIFIER | Overstates distress (discrepancy > 0.15) |
+| NORMALIZER | Treats elevated distress as normal |
+| CALIBRATING | < 5 data points collected |
+
+## Reconsolidation Readiness (0-1)
+
+Weighted composite: `therapeutic_range * 0.30 + engagement * 0.25 + emotional_charge * 0.25 + trigger_present * 0.20`. Above 0.6 signals a reconsolidation window to the coach.
+
+## Transgenerational Legacy — 8 Pattern Categories
+
+`emotional_suppression`, `caretaker_role`, `rage_cycle`, `abandonment`, `perfectionism`, `addiction`, `enmeshment`, `neglect`
+
+Detected via family-of-origin references (mom/dad/grandparent/growing up) co-occurring with pattern keywords. Cross-validated against client's own reactivity and crisis perception baseline (e.g., parent's `abandonment` reflected if client is `AMPLIFIER`).
+
+## Minimum Data Requirements
+
+| Feature | Min entries needed |
+|---|---|
+| Cyclical patterns | 28 mood history entries |
+| Crisis precursors | 3 crisis events |
+| Trigger mapping | 10 interactions |
+| Reactivity classification | 30 interactions |
+| Core beliefs | 8 shame indicator entries |
+| Legacy patterns | 5 family references |
+
+## Rules
+
+- Never modify reconsolidation readiness weights without updating the patent document
+- Legacy patterns are surfaced to coaches as "reflect with curiosity only" — never as confrontational prompts
+- CEE mismatches increment `corrective_experience_count` on reflected legacy patterns — this tracks generational cycle-breaking
+- PMB predictions require >= 0.5 confidence before surfacing to UI
+- Max 20 legacy patterns stored per client (oldest pruned)

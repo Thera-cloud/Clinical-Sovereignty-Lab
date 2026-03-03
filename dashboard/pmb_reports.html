@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMB Command Center | Sovereign Command</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/globe.gl@2"></script>
+    <style>
+        :root {
+            --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --border: #252525; --border-active: #333333;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2); --gold-text: #C9A962;
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
+            --orange: #FF9500; --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.1);
+            --text-primary: #FFFFFF; --text-secondary: #888888; --text-muted: #555555;
+            --font-body: 'DM Sans', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-display: 'Cormorant Garamond', serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, var(--bg-dark) 100%); border-bottom: 1px solid var(--gold-dim); padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-family: var(--font-display); font-size: 20px; font-weight: 600; color: var(--gold-text); }
+        .header-right { display: flex; gap: 8px; align-items: center; }
+        .hdr-btn { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-secondary); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-family: var(--font-body); font-size: 12px; font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 5px; }
+        .hdr-btn:hover { border-color: var(--gold-text); color: var(--gold-text); }
+        .hdr-btn .badge { background: var(--red); color: #000; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px; min-width: 16px; text-align: center; }
+        .hdr-btn .badge.zero { background: var(--text-muted); }
+        .filter-bar { background: var(--bg-dark); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        .fb-select, .fb-btn { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-primary); padding: 6px 10px; border-radius: 6px; font-size: 12px; font-family: var(--font-body); cursor: pointer; }
+        .fb-select:focus { border-color: var(--cyan); outline: none; }
+        .fb-btn.active { border-color: var(--gold-text); color: var(--gold-text); background: var(--gold-dim); }
+        .fb-sep { width: 1px; height: 24px; background: var(--border); }
+        .main-content { display: flex; height: calc(100vh - 100px); }
+        @media (max-width: 900px) { .main-content { flex-direction: column; height: auto; } }
+        .globe-panel { flex: 0 0 50%; position: relative; background: var(--bg-void); min-height: 400px; overflow: hidden; }
+        .report-panel { flex: 1; overflow-y: auto; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+        .rp-section { padding: 16px 18px; border-bottom: 1px solid var(--border); }
+        .rp-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 700; margin-bottom: 10px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
+        .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+        .stat-val { font-size: 20px; font-weight: 700; font-family: var(--font-mono); }
+        .stat-lbl { font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary); margin-top: 2px; }
+        .member-list { max-height: 250px; overflow-y: auto; }
+        .member-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; transition: background 0.15s; }
+        .member-row:hover { background: rgba(255,255,255,0.04); }
+        .member-row.selected { background: var(--gold-dim); border: 1px solid var(--gold-text); }
+        .member-row + .member-row { border-top: 1px solid rgba(255,255,255,0.03); }
+        .member-name { font-weight: 500; }
+        .member-metric { font-family: var(--font-mono); font-size: 11px; color: var(--cyan); }
+        .pmb-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
+        .pmb-badge.minimizer { background: rgba(255,149,0,0.15); color: #FF9500; }
+        .pmb-badge.amplifier { background: rgba(255,59,59,0.15); color: #FF3B3B; }
+        .pmb-badge.normalizer { background: rgba(0,255,136,0.1); color: #00FF88; }
+        .pmb-badge.calibrating { background: rgba(136,136,136,0.15); color: #888; }
+        .pmb-badge.calibrated { background: rgba(0,212,255,0.1); color: #00D4FF; }
+        .pmb-badge.none { background: rgba(85,85,85,0.15); color: #555; }
+        .detail-box { padding: 16px 18px; flex: 1; overflow-y: auto; }
+        .wisdom-item { padding: 8px 10px; border-radius: 6px; background: var(--bg-card); margin-bottom: 6px; font-size: 11px; }
+        .wisdom-item .wi-type { font-weight: 600; color: var(--cyan); font-size: 10px; text-transform: uppercase; }
+        .wisdom-item .wi-text { color: var(--text-secondary); margin-top: 3px; line-height: 1.4; }
+        .wisdom-item .wi-time { color: var(--text-muted); font-size: 10px; margin-top: 3px; }
+        .var-ref-toggle { position: fixed; bottom: 16px; left: 16px; z-index: 900; background: var(--bg-card); border: 1px solid var(--border); color: var(--cyan); padding: 7px 14px; border-radius: 8px; font-size: 11px; font-family: var(--font-body); font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .var-ref-toggle:hover { border-color: var(--cyan); background: var(--cyan-dim); }
+        .var-ref-toggle.active { border-color: var(--cyan); background: var(--cyan-dim); }
+        .var-ref-panel { position: fixed; left: 0; top: 0; bottom: 0; width: 280px; z-index: 899; background: rgba(10,10,10,0.95); border-right: 1px solid var(--border); backdrop-filter: blur(10px); transform: translateX(-100%); transition: transform 0.25s ease; overflow-y: auto; padding-top: 50px; }
+        .var-ref-panel.open { transform: translateX(0); }
+        .var-ref-panel-header { position: sticky; top: 0; padding: 12px 16px 8px; background: rgba(10,10,10,0.98); border-bottom: 1px solid var(--border); z-index: 1; }
+        .var-ref-panel-header span { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 700; }
+        .var-ref-panel-close { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; line-height: 1; }
+        .var-ref-panel-close:hover { color: var(--text-primary); }
+        .var-ref-content { display: grid; gap: 6px; padding: 10px 16px 20px; }
+        .var-ref-item { padding: 6px 10px; background: var(--bg-card); border-radius: 6px; }
+        .var-ref-item .vr-name { font-size: 11px; font-weight: 600; color: var(--cyan); }
+        .var-ref-item .vr-desc { font-size: 10px; color: var(--text-secondary); line-height: 1.4; }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; overflow-y: auto; }
+        .overlay.open { display: block; }
+        .overlay-content { max-width: 800px; margin: 40px auto; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 12px; padding: 24px; position: relative; }
+        .overlay-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; }
+        .overlay-close:hover { color: var(--text-primary); }
+        .loading { text-align: center; padding: 40px; color: var(--text-secondary); }
+        .dist-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .dist-label { width: 80px; font-size: 10px; text-align: right; color: var(--text-secondary); font-weight: 600; }
+        .dist-track { flex: 1; height: 18px; background: var(--bg-dark); border-radius: 3px; overflow: hidden; }
+        .dist-fill { height: 100%; border-radius: 3px; transition: width 0.4s; min-width: 2px; }
+        .coherence-bar { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+        .coherence-bar .cb-name { width: 80px; font-size: 11px; font-weight: 600; }
+        .coherence-bar .cb-track { flex: 1; height: 20px; background: var(--bg-dark); border-radius: 4px; overflow: hidden; }
+        .coherence-bar .cb-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+        .coherence-bar .cb-val { width: 50px; text-align: right; font-family: var(--font-mono); font-size: 12px; }
+        .info-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; }
+        .info-label { color: var(--text-secondary); }
+        .info-value { font-family: var(--font-mono); }
+        .pmb-section { margin-bottom: 14px; }
+        .pmb-section-title { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--purple); font-weight: 700; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+        .pmb-meter { height: 6px; background: var(--bg-dark); border-radius: 3px; overflow: hidden; margin: 4px 0 8px 0; }
+        .pmb-meter-fill { height: 100%; border-radius: 3px; }
+        details summary { cursor: pointer; color: var(--cyan); font-size: 11px; padding: 6px 20px; }
+        details summary:hover { color: var(--gold-text); }
+        .globe-global-score { position: absolute; bottom: 16px; left: 16px; background: rgba(10,10,10,0.85); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; z-index: 10; }
+        .globe-global-score .ggs-label { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+        .globe-global-score .ggs-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>PMB Command Center</h1>
+    <div class="header-right">
+        <button class="hdr-btn" onclick="openQueueOverlay()">Queue <span class="badge zero" id="queueBadge">0</span></button>
+        <button class="hdr-btn" onclick="openHistoryOverlay()">History</button>
+        <button class="hdr-btn" onclick="location.href='command.html'">Back</button>
+    </div>
+</div>
+
+<div class="filter-bar">
+    <select class="fb-select" id="idType" onchange="onIdTypeChange()">
+        <option value="all">All Clients</option>
+        <option value="coach">By Coach</option>
+        <option value="family">By Family</option>
+        <option value="group">By Community Group</option>
+        <option value="company">By Company</option>
+        <option value="individual">Individual</option>
+    </select>
+    <select class="fb-select" id="idPicker" onchange="onIdPick()" style="display:none;min-width:160px;"></select>
+    <div class="fb-sep"></div>
+    <button class="fb-btn active" id="modePmb" onclick="setMode('pmb')">PMB</button>
+    <button class="fb-btn" id="modeStats" onclick="setMode('stats')">STATS</button>
+    <button class="fb-btn" id="modeCoherence" onclick="setMode('coherence')">Coherence</button>
+    <div class="fb-sep"></div>
+    <select class="fb-select" id="varSelect" onchange="onVarChange()"></select>
+    <div class="fb-sep"></div>
+    <button class="fb-btn" id="toggleProj" onclick="toggleProjection()">Flat Map</button>
+    <button class="fb-btn active" id="toggleHeat" onclick="toggleHeatmap()">Heatmap</button>
+    <button class="fb-btn" id="toggleCoach" onclick="toggleCoachOverlay()">Coach Overlay</button>
+</div>
+
+<button class="var-ref-toggle" id="varRefToggle" onclick="toggleVarRefPanel()">Variables</button>
+<div class="var-ref-panel" id="varRefPanel">
+    <div class="var-ref-panel-header">
+        <span>Variable Reference</span>
+        <button class="var-ref-panel-close" onclick="toggleVarRefPanel()">&times;</button>
+    </div>
+    <div class="var-ref-content" id="varRefGrid"></div>
+</div>
+
+<div class="main-content">
+    <div class="globe-panel" id="globeContainer">
+        <div class="globe-global-score" id="globalScoreBox" style="display:none;">
+            <div class="ggs-label">Global Coherence</div>
+            <div class="ggs-value" id="globalScoreVal">--</div>
+        </div>
+    </div>
+    <div class="report-panel">
+        <div class="rp-section" id="aggregateSection">
+            <div class="rp-title">Aggregate Summary</div>
+            <div class="stat-grid" id="aggregateGrid"><div class="loading">Loading...</div></div>
+        </div>
+        <div class="rp-section">
+            <div class="rp-title">Members</div>
+            <div class="member-list" id="memberList"></div>
+        </div>
+        <div class="detail-box" id="detailBox" style="display:none;">
+            <div class="rp-title" style="display:flex;justify-content:space-between;align-items:center;">Detail View <button onclick="closeDetail()" style="background:none;border:1px solid var(--border);color:var(--text-muted);cursor:pointer;border-radius:4px;padding:2px 8px;font-size:10px;">&times; Close</button></div>
+            <div id="detailContent"></div>
+        </div>
+        <div class="rp-section" id="wisdomSection">
+            <div class="rp-title">Wisdom Feed</div>
+            <div id="wisdomFeed"><div class="loading">Loading...</div></div>
+        </div>
+    </div>
+</div>
+
+<div class="overlay" id="queueOverlay"><div class="overlay-content"><button class="overlay-close" onclick="closeQueue()">&times;</button><div id="queueContent"><div class="loading">Loading...</div></div></div></div>
+<div class="overlay" id="historyOverlay"><div class="overlay-content"><button class="overlay-close" onclick="closeHistory()">&times;</button><div id="historyContent"><div class="loading">Loading...</div></div></div></div>
+
+<script>
+function _recoverAuth() {
+    function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+    var hp = new URLSearchParams(location.hash.slice(1));
+    var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+    if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+    if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+    if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+    if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+    if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) try { sessionStorage.setItem('token', ct); } catch(e){} }
+    if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) try { sessionStorage.setItem('username', cu); } catch(e){} }
+    if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) try { sessionStorage.setItem('profile', cp); } catch(e){} }
+}
+_recoverAuth();
+
+var API = '';
+(function() { var h = location.hostname; if (!h || h === 'localhost' || h === '127.0.0.1' || location.protocol === 'file:') API = 'https://api.sovereignsanctuary.net'; else if (h.indexOf('sovereignsanctuary') >= 0) API = ''; else API = location.protocol + '//' + h + ':8000'; })();
+function _authHeaders(ct) { var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || ''; var h = { 'Authorization': 'Bearer ' + t }; if (ct) h['Content-Type'] = ct; return h; }
+function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtPct(v) { if (v == null) return '\u2014'; var n = parseFloat(v); return isNaN(n) ? '\u2014' : (n * 100).toFixed(0) + '%'; }
+function fmtDec(v, d) { if (v == null) return '\u2014'; var n = parseFloat(v); return isNaN(n) ? '\u2014' : n.toFixed(d || 3); }
+function timeAgo(iso) { if (!iso) return ''; var s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000); if (s < 60) return 'just now'; if (s < 3600) return Math.floor(s / 60) + 'm ago'; if (s < 86400) return Math.floor(s / 3600) + 'h ago'; return Math.floor(s / 86400) + 'd ago'; }
+function colorScale(v, invert) { var t = Math.max(0, Math.min(1, v || 0)); if (invert) t = 1 - t; var r = Math.round(255 * (1 - t)); var g = Math.round(255 * t); return 'rgb(' + r + ',' + g + ',60)'; }
+var REACT_COLORS = { FIGHT: '#FF3B3B', FLIGHT: '#FF9500', FREEZE: '#00D4FF', FAWN: '#9D4EDD', MIXED: '#888888' };
+var BASELINE_COLORS = { MINIMIZER: '#FF9500', AMPLIFIER: '#FF3B3B', NORMALIZER: '#00FF88', CALIBRATED: '#00D4FF', CALIBRATING: '#888888' };
+
+var VAR_DESCRIPTIONS = {
+    'Distress Discrepancy': 'Gap between objective and expressed distress. Positive = underreporting.',
+    'Minimization Score': 'EMA tracking of underreported distress frequency.',
+    'Sensitivity Score': 'EMA tracking of overreported distress frequency.',
+    'Normalization Index': 'Stability measure of discrepancy history. High = consistent pattern.',
+    'Perception Baseline': 'Classification: MINIMIZER, AMPLIFIER, NORMALIZER, CALIBRATED, CALIBRATING.',
+    'Shame Index': 'Weighted composite: self-blame (0.35) + unworthiness (0.40) + deflection (0.25).',
+    'Shame Baseline': 'EMA of shame index \u2014 resting shame level.',
+    'Masking Pattern': 'How shame manifests: FEAR, ANGER, WITHDRAWAL, PEOPLE_PLEASING.',
+    'Reactivity Type': 'Dominant stress response: FIGHT, FLIGHT, FREEZE, FAWN, or MIXED.',
+    'Reconsolidation Readiness': 'Optimal window score for memory reconsolidation work.',
+    'Legacy Patterns': 'Inherited behavioral patterns from family-of-origin.',
+    'C_emo (Coherence)': 'Quantum Emotional Coherence (0-1). Higher = better alignment.',
+    'GAP (Growth)': 'Growth Attunement Potential \u2014 readiness for change.',
+    'Quantum (Wellness)': 'Overall quantum wellness composite.',
+    'Anxiety Level': 'Current anxiety (0-1). Lower = healthier.',
+    'Stress Level': 'Current stress (0-1). Lower = healthier.',
+    'Engagement': 'Session engagement (0-1). Higher = more engaged.',
+    'Layer 1: Individual': 'Per-client emotional coherence (C_emo).',
+    'Layer 2: Family': 'Mean coherence + system resonance across family unit.',
+    'Layer 3: Community': 'Aggregated across geographic community groups.',
+    'Layer 4: Cultural': 'Internal therapeutic state vs external cultural sentiment.',
+    'Layer 5: Global': 'Weighted synthesis \u2014 planetary emotional weather report.',
+    '\u2500\u2500 PERCEPTION BASELINES \u2500\u2500': '',
+    'CALIBRATING': 'Fewer than 5 data points collected. System is still gathering baseline data for this client.',
+    'CALIBRATED': 'Self-reported distress matches objective distress markers. The client has accurate self-perception.',
+    'MINIMIZER': 'Client consistently understates distress (discrepancy < -0.15). Objective indicators show higher distress than reported.',
+    'AMPLIFIER': 'Client consistently overstates distress (discrepancy > 0.15). Objective indicators show lower distress than reported.',
+    'NORMALIZER': 'Client treats elevated distress as normal. High distress levels with flat emotional reporting.',
+    '\u2500\u2500 REACTIVITY TYPES \u2500\u2500': '',
+    'FIGHT': 'Dominant stress response is confrontation, anger, or resistance under pressure.',
+    'FLIGHT': 'Dominant stress response is avoidance, distraction, or escape behaviors.',
+    'FREEZE': 'Dominant stress response is immobilization, shutdown, or dissociation.',
+    'FAWN': 'Dominant stress response is people-pleasing, over-accommodation, or self-abandonment.',
+    'MIXED': 'No single dominant reactivity pattern. Client shifts between multiple stress responses.',
+    '\u2500\u2500 MASKING PATTERNS \u2500\u2500': '',
+    'FEAR (Masking)': 'Shame manifests as anxiety, avoidance, or hypervigilance \u2014 hiding vulnerability behind worry.',
+    'ANGER (Masking)': 'Shame manifests as irritability, blame, or outward aggression \u2014 deflecting inward pain outward.',
+    'WITHDRAWAL (Masking)': 'Shame manifests as isolation, silence, or emotional shutdown \u2014 disappearing to avoid exposure.',
+    'PEOPLE_PLEASING (Masking)': 'Shame manifests as excessive accommodation \u2014 earning worth through others\u2019 approval.',
+    '\u2500\u2500 LEGACY PATTERN TYPES \u2500\u2500': '',
+    'Emotional Suppression': 'Family-of-origin pattern: emotions were discouraged, punished, or ignored.',
+    'Caretaker Role': 'Client assumed parental responsibilities as a child (parentification).',
+    'Rage Cycle': 'Transgenerational pattern of explosive anger followed by guilt or withdrawal.',
+    'Abandonment': 'Core wound from physical or emotional absence of caregiver(s).',
+    'Perfectionism': 'Worth was tied to performance; mistakes were unacceptable in the family system.',
+    'Addiction': 'Substance or behavioral addiction patterns passed through generations.',
+    'Enmeshment': 'Blurred boundaries between family members; individual identity was suppressed.',
+    'Neglect': 'Basic emotional or physical needs were chronically unmet in childhood.'
+};
+
+var _geoData = null, _coherenceData = null, _wisdomData = null;
+var _globe = null, _is3D = true, _showCoaches = false, _showHeatmap = true;
+var _currentMode = 'pmb';
+var _currentVar = 'reactivity_type';
+var _filteredClients = [], _selectedHwId = null;
+
+var PMB_VARS = [
+    { key: 'reactivity_type', label: 'Reactivity Type', cat: true },
+    { key: 'crisis_baseline', label: 'Crisis Baseline', cat: true },
+    { key: 'shame_index', label: 'Shame Index', invert: true },
+    { key: 'reconsolidation_readiness', label: 'Reconsolidation' },
+    { key: 'legacy_count', label: 'Legacy Count' }
+];
+var STATS_VARS = [
+    { key: 'c_emo', label: 'C_emo' },
+    { key: 'gap', label: 'GAP' },
+    { key: 'quantum', label: 'Quantum' },
+    { key: 'anxiety_level', label: 'Anxiety', invert: true },
+    { key: 'stress_level', label: 'Stress', invert: true },
+    { key: 'engagement', label: 'Engagement' }
+];
+
+function renderVarRef() {
+    var html = '';
+    Object.keys(VAR_DESCRIPTIONS).forEach(function(k) {
+        var desc = VAR_DESCRIPTIONS[k];
+        if (!desc) {
+            html += '<div style="margin-top:10px;padding:4px 0;border-bottom:1px solid var(--border);font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--gold-dim);font-weight:700;">' + esc(k) + '</div>';
+        } else {
+            html += '<div class="var-ref-item"><div class="vr-name">' + esc(k) + '</div><div class="vr-desc">' + esc(desc) + '</div></div>';
+        }
+    });
+    document.getElementById('varRefGrid').innerHTML = html;
+}
+renderVarRef();
+
+function toggleVarRefPanel() {
+    var panel = document.getElementById('varRefPanel');
+    var btn = document.getElementById('varRefToggle');
+    panel.classList.toggle('open');
+    btn.classList.toggle('active');
+}
+
+function populateVarSelect() {
+    var sel = document.getElementById('varSelect');
+    sel.innerHTML = '';
+    var vars = _currentMode === 'pmb' ? PMB_VARS : _currentMode === 'stats' ? STATS_VARS : [];
+    vars.forEach(function(v) {
+        var opt = document.createElement('option');
+        opt.value = v.key; opt.textContent = v.label;
+        sel.appendChild(opt);
+    });
+    if (vars.length > 0) _currentVar = vars[0].key;
+    sel.style.display = _currentMode === 'coherence' ? 'none' : '';
+}
+
+function setMode(m) {
+    _currentMode = m;
+    document.getElementById('modePmb').className = 'fb-btn' + (m === 'pmb' ? ' active' : '');
+    document.getElementById('modeStats').className = 'fb-btn' + (m === 'stats' ? ' active' : '');
+    document.getElementById('modeCoherence').className = 'fb-btn' + (m === 'coherence' ? ' active' : '');
+    document.getElementById('globalScoreBox').style.display = m === 'coherence' ? '' : 'none';
+    populateVarSelect();
+    renderAggregate();
+    renderMemberList();
+    updateGlobeColors();
+}
+
+function getClientVar(c, key) {
+    if (_currentMode === 'pmb') return c.pmb ? c.pmb[key] : null;
+    if (_currentMode === 'stats') return c.stats ? c.stats[key] : null;
+    return null;
+}
+
+function pointColor(c) {
+    if (_currentMode === 'coherence') return '#00D4FF';
+    var val = getClientVar(c, _currentVar);
+    if (val == null) return '#333';
+    if (_currentVar === 'reactivity_type') return REACT_COLORS[String(val).toUpperCase()] || '#888';
+    if (_currentVar === 'crisis_baseline') return BASELINE_COLORS[String(val).toUpperCase()] || '#888';
+    var varDef = (_currentMode === 'pmb' ? PMB_VARS : STATS_VARS).filter(function(v) { return v.key === _currentVar; })[0];
+    return colorScale(val, varDef && varDef.invert);
+}
+
+function heatWeight(c) {
+    if (_currentMode === 'coherence') return 0.5;
+    var val = getClientVar(c, _currentVar);
+    if (val == null) return 0.15;
+    if (typeof val === 'string') return 0.4;
+    return Math.max(0.1, Math.min(1.0, Math.abs(parseFloat(val))));
+}
+
+function heatColorFn() {
+    var varDef = (_currentMode === 'pmb' ? PMB_VARS : STATS_VARS).filter(function(v) { return v.key === _currentVar; })[0];
+    var invert = varDef && varDef.invert;
+    if (_currentMode === 'coherence') return function(t) { return 'rgba(0, 212, 255, ' + t + ')'; };
+    if (invert) return function(t) { return 'rgba(255, ' + Math.round(80 * (1 - t)) + ', ' + Math.round(60 * (1 - t)) + ', ' + t + ')'; };
+    return function(t) { return 'rgba(' + Math.round(60 * (1 - t)) + ', ' + Math.round(255 * t) + ', ' + Math.round(100 * t) + ', ' + t + ')'; };
+}
+
+function initGlobe() {
+    var container = document.getElementById('globeContainer');
+    var w = container.clientWidth || 600;
+    var h = container.clientHeight || 500;
+    _globe = Globe()(container)
+        .width(w)
+        .height(h)
+        .globeImageUrl('//unpkg.com/three-globe/example/img/earth-night.jpg')
+        .backgroundColor('#050505')
+        .atmosphereColor('rgba(0, 212, 255, 0.15)')
+        .atmosphereAltitude(0.2)
+        .pointsData([])
+        .pointLat('lat').pointLng('lng')
+        .pointColor(function(d) { return pointColor(d); })
+        .pointAltitude(0.02)
+        .pointRadius(function(d) { return d.has_pmb ? 0.4 : 0.25; })
+        .pointLabel(function(d) {
+            var val = getClientVar(d, _currentVar);
+            var vStr = val != null ? (typeof val === 'number' ? fmtDec(val, 2) : val) : 'N/A';
+            var src = d.geo_source === 'ip' ? 'IP' : d.geo_source === 'timezone' ? 'TZ' : d.geo_source === 'state' ? 'State' : 'approx';
+            return '<div style="font-family:DM Sans;font-size:12px;background:rgba(10,10,10,0.92);padding:8px 12px;border-radius:8px;border:1px solid #333;max-width:220px;">' +
+                '<b style="color:#C9A962;">' + esc(d.name) + '</b><br>' +
+                '<span style="color:#888;">' + _currentVar.replace(/_/g, ' ') + ':</span> ' + vStr +
+                '<br><span style="color:#555;font-size:10px;">loc: ' + src + (d.city ? ' \u2022 ' + esc(d.city) : '') + '</span></div>';
+        })
+        .onPointClick(function(d) { selectMember(d.hardware_id); })
+        .enablePointerInteraction(true)
+        .heatmapsData([])
+        .heatmapPointLat('lat')
+        .heatmapPointLng('lng')
+        .heatmapPointWeight('w')
+        .heatmapTopAltitude(0.15)
+        .heatmapBandwidth(3.5)
+        .heatmapColorFn(heatColorFn());
+
+    _globe.controls().autoRotate = true;
+    _globe.controls().autoRotateSpeed = 0.3;
+    container.addEventListener('mousedown', function() { _globe.controls().autoRotate = false; });
+
+    window.addEventListener('resize', function() {
+        if (_globe) {
+            _globe.width(container.clientWidth || 600);
+            _globe.height(container.clientHeight || 500);
+        }
+    });
+}
+
+function updateHeatmap() {
+    if (!_globe) return;
+    if (!_showHeatmap) { _globe.heatmapsData([]); return; }
+    var pts = _filteredClients.filter(function(c) { return c.lat != null && c.lng != null; });
+    var heatPts = pts.map(function(c) { return { lat: c.lat, lng: c.lng, w: heatWeight(c) }; });
+    _globe.heatmapColorFn(heatColorFn());
+    _globe.heatmapsData(heatPts.length > 0 ? [heatPts] : []);
+}
+
+function updateGlobeData() {
+    if (!_globe || !_geoData) return;
+    var pts = _filteredClients.filter(function(c) { return c.lat != null && c.lng != null; });
+    _globe.pointsData(pts);
+    updateHeatmap();
+
+    if (_showCoaches && _geoData.coaches) {
+        var coaches = _geoData.coaches.filter(function(c) { return c.lat != null && c.lng != null; });
+        _globe.customLayerData(coaches)
+            .customThreeObject(function(d) {
+                var geo = new THREE.SphereGeometry(0.6, 8, 8);
+                var mat = new THREE.MeshBasicMaterial({ color: '#FFD700' });
+                return new THREE.Mesh(geo, mat);
+            })
+            .customThreeObjectUpdate(function(obj, d) {
+                Object.assign(obj.position, _globe.getCoords(d.lat, d.lng, 0.02));
+            });
+    } else {
+        _globe.customLayerData([]);
+    }
+}
+
+function updateGlobeColors() {
+    if (!_globe) return;
+    _globe.pointColor(function(d) { return pointColor(d); });
+    updateHeatmap();
+}
+
+function zoomToGroup(clients) {
+    if (!_globe || !clients || clients.length === 0) return;
+    var locs = clients.filter(function(c) { return c.lat != null; });
+    if (locs.length === 0) return;
+    var lat = 0, lng = 0;
+    locs.forEach(function(c) { lat += c.lat; lng += c.lng; });
+    lat /= locs.length; lng /= locs.length;
+    var alt = locs.length <= 3 ? 1.2 : locs.length <= 10 ? 1.8 : 2.5;
+    _globe.pointOfView({ lat: lat, lng: lng, altitude: alt }, 1000);
+}
+
+function toggleProjection() {
+    _is3D = !_is3D;
+    document.getElementById('toggleProj').textContent = _is3D ? 'Flat Map' : '3D Globe';
+    if (_is3D) { _globe.projectionType(null); } else { _globe.projectionType('naturalEarth1'); }
+}
+function toggleHeatmap() {
+    _showHeatmap = !_showHeatmap;
+    document.getElementById('toggleHeat').className = 'fb-btn' + (_showHeatmap ? ' active' : '');
+    updateHeatmap();
+}
+function toggleCoachOverlay() {
+    _showCoaches = !_showCoaches;
+    document.getElementById('toggleCoach').className = 'fb-btn' + (_showCoaches ? ' active' : '');
+    updateGlobeData();
+}
+
+function onVarChange() { _currentVar = document.getElementById('varSelect').value; updateGlobeColors(); renderMemberList(); }
+
+function onIdTypeChange() {
+    var type = document.getElementById('idType').value;
+    var picker = document.getElementById('idPicker');
+    if (type === 'all') { picker.style.display = 'none'; applyFilter('all', null); return; }
+    picker.style.display = '';
+    picker.innerHTML = '<option value="">-- select --</option>';
+    var clients = (_geoData && _geoData.clients) || [];
+    var opts = [];
+    if (type === 'coach') {
+        var seen = {};
+        clients.forEach(function(c) { var cn = c.coach_name || c.coach_id || ''; if (cn && !seen[cn]) { seen[cn] = true; opts.push(cn); } });
+    } else if (type === 'family') {
+        var seen2 = {};
+        clients.forEach(function(c) { var f = c.family_id; if (f && !seen2[f]) { seen2[f] = true; opts.push(f); } });
+    } else if (type === 'group') {
+        var seen3 = {};
+        clients.forEach(function(c) { (c.group_names || []).forEach(function(g) { if (g && !seen3[g]) { seen3[g] = true; opts.push(g); } }); });
+    } else if (type === 'company') {
+        var seen4 = {};
+        clients.forEach(function(c) { var co = c.company_id; if (co && !seen4[co]) { seen4[co] = true; opts.push(co); } });
+    } else if (type === 'individual') {
+        clients.forEach(function(c) { opts.push(c.name || c.username); });
+    }
+    opts.sort();
+    opts.forEach(function(o) { var el = document.createElement('option'); el.value = o; el.textContent = o; picker.appendChild(el); });
+}
+
+function onIdPick() {
+    var type = document.getElementById('idType').value;
+    var val = document.getElementById('idPicker').value;
+    if (!val) { applyFilter('all', null); return; }
+    applyFilter(type, val);
+}
+
+function applyFilter(type, val) {
+    var clients = (_geoData && _geoData.clients) || [];
+    if (type === 'all' || !val) { _filteredClients = clients; }
+    else if (type === 'coach') { _filteredClients = clients.filter(function(c) { return (c.coach_name || c.coach_id) === val; }); }
+    else if (type === 'family') { _filteredClients = clients.filter(function(c) { return c.family_id === val; }); }
+    else if (type === 'group') { _filteredClients = clients.filter(function(c) { return (c.group_names || []).indexOf(val) >= 0; }); }
+    else if (type === 'company') { _filteredClients = clients.filter(function(c) { return c.company_id === val; }); }
+    else if (type === 'individual') { _filteredClients = clients.filter(function(c) { return (c.name || c.username) === val; }); }
+    updateGlobeData();
+    zoomToGroup(_filteredClients);
+    renderAggregate();
+    renderMemberList();
+    _selectedHwId = null;
+    document.getElementById('detailBox').style.display = 'none';
+    document.getElementById('wisdomSection').style.display = '';
+}
+
+function renderAggregate() {
+    var el = document.getElementById('aggregateGrid');
+    var list = _filteredClients;
+    if (_currentMode === 'pmb') {
+        var withPmb = list.filter(function(c) { return c.has_pmb; });
+        var avgRecon = 0, avgShame = 0;
+        withPmb.forEach(function(c) { avgRecon += (c.pmb && c.pmb.reconsolidation_readiness) || 0; avgShame += (c.pmb && c.pmb.shame_index) || 0; });
+        avgRecon /= Math.max(withPmb.length, 1); avgShame /= Math.max(withPmb.length, 1);
+        el.innerHTML = sc(list.length, 'Clients', '') + sc(withPmb.length, 'With PMB', 'var(--cyan)') + sc(fmtPct(avgRecon), 'Avg Reconsolidation', colorScale(avgRecon)) + sc(fmtPct(avgShame), 'Avg Shame', colorScale(avgShame, true));
+    } else if (_currentMode === 'stats') {
+        var withS = list.filter(function(c) { return c.stats; });
+        var tot = { c: 0, g: 0, q: 0, a: 0, s: 0, e: 0, b: 0 };
+        withS.forEach(function(c) { var s = c.stats; tot.c += s.c_emo || 0; tot.g += s.gap || 0; tot.q += s.quantum || 0; tot.a += s.anxiety_level || 0; tot.s += s.stress_level || 0; tot.e += s.engagement || 0; tot.b += s.breakthrough_count || 0; });
+        var n = Math.max(withS.length, 1);
+        el.innerHTML = sc(list.length, 'Clients', '') + sc(fmtDec(tot.c / n, 3), 'Avg C_emo', colorScale(tot.c / n)) + sc(fmtDec(tot.g / n, 3), 'Avg GAP', colorScale(tot.g / n)) + sc(fmtDec(tot.q / n, 3), 'Avg Quantum', colorScale(tot.q / n)) + sc(fmtDec(tot.a / n, 2), 'Avg Anxiety', colorScale(tot.a / n, true)) + sc(tot.b, 'Breakthroughs', 'var(--gold)');
+    } else if (_currentMode === 'coherence') {
+        var idType = document.getElementById('idType').value;
+        if (idType === 'individual' && list.length === 1) {
+            var c = list[0];
+            var eng = c.engagement || {};
+            el.innerHTML = sc(fmtDec(eng.engagement_score, 2) || '0.00', 'Engagement', colorScale(eng.engagement_score || 0)) +
+                sc(eng.tokens_used ? eng.tokens_used.toLocaleString() : '0', 'Tokens Used', 'var(--cyan)') +
+                sc(eng.login_count || 0, 'Logins', 'var(--gold)') +
+                sc(eng.days_since_last_login != null ? eng.days_since_last_login + 'd' : '--', 'Last Active', eng.days_since_last_login < 3 ? 'var(--green)' : 'var(--orange)');
+        } else if (_coherenceData) {
+            var html = '';
+            (_coherenceData.layers || []).forEach(function(l) {
+                var col = colorScale(l.score);
+                var extra = l.client_count ? ' (' + l.client_count + ' clients)' : l.family_count ? ' (' + l.family_count + ' families)' : l.group_count ? ' (' + l.group_count + ' groups)' : '';
+                html += '<div class="coherence-bar"><div class="cb-name">' + l.name + '<span style="color:var(--text-muted);font-size:9px;">' + extra + '</span></div><div class="cb-track"><div class="cb-fill" style="width:' + (l.score * 100) + '%;background:' + col + ';"></div></div><div class="cb-val" style="color:' + col + ';">' + fmtDec(l.score, 3) + '</div></div>';
+            });
+            var b = _coherenceData.latest_briefing;
+            if (b) {
+                html += '<div style="margin-top:12px;padding:10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;">';
+                html += '<div style="font-size:10px;color:var(--gold);font-weight:600;margin-bottom:4px;">LATEST BRIEFING</div>';
+                if (b.gap_analysis) html += '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">' + esc(b.gap_analysis) + '</div>';
+                if (b.recommendations && b.recommendations.length) {
+                    html += '<div style="font-size:10px;color:var(--cyan);margin-top:4px;">Recommendations:</div>';
+                    b.recommendations.forEach(function(r) { html += '<div style="font-size:10px;color:var(--text-secondary);padding-left:8px;">\u2022 ' + esc(r) + '</div>'; });
+                }
+                if (b.generated_at) html += '<div style="font-size:9px;color:var(--text-muted);margin-top:4px;">' + timeAgo(b.generated_at) + '</div>';
+                html += '</div>';
+            }
+            el.innerHTML = html;
+        }
+    }
+}
+
+function sc(val, label, color) {
+    return '<div class="stat-card"><div class="stat-val" style="color:' + (color || 'var(--text-primary)') + ';">' + val + '</div><div class="stat-lbl">' + label + '</div></div>';
+}
+
+function renderMemberList() {
+    var el = document.getElementById('memberList');
+    var list = _filteredClients;
+    var idType = document.getElementById('idType').value;
+    if (_currentMode === 'coherence' && _coherenceData && (idType === 'all' || idType === 'family')) {
+        var html = '';
+        (_coherenceData.families || []).forEach(function(f) {
+            html += '<div class="member-row" onclick="selectFamily(\'' + esc(f.family_id) + '\')"><span class="member-name">Family: ' + esc(f.family_id) + ' (' + f.member_count + ')</span><span class="member-metric">' + fmtDec(f.s2, 3) + '</span></div>';
+        });
+        (_coherenceData.communities || []).forEach(function(g) {
+            html += '<div class="member-row"><span class="member-name">Group: ' + esc(g.group_name) + ' (' + g.member_count + ')</span><span class="member-metric">' + fmtDec(g.s3, 3) + '</span></div>';
+        });
+        el.innerHTML = html || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No families or groups found</div>';
+        return;
+    }
+    var html2 = '';
+    list.forEach(function(c) {
+        var metric = '';
+        if (_currentMode === 'pmb') {
+            var bl = c.has_pmb ? (c.pmb.crisis_baseline || 'CALIBRATING') : 'N/A';
+            metric = '<span class="pmb-badge ' + bl.toLowerCase() + '">' + bl + '</span>';
+        } else {
+            var cv = c.stats ? fmtDec(c.stats.c_emo, 3) : 'N/A';
+            metric = '<span class="member-metric">' + cv + '</span>';
+        }
+        var sel = c.hardware_id === _selectedHwId ? ' selected' : '';
+        html2 += '<div class="member-row' + sel + '" onclick="selectMember(\'' + esc(c.hardware_id) + '\')"><span class="member-name">' + esc(c.name || c.username) + '</span>' + metric + '</div>';
+    });
+    el.innerHTML = html2 || '<div style="padding:10px;color:var(--text-muted);font-size:12px;">No clients in selection</div>';
+}
+
+function selectFamily(famId) {
+    document.getElementById('idType').value = 'family';
+    onIdTypeChange();
+    document.getElementById('idPicker').value = famId;
+    onIdPick();
+}
+
+function selectMember(hwId) {
+    _selectedHwId = hwId;
+    renderMemberList();
+    var box = document.getElementById('detailBox');
+    box.style.display = '';
+    document.getElementById('wisdomSection').style.display = 'none';
+    document.getElementById('detailContent').innerHTML = '<div class="loading">Loading...</div>';
+    fetch(API + '/api/reports/pmb/client/' + encodeURIComponent(hwId), { headers: _authHeaders() })
+        .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function(data) { renderDetail(data, hwId); })
+        .catch(function(e) { document.getElementById('detailContent').innerHTML = '<div style="color:var(--red);">Error: ' + e.message + '</div>'; });
+}
+
+function closeDetail() {
+    _selectedHwId = null;
+    document.getElementById('detailBox').style.display = 'none';
+    document.getElementById('wisdomSection').style.display = '';
+    renderMemberList();
+}
+
+function renderDetail(data, hwId) {
+    var client = _filteredClients.filter(function(c) { return c.hardware_id === hwId; })[0];
+    var html = '';
+
+    var eng = data.engagement || {};
+    html += '<div class="pmb-section"><div class="pmb-section-title">ENGAGEMENT</div>';
+    html += meterRow('Engagement Score', eng.engagement_score, false);
+    html += '<div class="info-row"><span class="info-label">Tokens Used (month)</span><span class="info-value" style="color:var(--cyan);">' + (eng.tokens_used ? eng.tokens_used.toLocaleString() : '0') + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Token Balance</span><span class="info-value">' + (eng.token_balance ? eng.token_balance.toLocaleString() : '0') + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Login Count</span><span class="info-value">' + (eng.login_count || 0) + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Last Active</span><span class="info-value">' + (eng.days_since_last_login != null ? eng.days_since_last_login + ' days ago' : '--') + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Onboarding</span><span class="info-value" style="color:' + (eng.onboarding_completed ? 'var(--green)' : 'var(--orange)') + ';">' + (eng.onboarding_completed ? 'COMPLETE' : 'PENDING') + '</span></div>';
+    html += '</div>';
+
+    var sub = data.subscription || {};
+    var coach = data.coach || {};
+    var fam = data.family || {};
+    html += '<div class="pmb-section"><div class="pmb-section-title">PROFILE</div>';
+    html += '<div class="info-row"><span class="info-label">Plan</span><span class="info-value">' + esc(sub.plan || '--') + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Status</span><span class="info-value">' + esc(sub.status || '--') + '</span></div>';
+    if (coach.coach_name) html += '<div class="info-row"><span class="info-label">Coach</span><span class="info-value" style="color:var(--gold);">' + esc(coach.coach_name || coach.coach_username) + '</span></div>';
+    if (fam.family_id) html += '<div class="info-row"><span class="info-label">Family</span><span class="info-value">' + esc(fam.family_id) + ' (' + esc(fam.family_role || '') + ')</span></div>';
+    html += '</div>';
+
+    if (_currentMode === 'stats' || _currentMode === 'coherence') {
+        var s = data.stats || {};
+        html += '<div class="pmb-section"><div class="pmb-section-title">NEVEDAL THEOREM SCORES</div>';
+        html += meterRow('C_emo (Coherence)', s.c_emo, false);
+        html += meterRow('GAP (Growth)', s.gap, false);
+        html += meterRow('Quantum (Wellness)', s.quantum, false);
+        html += meterRow('Anxiety', s.anxiety_level, true);
+        html += meterRow('Stress', s.stress_level, true);
+        html += meterRow('Engagement', s.engagement, false);
+        html += '<div class="info-row"><span class="info-label">Sessions</span><span class="info-value">' + (s.session_count || 0) + '</span></div>';
+        html += '<div class="info-row"><span class="info-label">Breakthroughs</span><span class="info-value">' + (s.breakthrough_count || 0) + '</span></div>';
+        html += '</div>';
+    }
+    if (_currentMode === 'pmb' || _currentMode === 'coherence') {
+        var cp = data.crisis_perception || {};
+        html += '<div class="pmb-section"><div class="pmb-section-title">CRISIS PERCEPTION</div>';
+        html += '<div class="info-row"><span class="info-label">Baseline</span><span class="pmb-badge ' + (cp.perception_baseline || 'calibrating').toLowerCase() + '">' + (cp.perception_baseline || 'CALIBRATING') + '</span></div>';
+        html += meterRow('Distress Discrepancy', cp.distress_discrepancy, false);
+        html += meterRow('Minimization', cp.minimization_score, true);
+        html += meterRow('Sensitivity', cp.sensitivity_score, true);
+        html += meterRow('Normalization', cp.normalization_index, false);
+        html += '</div>';
+
+        var sp = data.shame_profile || {};
+        html += '<div class="pmb-section"><div class="pmb-section-title">SHAME PROFILE</div>';
+        html += meterRow('Shame Index', sp.shame_index, true);
+        html += meterRow('Shame Baseline', sp.shame_baseline, true);
+        html += '<div class="info-row"><span class="info-label">Masking</span><span class="info-value">' + (sp.shame_masking_pattern || 'UNKNOWN') + '</span></div>';
+        var beliefs = sp.core_beliefs || [];
+        if (beliefs.length > 0) {
+            html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);font-weight:600;">Core Beliefs:</div>';
+            beliefs.slice(0, 5).forEach(function(b) {
+                if (typeof b === 'object') html += '<div style="padding:4px 8px;background:var(--bg-dark);border-radius:4px;margin:3px 0;font-size:11px;color:var(--orange);">\u201c' + esc(b.belief || '') + '\u201d <span style="color:var(--text-muted);">(conf: ' + fmtDec(b.confidence, 2) + ')</span></div>';
+            });
+        }
+        html += '</div>';
+
+        var pmb = data.pmb || {};
+        html += '<div class="pmb-section"><div class="pmb-section-title">REACTIVITY PROFILE</div>';
+        html += '<div class="info-row"><span class="info-label">Type</span><span class="info-value" style="color:' + (REACT_COLORS[pmb.reactivity_type] || '#888') + ';">' + (pmb.reactivity_type || 'MIXED') + '</span></div>';
+        var ri = pmb.reactivity_indicators || {};
+        ['fight', 'flight', 'freeze', 'fawn'].forEach(function(t) { html += meterRow(t.toUpperCase(), ri[t], true); });
+        html += '</div>';
+
+        html += '<div class="pmb-section"><div class="pmb-section-title">RECONSOLIDATION READINESS</div>';
+        html += meterRow('Score', pmb.reconsolidation_readiness, false);
+        html += '</div>';
+
+        var legacy = pmb.legacy_patterns || [];
+        if (legacy.length > 0) {
+            html += '<div class="pmb-section"><div class="pmb-section-title">TRANSGENERATIONAL LEGACY</div>';
+            legacy.forEach(function(lp) {
+                if (typeof lp === 'object') {
+                    html += '<div style="padding:6px 8px;background:var(--bg-dark);border-radius:4px;margin:3px 0;font-size:11px;">';
+                    html += '<span style="color:var(--purple);font-weight:600;">' + esc(lp.source || '') + '</span> \u2192 ' + esc(lp.pattern || '');
+                    if (lp.reflected_in_client) html += ' <span style="color:var(--red);font-size:10px;">REFLECTED</span>';
+                    html += '</div>';
+                }
+            });
+            html += '</div>';
+        }
+    }
+    if (data.data_status === 'awaiting_first_session') {
+        html += '<div style="padding:12px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.3);border-radius:8px;margin-bottom:14px;">';
+        html += '<div style="font-size:11px;color:var(--cyan);font-weight:600;">THERAPY SESSION DATA PENDING</div>';
+        html += '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">Crisis perception, shame profile, and reactivity scores will populate after this client completes their first therapy session with Little Nate. Engagement data above is live.</div>';
+        html += '</div>';
+    }
+
+    var wisdom = data.wisdom || [];
+    if (wisdom.length > 0) {
+        html += '<div class="pmb-section"><div class="pmb-section-title">CLIENT WISDOM EXTRACTIONS</div>';
+        wisdom.forEach(function(w) {
+            html += '<div style="padding:6px 8px;background:var(--bg-dark);border-radius:4px;margin:3px 0;font-size:11px;">';
+            html += '<span style="color:var(--purple);font-weight:600;">' + esc(w.insight_type || '') + '</span> <span style="color:var(--text-muted);">(' + esc(w.source || '') + ')</span>';
+            if (w.effectiveness) html += ' <span style="color:var(--green);font-size:10px;">' + (w.effectiveness * 100).toFixed(0) + '% eff</span>';
+            html += '<div style="color:var(--text-secondary);margin-top:2px;">' + esc(w.content || '') + '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+
+    var gc = data.global_coherence || {};
+    if (gc.score != null) {
+        html += '<div class="pmb-section"><div class="pmb-section-title">GLOBAL COHERENCE (SYSTEM)</div>';
+        html += meterRow('Global C_emo', gc.score, false);
+        if (gc.measured_at) html += '<div class="info-row"><span class="info-label">Last Measured</span><span class="info-value" style="font-size:10px;color:var(--text-muted);">' + new Date(gc.measured_at).toLocaleString() + '</span></div>';
+        html += '</div>';
+    }
+
+    html += '<div class="pmb-section"><div class="pmb-section-title">DATA QUALITY</div>';
+    html += '<div class="info-row"><span class="info-label">Sessions</span><span class="info-value">' + (data.session_count || 0) + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">Mood Entries</span><span class="info-value">' + (data.mood_history_length || 0) + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">CEE Experiences</span><span class="info-value">' + (data.cee_count || 0) + '</span></div>';
+    html += '<div class="info-row"><span class="info-label">C_emo</span><span class="info-value" style="font-family:var(--font-mono);">' + fmtDec(data.C_emo, 3) + '</span></div>';
+    html += '</div>';
+    document.getElementById('detailContent').innerHTML = html;
+}
+
+function meterRow(label, value, invert) {
+    var v = parseFloat(value) || 0;
+    var pct = Math.min(Math.abs(v) * 100, 100);
+    var col = colorScale(Math.abs(v), invert);
+    return '<div class="info-row"><span class="info-label">' + label + '</span><span class="info-value">' + fmtPct(v) + '</span></div>' +
+        '<div class="pmb-meter"><div class="pmb-meter-fill" style="width:' + pct + '%;background:' + col + ';"></div></div>';
+}
+
+function renderWisdom() {
+    var el = document.getElementById('wisdomFeed');
+    if (!_wisdomData || !_wisdomData.feed || _wisdomData.feed.length === 0) {
+        el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">No wisdom data yet</div>';
+        return;
+    }
+    var counts = 'Extractions: ' + (_wisdomData.extraction_count || 0) +
+        ' \u2022 Nate Insights: ' + (_wisdomData.journal_count || 0) +
+        ' \u2022 Community: ' + (_wisdomData.community_count || 0);
+    var html = '<div style="font-size:10px;color:var(--text-muted);padding:0 0 8px 0;">' + counts + '</div>';
+    _wisdomData.feed.slice(0, 15).forEach(function(w) {
+        var icon, label, badge = '';
+        if (w.type === 'nate_insight') {
+            icon = '\ud83e\udde0'; label = (w.category || w.insight_type || 'insight').toUpperCase();
+            if (w.applied) badge = ' <span style="background:var(--green-dim);color:var(--green);padding:1px 5px;border-radius:4px;font-size:9px;">APPLIED</span>';
+        } else if (w.type === 'community_convergence') {
+            icon = '\ud83c\udf10'; label = w.topic || 'Community';
+            if (w.convergence_count > 1) badge = ' <span style="background:var(--purple-dim);color:var(--purple);padding:1px 5px;border-radius:4px;font-size:9px;">x' + w.convergence_count + '</span>';
+        } else {
+            icon = '\ud83d\udca1'; label = (w.insight_type || 'extraction').toUpperCase();
+            if (w.effectiveness_score) badge = ' <span style="color:var(--text-muted);font-size:9px;">' + (w.effectiveness_score * 100).toFixed(0) + '% eff</span>';
+        }
+        html += '<div class="wisdom-item">';
+        if (w.title) html += '<div style="font-size:11px;font-weight:600;color:var(--gold-text);margin-bottom:2px;">' + esc(w.title) + '</div>';
+        html += '<div class="wi-type">' + icon + ' ' + esc(label) + badge + '</div>';
+        html += '<div class="wi-text">' + esc((w.content || '').substring(0, 200)) + '</div>';
+        html += '<div class="wi-time">' + timeAgo(w.timestamp) + '</div>';
+        html += '</div>';
+    });
+    el.innerHTML = html;
+}
+
+async function loadAll() {
+    try {
+        var resp = await fetch(API + '/api/reports/pmb/geo-data', { headers: _authHeaders() });
+        if (resp.ok) { _geoData = await resp.json(); _filteredClients = _geoData.clients || []; }
+    } catch(e) { console.error('geo-data failed:', e); }
+
+    try {
+        var resp2 = await fetch(API + '/api/reports/pmb/coherence-layers', { headers: _authHeaders() });
+        if (resp2.ok) {
+            _coherenceData = await resp2.json();
+            document.getElementById('globalScoreVal').textContent = fmtDec(_coherenceData.global_score, 3);
+            document.getElementById('globalScoreVal').style.color = colorScale(_coherenceData.global_score);
+        }
+    } catch(e) { console.error('coherence failed:', e); }
+
+    try {
+        var resp3 = await fetch(API + '/api/reports/pmb/wisdom-feed', { headers: _authHeaders() });
+        if (resp3.ok) { _wisdomData = await resp3.json(); }
+    } catch(e) { console.error('wisdom failed:', e); }
+
+    populateVarSelect();
+    updateGlobeData();
+    renderAggregate();
+    renderMemberList();
+    renderWisdom();
+    loadQueueBadge();
+}
+
+async function loadQueueBadge() {
+    try {
+        var resp = await fetch(API + '/api/reports/pmb/pending', { headers: _authHeaders() });
+        if (resp.ok) { var d = await resp.json(); var b = document.getElementById('queueBadge'); b.textContent = d.length; b.className = 'badge' + (d.length === 0 ? ' zero' : ''); }
+    } catch(e) {}
+}
+
+async function openQueueOverlay() {
+    document.getElementById('queueOverlay').classList.add('open');
+    document.getElementById('queueContent').innerHTML = '<div class="loading">Loading...</div>';
+    try {
+        var resp = await fetch(API + '/api/reports/pmb/pending', { headers: _authHeaders() });
+        if (!resp.ok) { document.getElementById('queueContent').innerHTML = '<div style="color:var(--red);">Error ' + resp.status + '</div>'; return; }
+        var data = await resp.json();
+        if (!data.length) { document.getElementById('queueContent').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">No pending reports</div>'; return; }
+        var html = '<h3 style="color:var(--gold-text);font-family:var(--font-display);margin-bottom:16px;">Pending Reports</h3>';
+        data.forEach(function(r) {
+            html += '<div style="padding:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;" onclick="openDeepDive(\'' + r.id + '\')">';
+            html += '<div style="font-weight:600;">' + esc(r.client_name || r.client_username) + '</div>';
+            html += '<div style="font-size:11px;color:var(--text-secondary);">By ' + esc(r.requested_by) + ' \u2022 ' + r.urgency + ' \u2022 ' + timeAgo(r.requested_at) + '</div>';
+            html += '</div>';
+        });
+        document.getElementById('queueContent').innerHTML = html;
+    } catch(e) { document.getElementById('queueContent').innerHTML = '<div style="color:var(--red);">' + e.message + '</div>'; }
+}
+function closeQueue() { document.getElementById('queueOverlay').classList.remove('open'); }
+
+async function openHistoryOverlay() {
+    document.getElementById('historyOverlay').classList.add('open');
+    document.getElementById('historyContent').innerHTML = '<div class="loading">Loading...</div>';
+    try {
+        var resp = await fetch(API + '/api/reports/pmb/history', { headers: _authHeaders() });
+        if (!resp.ok) { document.getElementById('historyContent').innerHTML = '<div style="color:var(--red);">Error ' + resp.status + '</div>'; return; }
+        var data = await resp.json();
+        if (!data.length) { document.getElementById('historyContent').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">No reports yet</div>'; return; }
+        var html = '<h3 style="color:var(--gold-text);font-family:var(--font-display);margin-bottom:16px;">Report History</h3>';
+        data.forEach(function(r) {
+            var stColor = r.status === 'APPROVED' ? 'var(--green)' : r.status === 'DENIED' ? 'var(--red)' : 'var(--orange)';
+            html += '<div style="padding:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">';
+            html += '<div><div style="font-weight:500;font-size:13px;">' + esc(r.client_name) + '</div><div style="font-size:10px;color:var(--text-secondary);">' + esc(r.requested_by) + ' \u2022 ' + new Date(r.requested_at).toLocaleDateString() + '</div></div>';
+            html += '<span style="color:' + stColor + ';font-size:11px;font-weight:700;">' + r.status + '</span>';
+            html += '</div>';
+        });
+        document.getElementById('historyContent').innerHTML = html;
+    } catch(e) { document.getElementById('historyContent').innerHTML = '<div style="color:var(--red);">' + e.message + '</div>'; }
+}
+function closeHistory() { document.getElementById('historyOverlay').classList.remove('open'); }
+
+async function openDeepDive(reportId) {
+    closeQueue();
+    try {
+        var resp = await fetch(API + '/api/reports/pmb/deep-dive/' + reportId, { method: 'POST', headers: _authHeaders() });
+        if (resp.ok) {
+            var data = await resp.json();
+            alert('Clinical workspace for ' + (data.client_name || 'client') + ' opened. Use Big Nate Chat in SkyEye for consultation.');
+        } else { alert('Error: ' + resp.status); }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+var token = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+if (!token) { window.location.href = 'command.html'; }
+else { initGlobe(); loadAll(); }
+</script>
+</body>
+</html>

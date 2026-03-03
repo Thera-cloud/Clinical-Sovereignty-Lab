@@ -168,9 +168,10 @@ class CoachNexusV2:
 
                     filtered.append({
                         "id": ses.get("session_id") or ses.get("id") or "",
+                        "session_id": ses.get("session_id") or ses.get("id") or "",
                         "coach_id": hid,
                         "client_id": ses.get("client_id") or "",
-                        "client_name": ses.get("client_name") or "",  # optional
+                        "client_name": ses.get("client_name") or "",
                         "family_id": ses.get("family_id") or "",
                         "date": st_dt.date().isoformat(),
                         "time": st_dt.strftime("%H:%M"),
@@ -178,6 +179,7 @@ class CoachNexusV2:
                         "duration_minutes": dur_min,
                         "platform": "Zoom",
                         "zoom_link": ses.get("zoom_link") or "",
+                        "zoom_host_url": ses.get("zoom_host_url") or "",
                         "zoom_meeting_id": ses.get("zoom_meeting_id") or "",
                         "status": ses.get("status") or "scheduled",
                         "notes": ses.get("notes") or "",

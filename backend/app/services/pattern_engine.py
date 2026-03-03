@@ -146,7 +146,7 @@ class TransgenerationalPatternEngine:
             "shared_themes": {k: [str(u) for u in v] for k, v in shared.items()},
             "unique_by_member": {str(k): v for k, v in unique_by_member.items()},
             "theme_correlation": round(correlation, 4),
-            "total_themes_analyzed": total_themes,
+            "total_themes_analyzed": len(union_themes),
             "analyzed_at": datetime.utcnow().isoformat(),
         }
 
@@ -404,6 +404,128 @@ class TransgenerationalPatternEngine:
         }
 
     # =========================================================================
+    # HOH DECISION PATTERN ANALYSIS
+    # =========================================================================
+
+    async def analyze_hoh_decision_patterns(self, family_id) -> Dict[str, Any]:
+        """
+        Analyze Head of Household approval/decline patterns for Family Sanctuary
+        charges. Detects gatekeeping, financial stress, avoidance, and
+        transgenerational decision-making patterns.
+
+        Nate observes silently — this data is never exposed to family members.
+        It enriches his therapeutic understanding across generations.
+        """
+        async with self.db_pool.acquire() as conn:
+            resolved_fid = await conn.fetchval(
+                "SELECT COALESCE("
+                "  (SELECT family_id FROM users WHERE id = $1::uuid LIMIT 1),"
+                "  $1::uuid"
+                ")",
+                family_id,
+            )
+            observations = await conn.fetch("""
+                SELECT id, decision, decline_reason, decline_note,
+                       nate_classification, charge_type, charge_amount, created_at
+                FROM hoh_decision_observations
+                WHERE family_id = $1
+                ORDER BY created_at DESC
+                LIMIT 200
+            """, resolved_fid)
+
+        if not observations:
+            return {
+                "family_id": str(family_id),
+                "status": "no_data",
+                "message": "No HoH decision observations recorded yet",
+            }
+
+        total = len(observations)
+        declines = [o for o in observations if o["decision"] == "declined"]
+        approvals = total - len(declines)
+        approval_rate = approvals / max(total, 1)
+
+        # Reason frequency
+        reason_freq = {}
+        for o in declines:
+            r = o["decline_reason"] or "unknown"
+            reason_freq[r] = reason_freq.get(r, 0) + 1
+
+        # Signal dimension analysis
+        signal_counts = {"financial": 0, "timing": 0, "control": 0, "relational": 0, "unknown": 0}
+        for o in declines:
+            cls = o["nate_classification"] or {}
+            sig = cls.get("primary_signal", "unknown")
+            signal_counts[sig] = signal_counts.get(sig, 0) + 1
+
+        dominant_signal = max(signal_counts, key=signal_counts.get) if signal_counts else "unknown"
+
+        # Control risk trend (last 30 days vs prior 60)
+        now = datetime.utcnow()
+        recent = [o for o in declines if o["created_at"] and
+                  (now - o["created_at"].replace(tzinfo=None)).days <= 30]
+        older = [o for o in declines if o["created_at"] and
+                 30 < (now - o["created_at"].replace(tzinfo=None)).days <= 90]
+
+        control_reasons = {"not_needed", "can_handle_ourselves", "too_much_help", "family_doing_fine"}
+        recent_control = sum(1 for o in recent if o["decline_reason"] in control_reasons)
+        older_control = sum(1 for o in older if o["decline_reason"] in control_reasons)
+
+        control_trend = "stable"
+        if len(recent) > 0 and len(older) > 0:
+            recent_rate = recent_control / len(recent)
+            older_rate = older_control / len(older)
+            if recent_rate > older_rate + 0.15:
+                control_trend = "increasing"
+            elif recent_rate < older_rate - 0.15:
+                control_trend = "decreasing"
+
+        # Generational pattern check
+        generational_flags = sum(
+            1 for o in observations
+            if (o["nate_classification"] or {}).get("generational_flag")
+        )
+
+        # Cross-reference with coping inheritance
+        coping_correlation = None
+        try:
+            coping = await self.detect_coping_inheritance(family_id)
+            inherited_count = coping.get("classification_summary", {}).get("inherited", 0)
+            if inherited_count > 0 and generational_flags > 0:
+                coping_correlation = {
+                    "inherited_mechanisms": inherited_count,
+                    "generational_decision_flags": generational_flags,
+                    "interpretation": (
+                        "HoH decision patterns mirror inherited coping mechanisms — "
+                        "suggests deeply rooted family role dynamics"
+                    ),
+                }
+        except Exception:
+            pass
+
+        return {
+            "family_id": str(family_id),
+            "total_observations": total,
+            "approvals": approvals,
+            "declines": len(declines),
+            "approval_rate": round(approval_rate, 4),
+            "decline_reason_frequency": reason_freq,
+            "signal_distribution": signal_counts,
+            "dominant_signal": dominant_signal,
+            "control_trend": control_trend,
+            "generational_flags": generational_flags,
+            "coping_correlation": coping_correlation,
+            "interpretation": (
+                "High gatekeeping pattern — HoH frequently blocks therapeutic services"
+                if signal_counts.get("control", 0) > total * 0.4 else
+                "Financial stress pattern — declines correlate with budget concerns"
+                if signal_counts.get("financial", 0) > total * 0.4 else
+                "Mixed pattern — no single dominant decision driver"
+            ),
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
+
+    # =========================================================================
     # FULL FAMILY ANALYSIS
     # =========================================================================
 
@@ -430,6 +552,11 @@ class TransgenerationalPatternEngine:
             results["coherence_trajectories"] = await self.correlate_trajectories(family_id)
         except Exception as e:
             results["coherence_trajectories"] = {"error": str(e)}
+
+        try:
+            results["hoh_decision_patterns"] = await self.analyze_hoh_decision_patterns(family_id)
+        except Exception as e:
+            results["hoh_decision_patterns"] = {"error": str(e)}
 
         results["analyzed_at"] = datetime.utcnow().isoformat()
         return results

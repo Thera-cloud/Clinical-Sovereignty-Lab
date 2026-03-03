@@ -84,6 +84,13 @@
             animation: cardEnter 0.5s ease;
         }
 
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        .shake { animation: shake 0.5s ease-in-out; }
+
         @keyframes cardEnter {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
@@ -510,13 +517,14 @@
         }
         const SERVER_URL = getWsUrl();
         let socket = null;
+        let _wsRetry = 0;
         const selectedRole = 'ADMIN'; // Hardcoded — admin-only portal
 
         // Passphrase challenge state (verification happens server-side)
-        const MAX_PASSPHRASE_ATTEMPTS = 3;
-        const LOCKOUT_SECONDS = 300; // 5 minutes
+        const MAX_PASSPHRASE_ATTEMPTS = 5;
+        const LOCKOUT_SECONDS = 180; // 3 minutes
         let passphraseAttempts = 0;
-        let lockedUntil = parseInt(sessionStorage.getItem('_pp_lock') || '0');
+        let lockedUntil = parseInt(localStorage.getItem('_pp_lock') || '0');
         let lockoutInterval = null;
 
         function connect() {
@@ -524,6 +532,7 @@
                 socket = new WebSocket(SERVER_URL);
 
                 socket.onopen = () => {
+                    _wsRetry = 0;
                     document.getElementById('statusDot').classList.add('connected');
                     document.getElementById('statusText').textContent = 'Connected to Sovereign Bridge';
                     document.getElementById('loginBtn').disabled = false;
@@ -533,7 +542,7 @@
                     document.getElementById('statusDot').classList.remove('connected');
                     document.getElementById('statusText').textContent = 'Connection lost. Reconnecting...';
                     document.getElementById('loginBtn').disabled = true;
-                    setTimeout(connect, 3000);
+                    var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random()));
                 };
 
                 socket.onerror = (error) => {
@@ -589,14 +598,24 @@
                         return;
                     }
                     
-                    showPassphraseChallenge();
+                    if (data.profile && data.profile.role === 'CORP_ADMIN') {
+                        const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+                        setTimeout(() => { window.location.replace('corporate_command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                    } else {
+                        showPassphraseChallenge();
+                    }
                     
                 } else if (data.type === 'consent_updated') {
                     if (data.profile) {
                         try { sessionStorage.setItem('profile', JSON.stringify(data.profile)); } catch(e) {}
                     }
                     document.getElementById('consentOverlay').style.display = 'none';
-                    showPassphraseChallenge();
+                    if (_pendingProfile && _pendingProfile.role === 'CORP_ADMIN') {
+                        const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+                        setTimeout(() => { window.location.replace('corporate_command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                    } else {
+                        showPassphraseChallenge();
+                    }
 
                 } else if (data.type === 'sms_verification_result') {
                     if (data.success) {
@@ -628,9 +647,12 @@
                         // Wrong answer — handle attempts/lockout client-side
                         passphraseAttempts++;
                         const remaining = MAX_PASSPHRASE_ATTEMPTS - passphraseAttempts;
+                        // Shake the passphrase input
+                        const ppInput = document.getElementById('passphraseInput');
+                        if (ppInput) { ppInput.classList.remove('shake'); void ppInput.offsetWidth; ppInput.classList.add('shake'); }
                         if (remaining <= 0) {
                             lockedUntil = Date.now() + (LOCKOUT_SECONDS * 1000);
-                            try { sessionStorage.setItem('_pp_lock', lockedUntil.toString()); } catch(e) {}
+                            try { localStorage.setItem('_pp_lock', lockedUntil.toString()); } catch(e) {}
                             document.getElementById('passphraseOverlay').style.display = 'none';
                             showLockout();
                         } else {
@@ -646,6 +668,13 @@
 
                 } else if (data.type === 'login_failed') {
                     showError(data.message || 'Invalid credentials or insufficient permissions');
+                    const passField = document.getElementById('password');
+                    if (passField) { passField.classList.remove('shake'); void passField.offsetWidth; passField.classList.add('shake'); }
+                    if (data.cooldown_seconds && data.cooldown_seconds > 0) {
+                        const lockEnd = Date.now() + (data.cooldown_seconds * 1000);
+                        try { localStorage.setItem('_login_lock', lockEnd.toString()); } catch(e) {}
+                        _disableLoginUntil(lockEnd);
+                    }
                 }
             } catch (e) {
                 console.error('Message parse error:', e);
@@ -785,6 +814,24 @@
             errorEl.classList.add('visible');
         }
 
+        function _disableLoginUntil(lockEnd) {
+            const btn = document.getElementById('loginBtn');
+            if (!btn) return;
+            btn.disabled = true;
+            const _tick = setInterval(() => {
+                const left = Math.max(0, Math.ceil((lockEnd - Date.now()) / 1000));
+                if (left <= 0) {
+                    clearInterval(_tick);
+                    btn.disabled = false;
+                    btn.textContent = 'Enter The Sanctuary';
+                    try { localStorage.removeItem('_login_lock'); } catch(e) {}
+                } else {
+                    const m = Math.floor(left / 60), s = left % 60;
+                    btn.textContent = `Try again in ${m}:${String(s).padStart(2,'0')}`;
+                }
+            }, 1000);
+        }
+
         function hideError() {
             document.getElementById('errorMessage').classList.remove('visible');
         }
@@ -812,7 +859,13 @@
             btn.style.cursor = this.checked ? 'pointer' : 'not-allowed';
         });
 
-        // Check for active lockout on page load
+        // Check for active login lockout on page load
+        const _loginLock = parseInt(localStorage.getItem('_login_lock') || '0');
+        if (_loginLock > Date.now()) {
+            _disableLoginUntil(_loginLock);
+        }
+
+        // Check for active passphrase lockout on page load
         if (lockedUntil > Date.now()) {
             showLockout();
         }

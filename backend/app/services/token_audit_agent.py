@@ -196,6 +196,8 @@ class TokenAuditAgent:
     # 4. QUEUE INTEGRITY CHECK
     # =========================================================================
 
+    MAX_POST_RETRIES = 3
+
     async def _queue_integrity_check(self, report: dict):
         try:
             async with self.db_pool.acquire() as conn:
@@ -221,11 +223,41 @@ class TokenAuditAgent:
                         f"{', '.join(platforms_affected)}"
                     )
                     report["details"].append(detail)
-                    await self._log_discrepancy(
-                        "system",
-                        f"{len(stuck)} failed posts should have been re-queued "
-                        f"for platforms: {', '.join(platforms_affected)}"
-                    )
+
+                    # Re-queue eligible items (under retry cap, failed > 30 min ago)
+                    result = await conn.execute("""
+                        UPDATE skyeye_content_queue
+                        SET status = 'approved',
+                            error_message = NULL,
+                            updated_at = NOW(),
+                            cross_thread_refs = jsonb_set(
+                                COALESCE(cross_thread_refs, '{}'::jsonb),
+                                '{retry_count}',
+                                to_jsonb(COALESCE((cross_thread_refs->>'retry_count')::int, 0) + 1)
+                            )
+                        WHERE status = 'failed'
+                          AND platform = ANY($1::text[])
+                          AND COALESCE((cross_thread_refs->>'retry_count')::int, 0) < $2
+                          AND updated_at < NOW() - INTERVAL '30 minutes'
+                    """, list(connected_set), self.MAX_POST_RETRIES)
+                    requeued = int(result.split()[-1]) if result else 0
+                    exhausted = len(stuck) - requeued
+
+                    if requeued > 0:
+                        report["details"].append(
+                            f"AUDIT FIX: Re-queued {requeued} stuck posts for retry"
+                        )
+                        logger.info("Token Audit: re-queued %d stuck posts", requeued)
+
+                    if exhausted > 0:
+                        report["details"].append(
+                            f"EXHAUSTED: {exhausted} posts exceeded max retries ({self.MAX_POST_RETRIES})"
+                        )
+                        await self._log_discrepancy(
+                            "system",
+                            f"{exhausted} failed posts exceeded {self.MAX_POST_RETRIES} retries "
+                            f"on platforms: {', '.join(platforms_affected)}"
+                        )
 
         except Exception as e:
             logger.error(f"Queue integrity check failed: {e}")

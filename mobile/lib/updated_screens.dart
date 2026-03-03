@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -18,16 +19,16 @@ import 'metrics_widgets.dart';
 // Conditional import for web iframe support
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 
-// Conditional import for Spline avatar (web only)
-import 'spline_iframe_stub.dart' if (dart.library.html) 'spline_iframe_web.dart';
-
 import 'shared_widgets.dart';
+import 'services/nevedal_flutter.dart';
 import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen;
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
 import 'screens/billing_screens.dart';
 import 'services/export_service.dart';
+import 'screens/coaching_mesh_screen.dart';
+import 'screens/community_mesh_screen.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
@@ -1236,6 +1237,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
   DateTime? _voiceCommandCooldownUntil;
   int? _selectionStart;
   int? _selectionEnd;
+  bool _isTextSelected = false;
   final List<_VocabEntry> _customVocab = [];
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
@@ -1264,9 +1266,107 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
   // ── Sovereign Vault upload progress ──
   UploadProgressState _uploadProgressState = UploadProgressState.idle();
 
+  // Nevedal biometric integration
+  final NevedalService _nevedal = NevedalService();
+
+  // AI data-sharing consent (Apple 5.1.1(i) / 5.1.2(i))
+  bool _aiDataConsentGiven = false;
+  static const _aiConsentKey = 'ai_data_consent_v1';
+
+  Future<void> _loadAiConsent() async {
+    try {
+      const storage = FlutterSecureStorage();
+      final stored = await storage.read(key: _aiConsentKey);
+      if (stored == 'true' && mounted) setState(() => _aiDataConsentGiven = true);
+    } catch (_) {}
+  }
+
+  Future<void> _showAiDataConsentDialog() async {
+    final agreed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF111111),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(child: Icon(Icons.shield_outlined, color: Color(0xFFC9A962), size: 40)),
+              const SizedBox(height: 12),
+              const Center(child: Text("AI Data Processing Consent",
+                style: TextStyle(color: Color(0xFFC9A962), fontSize: 18, fontWeight: FontWeight.bold))),
+              const SizedBox(height: 16),
+              const Text("Before you start chatting with Little Nate, please review how your data is processed:",
+                style: TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 16),
+              _consentBullet(Icons.chat_bubble_outline, "Your Messages",
+                "Text messages and voice transcriptions are sent to Microsoft Azure OpenAI to generate Little Nate's responses."),
+              _consentBullet(Icons.mic_outlined, "Voice Biometrics",
+                "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
+              _consentBullet(Icons.lock_outline, "Data Protection",
+                "All data is encrypted in transit (TLS 1.2+) and at rest (AES-256). Microsoft Azure operates under enterprise data protection agreements — your data is NOT used to train their AI models."),
+              _consentBullet(Icons.delete_outline, "Your Rights",
+                "You can delete your data at any time via Settings > Data Deletion. See our Privacy Policy for full details."),
+              const SizedBox(height: 8),
+              const Divider(color: Colors.white24),
+              const SizedBox(height: 8),
+              RichText(text: const TextSpan(style: TextStyle(color: Colors.white60, fontSize: 12), children: [
+                TextSpan(text: "Third-party AI provider: "),
+                TextSpan(text: "Microsoft Azure OpenAI Service", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600)),
+              ])),
+              const SizedBox(height: 4),
+              const Text("Full details in our Privacy Policy (Settings > Legal & Privacy).",
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: const Text("Decline", style: TextStyle(color: Colors.white54)),
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962),
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: const Text("I Understand & Consent", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+                )),
+              ]),
+            ],
+          )),
+        ),
+      ),
+    );
+    if (agreed == true) {
+      setState(() => _aiDataConsentGiven = true);
+      try { const storage = FlutterSecureStorage(); await storage.write(key: _aiConsentKey, value: 'true'); } catch (_) {}
+    }
+  }
+
+  static Widget _consentBullet(IconData icon, String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: const Color(0xFF4ECDC4), size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text(body, style: const TextStyle(color: Colors.white60, fontSize: 12.5, height: 1.4)),
+        ])),
+      ]),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadAiConsent();
     _connectToCortex();
     _initSpeechToText();
     _loadCustomVocabulary();
@@ -1349,11 +1449,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
 
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    // basic exponential backoff (caps at ~30s)
     final attempt = _reconnectAttempts.clamp(0, 10);
-    final delayMs = (500 * (1 << attempt)).clamp(500, 30000);
+    final baseMs = (500 * (1 << attempt)).clamp(500, 30000);
+    final jitterMs = (baseMs * 0.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).toInt();
     _reconnectAttempts = (_reconnectAttempts + 1).clamp(0, 10);
-    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+    _reconnectTimer = Timer(Duration(milliseconds: baseMs + jitterMs), () {
       if (!mounted) return;
       if (_connectionStatus.contains("ONLINE")) return;
       _connectToCortex();
@@ -1379,6 +1479,16 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
 
         // Request pending nudges from Nate
         _socket?.sink.add(jsonEncode({"type": "get_pending_nudges"}));
+
+        if (_socket != null) {
+          final sessionId = data['session_id'] as String? ??
+              'session_${DateTime.now().millisecondsSinceEpoch}';
+          _nevedal.initialize(
+            socket: _socket!,
+            sessionId: sessionId,
+            userId: widget.username ?? 'unknown',
+          );
+        }
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
@@ -1391,6 +1501,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
           _scrollToBottom();
         });
         
+        // Auto-speak if voice mode default is enabled
+        final voiceDefault = widget.currentUserProfile?['voice_mode_default'] ??
+            widget.currentUserProfile?['notification_prefs']?['voice_mode_default'] ?? false;
+        if (voiceDefault == true && reply.trim().isNotEmpty && mounted) {
+          _speakNateMessage(reply);
+        }
+
         // Update avatar expression based on AI response mood/sentiment
         if (_avatarModeEnabled && _canUseAvatarMode()) {
           final sentiment = data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
@@ -1454,10 +1571,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
          } else {
            _audio.processAudioChunk(data['payload']);
          }
+         try {
+           final bytes = base64Decode(data['payload'] as String);
+           _nevedal.processNateAudio(bytes);
+         } catch (_) {}
          _talkingTimer?.cancel();
          _talkingTimer = Timer(const Duration(milliseconds: 500), () {
            if (mounted) setState(() => _isTalking = false);
          });
+      }
+      else if (data['type'] == 'nevedal_state') {
+        _nevedal.handleServerUpdate(data['data'] ?? data);
       }
       else if (data['type'] == 'login_failed' || data['type'] == 'login_failure') {
         final msg = (data['message'] ?? data['error'] ?? 'Login failed').toString();
@@ -1699,6 +1823,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
             _aiModeTile(ctx, 'archivist', 'Archivist', 'Narrative synthesis of therapeutic journey', Icons.auto_stories, const Color(0xFF9D4EDD)),
             _aiModeTile(ctx, 'guardian', 'Guardian', 'Protective monitoring for risk indicators', Icons.shield, const Color(0xFFEF4444)),
             _aiModeTile(ctx, 'supervisor', 'Supervisor', 'Clinical quality oversight and recommendations', Icons.supervisor_account, const Color(0xFFE8D5A3)),
+            _aiModeTile(ctx, 'editor', 'Editor', 'Literary writing companion — 7 master writers as collective intelligence', Icons.edit_note, const Color(0xFFF59E0B)),
             const SizedBox(height: 16),
           ],
         ),
@@ -2801,6 +2926,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     await _stopSpeechAndSuppressLateResults();
     String text = _chatController.text.trim();
     if (text.isEmpty) return;
+
+    if (!_aiDataConsentGiven) {
+      await _showAiDataConsentDialog();
+      if (!_aiDataConsentGiven) return;
+    }
     
     if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
       _addSystemMsg("Link is dead. Reconnecting...");
@@ -3154,67 +3284,111 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
           gesture: AvatarGesture.none,
           environment: AvatarEnvironment.cozyStudy,
         );
-        // Send initial expression to Spline avatar on web
-        if (kIsWeb) {
-          sendExpressionToSpline('neutral');
-        }
       }
     });
   }
   
-  /// Update avatar expression (works for both Spline and painted avatar)
+  /// Update avatar expression — GlbAvatarWidget rebuilds via setState
   void _updateAvatarExpression(AvatarExpression expression) {
-    if (_avatarState.expression == expression) return; // Skip if unchanged
+    if (_avatarState.expression == expression) return;
     setState(() {
       _avatarState = _avatarState.copyWith(expression: expression);
     });
-    // Send to Spline if on web and avatar mode is enabled
-    if (kIsWeb && _avatarModeEnabled) {
-      final expressionName = expression.toString().split('.').last;
-      sendExpressionToSpline(expressionName);
-    }
   }
 
-  /// Map sentiment/mood from AI response to avatar expression
-  /// Available Spline states: neutral, warm, attentive, empathetic, curious, calming, proud, sad, frustrated
+  /// Determine Nate's avatar expression from two inputs:
+  ///   1. Client mood (from the mood indicator / metrics) — Nate responds therapeutically
+  ///   2. Nate's own message content — his words carry their own emotional weight
+  ///
+  /// 3 GLB model groups:
+  ///   Neutral  — resting, attentive, thoughtful (baseline)
+  ///   Soft     — warm, empathetic, calming, validating, curious (nurturing)
+  ///   Intense  — proud, encouraging, sad, frustrated (strong emotion)
   void _updateAvatarFromSentiment(dynamic sentiment, String responseText) {
-    AvatarExpression expression = AvatarExpression.neutral;
-    
     final sentimentStr = (sentiment ?? 'neutral').toString().toLowerCase();
     final textLower = responseText.toLowerCase();
-    
-    // Map common sentiments/moods to available Spline expressions
-    if (sentimentStr.contains('happy') || sentimentStr.contains('joy') || 
-        textLower.contains('great job') || textLower.contains('proud') ||
-        textLower.contains('wonderful') || textLower.contains('amazing')) {
-      expression = AvatarExpression.proud;
-    } else if (sentimentStr.contains('sad') || sentimentStr.contains('grief') ||
-        textLower.contains('sorry to hear') || textLower.contains('that must be hard')) {
-      expression = AvatarExpression.sad;
-    } else if (sentimentStr.contains('anxious') || sentimentStr.contains('worried') ||
-        textLower.contains('take a breath') || textLower.contains('it\'s okay')) {
-      expression = AvatarExpression.calming;
-    } else if (sentimentStr.contains('angry') || sentimentStr.contains('frustrat')) {
-      expression = AvatarExpression.frustrated;
-    } else if (sentimentStr.contains('empathy') || sentimentStr.contains('compassion') ||
-        textLower.contains('i understand') || textLower.contains('that sounds')) {
-      expression = AvatarExpression.empathetic;
-    } else if (sentimentStr.contains('curious') || textLower.contains('tell me more') ||
-        textLower.contains('what') || textLower.contains('how did')) {
-      expression = AvatarExpression.curious;
+    final clientMood = (_metrics['mood_current'] ?? 'neutral').toString().toLowerCase();
+
+    // --- Step 1: Detect Nate's own expression from his message content ---
+    AvatarExpression? nateExpression;
+
+    if (textLower.contains('proud of you') || textLower.contains('great job') ||
+        textLower.contains('wonderful') || textLower.contains('amazing') ||
+        textLower.contains('incredible') || textLower.contains('that\'s huge')) {
+      nateExpression = AvatarExpression.proud;
+    } else if (textLower.contains('tell me more') || textLower.contains('what happened') ||
+        textLower.contains('how did') || textLower.contains('can you describe') ||
+        textLower.contains('what was that like') || textLower.contains('i\'m curious')) {
+      nateExpression = AvatarExpression.curious;
+    } else if (textLower.contains('take a breath') || textLower.contains('it\'s okay') ||
+        textLower.contains('let\'s slow down') || textLower.contains('you\'re safe') ||
+        textLower.contains('ground yourself') || textLower.contains('breathe')) {
+      nateExpression = AvatarExpression.calming;
     } else if (textLower.contains('i hear you') || textLower.contains('listening') ||
-        textLower.contains('go on')) {
-      expression = AvatarExpression.attentive;
-    } else {
-      expression = AvatarExpression.warm; // Default warm expression for responses
+        textLower.contains('go on') || textLower.contains('i\'m here')) {
+      nateExpression = AvatarExpression.attentive;
+    } else if (textLower.contains('i understand') || textLower.contains('that sounds') ||
+        textLower.contains('must be') || textLower.contains('i can see') ||
+        textLower.contains('that\'s really') || textLower.contains('makes sense')) {
+      nateExpression = AvatarExpression.empathetic;
+    } else if (textLower.contains('sorry to hear') || textLower.contains('that must be hard') ||
+        textLower.contains('i\'m sorry') || textLower.contains('loss') ||
+        textLower.contains('grief') || textLower.contains('hold space')) {
+      nateExpression = AvatarExpression.sad;
     }
-    
-    debugPrint('[Avatar] Sentiment: $sentimentStr → Expression: ${expression.toString().split('.').last}');
-    _updateAvatarExpression(expression);
+
+    // --- Step 2: If Nate's message didn't signal clearly, respond to client mood ---
+    if (nateExpression == null) {
+      if (sentimentStr.contains('happy') || sentimentStr.contains('joy')) {
+        nateExpression = AvatarExpression.proud;
+      } else if (sentimentStr.contains('sad') || sentimentStr.contains('grief')) {
+        nateExpression = AvatarExpression.empathetic;
+      } else if (sentimentStr.contains('anxious') || sentimentStr.contains('worried')) {
+        nateExpression = AvatarExpression.calming;
+      } else if (sentimentStr.contains('angry') || sentimentStr.contains('frustrat')) {
+        nateExpression = AvatarExpression.calming;
+      } else if (sentimentStr.contains('empathy') || sentimentStr.contains('compassion')) {
+        nateExpression = AvatarExpression.empathetic;
+      } else if (sentimentStr.contains('curious')) {
+        nateExpression = AvatarExpression.curious;
+      }
+    }
+
+    // --- Step 3: Factor in the client's UX mood icon for therapeutic response ---
+    if (nateExpression == null) {
+      switch (clientMood) {
+        case 'sad':
+        case 'down':
+          nateExpression = AvatarExpression.empathetic;
+          break;
+        case 'anxious':
+        case 'worried':
+          nateExpression = AvatarExpression.calming;
+          break;
+        case 'angry':
+        case 'frustrated':
+          nateExpression = AvatarExpression.calming;
+          break;
+        case 'happy':
+        case 'positive':
+          nateExpression = AvatarExpression.warm;
+          break;
+        case 'calm':
+        case 'peaceful':
+          nateExpression = AvatarExpression.warm;
+          break;
+        default:
+          nateExpression = AvatarExpression.warm;
+      }
+    }
+
+    debugPrint('[Avatar] ClientMood: $clientMood | Sentiment: $sentimentStr → Expression: ${nateExpression.toString().split('.').last}');
+    _updateAvatarExpression(nateExpression);
   }
 
   @override
   void dispose() {
+    _nevedal.dispose();
     _audioSub?.cancel();
     _talkingTimer?.cancel();
     _reconnectTimer?.cancel();
@@ -3374,75 +3548,87 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
           Expanded(
             child: Stack(
               children: [
-                // BACK LAYER: Visual (Spline avatar, painted avatar, or orb)
+                // BACK LAYER: Visual (GLB 3D avatar or orb)
                 Positioned.fill(
                   child: _avatarModeEnabled && _canUseAvatarMode()
-                    ? (kIsWeb 
-                        // Web: Use Spline 3D avatar iframe
-                        ? buildSplineAvatarIframe('/spline/index.html')
-                        // Mobile: Use existing painted avatar
-                        : LittleNateAvatar(
-                            appearance: _avatarAppearance,
-                            visualState: _avatarState,
-                            voiceState: _voiceState,
-                            mouthOpenness: _mouthOpenness,
-                          ))
+                    ? GlbAvatarWidget(
+                        expression: _avatarState.expression,
+                        voiceState: _voiceState,
+                        onTap: () => _toggleAvatarMode(false),
+                      )
                     : VisualPersona(isTalking: _isTalking, isListening: _audio.isListening),
                 ),
                 // FRONT LAYER: Chat messages (with PointerInterceptor for web iframe)
                 Positioned.fill(
                   child: _wrapWithPointerInterceptorIfNeeded(
-                    ListView.builder(
-                      controller: _scrollController,
-                      itemCount: _chatHistory.length,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemBuilder: (ctx, i) {
-                        final msg = _chatHistory[i];
-                        final isNate = msg.startsWith("[NATE]");
-                        final isYou = msg.startsWith("[YOU]");
-                        final isSystem = msg.startsWith("[SYSTEM]");
-                        final textColor = isYou 
-                            ? Colors.grey.shade400
-                            : (isSystem ? Colors.yellow : Colors.white);
-                        final textWidget = Text(
-                          msg, 
-                          style: TextStyle(
-                            fontFamily: "Courier", 
-                            color: textColor, 
-                            fontSize: 14,
-                            shadows: const [
-                              Shadow(color: Colors.black, blurRadius: 4, offset: Offset(1, 1)),
-                              Shadow(color: Colors.black, blurRadius: 8, offset: Offset(0, 0)),
-                            ],
-                          ),
-                        );
-                        // Show "Read Aloud" button for Nate messages if user has TTS access
-                        if (isNate && _canUseTtsReadAloud()) {
-                          final nateText = msg.replaceFirst("[NATE]: ", "");
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(child: textWidget),
-                                const SizedBox(width: 4),
-                                GestureDetector(
-                                  onTap: () => _speakNateMessage(nateText),
-                                  child: Icon(
-                                    _isTalking ? Icons.volume_up : Icons.volume_up_outlined,
-                                    color: const Color(0xFFC9A962),
-                                    size: 18,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
+                    GestureDetector(
+                      onTap: () {
+                        if (_isTextSelected) {
+                          setState(() => _isTextSelected = false);
                         }
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                          child: textWidget,
-                        );
                       },
+                      child: SelectionArea(
+                        onSelectionChanged: (value) {
+                          final selecting = value != null && value.plainText.isNotEmpty;
+                          if (selecting != _isTextSelected) {
+                            setState(() => _isTextSelected = selecting);
+                          }
+                        },
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          physics: _isTextSelected
+                              ? const NeverScrollableScrollPhysics()
+                              : const ClampingScrollPhysics(),
+                          itemCount: _chatHistory.length,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          itemBuilder: (ctx, i) {
+                            final msg = _chatHistory[i];
+                            final isNate = msg.startsWith("[NATE]");
+                            final isYou = msg.startsWith("[YOU]");
+                            final isSystem = msg.startsWith("[SYSTEM]");
+                            final textColor = isYou 
+                                ? Colors.grey.shade400
+                                : (isSystem ? Colors.yellow : Colors.white);
+                            final textWidget = Text(
+                              msg, 
+                              style: TextStyle(
+                                fontFamily: "Courier", 
+                                color: textColor, 
+                                fontSize: 14,
+                                shadows: const [
+                                  Shadow(color: Colors.black, blurRadius: 4, offset: Offset(1, 1)),
+                                  Shadow(color: Colors.black, blurRadius: 8, offset: Offset(0, 0)),
+                                ],
+                              ),
+                            );
+                            if (isNate && _canUseTtsReadAloud()) {
+                              final nateText = msg.replaceFirst("[NATE]: ", "");
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(child: textWidget),
+                                    const SizedBox(width: 4),
+                                    GestureDetector(
+                                      onTap: () => _speakNateMessage(nateText),
+                                      child: Icon(
+                                        _isTalking ? Icons.volume_up : Icons.volume_up_outlined,
+                                        color: const Color(0xFFC9A962),
+                                        size: 18,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                              child: textWidget,
+                            );
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -3569,7 +3755,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     );
   }
 
-  /// Wraps widget with PointerInterceptor on web when Spline iframe is active
+  /// Wraps widget with PointerInterceptor on web when 3D avatar is active
   Widget _wrapWithPointerInterceptorIfNeeded(Widget child) {
     if (kIsWeb && _avatarModeEnabled && _canUseAvatarMode()) {
       return PointerInterceptor(child: child);
@@ -3619,10 +3805,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   String get _serverUrl => defaultWsUrl;
   String get _apiBaseUrl => defaultApiBaseUrl;
 
+  final StreamController<Map<String, dynamic>> _messageRelay = StreamController<Map<String, dynamic>>.broadcast();
+
   List<dynamic> _clients = [];
   List<dynamic> _schedule = [];
   Map<String, dynamic>? _selectedClientBrief;
-  final Map<String, bool> _assistEnabledBySession = {}; // session_id -> enabled
+  final Map<String, bool> _assistEnabledBySession = {};
+  final Map<String, String> _sessionServiceMode = {}; // live_id -> green|yellow|blue|grey
   final ValueNotifier<List<Map<String, dynamic>>> _liveNotes = ValueNotifier<List<Map<String, dynamic>>>([]);
   final ValueNotifier<List<Map<String, dynamic>>> _liveObservations = ValueNotifier<List<Map<String, dynamic>>>([]);
   Map<String, dynamic>? _activeLiveSession;
@@ -3637,7 +3826,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   String _statusMessage = "Initializing...";
   
   // Client filter/search state (shared across Clients, Insights, Briefings)
-  String _clientFilterMode = 'ALL'; // ALL, FAMILY, COACH_ONLY, COMPANY
+  String _clientFilterMode = 'ALL'; // ALL, CLIENTS, FAMILY, COACH_ONLY, COMPANY
   String _clientSearchQuery = '';
   final TextEditingController _clientSearchController = TextEditingController();
   
@@ -3654,6 +3843,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   bool _financialsLoading = false;
   final TextEditingController _coachFeeController = TextEditingController();
   
+  // Payout / Stripe Connect state
+  Map<String, dynamic> _connectStatus = {};
+  bool _connectLoading = false;
+  bool _connectOnboarding = false;
+
   // DOJO Subscription management state
   Map<String, dynamic> _dojoSubscriptions = {};
   List<String> _activeDojos = [];
@@ -3703,6 +3897,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   bool _dojoBusy = false;
   String? _dojoError;
   
+  // Consultation timer state
+  String? _activeConsultationId;
+  int _consultationRemainingSeconds = 0;
+  String? _consultationWarningMessage;
+
   // Auth state for WebView
   String? _authToken;
   
@@ -3713,10 +3912,37 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   bool _useDojoWebView = !kIsWeb; // Use WebView on mobile, native on web
   String? _coachHardwareId;
 
+  // Insights chat state
+  final List<Map<String, String>> _insightsChatMessages = [];
+  final TextEditingController _insightsChatController = TextEditingController();
+  bool _insightsChatLoading = false;
+  final ScrollController _insightsChatScrollController = ScrollController();
+  Map<String, dynamic>? _lastNevedalReport;
+
+  // Assistant Coaches tab state
+  List<Map<String, dynamic>> _assistantMetrics = [];
+  bool _assistantsTabLoading = false;
+  String? _expandedAssistant;
+  List<Map<String, dynamic>> _expandedAssistantClients = [];
+  bool _expandedClientsLoading = false;
+  final List<Map<String, String>> _assistantChatMessages = [];
+  final TextEditingController _assistantChatController = TextEditingController();
+  bool _assistantChatLoading = false;
+  final ScrollController _assistantChatScrollController = ScrollController();
+
+  // WebSocket reconnect state
+  int _wsReconnectAttempts = 0;
+  Timer? _wsReconnectTimer;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);  // Added FINANCIALS tab
+    _tabController = TabController(length: 10, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 9 && _assistantMetrics.isEmpty && !_assistantsTabLoading) {
+        _loadAssistantMetrics();
+      }
+    });
     _connectToBridge();
   }
 
@@ -3735,10 +3961,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         onError: (e) {
           _debugLog("Coach Socket Error: $e");
           if (mounted) setState(() => _statusMessage = "Connection Failed\n$_serverUrl");
+          _scheduleWsReconnect();
         },
         onDone: () {
           _debugLog("Coach Socket Closed");
-          if (mounted) setState(() => _statusMessage = "Disconnected\n$_serverUrl");
+          if (mounted) setState(() => _statusMessage = "Disconnected — reconnecting...\n$_serverUrl");
+          _scheduleWsReconnect();
         },
         cancelOnError: true,
       );
@@ -3754,6 +3982,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     } catch (e) {
       _debugLog("Fatal Connection Error: $e");
     }
+  }
+
+  void _scheduleWsReconnect() {
+    _wsReconnectTimer?.cancel();
+    final attempt = _wsReconnectAttempts.clamp(0, 10);
+    final baseMs = (1000 * (1 << attempt)).clamp(1000, 30000);
+    final jitterMs = (baseMs * 0.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).toInt();
+    _wsReconnectAttempts++;
+    _wsReconnectTimer = Timer(Duration(milliseconds: baseMs + jitterMs), () {
+      if (!mounted) return;
+      _debugLog("Coach WS reconnect attempt $_wsReconnectAttempts (delay ${baseMs + jitterMs}ms)");
+      _connectToBridge();
+    });
   }
 
   void _refreshDojoQueue() {
@@ -3882,10 +4123,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
     _requestPendingBookings();
     _requestFinancials();
+    _loadConnectStatus();
     _requestDojoSubscriptions();
     // Classroom: Fetch sessions and progress for the Classroom tab
     _requestClassroomSessions();
     _requestClassroomProgress();
+  }
+
+  Map<String, String> _restHeaders({bool json = true}) {
+    final h = <String, String>{};
+    if (json) h['Content-Type'] = 'application/json';
+    final tok = _authToken ?? widget.currentUserProfile['token']?.toString() ?? '';
+    if (tok.isNotEmpty) h['Authorization'] = 'Bearer $tok';
+    return h;
   }
 
   Uri _apiUri(String path, {Map<String, String>? query}) {
@@ -3910,7 +4160,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   Future<Map<String, dynamic>?> _checkRecordingStatus(String sessionId) async {
     try {
-      final resp = await http.get(_sessionZoomRecordingStatusEndpoint(sessionId));
+      final resp = await http.get(_sessionZoomRecordingStatusEndpoint(sessionId), headers: _restHeaders());
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
@@ -4039,7 +4289,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   Future<void> _deleteZoomMeetingForSession(String sessionId) async {
     try {
-      final resp = await http.post(_sessionZoomDeleteEndpoint(sessionId));
+      final resp = await http.post(_sessionZoomDeleteEndpoint(sessionId), headers: _restHeaders());
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
@@ -4057,7 +4307,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   Future<void> _deleteSessionPermanently(String sessionId) async {
     try {
       final uri = _apiUri('/api/sessions/$sessionId', query: {"hard_delete": "true"});
-      final resp = await http.delete(uri);
+      final resp = await http.delete(uri, headers: _restHeaders());
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
@@ -4079,7 +4329,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   Future<void> _archiveZoomTranscriptForSession(String sessionId) async {
     try {
-      final resp = await http.post(_sessionZoomArchiveTranscriptEndpoint(sessionId));
+      final resp = await http.post(_sessionZoomArchiveTranscriptEndpoint(sessionId), headers: _restHeaders());
       if (resp.statusCode < 200 || resp.statusCode >= 300) {
         throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
       }
@@ -4124,7 +4374,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     try {
       final resp = await http.post(
         _scheduleSessionEndpoint(),
-        headers: const {"Content-Type": "application/json"},
+        headers: _restHeaders(),
         body: jsonEncode(payload),
       );
 
@@ -4163,40 +4413,89 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       return;
     }
 
-    final clients = <Map<String, String>>[];
+    // Build full client list with all grouping fields
+    final allClients = <Map<String, String>>[];
     for (final raw in _clients) {
       if (raw is! Map) continue;
       final c = Map<String, dynamic>.from(raw);
       final id = (c["hardware_id"] ?? c["client_id"] ?? c["id"] ?? "").toString().trim();
       if (id.isEmpty) continue;
       final name = (c["name"] ?? c["client_name"] ?? id).toString().trim();
-      final familyId = (c["family_id"] ?? "").toString().trim();
-      clients.add({"id": id, "name": name, "family_id": familyId});
+      allClients.add({
+        "id": id,
+        "name": name,
+        "family_id": (c["family_id"] ?? "").toString().trim(),
+        "group_id": (c["group_id"] ?? "").toString().trim(),
+        "company_id": (c["company_id"] ?? "").toString().trim(),
+        "company_name": (c["company_name"] ?? "").toString().trim(),
+      });
     }
 
-    if (clients.isEmpty) {
+    // Derive unique IDs for secondary dropdowns
+    final familyIds = allClients.map((c) => c["family_id"]!).where((f) => f.isNotEmpty).toSet().toList()..sort();
+    final groupIds = allClients.map((c) => c["group_id"]!).where((g) => g.isNotEmpty).toSet().toList()..sort();
+    final companyMap = <String, String>{};
+    for (final c in allClients) {
+      final cid = c["company_id"]!;
+      if (cid.isNotEmpty) companyMap[cid] = c["company_name"]!.isNotEmpty ? c["company_name"]! : cid;
+    }
+    final companyIds = companyMap.keys.toList()..sort();
+
+    // Active assistant coaches for COACH type
+    final activeAssistants = _assistantMetrics.where((a) => a['status'] == 'active').toList();
+
+    if (allClients.isEmpty && activeAssistants.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No clients available to schedule")),
+          const SnackBar(content: Text("No clients or assistants available to schedule")),
         );
       }
       return;
     }
 
-    String selectedClientId = clients.first["id"]!;
-    String selectedClientName = clients.first["name"]!;
-    String selectedFamilyId = clients.first["family_id"] ?? "";
+    String sessionType = "CLIENT";
+    String selectedSecondaryId = "";
+    String selectedClientId = allClients.isNotEmpty ? allClients.first["id"]! : "";
+    String selectedClientName = allClients.isNotEmpty ? allClients.first["name"]! : "";
     DateTime startLocal = DateTime.now().add(const Duration(minutes: 10));
     int durationMinutes = 50;
     String notes = "";
-    String sessionType = "COACH";
-    bool disableRecording = false;  // Coach can opt-out of auto-recording
+    bool disableRecording = false;
+
+    // Returns the visible entries for the person/client dropdown based on current type + secondary filter
+    List<Map<String, String>> _visibleEntries(String type, String secId) {
+      switch (type) {
+        case "COACH":
+          return activeAssistants.map((a) => {
+            "id": (a["assistant_id"] ?? a["hardware_id"] ?? "").toString(),
+            "name": (a["display_name"] ?? a["username"] ?? "").toString(),
+          }).where((e) => e["id"]!.isNotEmpty).toList();
+        case "FAMILY":
+          if (secId.isEmpty) return allClients;
+          return allClients.where((c) => c["family_id"] == secId).toList();
+        case "GROUP":
+          if (secId.isEmpty) return allClients;
+          return allClients.where((c) => c["group_id"] == secId).toList();
+        case "CORPORATE":
+          if (secId.isEmpty) return allClients;
+          return allClients.where((c) => c["company_id"] == secId).toList();
+        default:
+          return allClients;
+      }
+    }
 
     await showDialog(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
+            final visibleList = _visibleEntries(sessionType, selectedSecondaryId);
+            final bool hasEntries = visibleList.isNotEmpty;
+            if (hasEntries && !visibleList.any((e) => e["id"] == selectedClientId)) {
+              selectedClientId = visibleList.first["id"]!;
+              selectedClientName = visibleList.first["name"]!;
+            }
+
             Future<void> pickDateTime() async {
               final pickedDate = await showDatePicker(
                 context: ctx,
@@ -4221,6 +4520,81 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               });
             }
 
+            // Build the secondary dropdown (Family ID / Group ID / Company) based on session type
+            Widget? secondaryDropdown;
+            if (sessionType == "FAMILY" && familyIds.isNotEmpty) {
+              secondaryDropdown = DropdownButtonFormField<String>(
+                key: const ValueKey("family_dd"),
+                value: selectedSecondaryId.isNotEmpty && familyIds.contains(selectedSecondaryId) ? selectedSecondaryId : null,
+                dropdownColor: const Color(0xFF111118),
+                hint: const Text("All families", style: TextStyle(color: Colors.white38)),
+                items: familyIds
+                    .map((f) => DropdownMenuItem<String>(value: f, child: Text(f, style: const TextStyle(color: Colors.white))))
+                    .toList(),
+                onChanged: (v) => setLocal(() {
+                  selectedSecondaryId = v ?? "";
+                  selectedClientId = "";
+                  selectedClientName = "";
+                }),
+                decoration: InputDecoration(
+                  labelText: "Family ID",
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.06),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              );
+            } else if (sessionType == "GROUP" && groupIds.isNotEmpty) {
+              secondaryDropdown = DropdownButtonFormField<String>(
+                key: const ValueKey("group_dd"),
+                value: selectedSecondaryId.isNotEmpty && groupIds.contains(selectedSecondaryId) ? selectedSecondaryId : null,
+                dropdownColor: const Color(0xFF111118),
+                hint: const Text("All groups", style: TextStyle(color: Colors.white38)),
+                items: groupIds
+                    .map((g) => DropdownMenuItem<String>(value: g, child: Text(g, style: const TextStyle(color: Colors.white))))
+                    .toList(),
+                onChanged: (v) => setLocal(() {
+                  selectedSecondaryId = v ?? "";
+                  selectedClientId = "";
+                  selectedClientName = "";
+                }),
+                decoration: InputDecoration(
+                  labelText: "Group ID",
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.06),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              );
+            } else if (sessionType == "CORPORATE" && companyIds.isNotEmpty) {
+              secondaryDropdown = DropdownButtonFormField<String>(
+                key: const ValueKey("corp_dd"),
+                value: selectedSecondaryId.isNotEmpty && companyIds.contains(selectedSecondaryId) ? selectedSecondaryId : null,
+                dropdownColor: const Color(0xFF111118),
+                hint: const Text("All companies", style: TextStyle(color: Colors.white38)),
+                items: companyIds
+                    .map((cid) => DropdownMenuItem<String>(
+                      value: cid,
+                      child: Text(companyMap[cid] ?? cid, style: const TextStyle(color: Colors.white)),
+                    ))
+                    .toList(),
+                onChanged: (v) => setLocal(() {
+                  selectedSecondaryId = v ?? "";
+                  selectedClientId = "";
+                  selectedClientName = "";
+                }),
+                decoration: InputDecoration(
+                  labelText: "Company",
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.06),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              );
+            }
+
+            final personLabel = sessionType == "COACH" ? "Assistant Coach" : "Client";
+
             return AlertDialog(
               backgroundColor: const Color(0xFF0A0A0F),
               title: const Text("Create Session", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
@@ -4232,33 +4606,87 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     children: [
                       Text("API: $_apiBaseUrl", style: TextStyle(color: Colors.grey[500], fontSize: 11)),
                       const SizedBox(height: 12),
-                      const Text("Client", style: TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 6),
+
+                      // Session Type dropdown (full width)
                       DropdownButtonFormField<String>(
-                        value: selectedClientId,
+                        value: sessionType,
                         dropdownColor: const Color(0xFF111118),
-                        items: clients
-                            .map((c) => DropdownMenuItem<String>(
-                                  value: c["id"]!,
-                                  child: Text(c["name"] ?? c["id"]!, style: const TextStyle(color: Colors.white)),
-                                ))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v == null) return;
-                          final match = clients.firstWhere((c) => c["id"] == v, orElse: () => clients.first);
-                          setLocal(() {
-                            selectedClientId = match["id"]!;
-                            selectedClientName = match["name"] ?? match["id"]!;
-                            selectedFamilyId = match["family_id"] ?? "";
-                          });
-                        },
+                        items: const [
+                          DropdownMenuItem(value: "CLIENT", child: Text("CLIENT", style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(value: "COACH", child: Text("COACH", style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(value: "FAMILY", child: Text("FAMILY", style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(value: "GROUP", child: Text("GROUP", style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(value: "CORPORATE", child: Text("CORPORATE", style: TextStyle(color: Colors.white))),
+                        ],
+                        onChanged: (v) => setLocal(() {
+                          sessionType = v ?? "CLIENT";
+                          selectedSecondaryId = "";
+                          selectedClientId = "";
+                          selectedClientName = "";
+                        }),
                         decoration: InputDecoration(
+                          labelText: "Session Type",
+                          labelStyle: const TextStyle(color: Colors.white70),
                           filled: true,
                           fillColor: Colors.white.withOpacity(0.06),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
                       const SizedBox(height: 12),
+
+                      // Secondary dropdown (Family ID / Group ID / Company) — only when relevant
+                      if (secondaryDropdown != null) ...[
+                        secondaryDropdown,
+                        const SizedBox(height: 12),
+                      ],
+
+                      // Person dropdown (client or assistant coach)
+                      Text(personLabel, style: const TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 6),
+                      if (!hasEntries)
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.04),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                          ),
+                          child: Text(
+                            sessionType == "COACH"
+                                ? "No active assistant coaches found"
+                                : selectedSecondaryId.isNotEmpty
+                                    ? "No clients found for selected ${sessionType == 'FAMILY' ? 'family' : sessionType == 'GROUP' ? 'group' : 'company'}"
+                                    : "No clients available",
+                            style: const TextStyle(color: Colors.orange, fontSize: 13),
+                          ),
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          value: visibleList.any((e) => e["id"] == selectedClientId) ? selectedClientId : visibleList.first["id"]!,
+                          dropdownColor: const Color(0xFF111118),
+                          items: visibleList
+                              .map((c) => DropdownMenuItem<String>(
+                                    value: c["id"]!,
+                                    child: Text(c["name"] ?? c["id"]!, style: const TextStyle(color: Colors.white)),
+                                  ))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            final match = visibleList.firstWhere((c) => c["id"] == v, orElse: () => visibleList.first);
+                            setLocal(() {
+                              selectedClientId = match["id"]!;
+                              selectedClientName = match["name"] ?? match["id"]!;
+                            });
+                          },
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.06),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+
+                      // Date/time + duration row
                       Row(
                         children: [
                           Expanded(
@@ -4294,45 +4722,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: sessionType,
-                              dropdownColor: const Color(0xFF111118),
-                              items: const [
-                                DropdownMenuItem(value: "COACH", child: Text("COACH", style: TextStyle(color: Colors.white))),
-                                DropdownMenuItem(value: "FAMILY", child: Text("FAMILY", style: TextStyle(color: Colors.white))),
-                                DropdownMenuItem(value: "GROUP", child: Text("GROUP", style: TextStyle(color: Colors.white))),
-                              ],
-                              onChanged: (v) => setLocal(() => sessionType = (v ?? "COACH")),
-                              decoration: InputDecoration(
-                                labelText: "Type",
-                                labelStyle: const TextStyle(color: Colors.white70),
-                                filled: true,
-                                fillColor: Colors.white.withOpacity(0.06),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextFormField(
-                              initialValue: selectedFamilyId,
-                              style: const TextStyle(color: Colors.white),
-                              decoration: InputDecoration(
-                                labelText: "Family ID (optional)",
-                                labelStyle: const TextStyle(color: Colors.white70),
-                                filled: true,
-                                fillColor: Colors.white.withOpacity(0.06),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                              onChanged: (v) => setLocal(() => selectedFamilyId = v.trim()),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+
+                      // Notes
                       TextFormField(
                         minLines: 2,
                         maxLines: 5,
@@ -4347,7 +4738,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                         onChanged: (v) => notes = v,
                       ),
                       const SizedBox(height: 12),
-                      // Recording opt-out toggle for coach
+
+                      // Recording opt-out toggle
                       Container(
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.04),
@@ -4387,21 +4779,27 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     backgroundColor: const Color(0xFFFFD700),
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: () async {
-                    if (durationMinutes < 5) durationMinutes = 5;
-                    await _scheduleSessionViaApi(
-                      clientId: selectedClientId,
-                      clientName: selectedClientName,
-                      coachId: coachId,
-                      familyId: selectedFamilyId,
-                      scheduledStartLocal: startLocal,
-                      durationMinutes: durationMinutes,
-                      sessionType: sessionType,
-                      notes: notes,
-                      disableRecording: disableRecording,
-                    );
-                    if (ctx.mounted) Navigator.of(ctx).pop();
-                  },
+                  onPressed: hasEntries
+                      ? () async {
+                          if (durationMinutes < 5) durationMinutes = 5;
+                          String familyIdForPayload = "";
+                          if (sessionType == "FAMILY") familyIdForPayload = selectedSecondaryId;
+                          else if (sessionType == "GROUP") familyIdForPayload = selectedSecondaryId;
+                          else if (sessionType == "CORPORATE") familyIdForPayload = selectedSecondaryId;
+                          await _scheduleSessionViaApi(
+                            clientId: selectedClientId,
+                            clientName: selectedClientName,
+                            coachId: coachId,
+                            familyId: familyIdForPayload,
+                            scheduledStartLocal: startLocal,
+                            durationMinutes: durationMinutes,
+                            sessionType: sessionType,
+                            notes: notes,
+                            disableRecording: disableRecording,
+                          );
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        }
+                      : null,
                   child: const Text("Create"),
                 ),
               ],
@@ -4436,8 +4834,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     } else if (durRaw is String) {
       scheduledMinutes = int.tryParse(durRaw);
     }
-    final assist = _assistEnabledBySession[sessionId] ?? true;
-
     _activeLiveSession = null;
     _liveNotes.value = [];
     _liveObservations.value = [];
@@ -4451,7 +4847,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       "label": label,
       "meeting_url": meetingUrl,
       "zoom_meeting_id": zoomMeetingId,
-      "assist_enabled": assist,
+      "service_mode": "green",
     }));
 
     _showLiveSessionSheet(initialLabel: label, initialMeetingUrl: meetingUrl, initialHostUrl: hostUrl);
@@ -4510,9 +4906,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     try {
       final data = jsonDecode(message);
 
+      if (!_messageRelay.isClosed && data is Map<String, dynamic>) {
+        _messageRelay.add(data);
+      }
+
       if (data['type'] == 'login_success') {
         _debugLog(">>> COACH AUTHENTICATED. Fetching Data...");
-        // Capture auth info for WebView hybrid pages
+        _wsReconnectAttempts = 0;
         _authToken = data['token']?.toString();
         final profile = data['profile'] as Map<String, dynamic>?;
         _coachHardwareId = profile?['hardware_id']?.toString();
@@ -4541,8 +4941,39 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           _showClientBriefSheet();
         }
       }
+      else if (data['type'] == 'session_assistant_data') {
+        if (mounted) _handleSessionAssistantData(Map<String, dynamic>.from(data));
+      }
+      else if (data['type'] == 'session_assistant_response') {
+        if (mounted && data['nate_response'] != null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(data['nate_response'], style: const TextStyle(color: Colors.white)),
+            backgroundColor: const Color(0xFF1A1A2E),
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(label: 'OK', textColor: const Color(0xFF4ECDC4), onPressed: () {}),
+          ));
+        }
+      }
+      else if (data['type'] == 'session_assistant_toggle_ack') {
+        if (mounted) {
+          _assistEnabledBySession[data['session_id'] ?? ''] = data['nate_enabled'] ?? true;
+          setState(() {});
+        }
+      }
+      else if (data['type'] == 'session_service_mode_ack') {
+        final liveId = (data['live_session_id'] ?? '').toString();
+        if (liveId.isNotEmpty && mounted) {
+          _sessionServiceMode[liveId] = (data['service_mode'] ?? 'green').toString();
+          _assistEnabledBySession[liveId] = data['assist_enabled'] ?? true;
+          setState(() {});
+        }
+      }
       else if (data['type'] == 'coach_live_session_started') {
         final live = (data['live_session'] is Map) ? Map<String, dynamic>.from(data['live_session']) : <String, dynamic>{};
+        final liveId = (live['id'] ?? '').toString();
+        if (liveId.isNotEmpty) {
+          _sessionServiceMode[liveId] = (live['service_mode'] ?? 'green').toString();
+        }
         setState(() {
           _activeLiveSession = live;
         });
@@ -4606,10 +5037,73 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         }
       }
       else if (data['type'] == 'coach_session_note_saved') {
-        // optimistic UI is handled by coach_session_notes follow-up broadcast
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Note saved")),
+          );
+        }
+      }
+      else if (data['type'] == 'consultation_started') {
+        if (mounted) {
+          setState(() {
+            _activeConsultationId = (data['session']?['session_id'] ?? '').toString();
+            _consultationRemainingSeconds = (data['duration_seconds'] ?? 900) as int;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(data['message']?.toString() ?? 'Consultation started'),
+              backgroundColor: const Color(0xFF4ECDC4),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+      else if (data['type'] == 'consultation_timer_update') {
+        if (mounted) {
+          setState(() {
+            _consultationRemainingSeconds = (data['remaining_seconds'] ?? 0) as int;
+          });
+        }
+      }
+      else if (data['type'] == 'consultation_warning') {
+        if (mounted) {
+          final msg = data['message']?.toString() ?? 'Time running out';
+          setState(() => _consultationWarningMessage = msg);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(msg),
+              backgroundColor: const Color(0xFFEF4444),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          Future.delayed(const Duration(seconds: 6), () {
+            if (mounted) setState(() => _consultationWarningMessage = null);
+          });
+        }
+      }
+      else if (data['type'] == 'consultation_ended') {
+        if (mounted) {
+          setState(() {
+            _activeConsultationId = null;
+            _consultationRemainingSeconds = 0;
+            _consultationWarningMessage = null;
+          });
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              title: const Text('Consultation Complete', style: TextStyle(color: Color(0xFFC9A962))),
+              content: Text(
+                data['message']?.toString() ?? 'The consultation has ended.',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK', style: TextStyle(color: Color(0xFF4ECDC4))),
+                ),
+              ],
+            ),
           );
         }
       }
@@ -5069,6 +5563,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               subtitle: const Text('Clinical quality oversight and recommendations', style: TextStyle(color: Colors.white38, fontSize: 12)),
               onTap: () { Navigator.pop(ctx); _activateCoachAiMode('supervisor', clientId); },
             ),
+            ListTile(
+              leading: const Icon(Icons.edit_note, color: Color(0xFFF59E0B)),
+              title: const Text('Editor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              subtitle: const Text('Literary writing companion — 7 master writers as collective intelligence', style: TextStyle(color: Colors.white38, fontSize: 12)),
+              onTap: () { Navigator.pop(ctx); _activateCoachAiMode('editor', clientId); },
+            ),
             const SizedBox(height: 16),
           ],
         ),
@@ -5170,7 +5670,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     final uri = Uri.parse('$_apiBaseUrl/api/research/nevedal/reports/generate');
                     final resp = await http.post(
                       uri,
-                      headers: {'Content-Type': 'application/json'},
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ${widget.currentUserProfile['token']}',
+                      },
                       body: jsonEncode({
                         'report_type': reportType,
                         'user_ids': [targetClientId],
@@ -5203,6 +5706,34 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _showNevedalReportResult(Map<String, dynamic> result) {
+    setState(() => _lastNevedalReport = result);
+
+    if (result['status'] == 'no_data') {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text('NO DATA AVAILABLE', style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 16)),
+          content: const Text(
+            'No coherence measurements found for this client in the selected period. '
+            'Data is recorded during live sessions with the Nevedal engine active.',
+            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK', style: TextStyle(color: Color(0xFFC9A962)))),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final summary = result['summary'];
+    final weeklyAverages = result['weekly_averages'] as List<dynamic>? ?? [];
+    final userName = result['user_name']?.toString() ?? 'Unknown';
+    final periodDays = result['period_days']?.toString() ?? '84';
+    final generatedAt = result['generated_at']?.toString() ?? '';
+    final reportType = result['report_type']?.toString().replaceAll('_', ' ').toUpperCase() ?? 'REPORT';
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -5212,10 +5743,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             const Icon(Icons.science, color: Color(0xFF9D4EDD)),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                result['report_type']?.toString().replaceAll('_', ' ').toUpperCase() ?? 'REPORT',
-                style: const TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 16),
-              ),
+              child: Text(reportType, style: const TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond', fontSize: 16)),
             ),
           ],
         ),
@@ -5225,19 +5753,76 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (result['summary'] != null)
-                  Text(result['summary'].toString(), style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5)),
-                const SizedBox(height: 12),
-                if (result['data'] != null)
-                  Text(
-                    const JsonEncoder.withIndent('  ').convert(result['data']),
-                    style: const TextStyle(color: Colors.white54, fontFamily: 'Courier', fontSize: 11),
-                  ),
+                Text('Subject: $userName', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                Text('Period: $periodDays days', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                if (generatedAt.isNotEmpty)
+                  Text('Generated: ${generatedAt.substring(0, generatedAt.length > 19 ? 19 : generatedAt.length).replaceAll('T', ' ')}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                const SizedBox(height: 14),
+                if (summary != null && summary is Map) ...[
+                  const Text('SUMMARY', style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+                  const SizedBox(height: 8),
+                  ...((summary as Map<String, dynamic>).entries.map((e) {
+                    final label = e.key.toString().replaceAll('_', ' ').replaceFirst(e.key[0], e.key[0].toUpperCase());
+                    final value = e.value;
+                    Color valueColor = Colors.white;
+                    if (e.key == 'trend') {
+                      valueColor = value == 'improving' ? const Color(0xFF22C55E) : value == 'declining' ? const Color(0xFFEF4444) : const Color(0xFFC9A962);
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Flexible(child: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 13))),
+                          Text(value is double ? value.toStringAsFixed(4) : value.toString(),
+                            style: TextStyle(color: valueColor, fontSize: 13, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    );
+                  })),
+                ],
+                if (weeklyAverages.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  const Text('WEEKLY TREND', style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+                  const SizedBox(height: 8),
+                  ...weeklyAverages.take(12).map((w) {
+                    if (w is! Map) return const SizedBox.shrink();
+                    final week = w['week']?.toString() ?? '?';
+                    final avg = (w['avg'] is num) ? (w['avg'] as num).toDouble() : 0.0;
+                    final count = w['count']?.toString() ?? '0';
+                    final barWidth = (avg * 200).clamp(0.0, 200.0);
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 70, child: Text(week, style: const TextStyle(color: Colors.white38, fontSize: 11))),
+                          Container(width: barWidth, height: 12, decoration: BoxDecoration(
+                            color: avg > 0.6 ? const Color(0xFF22C55E) : avg > 0.3 ? const Color(0xFFC9A962) : const Color(0xFFEF4444),
+                            borderRadius: BorderRadius.circular(3),
+                          )),
+                          const SizedBox(width: 6),
+                          Text('${avg.toStringAsFixed(3)} ($count)', style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
               ],
             ),
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final reportSummary = summary is Map
+                  ? (summary as Map).entries.map((e) => '${e.key}: ${e.value}').join(', ')
+                  : 'Report generated';
+              _sendInsightsChat('I just generated a ${reportType.toLowerCase()} report for $userName. Summary: $reportSummary. What insights can you share about this?');
+            },
+            child: const Text('DISCUSS WITH NATE', style: TextStyle(color: Color(0xFF4ECDC4))),
+          ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('CLOSE', style: TextStyle(color: Color(0xFFC9A962)))),
         ],
       ),
@@ -5431,24 +6016,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   @override
   void dispose() {
+    _messageRelay.close();
     _dojoResponseController.dispose();
     _dojoScrollController.dispose();
     _liveNotes.dispose();
     _liveObservations.dispose();
+    _assistantChatController.dispose();
+    _assistantChatScrollController.dispose();
     _tabController.dispose();
+    _wsReconnectTimer?.cancel();
     _socket?.sink.close();
     super.dispose();
   }
 
   // Tab labels for mobile dropdown
-  static const _tabLabels = ["CLIENTS", "SCHEDULE", "INSIGHTS", "BRIEFINGS", "DOJO", "CLASSROOM", "FINANCIALS"];
-  static const _tabIcons = [Icons.people, Icons.calendar_today, Icons.insights, Icons.folder, Icons.sports_martial_arts, Icons.school, Icons.account_balance_wallet];
+  static const _tabLabels = ["CLIENTS", "SCHEDULE", "INSIGHTS", "BRIEFINGS", "DOJO", "CLASSROOM", "TRAINING", "FINANCIALS", "FOLDER", "ASSISTANTS"];
+  static const _tabIcons = [Icons.people, Icons.calendar_today, Icons.insights, Icons.folder_shared, Icons.sports_martial_arts, Icons.school, Icons.fitness_center, Icons.account_balance_wallet, Icons.folder_copy, Icons.supervisor_account];
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 768;
 
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
         title: isMobile
@@ -5459,7 +6048,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        toolbarHeight: isMobile ? 48 : kToolbarHeight,
+        toolbarHeight: isMobile ? 56 : kToolbarHeight,
         bottom: isMobile
           ? null  // No tab bar on mobile — using dropdown instead
           : TabBar(
@@ -5472,10 +6061,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                 Tab(icon: Icon(Icons.people), text: "CLIENTS"),
                 Tab(icon: Icon(Icons.calendar_today), text: "SCHEDULE"),
                 Tab(icon: Icon(Icons.insights), text: "INSIGHTS"),
-                Tab(icon: Icon(Icons.folder), text: "BRIEFINGS"),
+                Tab(icon: Icon(Icons.folder_shared), text: "BRIEFINGS"),
                 Tab(icon: Icon(Icons.sports_martial_arts), text: "DOJO"),
                 Tab(icon: Icon(Icons.school), text: "CLASSROOM"),
+                Tab(icon: Icon(Icons.fitness_center), text: "TRAINING"),
                 Tab(icon: Icon(Icons.account_balance_wallet), text: "FINANCIALS"),
+                Tab(icon: Icon(Icons.folder_copy), text: "FOLDER"),
+                Tab(icon: Icon(Icons.supervisor_account), text: "ASSISTANTS"),
               ],
             ),
         actions: [
@@ -5500,6 +6092,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                 builder: (_) => CoachSettingsScreen(
                   profile: widget.currentUserProfile ?? {},
                   socket: _socket,
+                  messageStream: _messageRelay.stream,
                   onLogout: () {
                     _socket?.sink.close();
                   },
@@ -5539,9 +6132,104 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               _buildBriefingsTab(),
               _buildDojoTab(),
               _buildClassroomTab(),
+              _buildTrainingTab(),
               _buildFinancialsTab(),
+              _buildFolderTab(),
+              _buildAssistantsTab(),
             ],
           ),
+    );
+
+    return Stack(
+      children: [
+        scaffold,
+        _buildSessionAssistantOverlay(),
+        if (_activeConsultationId != null) _buildConsultationTimerOverlay(),
+      ],
+    );
+  }
+
+  Widget _buildConsultationTimerOverlay() {
+    final remaining = _consultationRemainingSeconds;
+    final minutes = remaining ~/ 60;
+    final seconds = remaining % 60;
+    final progress = remaining / 900.0;
+    final isUrgent = remaining <= 60;
+    final barColor = isUrgent
+        ? Colors.red
+        : remaining <= 300
+            ? Colors.orange
+            : const Color(0xFF4ECDC4);
+
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111111),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: barColor.withOpacity(0.6)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.timer, color: barColor, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'FREE CONSULTATION',
+                        style: TextStyle(
+                          color: barColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          color: barColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Courier',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0.0, 1.0),
+                      backgroundColor: Colors.grey[900],
+                      valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                      minHeight: 4,
+                    ),
+                  ),
+                  if (_consultationWarningMessage != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _consultationWarningMessage!,
+                      style: TextStyle(
+                        color: isUrgent ? Colors.red : Colors.orange,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -5643,8 +6331,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     final folders = _buildFolderGroups();
     return Column(
       children: [
+        const SizedBox(height: 8),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: _buildClientSearchAndFilter(),
         ),
         Expanded(
@@ -5937,8 +6626,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                   final meetingUrl = (session['zoom_link'] ?? session['meeting_url'] ?? '').toString();
                   final zoomHostUrl = (session['zoom_host_url'] ?? '').toString();
                   final zoomMeetingId = (session['zoom_meeting_id'] ?? '').toString();
-                  final assist = _assistEnabledBySession[sessionId] ?? true;
-
                   return Container(
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(14),
@@ -5961,13 +6648,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Switch(
-                          value: assist,
-                          onChanged: (v) => setState(() => _assistEnabledBySession[sessionId] = v),
-                          activeColor: const Color(0xFF00F5D4),
-                          inactiveThumbColor: Colors.grey,
                         ),
                       ],
                     ),
@@ -6122,7 +6802,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.play_arrow),
-                        label: Text(assist ? "Start Live Session (Assist ON)" : "Start Live Session"),
+                        label: const Text("Start Live Session"),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFFD700),
                           foregroundColor: Colors.black,
@@ -6282,6 +6962,848 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
 
+  Future<void> _sendInsightsChat(String message) async {
+    if (message.trim().isEmpty) return;
+    setState(() {
+      _insightsChatMessages.add({'role': 'user', 'content': message});
+      _insightsChatLoading = true;
+    });
+    _insightsChatController.clear();
+    _scrollInsightsChat();
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final coachUsername = widget.currentUserProfile['username'] ?? '';
+      final coachRole = widget.currentUserProfile['role'] ?? 'COACH';
+
+      final clientDetails = _clients.take(30).map((c) => {
+        'name': c['name'] ?? 'Unknown',
+        'id': c['hardware_id'] ?? c['id'] ?? '',
+        'tier': c['tier'] ?? '',
+        'risk': c['risk_level'] ?? c['coherence_risk'] ?? '',
+      }).toList();
+
+      final contextPayload = <String, dynamic>{
+        'coach_username': coachUsername,
+        'coach_role': coachRole,
+        'total_clients': _clients.length,
+        'client_names': clientDetails,
+        'is_master_coach': widget.currentUserProfile['is_master_coach'] == true,
+      };
+
+      if (_lastNevedalReport != null) {
+        contextPayload['last_report'] = _lastNevedalReport;
+      }
+
+      if (_selectedClientBrief != null) {
+        contextPayload['briefing_data'] = _selectedClientBrief;
+      }
+
+      final uri = Uri.parse('$_apiBaseUrl/api/coach/nate-chat');
+      final resp = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'message': message,
+          'mode': 'inquiry',
+          'context': contextPayload,
+        }),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _insightsChatMessages.add({
+            'role': 'assistant',
+            'content': (data['response'] ?? data['message'] ?? 'No response').toString(),
+          });
+        });
+      } else {
+        setState(() {
+          _insightsChatMessages.add({
+            'role': 'assistant',
+            'content': 'Connection issue (${resp.statusCode}). Try again.',
+          });
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _insightsChatMessages.add({'role': 'assistant', 'content': 'Connection error. Check your network.'});
+      });
+    }
+    if (mounted) setState(() => _insightsChatLoading = false);
+    _scrollInsightsChat();
+  }
+
+  void _scrollInsightsChat() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_insightsChatScrollController.hasClients) {
+        _insightsChatScrollController.animateTo(
+          _insightsChatScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Widget _buildInsightsChatBox() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF4ECDC4).withOpacity(0.08),
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.psychology, color: Color(0xFF4ECDC4), size: 16),
+                SizedBox(width: 6),
+                Text('LITTLE NATE', style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                Spacer(),
+                Text('COACHING INSIGHTS', style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _insightsChatMessages.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Ask about client patterns, coherence trends, risk indicators, or session insights...',
+                        style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _insightsChatScrollController,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _insightsChatMessages.length,
+                    itemBuilder: (ctx, i) {
+                      final msg = _insightsChatMessages[i];
+                      final isUser = msg['role'] == 'user';
+                      return Align(
+                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          constraints: BoxConstraints(maxWidth: MediaQuery.of(ctx).size.width * 0.55),
+                          decoration: BoxDecoration(
+                            color: isUser ? const Color(0xFFC9A962).withOpacity(0.15) : const Color(0xFF4ECDC4).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isUser ? const Color(0xFFC9A962).withOpacity(0.2) : const Color(0xFF4ECDC4).withOpacity(0.15),
+                            ),
+                          ),
+                          child: SelectableText(
+                            msg['content'] ?? '',
+                            style: TextStyle(color: isUser ? const Color(0xFFE8D5A3) : Colors.white70, fontSize: 12, height: 1.4),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          if (_insightsChatLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF4ECDC4))),
+            ),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _insightsChatController,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'Ask Nate about your clients...',
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 12),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.04),
+                    ),
+                    onSubmitted: _sendInsightsChat,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: const Icon(Icons.send, color: Color(0xFF4ECDC4), size: 18),
+                  onPressed: () => _sendInsightsChat(_insightsChatController.text),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // ASSISTANT COACHES TAB — master coach only
+  // ════════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadAssistantMetrics() async {
+    if (_assistantsTabLoading) return;
+    setState(() => _assistantsTabLoading = true);
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final resp = await http.get(
+        Uri.parse('$_apiBaseUrl/api/coach/hierarchy/assistant-metrics?days=30'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _assistantMetrics = List<Map<String, dynamic>>.from(data['assistants'] ?? []);
+        });
+      }
+    } catch (e) {
+      _debugLog("Assistant metrics error: $e");
+    }
+    if (mounted) setState(() => _assistantsTabLoading = false);
+  }
+
+  Future<void> _loadAssistantClients(String username) async {
+    setState(() => _expandedClientsLoading = true);
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final resp = await http.get(
+        Uri.parse('$_apiBaseUrl/api/coach/hierarchy/assistant-clients/$username'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _expandedAssistantClients = List<Map<String, dynamic>>.from(data['clients'] ?? []);
+        });
+      }
+    } catch (e) {
+      _debugLog("Assistant clients error: $e");
+    }
+    if (mounted) setState(() => _expandedClientsLoading = false);
+  }
+
+  void _startConsultation(Map<String, dynamic> assistant) {
+    final assistantId = (assistant['assistant_id'] ?? assistant['hardware_id'] ?? '').toString();
+    final displayName = assistant['display_name'] ?? assistant['username'] ?? 'Assistant';
+    final username = (assistant['username'] ?? '').toString();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Start Free Consultation', style: TextStyle(color: Color(0xFFC9A962))),
+        content: Text(
+          'Start a 15-minute consultation with $displayName (@$username)?\n\nThis is a free coaching session limited to one per assistant per day.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4ECDC4)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _socket?.sink.add(jsonEncode({
+                'type': 'master_consultation_request',
+                'assistant_id': assistantId,
+                'assistant_username': username,
+              }));
+            },
+            child: const Text('Start', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _sendAssistantChat(String message) async {
+    if (message.trim().isEmpty) return;
+    setState(() {
+      _assistantChatMessages.add({'role': 'user', 'content': message});
+      _assistantChatLoading = true;
+    });
+    _assistantChatController.clear();
+    _scrollAssistantChat();
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final coachUsername = widget.currentUserProfile['username'] ?? '';
+
+      final assistantNames = _assistantMetrics.map((a) {
+        return {
+          'name': a['display_name'] ?? a['username'] ?? '',
+          'username': a['username'] ?? '',
+          'client_count': a['client_count'] ?? 0,
+          'sessions_total': a['sessions']?['total'] ?? 0,
+          'sessions_completed': a['sessions']?['completed'] ?? 0,
+          'avg_coherence': a['sessions']?['avg_coherence'] ?? 0,
+          'supervised_hours': a['supervised_hours'] ?? 0,
+        };
+      }).toList();
+
+      final contextPayload = <String, dynamic>{
+        'coach_username': coachUsername,
+        'coach_role': 'MASTER_COACH',
+        'is_master_coach': true,
+        'total_assistants': _assistantMetrics.length,
+        'assistant_details': assistantNames,
+        'client_names': assistantNames.map((a) => a['name']).toList(),
+        'total_clients': assistantNames.fold<int>(0, (sum, a) => sum + ((a['client_count'] as int?) ?? 0)),
+      };
+
+      if (_expandedAssistant != null) {
+        contextPayload['focused_assistant'] = _expandedAssistant;
+        contextPayload['focused_assistant_clients'] = _expandedAssistantClients.map((c) => {
+          'name': c['name'] ?? c['username'] ?? '',
+          'tier': c['tier'] ?? '',
+          'risk': c['risk'] ?? '',
+        }).toList();
+      }
+
+      final uri = Uri.parse('$_apiBaseUrl/api/coach/nate-chat');
+      final resp = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        body: jsonEncode({
+          'message': message,
+          'mode': 'assistant_inquiry',
+          'context': contextPayload,
+        }),
+      );
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _assistantChatMessages.add({
+            'role': 'assistant',
+            'content': (data['response'] ?? data['message'] ?? 'No response').toString(),
+          });
+        });
+      } else {
+        setState(() {
+          _assistantChatMessages.add({
+            'role': 'assistant',
+            'content': 'Connection issue (${resp.statusCode}). Try again.',
+          });
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _assistantChatMessages.add({'role': 'assistant', 'content': 'Connection error. Check your network.'});
+      });
+    }
+    if (mounted) setState(() => _assistantChatLoading = false);
+    _scrollAssistantChat();
+  }
+
+  void _scrollAssistantChat() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_assistantChatScrollController.hasClients) {
+        _assistantChatScrollController.animateTo(
+          _assistantChatScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Widget _buildAssistantChatBox() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF9D4EDD).withOpacity(0.08),
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+            ),
+            child: Row(
+              children: const [
+                Icon(Icons.psychology, color: Color(0xFF9D4EDD), size: 16),
+                SizedBox(width: 6),
+                Text('LITTLE NATE', style: TextStyle(color: Color(0xFF9D4EDD), fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                Spacer(),
+                Text('ASSISTANT INSIGHTS', style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _assistantChatMessages.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        'Ask about your assistant coaches, their client progress, session quality, or areas where they need support...',
+                        style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _assistantChatScrollController,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _assistantChatMessages.length,
+                    itemBuilder: (ctx, i) {
+                      final msg = _assistantChatMessages[i];
+                      final isUser = msg['role'] == 'user';
+                      return Align(
+                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          constraints: BoxConstraints(maxWidth: MediaQuery.of(ctx).size.width * 0.55),
+                          decoration: BoxDecoration(
+                            color: isUser ? const Color(0xFFC9A962).withOpacity(0.15) : const Color(0xFF9D4EDD).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isUser ? const Color(0xFFC9A962).withOpacity(0.2) : const Color(0xFF9D4EDD).withOpacity(0.15),
+                            ),
+                          ),
+                          child: SelectableText(
+                            msg['content'] ?? '',
+                            style: TextStyle(color: isUser ? const Color(0xFFE8D5A3) : Colors.white70, fontSize: 12, height: 1.4),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          if (_assistantChatLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF9D4EDD))),
+            ),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _assistantChatController,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'Ask Nate about your assistants...',
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.25), fontSize: 12),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.04),
+                    ),
+                    onSubmitted: _sendAssistantChat,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                IconButton(
+                  icon: const Icon(Icons.send, color: Color(0xFF9D4EDD), size: 18),
+                  onPressed: () => _sendAssistantChat(_assistantChatController.text),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssistantCard(Map<String, dynamic> assistant) {
+    final name = assistant['display_name'] ?? assistant['username'] ?? '—';
+    final username = assistant['username'] ?? '';
+    final clientCount = assistant['client_count'] ?? 0;
+    final sessions = assistant['sessions'] ?? {};
+    final totalSessions = sessions['total'] ?? 0;
+    final completedSessions = sessions['completed'] ?? 0;
+    final avgCoherence = (sessions['avg_coherence'] ?? 0.0).toDouble();
+    final hours = (assistant['supervised_hours'] ?? 0).toDouble();
+    final isExpanded = _expandedAssistant == username;
+    final status = assistant['status'] ?? 'active';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isExpanded ? const Color(0xFF9D4EDD).withOpacity(0.5) : Colors.white.withOpacity(0.06),
+        ),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedAssistant = null;
+                  _expandedAssistantClients = [];
+                } else {
+                  _expandedAssistant = username;
+                  _loadAssistantClients(username);
+                }
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF9D4EDD).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Center(
+                          child: Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : '?',
+                            style: const TextStyle(color: Color(0xFF9D4EDD), fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                            Text('@$username', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      if (status == 'active' || status == 'accepted')
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: SizedBox(
+                            height: 26,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF4ECDC4),
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                              ),
+                              onPressed: () => _startConsultation(assistant),
+                              child: const Text('Consult', style: TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: status == 'active' || status == 'accepted'
+                              ? Colors.green.withOpacity(0.15)
+                              : Colors.orange.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            color: status == 'active' || status == 'accepted' ? Colors.green : Colors.orange,
+                            fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(isExpanded ? Icons.expand_less : Icons.expand_more, color: Colors.white38, size: 20),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _metricChip(Icons.people, '$clientCount', 'Clients'),
+                      const SizedBox(width: 8),
+                      _metricChip(Icons.event_note, '$completedSessions/$totalSessions', 'Sessions'),
+                      const SizedBox(width: 8),
+                      _metricChip(Icons.timeline, avgCoherence.toStringAsFixed(2), 'Avg CEE'),
+                      const SizedBox(width: 8),
+                      _metricChip(Icons.timer, '${hours.toStringAsFixed(1)}h', 'Supervised'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isExpanded) ...[
+            Divider(height: 1, color: Colors.white.withOpacity(0.06)),
+            _expandedClientsLoading
+                ? const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF9D4EDD)))),
+                  )
+                : _expandedAssistantClients.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text('No clients assigned', style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12)),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8, left: 4),
+                              child: Text(
+                                'ASSIGNED CLIENTS',
+                                style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1),
+                              ),
+                            ),
+                            ..._expandedAssistantClients.map((c) => Container(
+                              margin: const EdgeInsets.only(bottom: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.02),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.person, color: Colors.white.withOpacity(0.3), size: 14),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      c['name'] ?? c['username'] ?? '—',
+                                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: _riskColor(c['risk'] ?? 'normal').withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      (c['risk'] ?? 'normal').toString().toUpperCase(),
+                                      style: TextStyle(color: _riskColor(c['risk'] ?? 'normal'), fontSize: 9, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(c['tier'] ?? '', style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10)),
+                                ],
+                              ),
+                            )),
+                          ],
+                        ),
+                      ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _metricChip(IconData icon, String value, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: const Color(0xFF9D4EDD), size: 12),
+                const SizedBox(width: 3),
+                Flexible(child: Text(value, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _riskColor(String risk) {
+    switch (risk.toLowerCase()) {
+      case 'high': return const Color(0xFFEF4444);
+      case 'elevated': return Colors.orange;
+      case 'low': return Colors.green;
+      default: return const Color(0xFFC9A962);
+    }
+  }
+
+  Widget _buildAssistantsTab() {
+    final profile = widget.currentUserProfile;
+    final isMaster = _assistantMetrics.isNotEmpty
+        || profile['is_master_coach'] == true
+        || profile['master_coach_approved'] == true
+        || profile['master_coach_approved'] == 'true';
+
+    if (!isMaster && !_assistantsTabLoading && _assistantMetrics.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.supervisor_account, color: Colors.white.withOpacity(0.15), size: 64),
+            const SizedBox(height: 16),
+            Text('Master Coach Access', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(
+              'This tab is available when you have\nassistant coaches under your supervision.',
+              style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.supervisor_account, color: Color(0xFF9D4EDD), size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'ASSISTANT COACHES',
+                style: TextStyle(color: Color(0xFF9D4EDD), fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              ),
+              const Spacer(),
+              if (_assistantsTabLoading)
+                const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF9D4EDD)))
+              else
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Color(0xFF9D4EDD), size: 18),
+                  onPressed: _loadAssistantMetrics,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${_assistantMetrics.length} assistant${_assistantMetrics.length == 1 ? '' : 's'} under your supervision',
+            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+
+          SizedBox(
+            height: 260,
+            child: Row(
+              children: [
+                Expanded(flex: 3, child: _buildAssistantChatBox()),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A0A0A),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.06)),
+                    ),
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('OVERVIEW', style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        const SizedBox(height: 12),
+                        _overviewStat('Total Assistants', '${_assistantMetrics.length}', Icons.people_alt),
+                        const SizedBox(height: 8),
+                        _overviewStat(
+                          'Total Clients',
+                          '${_assistantMetrics.fold<int>(0, (s, a) => s + ((a['client_count'] as int?) ?? 0))}',
+                          Icons.person,
+                        ),
+                        const SizedBox(height: 8),
+                        _overviewStat(
+                          'Sessions (30d)',
+                          '${_assistantMetrics.fold<int>(0, (s, a) => s + (((a['sessions'] ?? {})['total'] as int?) ?? 0))}',
+                          Icons.event_note,
+                        ),
+                        const SizedBox(height: 8),
+                        _overviewStat(
+                          'Avg Coherence',
+                          _assistantMetrics.isNotEmpty
+                              ? (_assistantMetrics.fold<double>(0, (s, a) => s + ((a['sessions'] ?? {})['avg_coherence'] as double? ?? 0))
+                                    / _assistantMetrics.length).toStringAsFixed(3)
+                              : '—',
+                          Icons.timeline,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          ..._assistantMetrics.map((a) => _buildAssistantCard(a)),
+
+          if (_assistantMetrics.isEmpty && !_assistantsTabLoading)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.02),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Text(
+                  'No assistant coaches found. Invite assistants from Settings > My Assistants.',
+                  style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _overviewStat(String label, String value, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFF9D4EDD), size: 14),
+        const SizedBox(width: 8),
+        Expanded(child: Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11))),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
   Widget _buildInsightsTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -6301,7 +7823,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     side: const BorderSide(color: Color(0xFF9D4EDD), width: 0.5),
                   ),
                   onPressed: () {
-                    // Select client first then show AI mode picker
                     final clientId = _getFilteredClients().isNotEmpty
                         ? (_getFilteredClients().first['hardware_id'] ?? _getFilteredClients().first['id'] ?? '').toString()
                         : '';
@@ -6330,30 +7851,48 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          // Quick stats
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard("Total Clients", _clients.length.toString(), Icons.people, const Color(0xFF4361EE)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard("Sessions Today", _schedule.length.toString(), Icons.calendar_today, const Color(0xFF00F5D4)),
-              ),
-            ],
-          ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard("High Risk", "0", Icons.warning, const Color(0xFFFF9F1C)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard("Breakthroughs", "0", Icons.star, const Color(0xFFFFD700)),
-              ),
-            ],
+          // ── Chat Box + 2x2 Stats Grid ──
+          SizedBox(
+            height: 240,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Chat box (left — takes ~60% width)
+                Expanded(
+                  flex: 3,
+                  child: _buildInsightsChatBox(),
+                ),
+                const SizedBox(width: 10),
+                // 2x2 stat grid (right — takes ~40% width)
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(child: _buildStatCard("Total Clients", _clients.length.toString(), Icons.people, const Color(0xFF4361EE))),
+                            const SizedBox(width: 8),
+                            Expanded(child: _buildStatCard("High Risk", "0", Icons.warning, const Color(0xFFFF9F1C))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(child: _buildStatCard("Sessions Today", _schedule.length.toString(), Icons.calendar_today, const Color(0xFF00F5D4))),
+                            const SizedBox(width: 8),
+                            Expanded(child: _buildStatCard("Breakthroughs", "0", Icons.star, const Color(0xFFFFD700))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           
@@ -6366,7 +7905,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           ),
           const SizedBox(height: 12),
           
-          // Client metrics overview (all matching clients, scrollable)
+          // Client metrics overview
           ..._getFilteredClients().map((client) {
             final metrics = (client['metrics'] is Map) ? Map<String, dynamic>.from(client['metrics']) : <String, dynamic>{};
             final plan = (client['subscription_plan'] ?? client['tier'] ?? '').toString().toUpperCase();
@@ -6444,11 +7983,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       );
     }
 
-    // Select first folder by default (post-frame).
-    if (_selectedFolderId == null) {
+    final folders = _buildFolderGroups();
+    final isWide = MediaQuery.of(context).size.width > 980;
+
+    // Auto-select first folder on wide screens only (mobile shows full folder list first)
+    if (_selectedFolderId == null && isWide) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final folders = _buildFolderGroups();
         if (folders.isEmpty) return;
         final first = folders.first;
         _openFolder(
@@ -6459,13 +8000,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         );
       });
     }
-
-    final folders = _buildFolderGroups();
-    final isWide = MediaQuery.of(context).size.width > 980;
     final folderList = Column(
       children: [
+        const SizedBox(height: 8),
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: _buildClientSearchAndFilter(),
         ),
         Expanded(
@@ -6537,11 +8076,86 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     final folderContent = _buildFolderContent();
 
     if (!isWide) {
+      if (_selectedFolderId != null) {
+        return Column(
+          children: [
+            _buildMobileFilterBar(),
+            const Divider(color: Colors.white10, height: 1),
+            Expanded(child: folderContent),
+          ],
+        );
+      }
       return Column(
         children: [
-          SizedBox(height: 150, child: folderList),
-          const Divider(color: Colors.white10, height: 1),
-          Expanded(child: folderContent),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: _buildClientSearchAndFilter(),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: folders.length,
+              itemBuilder: (context, index) {
+                final f = folders[index];
+                final folderType = (f['folder_type'] ?? 'family').toString();
+                IconData folderIcon;
+                Color iconColor;
+                switch (folderType) {
+                  case 'company':
+                    folderIcon = Icons.business;
+                    iconColor = const Color(0xFF4ECDC4);
+                    break;
+                  case 'coach_only':
+                    folderIcon = Icons.calendar_today;
+                    iconColor = const Color(0xFFC9A962);
+                    break;
+                  default:
+                    folderIcon = Icons.folder;
+                    iconColor = const Color(0xFFFFD700);
+                }
+                return InkWell(
+                  onTap: () => _openFolder(
+                    folderId: f['folder_id'],
+                    label: f['label'],
+                    familyId: f['family_id'],
+                    clients: List<Map<String, dynamic>>.from(f['clients'] ?? []),
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(folderIcon, color: iconColor, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            (f['label'] ?? 'Folder').toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${(f['clients'] as List?)?.length ?? 0}',
+                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         ],
       );
     }
@@ -6552,6 +8166,61 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         const VerticalDivider(color: Colors.white10, width: 1),
         Expanded(child: folderContent),
       ],
+    );
+  }
+
+  /// Compact mobile header when a folder is open — shows folder name + back button
+  Widget _buildMobileFilterBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Color(0xFF111118),
+        border: Border(bottom: BorderSide(color: Colors.white10, width: 0.5)),
+      ),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: () => setState(() {
+              _selectedFolderId = null;
+              _selectedFolderLabel = null;
+              _selectedFolderClients = [];
+            }),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.arrow_back_ios, color: Color(0xFFC9A962), size: 14),
+                  SizedBox(width: 4),
+                  Text("Folders", style: TextStyle(color: Color(0xFFC9A962), fontSize: 12, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _selectedFolderLabel ?? "Briefing",
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            '${_selectedFolderClients.length} member${_selectedFolderClients.length == 1 ? '' : 's'}',
+            style: const TextStyle(color: Colors.grey, fontSize: 11),
+          ),
+        ],
+      ),
     );
   }
 
@@ -6604,6 +8273,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             children: [
               _buildFilterChip('All', 'ALL'),
               const SizedBox(width: 6),
+              _buildFilterChip('Clients', 'CLIENTS'),
+              const SizedBox(width: 6),
               _buildFilterChip('Families', 'FAMILY'),
               const SizedBox(width: 6),
               _buildFilterChip('Coach-Only', 'COACH_ONLY'),
@@ -6629,6 +8300,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       selectedColor: const Color(0xFFC9A962),
       backgroundColor: const Color(0xFF1A1A1A),
       side: BorderSide(color: isActive ? const Color(0xFFC9A962) : const Color(0xFF252525)),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       onSelected: (selected) {
         if (selected) setState(() => _clientFilterMode = mode);
       },
@@ -6648,6 +8322,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final companyId = (m['company_id'] ?? '').toString().trim();
       
       switch (_clientFilterMode) {
+        case 'CLIENTS':
+          break;
         case 'FAMILY':
           if (familyId.isEmpty || plan == 'COACH_ONLY') continue;
           break;
@@ -6691,10 +8367,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final companyId = (m['company_id'] ?? '').toString().trim();
       final plan = (m['subscription_plan'] ?? m['tier'] ?? '').toString().toUpperCase();
       
-      if (_clientFilterMode == 'COMPANY' && companyId.isNotEmpty) {
+      if (_clientFilterMode == 'CLIENTS') {
+        individuals.add(m);
+      } else if (_clientFilterMode == 'COMPANY' && companyId.isNotEmpty) {
         byCompany.putIfAbsent(companyId, () => []).add(m);
       } else if (_clientFilterMode == 'COACH_ONLY') {
-        // Show coach-only clients individually or by company
         if (companyId.isNotEmpty) {
           byCompany.putIfAbsent(companyId, () => []).add(m);
         } else {
@@ -6790,12 +8467,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     for (final c in individuals) {
       final plan = (c['subscription_plan'] ?? c['tier'] ?? '').toString().toUpperCase();
       final isCoachOnly = plan == 'COACH_ONLY';
+      final cFamilyId = (c['family_id'] ?? '').toString().trim();
+      final lastLogin = (c['last_login'] ?? '').toString();
+      final lastTxt = lastLogin.isNotEmpty && lastLogin.length >= 10 ? lastLogin.substring(0, 10) : '—';
+      String tag = isCoachOnly ? 'Coach-Only' : (cFamilyId.isNotEmpty ? 'Family Member' : 'Individual');
       out.add({
         "folder_id": "client:${(c['id'] ?? '').toString()}",
-        "family_id": "",
+        "family_id": cFamilyId,
         "company_id": (c['company_id'] ?? '').toString(),
         "label": (c['name'] ?? 'Client').toString(),
-        "subtitle": "${isCoachOnly ? 'Coach-Only' : 'Individual'} • Last: ${(c['last_login'] ?? '').toString().isNotEmpty ? (c['last_login'] ?? '').toString().substring(0, 10) : '—'}",
+        "subtitle": "$tag • Last: $lastTxt",
         "risk_level": ((c['metrics'] is Map) ? (c['metrics']['risk_level'] ?? 'LOW') : 'LOW').toString(),
         "clients": [c],
         "folder_type": isCoachOnly ? "coach_only" : "individual",
@@ -7140,7 +8821,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       // Try to fetch from API
       final clientId = clientIds.first;
       final uri = _apiUri('/api/night-school/memories/client/$clientId');
-      final resp = await http.get(uri).timeout(const Duration(seconds: 5));
+      final resp = await http.get(uri, headers: _restHeaders()).timeout(const Duration(seconds: 5));
       
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final data = jsonDecode(resp.body);
@@ -7410,7 +9091,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
-                      if (liveId.isNotEmpty)
+                      if (liveId.isNotEmpty) ...[
+                        GestureDetector(
+                          onTap: () {
+                            final clientId = (_activeLiveSession?['client_id'] ?? '').toString();
+                            if (clientId.isNotEmpty) {
+                              Navigator.pop(context);
+                              _openSessionAssistant(clientId, liveId);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                            margin: const EdgeInsets.only(right: 6),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.4)),
+                              color: const Color(0xFF9D4EDD).withOpacity(0.10),
+                            ),
+                            child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(Icons.psychology, color: Color(0xFF9D4EDD), size: 14),
+                              SizedBox(width: 4),
+                              Text("AI", style: TextStyle(color: Color(0xFF9D4EDD), fontWeight: FontWeight.bold, fontSize: 12)),
+                            ]),
+                          ),
+                        ),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
@@ -7420,6 +9124,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                           ),
                           child: const Text("LIVE", style: TextStyle(color: Color(0xFF00F5D4), fontWeight: FontWeight.bold)),
                         ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -7637,6 +9342,284 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       _liveSheetOpen = false;
       noteCtrl.dispose();
     });
+  }
+
+  // === SESSION ASSISTANT AI POP-UP (Phase 4) ===
+  Map<String, dynamic>? _sessionAssistantData;
+  bool _sessionAssistantOpen = false;
+  String _sessionAssistantMode = 'observe'; // observe, suggest, challenge
+
+  void _openSessionAssistant(String clientId, String sessionId) {
+    final msg = json.encode({
+      "type": "session_assistant_open",
+      "client_id": clientId,
+      "session_id": sessionId,
+    });
+    _sendMessage(msg);
+    setState(() => _sessionAssistantOpen = true);
+  }
+
+  void _handleSessionAssistantData(Map<String, dynamic> data) {
+    setState(() {
+      _sessionAssistantData = data;
+    });
+  }
+
+  void _sendSessionCheckin(String sessionId, String mood, String note) {
+    final msg = json.encode({
+      "type": "session_assistant_checkin",
+      "session_id": sessionId,
+      "mood": mood,
+      "note": note,
+      "nate_mode": _sessionAssistantMode,
+    });
+    _sendMessage(msg);
+  }
+
+  void _toggleNateAssist(String sessionId, bool enabled) {
+    _assistEnabledBySession[sessionId] = enabled;
+    final msg = json.encode({
+      "type": "session_assistant_nate_toggle",
+      "session_id": sessionId,
+      "enabled": enabled,
+    });
+    _sendMessage(msg);
+    setState(() {});
+  }
+
+  void _setSessionServiceMode(String liveId, String mode) {
+    _sessionServiceMode[liveId] = mode;
+    _assistEnabledBySession[liveId] = (mode == 'green' || mode == 'yellow');
+    _socket?.sink.add(jsonEncode({
+      "type": "session_service_mode_change",
+      "live_session_id": liveId,
+      "service_mode": mode,
+    }));
+    setState(() {});
+  }
+
+  Widget _buildServiceModeSelector(String liveId) {
+    final mode = _sessionServiceMode[liveId] ?? 'green';
+    const modes = [
+      {'key': 'green', 'label': 'Full', 'color': Color(0xFF22C55E), 'icon': Icons.visibility},
+      {'key': 'yellow', 'label': 'Assist', 'color': Color(0xFFF59E0B), 'icon': Icons.psychology},
+      {'key': 'blue', 'label': 'Camera', 'color': Color(0xFF3B82F6), 'icon': Icons.videocam},
+      {'key': 'grey', 'label': 'Paused', 'color': Color(0xFF6B7280), 'icon': Icons.pause},
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: modes.map((m) {
+        final active = mode == m['key'];
+        final c = m['color'] as Color;
+        return Padding(
+          padding: const EdgeInsets.only(left: 3),
+          child: GestureDetector(
+            onTap: () => _setSessionServiceMode(liveId, m['key'] as String),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: active ? c.withOpacity(0.25) : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: active ? c : Colors.white12, width: active ? 1.5 : 0.5),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(m['icon'] as IconData, size: 12, color: active ? c : Colors.grey),
+                const SizedBox(width: 3),
+                Text(m['label'] as String, style: TextStyle(color: active ? c : Colors.grey, fontSize: 9, fontWeight: active ? FontWeight.bold : FontWeight.normal)),
+              ]),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Future<bool> _checkRecordingConsent(String clientId) async {
+    final clientData = _clients.cast<Map<String, dynamic>>().firstWhere(
+      (c) => c['id'] == clientId,
+      orElse: () => <String, dynamic>{},
+    );
+    final consent = clientData['recording_consent'];
+    if (consent is Map && consent['granted'] == true) return true;
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFFC9A962), width: 0.5)),
+        title: const Text('Recording Consent', style: TextStyle(color: Color(0xFFC9A962), fontSize: 16)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('This session uses AI observation and may capture visual data. Please confirm client awareness:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 16),
+          _consentOption(ctx, 'permanent', 'Client is aware and agrees to recording features', 'Consent saved — will not ask again for this client.'),
+          const SizedBox(height: 10),
+          _consentOption(ctx, 'remind', 'I will inform the client — remind me next time', 'Prompt will appear before every session with this client.'),
+        ]),
+      ),
+    );
+    if (result == null) return false;
+
+    _socket?.sink.add(jsonEncode({
+      "type": "save_recording_consent",
+      "client_id": clientId,
+      "consent_type": result,
+    }));
+    return true;
+  }
+
+  Widget _consentOption(BuildContext ctx, String value, String title, String subtitle) {
+    return InkWell(
+      onTap: () => Navigator.of(ctx).pop(value),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(value == 'permanent' ? Icons.check_circle_outline : Icons.notifications_active, color: const Color(0xFF4ECDC4), size: 16),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500))),
+          ]),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 24),
+            child: Text(subtitle, style: TextStyle(color: Colors.grey[500], fontSize: 10)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildSessionAssistantOverlay() {
+    if (!_sessionAssistantOpen || _sessionAssistantData == null) return const SizedBox.shrink();
+    final d = _sessionAssistantData!;
+    final clientName = d['client_name'] ?? 'Client';
+    final sessionId = d['session_id'] ?? '';
+    final nateEnabled = _assistEnabledBySession[sessionId] ?? (d['nate_enabled'] ?? true);
+    final pmb = d['pmb'] ?? {};
+    final crisis = d['crisis_perception'] ?? {};
+    final shame = d['shame_profile'] ?? {};
+    final fcodes = (d['fcodes'] is List) ? List<Map<String, dynamic>>.from(d['fcodes']) : <Map<String, dynamic>>[];
+    final legacy = (d['legacy_patterns'] is List) ? List<Map<String, dynamic>>.from(d['legacy_patterns']) : <Map<String, dynamic>>[];
+
+    return Positioned(
+      right: 12,
+      top: 80,
+      width: 320,
+      child: Material(
+        elevation: 12,
+        borderRadius: BorderRadius.circular(16),
+        color: const Color(0xFF0A0A0F),
+        child: Container(
+          constraints: const BoxConstraints(maxHeight: 480),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(children: [
+                  const Icon(Icons.psychology, color: Color(0xFF4ECDC4), size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text("Session Assistant: $clientName", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))),
+                  GestureDetector(
+                    onTap: () => setState(() => _sessionAssistantOpen = false),
+                    child: const Icon(Icons.close, color: Colors.grey, size: 18),
+                  ),
+                ]),
+                const Divider(color: Colors.white12, height: 16),
+
+                Row(children: [
+                  const Text("Nate Mode:", style: TextStyle(color: Colors.grey, fontSize: 10)),
+                  const Spacer(),
+                  ...['observe', 'suggest', 'challenge'].map((m) => Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: GestureDetector(
+                      onTap: () => setState(() => _sessionAssistantMode = m),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _sessionAssistantMode == m ? const Color(0xFF4ECDC4).withOpacity(0.2) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _sessionAssistantMode == m ? const Color(0xFF4ECDC4) : Colors.white12),
+                        ),
+                        child: Text(m[0].toUpperCase() + m.substring(1), style: TextStyle(color: _sessionAssistantMode == m ? const Color(0xFF4ECDC4) : Colors.grey, fontSize: 10)),
+                      ),
+                    ),
+                  )),
+                ]),
+                if (_activeLiveSession != null) ...[
+                  const SizedBox(height: 6),
+                  _buildServiceModeSelector((_activeLiveSession?['id'] ?? '').toString()),
+                ],
+                const SizedBox(height: 8),
+
+                if (pmb['reconsolidation_readiness'] != null && (pmb['reconsolidation_readiness'] as num) > 0.6)
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF9D4EDD).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.4)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.auto_awesome, color: Color(0xFF9D4EDD), size: 14),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text("Reconsolidation window open (${((pmb['reconsolidation_readiness'] as num) * 100).toInt()}%)",
+                          style: const TextStyle(color: Color(0xFF9D4EDD), fontSize: 11, fontWeight: FontWeight.bold))),
+                    ]),
+                  ),
+
+                _buildAssistantMetricRow("Crisis Baseline", crisis['baseline'] ?? '-'),
+                _buildAssistantMetricRow("Shame Index", "${((shame['index'] ?? 0) * 100).toInt()}%"),
+                _buildAssistantMetricRow("Reactivity", pmb['reactivity'] ?? '-'),
+                if (fcodes.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text("ACTIVE F-CODES", style: TextStyle(color: Color(0xFF8B7355), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                  const SizedBox(height: 4),
+                  ...fcodes.map((fc) => Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text("${fc['code']}: ${fc['description']}", style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                  )),
+                ],
+                if (legacy.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text("LEGACY PATTERNS", style: TextStyle(color: Color(0xFF8B7355), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                  const SizedBox(height: 4),
+                  ...legacy.map((lp) => Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Row(children: [
+                      Icon(lp['reflected'] == true ? Icons.link : Icons.link_off, color: lp['reflected'] == true ? const Color(0xFF4ECDC4) : Colors.grey, size: 12),
+                      const SizedBox(width: 4),
+                      Expanded(child: Text("${lp['source']}: ${lp['pattern']}", style: const TextStyle(color: Colors.white70, fontSize: 11))),
+                    ]),
+                  )),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAssistantMetricRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      ]),
+    );
   }
 
   Widget _buildDojoTab() {
@@ -9573,6 +11556,87 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     }));
   }
 
+  Future<void> _loadConnectStatus() async {
+    if (_connectLoading) return;
+    setState(() => _connectLoading = true);
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/connect/status'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        setState(() {
+          _connectStatus = Map<String, dynamic>.from(jsonDecode(resp.body));
+          _connectLoading = false;
+        });
+        return;
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _connectLoading = false);
+  }
+
+  Future<void> _startConnectOnboarding() async {
+    if (_connectOnboarding) return;
+    setState(() => _connectOnboarding = true);
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/connect/onboard'),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        final url = data['url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        } else if (data['status'] == 'already_connected') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Stripe Connect already set up'), backgroundColor: Color(0xFF4ECDC4)),
+          );
+        }
+      } else if (mounted) {
+        final err = jsonDecode(resp.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err['detail']?.toString() ?? 'Onboarding failed'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+    if (mounted) {
+      setState(() => _connectOnboarding = false);
+      _loadConnectStatus();
+    }
+  }
+
+  Future<void> _openConnectDashboard() async {
+    try {
+      final token = widget.currentUserProfile['token'] ?? '';
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/connect/dashboard'),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        final url = data['url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   void _requestDojoSubscriptions() {
     setState(() => _dojoSubsLoading = true);
     _socket?.sink.add(jsonEncode({
@@ -9684,6 +11748,380 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       "coach_id": widget.username,
       "w9_data": w9Data,
     }));
+  }
+
+  // =============================================================================
+  // TRAINING TAB — Coaching Mesh & Community Circle
+  // =============================================================================
+
+  Widget _buildTrainingTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("TRAINING", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Cormorant Garamond', fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text("Group training sessions, coaching mesh, and community", style: TextStyle(color: Colors.grey, fontSize: 12)),
+          const SizedBox(height: 24),
+
+          // Start Training Session (Master Coach)
+          _buildTrainingAction(
+            icon: Icons.play_circle_fill,
+            iconColor: const Color(0xFFFFD700),
+            title: "Start Training Session",
+            subtitle: "Create a BLE coaching mesh as master coach",
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => _lazyCoachingMeshScreen(isMaster: true),
+              ));
+            },
+          ),
+          const SizedBox(height: 12),
+
+          // Join Training Session
+          _buildTrainingAction(
+            icon: Icons.login,
+            iconColor: const Color(0xFF4ECDC4),
+            title: "Join Training Session",
+            subtitle: "Connect to a master coach's active session",
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => _lazyCoachingMeshScreen(isMaster: false),
+              ));
+            },
+          ),
+          const SizedBox(height: 24),
+
+          const Divider(color: Color(0xFF333333)),
+          const SizedBox(height: 16),
+
+          const Text("COMMUNITY", style: TextStyle(color: Color(0xFF4ECDC4), fontFamily: 'Courier', fontSize: 14, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+
+          _buildTrainingAction(
+            icon: Icons.group_work,
+            iconColor: const Color(0xFF9D4EDD),
+            title: "Community Circle",
+            subtitle: "Nate-to-Nate peer group wisdom sessions",
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => _lazyCommunityMeshScreen(),
+              ));
+            },
+          ),
+          const SizedBox(height: 24),
+
+          const Divider(color: Color(0xFF333333)),
+          const SizedBox(height: 16),
+
+          const Text("RECENT SESSIONS", style: TextStyle(color: Color(0xFF888888), fontFamily: 'Courier', fontSize: 12)),
+          const SizedBox(height: 8),
+
+          FutureBuilder<List<dynamic>>(
+            future: _fetchRecentTrainingSessions(),
+            builder: (ctx, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700), strokeWidth: 2));
+              }
+              final sessions = snap.data ?? [];
+              if (sessions.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(child: Text("No training sessions yet", style: TextStyle(color: Colors.grey, fontSize: 13))),
+                );
+              }
+              return Column(
+                children: sessions.take(5).map<Widget>((s) {
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.fitness_center, color: Color(0xFFFFD700), size: 20),
+                    title: Text(s['title'] ?? 'Training Session', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                    subtitle: Text(
+                      '${s['session_type'] ?? ''} · ${s['participant_count'] ?? 0} participants',
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    ),
+                    trailing: Text(
+                      s['started_at'] != null ? s['started_at'].toString().substring(0, 10) : '',
+                      style: const TextStyle(color: Colors.grey, fontSize: 11),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrainingAction({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF333333)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 32),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, color: Colors.grey, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _lazyCoachingMeshScreen({required bool isMaster}) {
+    final ethicsVersion = widget.currentUserProfile['coach_ethics_version'] ?? '';
+    if (ethicsVersion != 'v1.0_2026') {
+      return Scaffold(
+        backgroundColor: const Color(0xFF050505),
+        appBar: AppBar(
+          title: const Text('DOJO ACCESS'),
+          backgroundColor: const Color(0xFF111111),
+          foregroundColor: const Color(0xFFC9A962),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.shield_outlined, color: Color(0xFFC9A962), size: 64),
+                const SizedBox(height: 24),
+                const Text(
+                  'Coach Ethics & Code of Conduct Required',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFFE8D5A3), fontSize: 20,
+                    fontWeight: FontWeight.bold, fontFamily: 'Cormorant Garamond'),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'You must accept the Coach Ethics & Code of Conduct before accessing DOJO training sessions.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color(0xFF999999), fontSize: 14),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFC9A962),
+                    foregroundColor: const Color(0xFF050505),
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('GO BACK', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return CoachingMeshScreen(
+      profile: widget.currentUserProfile,
+      token: widget.currentUserProfile['token'] ?? '',
+      isMaster: isMaster,
+    );
+  }
+
+  Widget _lazyCommunityMeshScreen() {
+    return CommunityMeshScreen(
+      profile: widget.currentUserProfile,
+    );
+  }
+
+  Future<List<dynamic>> _fetchRecentTrainingSessions() async {
+    try {
+      final hwId = widget.currentUserProfile['hardware_id'] ?? '';
+      final url = '${_serverUrl.replaceFirst('ws', 'http').replaceAll(':8765', ':8000')}/api/coach/mesh/sessions/$hwId?limit=5';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer ${widget.currentUserProfile['token']}'},
+      );
+      if (resp.statusCode == 200) return jsonDecode(resp.body) as List;
+    } catch (_) {}
+    return [];
+  }
+
+  // =============================================================================
+  // PAYOUT SETTINGS (Stripe Connect Express)
+  // =============================================================================
+
+  Widget _buildPayoutSettingsSection() {
+    final connected = _connectStatus['connected'] == true;
+    final payoutsEnabled = _connectStatus['payouts_enabled'] == true;
+    final detailsSubmitted = _connectStatus['details_submitted'] == true;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text("PAYOUT SETTINGS", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier', fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
+              const Spacer(),
+              if (_connectLoading)
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFFD700)))
+              else
+                InkWell(
+                  onTap: _loadConnectStatus,
+                  child: const Icon(Icons.refresh, color: Colors.grey, size: 18),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (!connected) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A0F),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.account_balance, color: Colors.grey, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(child: Text("No payout account linked", style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Set up Stripe Express to receive payouts directly to your bank account. Quick 2-minute process.",
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFD700),
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: _connectOnboarding ? null : _startConnectOnboarding,
+                      icon: _connectOnboarding
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                          : const Icon(Icons.launch, size: 18),
+                      label: Text(_connectOnboarding ? "Opening..." : "Set Up Payouts"),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            // Connected — show status
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A0F),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: payoutsEnabled ? const Color(0xFF4ECDC4).withOpacity(0.3) : Colors.orange.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        payoutsEnabled ? Icons.check_circle : Icons.pending,
+                        color: payoutsEnabled ? const Color(0xFF4ECDC4) : Colors.orange,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          payoutsEnabled ? "Payouts Active" : (detailsSubmitted ? "Verification Pending" : "Setup Incomplete"),
+                          style: TextStyle(
+                            color: payoutsEnabled ? const Color(0xFF4ECDC4) : Colors.orange,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    payoutsEnabled
+                        ? "Your bank account is connected and payouts are enabled."
+                        : (detailsSubmitted
+                            ? "Your details are submitted and under review by Stripe."
+                            : "Please complete the Stripe onboarding to enable payouts."),
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      if (!detailsSubmitted)
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                            onPressed: _connectOnboarding ? null : _startConnectOnboarding,
+                            icon: const Icon(Icons.launch, size: 16),
+                            label: const Text("Complete Setup", style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      if (payoutsEnabled) ...[
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1A1A2E),
+                              foregroundColor: const Color(0xFF4ECDC4),
+                              side: const BorderSide(color: Color(0xFF4ECDC4), width: 1),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                            onPressed: _openConnectDashboard,
+                            icon: const Icon(Icons.dashboard, size: 16),
+                            label: const Text("Stripe Dashboard", style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   // =============================================================================
@@ -9886,6 +12324,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
           const SizedBox(height: 24),
 
+          // ===== PAYOUT SETTINGS (Stripe Connect) =====
+          _buildPayoutSettingsSection(),
+
+          const SizedBox(height: 24),
+
           // ===== DOJO SUBSCRIPTIONS =====
           _buildDojoSubscriptionsSection(),
 
@@ -10045,6 +12488,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       'mcat': 'MCAT',
       'teacher': 'Teacher',
       'judge': 'Judge',
+      'coach_nate': 'Coach Nate',
     };
     const dojoPrices = {
       'therapist': 175.0,
@@ -10054,6 +12498,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       'mcat': 500.0,
       'teacher': 225.0,
       'judge': 2100.0,
+      'coach_nate': 90.0,
     };
 
     // Determine which dojos can be added (not currently active)
@@ -10699,6 +13144,508 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       ),
     );
   }
+
+  void _sendMessage(dynamic msg) {
+    if (msg is String) {
+      _socket?.sink.add(msg);
+    } else {
+      _socket?.sink.add(jsonEncode(msg));
+    }
+  }
+
+  // ===========================================================================
+  // FOLDER TAB — File storage & form templates
+  // ===========================================================================
+
+  List<Map<String, dynamic>> _coachFolderList = [];
+  List<Map<String, dynamic>> _coachFolderFiles = [];
+  String? _coachActiveFolderId;
+  String? _coachActiveFolderName;
+  bool _coachFoldersLoading = false;
+
+  Widget _buildFolderTab() {
+    return RefreshIndicator(
+      onRefresh: () async => _coachFetchFolders(),
+      color: const Color(0xFFFFD700),
+      child: _coachFoldersLoading
+        ? const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700)))
+        : _coachActiveFolderId != null
+          ? _buildCoachFolderDetail()
+          : _buildCoachFolderList(),
+    );
+  }
+
+  Widget _buildCoachFolderList() {
+    if (_coachFolderList.isEmpty && !_coachFoldersLoading) {
+      _coachFetchFolders();
+    }
+
+    final personal = _coachFolderList.where((f) => f['folder_type'] == 'personal').toList();
+    final clients = _coachFolderList.where((f) => f['folder_type'] == 'client').toList();
+    final families = _coachFolderList.where((f) => f['folder_type'] == 'family').toList();
+    final groups = _coachFolderList.where((f) => f['folder_type'] == 'group').toList();
+    final companies = _coachFolderList.where((f) => f['folder_type'] == 'company').toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text("FILE MANAGER", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier', fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 2)),
+            IconButton(
+              icon: const Icon(Icons.create_new_folder, color: Color(0xFFC9A962), size: 20),
+              tooltip: "New Folder",
+              onPressed: _coachCreateFolder,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (personal.isNotEmpty) ...[
+          _buildCoachFolderSection("MY FILES", Icons.person, personal),
+          const SizedBox(height: 16),
+        ],
+        if (clients.isNotEmpty) ...[
+          _buildCoachFolderSection("CLIENT FOLDERS", Icons.people, clients),
+          const SizedBox(height: 16),
+        ],
+        if (families.isNotEmpty) ...[
+          _buildCoachFolderSection("FAMILY FOLDERS", Icons.family_restroom, families),
+          const SizedBox(height: 16),
+        ],
+        if (groups.isNotEmpty) ...[
+          _buildCoachFolderSection("GROUP FOLDERS", Icons.groups, groups),
+          const SizedBox(height: 16),
+        ],
+        if (companies.isNotEmpty) ...[
+          _buildCoachFolderSection("COMPANY FOLDERS", Icons.business, companies),
+        ],
+        if (_coachFolderList.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(children: [
+                Icon(Icons.folder_open, color: Colors.grey[600], size: 48),
+                const SizedBox(height: 12),
+                Text("No folders yet", style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+                const SizedBox(height: 4),
+                Text("Folders auto-populate from your assigned clients", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+              ]),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCoachFolderSection(String title, IconData icon, List<Map<String, dynamic>> folders) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, color: const Color(0xFF8B7355), size: 16),
+          const SizedBox(width: 8),
+          Text(title, style: const TextStyle(color: Color(0xFF8B7355), fontFamily: 'Courier', fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          const SizedBox(width: 8),
+          Text("(${folders.length})", style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+        ]),
+        const SizedBox(height: 8),
+        ...folders.map((f) => _buildCoachFolderCard(f)),
+      ],
+    );
+  }
+
+  Widget _buildCoachFolderCard(Map<String, dynamic> folder) {
+    final name = folder['entity_name'] ?? folder['entity_id'] ?? 'Unnamed';
+    final type = folder['folder_type'] ?? '';
+    final typeIcons = {
+      'personal': Icons.person,
+      'client': Icons.person_outline,
+      'family': Icons.family_restroom,
+      'group': Icons.groups,
+      'company': Icons.business,
+    };
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _coachActiveFolderId = folder['id'];
+          _coachActiveFolderName = name;
+          _coachFolderFiles = [];
+        });
+        _coachFetchFolderFiles(folder['id']);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF222222)),
+        ),
+        child: Row(
+          children: [
+            Icon(typeIcons[type] ?? Icons.folder, color: const Color(0xFFC9A962), size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _coachFileUploading = false;
+  String? _coachUploadFileName;
+  String? _coachUploadError;
+  bool _coachUploadSuccess = false;
+
+  Widget _buildCoachFolderDetail() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: const Color(0xFF0D0D0D),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () => setState(() { _coachActiveFolderId = null; _coachActiveFolderName = null; }),
+                child: const Row(children: [
+                  Icon(Icons.arrow_back, color: Color(0xFFC9A962), size: 18),
+                  SizedBox(width: 6),
+                  Text("Back", style: TextStyle(color: Color(0xFFC9A962), fontSize: 13)),
+                ]),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(_coachActiveFolderName ?? "Folder", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+              InkWell(
+                onTap: _coachFileUploading ? null : _coachPickAndUploadFile,
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC9A962).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(_coachFileUploading ? Icons.hourglass_top : Icons.upload_file,
+                      color: const Color(0xFFC9A962), size: 16),
+                    const SizedBox(width: 4),
+                    Text(_coachFileUploading ? "Uploading..." : "Upload",
+                      style: const TextStyle(color: Color(0xFFC9A962), fontSize: 12, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_coachFileUploading && _coachUploadFileName != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF0A0A0A),
+            child: Row(children: [
+              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF4ECDC4))),
+              const SizedBox(width: 10),
+              Expanded(child: Text("Uploading ${_coachUploadFileName!}...", style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 12))),
+            ]),
+          ),
+        if (_coachUploadSuccess)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF0A0A0A),
+            child: Row(children: [
+              const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 16),
+              const SizedBox(width: 10),
+              const Expanded(child: Text("File uploaded successfully", style: TextStyle(color: Color(0xFF22C55E), fontSize: 12))),
+              IconButton(icon: const Icon(Icons.close, size: 14, color: Colors.grey), onPressed: () => setState(() => _coachUploadSuccess = false)),
+            ]),
+          ),
+        if (_coachUploadError != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF0A0A0A),
+            child: Row(children: [
+              const Icon(Icons.error, color: Color(0xFFEF4444), size: 16),
+              const SizedBox(width: 10),
+              Expanded(child: Text(_coachUploadError!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12))),
+              IconButton(icon: const Icon(Icons.close, size: 14, color: Colors.grey), onPressed: () => setState(() => _coachUploadError = null)),
+            ]),
+          ),
+        Expanded(
+          child: _coachFolderFiles.isEmpty
+            ? Center(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.insert_drive_file, color: Colors.grey[700], size: 40),
+                  const SizedBox(height: 8),
+                  Text("No files yet", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.upload_file, size: 16),
+                    label: const Text("Upload a File"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFC9A962),
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    ),
+                    onPressed: _coachFileUploading ? null : _coachPickAndUploadFile,
+                  ),
+                ]),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: _coachFolderFiles.length,
+                itemBuilder: (context, index) {
+                  final file = _coachFolderFiles[index];
+                  final filename = file['filename'] ?? 'Unknown';
+                  final fileType = file['file_type'] ?? 'document';
+                  final created = file['created_at'] ?? '';
+                  final fileId = file['id'] ?? '';
+                  final sizeBytes = file['file_size_bytes'] ?? 0;
+
+                  final typeIcon = fileType.contains('pdf') ? Icons.picture_as_pdf
+                      : fileType.contains('xls') || fileType.contains('spread') ? Icons.table_chart
+                      : fileType.contains('image') ? Icons.image
+                      : Icons.insert_drive_file;
+
+                  String sizeStr = '';
+                  if (sizeBytes > 0) {
+                    if (sizeBytes > 1024 * 1024) {
+                      sizeStr = '${(sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+                    } else if (sizeBytes > 1024) {
+                      sizeStr = '${(sizeBytes / 1024).toStringAsFixed(0)} KB';
+                    } else {
+                      sizeStr = '$sizeBytes B';
+                    }
+                  }
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111111),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF222222)),
+                    ),
+                    child: Row(children: [
+                      Icon(typeIcon, color: const Color(0xFF4ECDC4), size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(filename, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                          Row(children: [
+                            if (created.isNotEmpty)
+                              Text(created.toString().substring(0, 10), style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                            if (sizeStr.isNotEmpty) ...[
+                              Text('  ·  ', style: TextStyle(color: Colors.grey[700], fontSize: 11)),
+                              Text(sizeStr, style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                            ],
+                          ]),
+                        ]),
+                      ),
+                      PopupMenuButton<String>(
+                        icon: Icon(Icons.more_vert, color: Colors.grey[600], size: 18),
+                        color: const Color(0xFF1A1A1A),
+                        onSelected: (val) {
+                          if (val == 'delete') _coachDeleteFile(fileId);
+                        },
+                        itemBuilder: (ctx) => [
+                          const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Color(0xFFEF4444), fontSize: 13))),
+                        ],
+                      ),
+                    ]),
+                  );
+                },
+              ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _coachPickAndUploadFile() async {
+    if (_coachActiveFolderId == null) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(allowMultiple: false);
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      final bytes = file.bytes;
+      if (bytes == null && file.path == null) return;
+
+      final fileName = file.name;
+      setState(() {
+        _coachFileUploading = true;
+        _coachUploadFileName = fileName;
+        _coachUploadError = null;
+        _coachUploadSuccess = false;
+      });
+
+      final token = widget.currentUserProfile?['token'] ?? '';
+      final baseUrl = AppConfig.apiBaseUrl;
+      final uri = Uri.parse('$baseUrl/api/coach/folders/upload');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['Authorization'] = 'Bearer $token';
+      request.fields['folder_id'] = _coachActiveFolderId!;
+
+      final data = bytes ?? (await File(file.path!).readAsBytes());
+      request.files.add(http.MultipartFile.fromBytes('file', data, filename: fileName));
+
+      final streamedResp = await request.send().timeout(const Duration(seconds: 120));
+      final respBody = await streamedResp.stream.bytesToString();
+
+      if (!mounted) return;
+      if (streamedResp.statusCode == 200) {
+        setState(() {
+          _coachFileUploading = false;
+          _coachUploadFileName = null;
+          _coachUploadSuccess = true;
+        });
+        _coachFetchFolderFiles(_coachActiveFolderId!);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _coachUploadSuccess = false);
+        });
+      } else {
+        String errMsg = 'Upload failed (${streamedResp.statusCode})';
+        try {
+          final errData = json.decode(respBody);
+          errMsg = errData['detail'] ?? errMsg;
+        } catch (_) {}
+        setState(() {
+          _coachFileUploading = false;
+          _coachUploadFileName = null;
+          _coachUploadError = errMsg;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _coachFileUploading = false;
+        _coachUploadFileName = null;
+        _coachUploadError = 'Upload error: $e';
+      });
+    }
+  }
+
+  void _coachDeleteFile(String fileId) {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty || _coachActiveFolderId == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text("Delete File?", style: TextStyle(color: Color(0xFFEF4444), fontSize: 16)),
+        content: const Text("This cannot be undone.", style: TextStyle(color: Colors.white70, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final baseUrl = AppConfig.apiBaseUrl;
+              final url = Uri.parse('$baseUrl/api/coach/folders/files/$fileId');
+              http.delete(url, headers: {'Authorization': 'Bearer $token'}).then((resp) {
+                if (resp.statusCode == 200 && mounted) {
+                  _coachFetchFolderFiles(_coachActiveFolderId!);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("File deleted"), backgroundColor: Colors.green),
+                  );
+                }
+              });
+            },
+            child: const Text("Delete"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _coachFetchFolders() {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+    setState(() => _coachFoldersLoading = true);
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/folders');
+    http.get(url, headers: {'Authorization': 'Bearer $token'}).then((resp) {
+      if (resp.statusCode == 200 && mounted) {
+        try {
+          final data = json.decode(resp.body);
+          setState(() {
+            _coachFolderList = List<Map<String, dynamic>>.from(data['folders'] ?? []);
+            _coachFoldersLoading = false;
+          });
+        } catch (_) {
+          if (mounted) setState(() => _coachFoldersLoading = false);
+        }
+      } else if (mounted) {
+        setState(() => _coachFoldersLoading = false);
+      }
+    }).catchError((_) {
+      if (mounted) setState(() => _coachFoldersLoading = false);
+    });
+  }
+
+  void _coachFetchFolderFiles(String folderId) {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/folders/$folderId/files');
+    http.get(url, headers: {'Authorization': 'Bearer $token'}).then((resp) {
+      if (resp.statusCode == 200 && mounted) {
+        try {
+          final data = json.decode(resp.body);
+          setState(() {
+            _coachFolderFiles = List<Map<String, dynamic>>.from(data['files'] ?? []);
+          });
+        } catch (_) {}
+      }
+    }).catchError((_) {});
+  }
+
+  void _coachCreateFolder() {
+    final nameCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text("Create Folder", style: TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
+        content: TextField(
+          controller: nameCtrl,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: "Folder Name",
+            labelStyle: TextStyle(color: Colors.grey),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) return;
+              final token = widget.currentUserProfile?['token'] ?? '';
+              if (token.isEmpty) return;
+              final baseUrl = AppConfig.apiBaseUrl;
+              final url = Uri.parse('$baseUrl/api/coach/folders/create');
+              http.post(url, headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'}, body: json.encode({'folder_type': 'personal', 'entity_name': name})).then((resp) {
+                if (resp.statusCode == 200 && mounted) _coachFetchFolders();
+              }).catchError((_) {});
+            },
+            child: const Text("Create", style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // =============================================================================
@@ -10730,6 +13677,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
   List<dynamic> _users = [];
   List<dynamic> _crisisWatchlist = [];
   List<dynamic> _pendingCoaches = [];
+  List<dynamic> _pendingUpgrades = [];
   List<dynamic> _pendingSearches = [];
   List<dynamic> _pendingStudents = [];
   List<dynamic> _coachLearningItems = [];
@@ -10737,6 +13685,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
   bool _coachLearningLoading = false;
   bool _isLoading = true;
   String _statusMessage = "Initializing...";
+  int _wsReconnectAttempts = 0;
+  Timer? _wsReconnectTimer;
   
   late TabController _tabController;
 
@@ -10757,10 +13707,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
         _handleSocketMessage,
         onError: (e) {
           if (mounted) setState(() => _statusMessage = "Connection Failed");
+          _scheduleWsReconnect();
         },
         onDone: () {
-          if (mounted) setState(() => _statusMessage = "Disconnected");
-        }
+          if (mounted) setState(() => _statusMessage = "Disconnected — reconnecting...");
+          _scheduleWsReconnect();
+        },
+        cancelOnError: true,
       );
 
       _socket!.sink.add(jsonEncode({
@@ -10772,7 +13725,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
 
     } catch (e) {
       _debugLog("Fatal Connection Error: $e");
+      _scheduleWsReconnect();
     }
+  }
+
+  void _scheduleWsReconnect() {
+    _wsReconnectTimer?.cancel();
+    final attempt = _wsReconnectAttempts.clamp(0, 10);
+    final baseMs = (1000 * (1 << attempt)).clamp(1000, 30000);
+    final jitterMs = (baseMs * 0.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).toInt();
+    _wsReconnectAttempts++;
+    _wsReconnectTimer = Timer(Duration(milliseconds: baseMs + jitterMs), () {
+      if (!mounted) return;
+      _debugLog("Admin WS reconnect attempt $_wsReconnectAttempts (delay ${baseMs + jitterMs}ms)");
+      _connectToBridge();
+    });
   }
 
   void _fetchDashboard() {
@@ -10780,6 +13747,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
     _socket?.sink.add(jsonEncode({"type": "admin_get_users"}));
     _socket?.sink.add(jsonEncode({"type": "admin_get_crisis_watchlist"}));
     _socket?.sink.add(jsonEncode({"type": "admin_get_pending_coaches"}));
+    _socket?.sink.add(jsonEncode({"type": "admin_get_pending_upgrades"}));
     _socket?.sink.add(jsonEncode({"type": "admin_get_pending_searches"}));
     _socket?.sink.add(jsonEncode({"type": "admin_get_pending_students"}));
     _fetchCoachLearningQueue(status: _coachLearningStatus);
@@ -10811,6 +13779,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
       final data = jsonDecode(message);
 
       if (data['type'] == 'login_success') {
+        _wsReconnectAttempts = 0;
         _fetchDashboard();
       }
       else if (data['type'] == 'admin_stats') {
@@ -10831,6 +13800,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
       else if (data['type'] == 'coach_approved') {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Coach approved successfully"), backgroundColor: Color(0xFF00F5D4)),
+        );
+        _fetchDashboard();
+      }
+      else if (data['type'] == 'pending_upgrades') {
+        setState(() => _pendingUpgrades = data['upgrades'] ?? []);
+      }
+      else if (data['type'] == 'upgrade_approved') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("${data['username'] ?? 'Client'} upgraded to Coach"), backgroundColor: const Color(0xFF00F5D4)),
+        );
+        _fetchDashboard();
+      }
+      else if (data['type'] == 'upgrade_rejected') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Upgrade request rejected"), backgroundColor: Color(0xFFEF4444)),
         );
         _fetchDashboard();
       }
@@ -11035,6 +14019,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
   @override
   void dispose() {
     _tabController.dispose();
+    _wsReconnectTimer?.cancel();
     _socket?.sink.close();
     super.dispose();
   }
@@ -11179,6 +14164,378 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
         );
       },
     );
+  }
+
+  // =============================================================================
+  // FOLDER TAB — File storage & form templates
+  // =============================================================================
+
+  List<Map<String, dynamic>> _folderList = [];
+  List<Map<String, dynamic>> _folderFiles = [];
+  List<Map<String, dynamic>> _formTemplates = [];
+  String? _activeFolderId;
+  String? _activeFolderName;
+  bool _foldersLoading = false;
+
+  Widget _buildFolderTab() {
+    return RefreshIndicator(
+      onRefresh: () async => _fetchFolders(),
+      color: const Color(0xFFFFD700),
+      child: _foldersLoading
+        ? const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700)))
+        : _activeFolderId != null
+          ? _buildFolderDetail()
+          : _buildFolderList(),
+    );
+  }
+
+  Widget _buildFolderList() {
+    if (_folderList.isEmpty && !_foldersLoading) {
+      _fetchFolders();
+    }
+
+    final personal = _folderList.where((f) => f['folder_type'] == 'personal').toList();
+    final clients = _folderList.where((f) => f['folder_type'] == 'client').toList();
+    final families = _folderList.where((f) => f['folder_type'] == 'family').toList();
+    final groups = _folderList.where((f) => f['folder_type'] == 'group').toList();
+    final companies = _folderList.where((f) => f['folder_type'] == 'company').toList();
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text("FILE MANAGER", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier', fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 2)),
+            Row(children: [
+              IconButton(
+                icon: const Icon(Icons.note_add, color: Color(0xFF4ECDC4), size: 20),
+                tooltip: "Form Templates",
+                onPressed: _showFormTemplates,
+              ),
+              IconButton(
+                icon: const Icon(Icons.create_new_folder, color: Color(0xFFC9A962), size: 20),
+                tooltip: "New Folder",
+                onPressed: _createCustomFolder,
+              ),
+            ]),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        if (personal.isNotEmpty) ...[
+          _buildFolderSection("MY FILES", Icons.person, personal),
+          const SizedBox(height: 16),
+        ],
+        if (clients.isNotEmpty) ...[
+          _buildFolderSection("CLIENT FOLDERS", Icons.people, clients),
+          const SizedBox(height: 16),
+        ],
+        if (families.isNotEmpty) ...[
+          _buildFolderSection("FAMILY FOLDERS", Icons.family_restroom, families),
+          const SizedBox(height: 16),
+        ],
+        if (groups.isNotEmpty) ...[
+          _buildFolderSection("GROUP FOLDERS", Icons.groups, groups),
+          const SizedBox(height: 16),
+        ],
+        if (companies.isNotEmpty) ...[
+          _buildFolderSection("COMPANY FOLDERS", Icons.business, companies),
+        ],
+        if (_folderList.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(children: [
+                Icon(Icons.folder_open, color: Colors.grey[600], size: 48),
+                const SizedBox(height: 12),
+                Text("No folders yet", style: TextStyle(color: Colors.grey[500], fontSize: 14)),
+                const SizedBox(height: 4),
+                Text("Folders auto-populate from your assigned clients", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+              ]),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildFolderSection(String title, IconData icon, List<Map<String, dynamic>> folders) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(icon, color: const Color(0xFF8B7355), size: 16),
+          const SizedBox(width: 8),
+          Text(title, style: const TextStyle(color: Color(0xFF8B7355), fontFamily: 'Courier', fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          const SizedBox(width: 8),
+          Text("(${folders.length})", style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+        ]),
+        const SizedBox(height: 8),
+        ...folders.map((f) => _buildFolderCard(f)),
+      ],
+    );
+  }
+
+  Widget _buildFolderCard(Map<String, dynamic> folder) {
+    final name = folder['entity_name'] ?? folder['entity_id'] ?? 'Unnamed';
+    final type = folder['folder_type'] ?? '';
+    final typeIcons = {
+      'personal': Icons.person,
+      'client': Icons.person_outline,
+      'family': Icons.family_restroom,
+      'group': Icons.groups,
+      'company': Icons.business,
+    };
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _activeFolderId = folder['id'];
+          _activeFolderName = name;
+          _folderFiles = [];
+        });
+        _fetchFolderFiles(folder['id']);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFF222222)),
+        ),
+        child: Row(
+          children: [
+            Icon(typeIcons[type] ?? Icons.folder, color: const Color(0xFFC9A962), size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFolderDetail() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: const Color(0xFF0D0D0D),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () => setState(() { _activeFolderId = null; _activeFolderName = null; }),
+                child: const Row(children: [
+                  Icon(Icons.arrow_back, color: Color(0xFFC9A962), size: 18),
+                  SizedBox(width: 6),
+                  Text("Back", style: TextStyle(color: Color(0xFFC9A962), fontSize: 13)),
+                ]),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(_activeFolderName ?? "Folder", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _folderFiles.isEmpty
+            ? Center(
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.insert_drive_file, color: Colors.grey[700], size: 40),
+                  const SizedBox(height: 8),
+                  Text("No files yet", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                ]),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.all(12),
+                itemCount: _folderFiles.length,
+                itemBuilder: (context, index) {
+                  final file = _folderFiles[index];
+                  final filename = file['filename'] ?? 'Unknown';
+                  final fileType = file['file_type'] ?? 'document';
+                  final created = file['created_at'] ?? '';
+
+                  final typeIcon = fileType.contains('pdf') ? Icons.picture_as_pdf
+                      : fileType.contains('xls') ? Icons.table_chart
+                      : fileType.contains('image') ? Icons.image
+                      : Icons.insert_drive_file;
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111111),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF222222)),
+                    ),
+                    child: Row(children: [
+                      Icon(typeIcon, color: const Color(0xFF4ECDC4), size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(filename, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                          if (created.isNotEmpty)
+                            Text(created.substring(0, 10), style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                        ]),
+                      ),
+                    ]),
+                  );
+                },
+              ),
+        ),
+      ],
+    );
+  }
+
+  void _fetchFolders() {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+    setState(() => _foldersLoading = true);
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/folders');
+    _makeApiRequest(url, token, (data) {
+      if (mounted) {
+        setState(() {
+          _folderList = List<Map<String, dynamic>>.from(data['folders'] ?? []);
+          _foldersLoading = false;
+        });
+      }
+    });
+  }
+
+  void _fetchFolderFiles(String folderId) {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/folders/$folderId/files');
+    _makeApiRequest(url, token, (data) {
+      if (mounted) {
+        setState(() {
+          _folderFiles = List<Map<String, dynamic>>.from(data['files'] ?? []);
+        });
+      }
+    });
+  }
+
+  void _showFormTemplates() {
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/forms/templates');
+    _makeApiRequest(url, token, (data) {
+      if (!mounted) return;
+      final templates = List<Map<String, dynamic>>.from(data['templates'] ?? []);
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: const Text("Form Templates", style: TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: ListView.builder(
+              itemCount: templates.length,
+              itemBuilder: (ctx, idx) {
+                final t = templates[idx];
+                return ListTile(
+                  leading: Icon(
+                    t['created_by_ai'] == true ? Icons.auto_awesome : Icons.description,
+                    color: t['form_type'] == 'system' ? const Color(0xFFC9A962) : const Color(0xFF4ECDC4),
+                    size: 20,
+                  ),
+                  title: Text(t['title'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  subtitle: Text(t['description'] ?? '', style: TextStyle(color: Colors.grey[500], fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  onTap: () => Navigator.pop(ctx),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Close", style: TextStyle(color: Color(0xFFC9A962))),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  void _createCustomFolder() {
+    final nameCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text("Create Folder", style: TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
+        content: TextField(
+          controller: nameCtrl,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: "Folder Name",
+            labelStyle: TextStyle(color: Colors.grey),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _doCreateFolder(nameCtrl.text.trim());
+            },
+            child: const Text("Create", style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _doCreateFolder(String name) {
+    if (name.isEmpty) return;
+    final token = widget.currentUserProfile?['token'] ?? '';
+    if (token.isEmpty) return;
+
+    final baseUrl = AppConfig.apiBaseUrl;
+    final url = Uri.parse('$baseUrl/api/coach/folders/create');
+    _makeApiPost(url, token, {'folder_type': 'personal', 'entity_name': name}, (data) {
+      if (mounted) {
+        _fetchFolders();
+      }
+    });
+  }
+
+  void _makeApiRequest(Uri url, String token, void Function(Map<String, dynamic>) onData) {
+    http.get(url, headers: {'Authorization': 'Bearer $token'}).then((resp) {
+      if (resp.statusCode == 200) {
+        try {
+          final data = json.decode(resp.body);
+          onData(data is Map<String, dynamic> ? data : {});
+        } catch (_) {}
+      }
+    }).catchError((_) {});
+  }
+
+  void _makeApiPost(Uri url, String token, Map<String, dynamic> body, void Function(Map<String, dynamic>) onData) {
+    http.post(url, headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'}, body: json.encode(body)).then((resp) {
+      if (resp.statusCode == 200) {
+        try {
+          final data = json.decode(resp.body);
+          onData(data is Map<String, dynamic> ? data : {});
+        } catch (_) {}
+      }
+    }).catchError((_) {});
   }
 
   Widget _buildLearningTab() {
@@ -11341,9 +14698,74 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
               ],
             ),
           ),
+
+          const SizedBox(height: 24),
+
+          // Coaching Hierarchy Metrics
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF333333)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.fitness_center, color: Color(0xFFFFD700), size: 20),
+                    SizedBox(width: 8),
+                    Text('COACHING MESH', style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier', fontWeight: FontWeight.bold, fontSize: 14)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                FutureBuilder<Map<String, dynamic>>(
+                  future: _fetchCoachingMetrics(),
+                  builder: (ctx, snap) {
+                    if (snap.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator(color: Color(0xFFFFD700), strokeWidth: 2));
+                    }
+                    final data = snap.data ?? {};
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _miniStat('Hierarchies', '${data['active_relationships'] ?? 0}', const Color(0xFFFFD700)),
+                        _miniStat('Hours', '${data['total_supervised_hours'] ?? 0}', const Color(0xFF4ECDC4)),
+                        _miniStat('Sessions', '${data['total_mesh_sessions'] ?? 0}', const Color(0xFF9D4EDD)),
+                        _miniStat('Active', '${data['active_mesh_sessions'] ?? 0}', const Color(0xFF22C55E)),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _miniStat(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold, fontFamily: 'Courier')),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+      ],
+    );
+  }
+
+  Future<Map<String, dynamic>> _fetchCoachingMetrics() async {
+    try {
+      final url = '${_serverUrl.replaceFirst('ws', 'http').replaceAll(':8765', ':8000')}/api/coach/hierarchy/metrics';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer ${widget.currentUserProfile['token']}'},
+      );
+      if (resp.statusCode == 200) return jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (_) {}
+    return {};
   }
 
   Widget _buildCrisisTab() {
@@ -11603,6 +15025,67 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
                 )
               else
                 ..._pendingCoaches.map((coach) => _buildCoachApprovalCard(coach)),
+            ],
+          ),
+        ),
+
+        // --- CLIENT → COACH UPGRADE REQUESTS ---
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.trending_up, color: Color(0xFF4ECDC4), size: 18),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      "COACH UPGRADE REQUESTS",
+                      style: TextStyle(
+                        color: Color(0xFF4ECDC4),
+                        fontFamily: 'Courier',
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  if (_pendingUpgrades.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4ECDC4),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        "${_pendingUpgrades.length}",
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                "Clients requesting to upgrade their account to Coach",
+                style: TextStyle(color: Colors.grey, fontSize: 10),
+              ),
+              const SizedBox(height: 8),
+              if (_pendingUpgrades.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(
+                    child: Text("No pending upgrade requests", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                )
+              else
+                ..._pendingUpgrades.map((u) => _buildUpgradeApprovalCard(u)),
             ],
           ),
         ),
@@ -12003,6 +15486,93 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
 
   Widget _buildMiniStatusBadge(IconData icon, bool ok) {
     return Icon(icon, size: 14, color: ok ? const Color(0xFF4ECDC4) : Colors.grey.withOpacity(0.4));
+  }
+
+  Widget _buildUpgradeApprovalCard(dynamic u) {
+    final hwId = u['hardware_id'] ?? '';
+    final name = u['name'] ?? 'Unknown';
+    final username = u['username'] ?? '';
+    final email = u['email'] ?? '';
+    final dojos = (u['selected_dojos'] as List?)?.cast<String>() ?? [];
+    final fee = u['coaching_fee'] ?? 0;
+    final sessions = u['total_sessions_count'] ?? 0;
+    final requestedAt = u['requested_at'] ?? '';
+    const dojoLabels = {
+      'therapist': 'Therapist', 'project_pm': 'Project PM', 'business': 'Business',
+      'cnc': 'CNC', 'mcat': 'MCAT', 'teacher': 'Teacher', 'judge': 'Judge',
+      'coach_nate': 'Coach Nate',
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0F),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            CircleAvatar(
+              backgroundColor: const Color(0xFF4ECDC4).withOpacity(0.3),
+              radius: 16,
+              child: const Icon(Icons.trending_up, color: Color(0xFF4ECDC4), size: 16),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                Text('@$username', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+              ],
+            )),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC9A962).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text('$sessions sessions', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 10, fontWeight: FontWeight.bold)),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          if (email.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(bottom: 4),
+              child: Text(email, style: TextStyle(color: Colors.grey[400], fontSize: 11))),
+          Wrap(spacing: 6, runSpacing: 4, children: dojos.map((d) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: const Color(0xFF9D4EDD).withOpacity(0.2), borderRadius: BorderRadius.circular(6)),
+            child: Text(dojoLabels[d] ?? d, style: const TextStyle(color: Color(0xFF9D4EDD), fontSize: 10)),
+          )).toList()),
+          if (fee > 0)
+            Padding(padding: const EdgeInsets.only(top: 4),
+              child: Text('Fee: \$${fee}/hr', style: TextStyle(color: Colors.grey[500], fontSize: 11))),
+          if (requestedAt.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 2),
+              child: Text('Requested: ${requestedAt.split('.').first}', style: TextStyle(color: Colors.grey[600], fontSize: 10))),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: OutlinedButton(
+              onPressed: () {
+                _socket?.sink.add(jsonEncode({"type": "admin_reject_upgrade", "hardware_id": hwId, "reason": "Declined by admin"}));
+              },
+              style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(vertical: 6)),
+              child: const Text("REJECT", style: TextStyle(fontSize: 11)),
+            )),
+            const SizedBox(width: 8),
+            Expanded(child: ElevatedButton(
+              onPressed: () {
+                _socket?.sink.add(jsonEncode({"type": "admin_approve_upgrade", "hardware_id": hwId}));
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F5D4), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 6)),
+              child: const Text("APPROVE", style: TextStyle(fontSize: 11)),
+            )),
+          ]),
+        ],
+      ),
+    );
   }
 
   void _showCoachDetailDialog(dynamic coach) {

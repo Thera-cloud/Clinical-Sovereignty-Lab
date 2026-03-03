@@ -16,7 +16,7 @@ _logger = logging.getLogger("login_guardian")
 
 # Brute force settings
 MAX_FAILED_ATTEMPTS = 5
-LOCKOUT_DURATION_MINUTES = 30
+LOCKOUT_DURATION_MINUTES = 3
 LOCKOUT_ESCALATION_MULTIPLIER = 2  # Doubles each time
 
 # Device verification
@@ -35,13 +35,13 @@ class MemberLoginGuardian:
     ) -> Dict[str, Any]:
         """
         Pre-login check: is this identifier locked out?
-        Returns {"allowed": bool, "reason": str, "lockout_remaining_sec": int}.
+        Returns {"allowed": bool, "reason": str, "lockout_remaining_sec": int,
+                 "remaining_attempts": int}.
         """
         if not self._db:
-            return {"allowed": True, "reason": "no_db"}
+            return {"allowed": True, "reason": "no_db", "remaining_attempts": MAX_FAILED_ATTEMPTS}
 
         try:
-            # Count recent failures
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=LOCKOUT_DURATION_MINUTES)
             row = await self._db.fetchrow(
                 """SELECT COUNT(*) as fail_count,
@@ -52,10 +52,10 @@ class MemberLoginGuardian:
             )
 
             fail_count = row["fail_count"] if row else 0
+            remaining_attempts = max(0, MAX_FAILED_ATTEMPTS - fail_count)
 
             if fail_count >= MAX_FAILED_ATTEMPTS:
                 last_attempt = row["last_attempt"]
-                # Exponential backoff: lockout doubles with repeated lockouts
                 escalation = max(1, fail_count // MAX_FAILED_ATTEMPTS)
                 lockout_minutes = LOCKOUT_DURATION_MINUTES * min(escalation, 8)
                 lockout_until = last_attempt + timedelta(minutes=lockout_minutes)
@@ -72,12 +72,18 @@ class MemberLoginGuardian:
                         "allowed": False,
                         "reason": "account_locked",
                         "lockout_remaining_sec": remaining,
+                        "remaining_attempts": 0,
                     }
 
-            return {"allowed": True, "reason": "ok", "lockout_remaining_sec": 0}
+            return {
+                "allowed": True,
+                "reason": "ok",
+                "lockout_remaining_sec": 0,
+                "remaining_attempts": remaining_attempts,
+            }
         except Exception as exc:
             _logger.error("Pre-login check error: %s", exc)
-            return {"allowed": True, "reason": "check_error"}
+            return {"allowed": True, "reason": "check_error", "remaining_attempts": MAX_FAILED_ATTEMPTS}
 
     async def record_attempt(
         self, identifier: str, success: bool, ip_address: str = "",

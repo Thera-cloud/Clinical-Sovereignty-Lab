@@ -1,0 +1,42 @@
+---
+description: Safari service worker caching rules for Flutter web deployments
+alwaysApply: true
+---
+
+# Safari / Flutter Web Caching
+
+Safari aggressively caches `flutter_service_worker.js`, `flutter_bootstrap.js`, and `index.html`. Without explicit no-cache headers, iOS Safari users get stuck on stale builds where the WebSocket connects but the Flutter UI never renders.
+
+## Symptom
+
+- Nginx access log shows `GET /ws HTTP/1.1 101` (WebSocket upgrade succeeds)
+- Bridge logs show `[SOCKET] Connection closed for GUEST` with `sockets_before=0`
+- **No `login_request` is ever received** — the app isn't interactive
+- Works on Chrome, fails on Safari (especially iOS)
+
+## Required Nginx Headers
+
+Both `coach.sovereignsanctuary.net` and `app.sovereignsanctuary.net` MUST have these location blocks:
+
+```nginx
+location = /flutter_service_worker.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+location = /flutter_bootstrap.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+location = /index.html {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+```
+
+## Rules
+
+1. **Never remove** the no-cache location blocks from any nginx config serving the Flutter web app.
+2. **After any nginx config change**, verify headers: `curl -sI https://coach.sovereignsanctuary.net/flutter_service_worker.js | grep Cache-Control` — must show `no-cache`.
+3. **After any Flutter web deploy**, tell Safari users to hard-refresh (or clear website data for sovereignsanctuary.net) if they report a blank screen or non-functional UI.
+4. **GUEST closes in bridge logs** with no preceding `login_request` = stale service worker cache. The fix is client-side (clear cache), not server-side.
+5. **`main.dart.js` can remain cached** (4MB) — it changes hash on rebuild. Only the service worker, bootstrap, and index need no-cache.

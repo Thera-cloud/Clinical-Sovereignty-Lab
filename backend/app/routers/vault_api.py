@@ -5,6 +5,8 @@ Endpoints for vault folders, items, uploads, search, stats, export.
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 import uuid
 from collections import defaultdict
@@ -13,11 +15,13 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user
+from app.auth import get_current_user_id
 from app.services.vault.vault_operations import VaultOperations
 from app.services.vault.auto_filer import AutoFiler
 from app.services.vault.file_processor import FileProcessor
 from app.services.vault.blob_manager import VaultBlobManager
+
+_log = logging.getLogger("vault.metrics")
 
 
 # =============================================================================
@@ -43,6 +47,12 @@ class UpdateFolderBody(BaseModel):
 class MoveItemBody(BaseModel):
     """Body for move item."""
     target_folder_id: str = Field(...)
+
+
+class SaveConversationBody(BaseModel):
+    content: str = Field(..., min_length=1, max_length=500_000)
+    title: str = Field(default="Saved Conversation", max_length=256)
+    source: str = Field(default="chat", max_length=64)
 
 
 # =============================================================================
@@ -77,7 +87,7 @@ def create_vault_router(db_pool) -> APIRouter:
     blob_manager = VaultBlobManager()
 
     async def get_member_id_and_tier(
-        authenticated_user_id: str = Depends(get_current_user),
+        authenticated_user_id: str = Depends(get_current_user_id),
     ) -> tuple[str, str]:
         """Resolve member_id and tier from the authenticated user.
         Falls back to the raw user ID with STANDARD tier if no DB record exists
@@ -143,8 +153,12 @@ def create_vault_router(db_pool) -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=413, detail=str(e))
 
+        import re as _re
+        _raw_name = file.filename or "upload"
+        _safe_display = _re.sub(r'[^\w\-. ]', '_', _raw_name.split("/")[-1].split("\\")[-1])[:255] or "upload"
+
         processed = file_processor.process(
-            file.filename or "upload", content, mime_type
+            _safe_display, content, mime_type
         )
 
         upload_id = str(uuid.uuid4())
@@ -169,7 +183,7 @@ def create_vault_router(db_pool) -> APIRouter:
             member_id=member_id,
             folder_id=uploads_root,
             content_type="upload_document" if "document" in processed.type else "upload_image",
-            display_name=file.filename or "Upload",
+            display_name=_safe_display,
             blob_path=blob_path,
             thumbnail_path=None,
             size_bytes=processed.size_bytes,
@@ -180,6 +194,17 @@ def create_vault_router(db_pool) -> APIRouter:
         )
 
         await auto_filer.file_upload(member_id, mime_type, item["id"])
+
+        try:
+            await db_pool.execute(
+                """INSERT INTO skyeye_activity (platform, type, content, severity, metadata, created_at)
+                   VALUES ('vault', 'vault_upload', $1, 'info', $2::jsonb, NOW())""",
+                f"Upload: {item['display_name']} ({mime_type}, {item['size_bytes']}B)",
+                json.dumps({"member_id": member_id, "mime_type": mime_type,
+                            "size_bytes": item["size_bytes"], "item_id": item["id"]}),
+            )
+        except Exception:
+            _log.debug("vault_upload metric write skipped", exc_info=True)
 
         return {
             "upload_id": upload_id,
@@ -498,5 +523,43 @@ def create_vault_router(db_pool) -> APIRouter:
 
         finally:
             _import_in_progress.discard(member_id)
+
+    # -------------------------------------------------------------------------
+    # SAVE CONVERSATION (text capture from chat / community mesh)
+    # -------------------------------------------------------------------------
+
+    @router.post("/vault/save-conversation")
+    async def save_conversation(
+        body: SaveConversationBody,
+        auth: tuple = Depends(get_member_id_and_tier),
+    ):
+        """Save a conversation or session transcript as a vault item."""
+        member_id, _tier = auth
+        item_id = uuid.uuid4()
+        size = len(body.content.encode("utf-8"))
+        display = body.title[:255] if body.title else "Saved Conversation"
+        preview = body.content[:2000]
+        try:
+            await db_pool.execute(
+                """INSERT INTO vault_items
+                   (id, member_id, content_type, display_name, filename,
+                    extracted_text_preview, size_bytes, mime_type)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'text/plain')
+                   ON CONFLICT DO NOTHING""",
+                item_id, member_id, body.source,
+                display, f"{display}.txt", preview, size,
+            )
+        except Exception:
+            _log.warning("save-conversation DB write failed for %s", member_id, exc_info=True)
+        try:
+            await db_pool.execute(
+                """INSERT INTO skyeye_activity (platform, type, content, severity, metadata, created_at)
+                   VALUES ('vault', 'conversation_capture', $1, 'info', $2::jsonb, NOW())""",
+                f"Conversation saved: {display} ({size}B, source={body.source})",
+                json.dumps({"member_id": member_id, "source": body.source, "size_bytes": size}),
+            )
+        except Exception:
+            _log.debug("conversation_capture metric write skipped", exc_info=True)
+        return {"status": "saved", "item_id": str(item_id)}
 
     return router

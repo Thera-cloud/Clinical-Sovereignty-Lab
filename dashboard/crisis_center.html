@@ -160,6 +160,7 @@ _recoverAuth();
         }
         var SERVER_URL = getWsUrl();
         var socket = null;
+        var _wsRetry = 0;
         var crisisWatchlist = [];
         var crisisLog = [];
         var resolvingId = null;
@@ -173,6 +174,7 @@ _recoverAuth();
         function connect() {
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
+                _wsRetry = 0;
                 var profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
                 socket.send(JSON.stringify({
                     type: "auth",
@@ -181,7 +183,8 @@ _recoverAuth();
                 }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setTimeout(connect, 3000); };
+            socket.onerror = function(e) { console.warn('WS error:', e); };
+            socket.onclose = function() { var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random())); };
         }
         
         function handleMessage(event) {

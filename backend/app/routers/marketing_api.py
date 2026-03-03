@@ -5,10 +5,12 @@ Endpoints for the marketing playbook, funnel stats, actions, growth, and quiz fa
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/marketing", tags=["marketing"])
+from app.services.api_server import require_admin
+
+router = APIRouter(prefix="/api/marketing", tags=["marketing"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================
@@ -257,6 +259,81 @@ async def get_ab_tests(request: Request, status: str = Query(default="running"))
                 WHERE status = $1
                 ORDER BY started_at DESC
             """, status)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/post-analytics")
+async def get_post_analytics(
+    request: Request,
+    days: int = Query(default=7, ge=1, le=90),
+    platform: str = Query(default=None),
+):
+    """Per-post performance metrics from the Notification Observer."""
+    try:
+        pool = request.app.state.db_pool
+        async with pool.acquire() as conn:
+            if platform:
+                rows = await conn.fetch("""
+                    SELECT platform, post_id, post_url, post_text,
+                           likes, reposts, comments, impressions, captured_at
+                    FROM skyeye_post_analytics
+                    WHERE platform = $1
+                      AND captured_at > NOW() - make_interval(days => $2)
+                    ORDER BY captured_at DESC
+                    LIMIT 100
+                """, platform, days)
+            else:
+                rows = await conn.fetch("""
+                    SELECT platform, post_id, post_url, post_text,
+                           likes, reposts, comments, impressions, captured_at
+                    FROM skyeye_post_analytics
+                    WHERE captured_at > NOW() - make_interval(days => $1)
+                    ORDER BY captured_at DESC
+                    LIMIT 100
+                """, days)
+            return [dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/notifications")
+async def get_notifications(
+    request: Request,
+    limit: int = Query(default=50, le=200),
+    processed: str = Query(default="all"),
+):
+    """Social engagement notifications detected by the Notification Observer."""
+    try:
+        pool = request.app.state.db_pool
+        async with pool.acquire() as conn:
+            if processed == "unprocessed":
+                rows = await conn.fetch("""
+                    SELECT id, platform, notification_type, post_id,
+                           actor_handle, actor_id, actor_bio, actor_followers,
+                           processed, created_at
+                    FROM skyeye_notifications
+                    WHERE processed = FALSE
+                    ORDER BY created_at DESC LIMIT $1
+                """, limit)
+            elif processed == "processed":
+                rows = await conn.fetch("""
+                    SELECT id, platform, notification_type, post_id,
+                           actor_handle, actor_id, actor_bio, actor_followers,
+                           processed, created_at
+                    FROM skyeye_notifications
+                    WHERE processed = TRUE
+                    ORDER BY created_at DESC LIMIT $1
+                """, limit)
+            else:
+                rows = await conn.fetch("""
+                    SELECT id, platform, notification_type, post_id,
+                           actor_handle, actor_id, actor_bio, actor_followers,
+                           processed, created_at
+                    FROM skyeye_notifications
+                    ORDER BY created_at DESC LIMIT $1
+                """, limit)
             return [dict(r) for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

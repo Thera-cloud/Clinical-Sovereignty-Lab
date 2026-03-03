@@ -1,0 +1,60 @@
+# Coach Assignment Model
+
+## Primary Coach
+
+All clients are assigned to `CoachN` (Nathaniel Nevedal, role=COACH, hw=`COACH_COACHN_ID`).
+
+| Field | Value |
+|---|---|
+| Username | `CoachN` |
+| Role | `COACH` |
+| Hardware ID | `COACH_COACHN_ID` |
+
+The previous default `hnevedal` / `COACH_HNEVEDAL_ID` was replaced on 2026-02-23. All 28 client accounts were reassigned to CoachN.
+
+## How Coach Assignment Works
+
+A client's coach is stored in the `profile_data` JSONB column of the `users` table:
+
+```json
+{
+  "coach_id": "COACH_COACHN_ID",
+  "assigned_coach": "CoachN"
+}
+```
+
+- `coach_id` — the coach's `hardware_id` (used for programmatic lookups)
+- `assigned_coach` — the coach's username (used for display)
+
+## Rules
+
+1. **Every new client must get a coach** — when creating a client account, always set `coach_id` and `assigned_coach`. Default to `CoachN` / `COACH_COACHN_ID`.
+
+2. **Coach ≠ Family Member** — assigning a coach does NOT add them to the client's `family_id`. These are separate concepts:
+   - `family_id` — groups family members who share a subscription plan (HEAD, SPOUSE, MEMBER)
+   - `coach_id` — points to the professional coaching the client
+
+3. **Admin is never a coach** — `DrNevedal1` (ADMIN) must never be used as a `coach_id`. Use `CoachN` (COACH) instead.
+
+4. **Coach accounts** — the following are legitimate coach accounts (role=COACH):
+
+   | Username | Hardware ID |
+   |---|---|
+   | CoachN | COACH_COACHN_ID |
+   | hnevedal | COACH_HNEVEDAL_ID |
+   | coach1 | COACH_001 |
+   | Wilsnaw | COACH_WILSNAW_ID |
+   | hector12 | COACH_HECTOR12_ID |
+   | freeindeed | COACH_FREEINDEED_ID |
+   | sweet2noend | COACH_SWEET2NOEND_ID |
+   | audit_coach | audit_coach_hw |
+
+5. **PostgreSQL is the source of truth** — coach assignments are stored in the `users` table `profile_data` JSONB. After direct SQL updates, restart the bridge (`docker restart nate_bridge`) so the in-memory `_registry_cache` reloads from PostgreSQL.
+
+6. **Verification** — after any coach assignment change, verify with:
+   ```sql
+   SELECT username, name, profile_data->>'coach_id' AS coach_id
+   FROM users
+   WHERE role = 'CLIENT'
+   ORDER BY username;
+   ```

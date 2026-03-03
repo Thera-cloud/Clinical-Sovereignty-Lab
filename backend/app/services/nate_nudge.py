@@ -64,6 +64,27 @@ NUDGE_TEMPLATES: Dict[str, Dict[str, str]] = {
             "progress. Well done."
         ),
     },
+    "checkin_coach_alert": {
+        "title": "Client Activity Alert",
+        "content": (
+            "Your client {client_name} hasn't been active for over 62 hours. "
+            "You may want to reach out and check in."
+        ),
+    },
+    "checkin_client_72h": {
+        "title": "Little Nate is checking in",
+        "content": (
+            "Hey {name}, it's been a few days since we connected. "
+            "Tap here to reconnect — I'm always here for you."
+        ),
+    },
+    "checkin_coach_72h": {
+        "title": "Little Nate coaching check-in",
+        "content": (
+            "Hey {name}, it's been a few days. How are your coaching goals "
+            "coming along? Any wins to celebrate or new goals to set?"
+        ),
+    },
 }
 
 

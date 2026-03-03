@@ -365,16 +365,18 @@ export default function BigNateChat() {
       const result = await res.json();
 
       setPendingActions((prev) => prev.filter((a) => a.action_id !== actionId));
+      const verificationText = result.verification_message
+        || (result.success
+          ? `Action executed: ${result.type || 'done'}`
+          : `Action failed: ${result.error || 'unknown error'}`);
       setMessages((m) => [
         ...m,
         {
           role: 'assistant',
           mode,
-          content: result.success
-            ? `Action executed: ${result.type || 'done'}`
-            : `Action failed: ${result.error || 'unknown error'}`,
+          content: verificationText,
           executedResults: result.success ? [result] : [],
-          isSystemAction: true,
+          isSystemAction: !result.verification_message,
         },
       ]);
 

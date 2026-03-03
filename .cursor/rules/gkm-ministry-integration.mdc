@@ -1,0 +1,45 @@
+---
+description: Greatest in the Kingdom Ministry 501(c)(3) donation tracking, receipts, and compliance
+alwaysApply: true
+---
+# GKM Ministry Integration
+
+## Organization Details
+
+| Field | Value |
+|---|---|
+| Name | Greatest in the Kingdom Ministry |
+| Tax-Exempt ID | 84-3879515 |
+| Address | Stafford, TX 77477 |
+| Contact | support@sovereignsanctuary.net |
+| Receipt Threshold | $250.00 cumulative per tax year |
+
+## Database Tables (Migration 076)
+
+| Table | Purpose |
+|---|---|
+| `token_shares` | Every BLE/NFC token transfer (sharer, receiver, amount, fee, Stripe ID) |
+| `gkm_donations` | Each share fee recorded as a donation with running `cumulative_total_cents` |
+| `gkm_annual_receipts` | Year-end receipt tracking per donor per tax year (unique on username+year) |
+| `gkm_discounts` | Promotional discount tracking |
+
+## Donation Flow
+
+1. User shares tokens via BLE → `POST /api/gkm/token-share/initiate`
+2. Stripe charges the sharer $5 per 10k tokens
+3. Fee recorded in `gkm_donations` with updated `cumulative_total_cents`
+4. At `cumulative_total_cents >= 25000` ($250), donor becomes receipt-eligible
+5. Admin generates receipts via GKM tab or Token Usage Agent auto-generates on Jan 2nd
+
+## Receipt Format Requirements
+
+Each donation receipt must include: GKM name, tax-exempt ID (84-3879515), Stafford TX 77477 address, donor name, itemized donation list, annual total, "No goods or services were provided in exchange for this contribution", and contact email.
+
+## Rules
+
+1. **Never change the tax-exempt ID** (84-3879515) without legal review.
+2. **Cumulative totals must be monotonically increasing** within a tax year — never subtract from `cumulative_total_cents`.
+3. **Receipt generation is idempotent** — `gkm_annual_receipts` has a UNIQUE constraint on `(username, tax_year)`. Re-generating updates the existing row.
+4. **All share fees are donations** — the `donation_eligible` flag on `token_shares` defaults to TRUE. Only set FALSE for non-qualifying transactions.
+5. **The GKM tab is admin-only** — all `/api/gkm/` endpoints except `token-share/initiate` and `token-share/history` require `require_admin`.
+6. **Year-end automation runs Jan 2nd** — the Token Usage Agent checks `month==1, day==2, hour<1` to generate annual receipts for the prior tax year.

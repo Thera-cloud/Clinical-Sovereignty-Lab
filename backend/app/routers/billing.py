@@ -10,12 +10,87 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 
-from app.auth import get_current_user
+from app.auth import get_current_user_id
+from app.services.api_server import require_admin, require_coach
 from datetime import datetime, timedelta
+import logging
 import os
 import json
 import secrets
 from pathlib import Path
+
+from app.services.pg_data_helpers import (
+    find_user_pg,
+    get_subscription_pg,
+    get_transactions_pg,
+    update_user_field_pg,
+)
+
+logger = logging.getLogger("billing_router")
+
+PLAN_CHANGE_COOLDOWN_HOURS = 24
+
+_TIER_ALIAS_MAP = {
+    "SOVEREIGN_CIRCLE": "TOP_TIER", "SOVEREIGN": "TOP_TIER", "TOP": "TOP_TIER",
+    "INNER_CHAMBER": "STANDARD", "INNER": "STANDARD", "THRESHOLD": "TRIAL",
+}
+_TIER_DB_MAP = {
+    "COACH_ONLY": "STANDARD", "TRIAL": "TRIAL", "STANDARD": "STANDARD",
+    "TOP_TIER": "TOP_TIER", "DEPENDENT": "DEPENDENT",
+    "FAMILY_MEMBER": "STANDARD", "FAMILY_DEPENDENT": "DEPENDENT",
+}
+
+def _normalize_tier(raw: str) -> str:
+    upper = (raw or "").strip().upper()
+    return _TIER_ALIAS_MAP.get(upper, upper)
+
+def _tier_for_db(plan: str) -> str:
+    return _TIER_DB_MAP.get(_normalize_tier(plan), "STANDARD")
+
+
+def _can_access_nate(plan: str) -> bool:
+    """COACH_ONLY users cannot access Nate AI; all other plans can."""
+    return _normalize_tier(plan) != "COACH_ONLY"
+
+
+def _verify_ownership(req_user_id: str, auth_user_id: str) -> None:
+    """Raise 403 if the authenticated user is trying to act on another user's account."""
+    if req_user_id != auth_user_id:
+        raise HTTPException(
+            403,
+            "You can only modify your own account. "
+            f"Authenticated as {auth_user_id[:8]}…, target is {req_user_id[:8]}…",
+        )
+
+
+async def _check_plan_change_cooldown(pool, user_id: str) -> None:
+    """Raise 429 if the user changed plans within the cooldown window."""
+    if not pool:
+        return
+    try:
+        row = await pool.fetchrow(
+            """SELECT profile_data->>'plan_changed_at' AS changed_at
+               FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1""",
+            user_id,
+        )
+        if row and row["changed_at"]:
+            try:
+                last_change = datetime.fromisoformat(row["changed_at"])
+                hours_since = (datetime.now() - last_change).total_seconds() / 3600
+                if hours_since < PLAN_CHANGE_COOLDOWN_HOURS:
+                    remaining = PLAN_CHANGE_COOLDOWN_HOURS - hours_since
+                    raise HTTPException(
+                        429,
+                        f"Plan changes are limited to once every {PLAN_CHANGE_COOLDOWN_HOURS}h. "
+                        f"Try again in {remaining:.0f}h.",
+                    )
+            except (ValueError, TypeError):
+                pass
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug("_check_plan_change_cooldown: %s", e)
+
 
 try:
     import stripe
@@ -26,15 +101,27 @@ except ImportError:
 router = APIRouter(
     prefix="/api/billing",
     tags=["billing"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(get_current_user_id)],
 )
 
 # Configuration
 from app.config import settings as _settings
 DATA_DIR = Path(_settings.DATA_DIR)
 
+_STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+
 if STRIPE_AVAILABLE:
     stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+
+
+@router.get("/config")
+async def billing_config():
+    """Return non-secret billing configuration for frontend Stripe.js initialization."""
+    return {
+        "publishable_key": _STRIPE_PUBLISHABLE_KEY,
+        "stripe_available": STRIPE_AVAILABLE and bool(stripe.api_key) if STRIPE_AVAILABLE else False,
+    }
+
 
 # Plan Details — aligned with Locked Pricing Model v3
 # coach_sessions = max bookable per billing period (client pays coach; platform takes 30%, min $30)
@@ -126,7 +213,9 @@ def load_json(filepath: Path, default=None):
     if not filepath.exists(): return default
     try:
         with open(filepath, 'r') as f: return json.load(f)
-    except: return default
+    except Exception as e:
+        logger.warning("load_json(%s): %s", filepath, e)
+        return default
 
 def save_json(filepath: Path, data):
     filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +226,18 @@ async def get_plans():
     return {"plans": PLAN_DETAILS, "family_pricing": FAMILY_PRICING, "overages": OVERAGE_PRICING}
 
 @router.get("/subscription/{user_id}")
-async def get_subscription(user_id: str):
+async def get_subscription(user_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            sub = await get_subscription_pg(pool, user_id)
+            if sub:
+                plan_key = sub.get("plan", "TRIAL")
+                return {"subscription": sub, "details": PLAN_DETAILS.get(plan_key, PLAN_DETAILS.get("TRIAL"))}
+        except Exception as e:
+            logger.warning("get_subscription: PG read failed for %s: %s", user_id, e)
+
+    # JSON fallback
     billing = load_json(DATA_DIR / "billing.json")
     sub = billing.get("subscriptions", {}).get(user_id)
     if not sub:
@@ -145,13 +245,19 @@ async def get_subscription(user_id: str):
     return {"subscription": sub, "details": PLAN_DETAILS.get(sub.get("plan", "STANDARD"))}
 
 @router.post("/subscribe")
-async def create_subscription(req: SubscriptionRequest):
+async def create_subscription(
+    req: SubscriptionRequest,
+    request: Request,
+    admin: dict = Depends(require_admin),
+):
+
     if req.plan not in PLAN_DETAILS:
         raise HTTPException(400, "Invalid plan")
-    
+
+    pool = getattr(request.app.state, "db_pool", None)
+    await _check_plan_change_cooldown(pool, req.user_id)
+
     plan = PLAN_DETAILS[req.plan]
-    billing = load_json(DATA_DIR / "billing.json")
-    
     sub = {
         "user_id": req.user_id,
         "plan": req.plan,
@@ -161,24 +267,60 @@ async def create_subscription(req: SubscriptionRequest):
         "end_date": str((datetime.now() + timedelta(days=30)).date()),
         "created_at": str(datetime.now())
     }
-    
+
+    canonical_sub = _normalize_tier(req.plan)
+
+    if pool:
+        try:
+            await update_user_field_pg(pool, req.user_id, {
+                "tier": _tier_for_db(canonical_sub),
+                "subscription_status": "ACTIVE",
+                "token_balance": plan["tokens"],
+                "subscription_plan": canonical_sub,
+                "subscription_start_date": sub["start_date"],
+                "subscription_end_date": sub["end_date"],
+                "can_access_nate": _can_access_nate(canonical_sub),
+                "plan_changed_at": str(datetime.now()),
+            })
+        except Exception as e:
+            logger.warning("create_subscription: PG update failed for %s: %s", req.user_id, e)
+
+    # JSON backup writes
+    billing = load_json(DATA_DIR / "billing.json")
     billing.setdefault("subscriptions", {})[req.user_id] = sub
     save_json(DATA_DIR / "billing.json", billing)
-    
-    # Update user registry
+
     registry = load_json(DATA_DIR / "user_registry.json")
     for k, v in registry.items():
         if v.get("profile", {}).get("hardware_id") == req.user_id:
-            v["profile"]["subscription_plan"] = req.plan
+            v["profile"]["subscription_plan"] = canonical_sub
+            v["profile"]["tier"] = _tier_for_db(canonical_sub)
             v["profile"]["subscription_status"] = "ACTIVE"
             v["profile"]["token_balance"] = plan["tokens"]
+            v["profile"]["can_access_nate"] = _can_access_nate(canonical_sub)
             save_json(DATA_DIR / "user_registry.json", registry)
             break
-    
+
     return {"subscription": sub}
 
 @router.get("/usage/{user_id}")
-async def get_usage(user_id: str):
+async def get_usage(user_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            profile = await find_user_pg(pool, user_id)
+            if profile:
+                pd = profile
+                return {
+                    "token_balance": pd.get("token_balance", 0),
+                    "tokens_used_today": pd.get("token_usage_today", 0),
+                    "tokens_used_month": pd.get("token_usage_month", 0),
+                    "plan": pd.get("tier") or pd.get("subscription_plan", "TRIAL"),
+                }
+        except Exception as e:
+            logger.warning("get_usage: PG read failed for %s: %s", user_id, e)
+
+    # JSON fallback
     registry = load_json(DATA_DIR / "user_registry.json")
     for k, v in registry.items():
         p = v.get("profile", {})
@@ -192,7 +334,51 @@ async def get_usage(user_id: str):
     raise HTTPException(404, "User not found")
 
 @router.post("/use-tokens")
-async def use_tokens(req: UsageRequest):
+async def use_tokens(
+    req: UsageRequest,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    _verify_ownership(req.user_id, auth_user_id)
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT token_balance FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1",
+                    req.user_id,
+                )
+                if row:
+                    balance = row["token_balance"] or 0
+                    if balance < req.tokens:
+                        raise HTTPException(402, "Insufficient tokens")
+                    new_balance = balance - req.tokens
+                    await conn.execute(
+                        """UPDATE users SET
+                               token_balance = $1::int,
+                               profile_data = jsonb_set(
+                                   jsonb_set(
+                                       jsonb_set(
+                                           COALESCE(profile_data, '{}'::jsonb),
+                                           '{token_balance}', to_jsonb($1::int)
+                                       ),
+                                       '{token_usage_today}',
+                                       to_jsonb((COALESCE((profile_data->>'token_usage_today')::int, 0) + $2::int)::int)
+                                   ),
+                                   '{token_usage_month}',
+                                   to_jsonb((COALESCE((profile_data->>'token_usage_month')::int, 0) + $2::int)::int)
+                               ),
+                               updated_at = NOW()
+                           WHERE hardware_id = $3""",
+                        new_balance, req.tokens, req.user_id,
+                    )
+                    return {"remaining": new_balance}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("use_tokens: PG update failed for %s: %s", req.user_id, e)
+
+    # JSON fallback
     registry = load_json(DATA_DIR / "user_registry.json")
     for k, v in registry.items():
         p = v.get("profile", {})
@@ -208,7 +394,23 @@ async def use_tokens(req: UsageRequest):
     raise HTTPException(404, "User not found")
 
 @router.get("/transactions/{user_id}")
-async def get_transactions(user_id: str, limit: int = 20):
+async def get_transactions(user_id: str, request: Request, limit: int = 20):
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                username_row = await conn.fetchrow(
+                    "SELECT username FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1",
+                    user_id,
+                )
+            if username_row:
+                txns = await get_transactions_pg(pool, username_row["username"], limit)
+                if txns is not None:
+                    return {"transactions": txns}
+        except Exception as e:
+            logger.warning("get_transactions: PG read failed for %s: %s", user_id, e)
+
+    # JSON fallback
     billing = load_json(DATA_DIR / "billing.json")
     txns = [t for t in billing.get("transactions", []) if t.get("user_id") == user_id]
     return {"transactions": txns[-limit:]}
@@ -221,8 +423,22 @@ async def get_transactions(user_id: str, limit: int = 20):
 TIER_ORDER = ["COACH_ONLY", "TRIAL", "STANDARD", "TOP_TIER"]
 
 
-def _find_user_profile(user_id: str):
-    """Return (registry dict, key, profile dict) or raise 404."""
+async def _find_user_profile(user_id: str, db_pool=None):
+    """Return (registry dict, key, profile dict) or raise 404.
+
+    Tries PostgreSQL first (via find_user_pg), falls back to JSON registry.
+    When PG succeeds, registry/key are returned as None since the caller
+    only needs the profile for reads — JSON writes still load fresh.
+    """
+    if db_pool:
+        try:
+            profile = await find_user_pg(db_pool, user_id)
+            if profile:
+                return None, None, profile
+        except Exception as e:
+            logger.warning("_find_user_profile: PG lookup failed for %s: %s", user_id, e)
+
+    # JSON fallback
     registry = load_json(DATA_DIR / "user_registry.json")
     for k, v in registry.items():
         p = v.get("profile", {})
@@ -231,8 +447,22 @@ def _find_user_profile(user_id: str):
     raise HTTPException(404, "User not found")
 
 
-def _get_stripe_customer(user_id: str) -> Optional[str]:
-    """Retrieve Stripe customer ID from billing data or registry."""
+async def _get_stripe_customer(user_id: str, db_pool=None) -> Optional[str]:
+    """Retrieve Stripe customer ID — PG first, then billing.json, then JSON registry."""
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """SELECT profile_data->>'stripe_customer_id' as stripe_cid
+                       FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1""",
+                    user_id,
+                )
+                if row and row["stripe_cid"]:
+                    return row["stripe_cid"]
+        except Exception as e:
+            logger.warning("_get_stripe_customer: PG lookup failed for %s: %s", user_id, e)
+
+    # JSON fallback: billing.json
     billing = load_json(DATA_DIR / "billing.json")
     sub = billing.get("subscriptions", {}).get(user_id, {})
     cust_id = sub.get("stripe_customer_id")
@@ -248,13 +478,22 @@ def _get_stripe_customer(user_id: str) -> Optional[str]:
 
 
 @router.post("/subscription/upgrade")
-async def upgrade_subscription(req: UpgradeDowngradeRequest):
+async def upgrade_subscription(
+    req: UpgradeDowngradeRequest,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
     """Change plan upward."""
+    _verify_ownership(req.user_id, auth_user_id)
+
     if req.new_plan not in PLAN_DETAILS:
         raise HTTPException(400, f"Invalid plan: {req.new_plan}")
 
-    registry, rk, profile = _find_user_profile(req.user_id)
-    current_plan = (profile.get("subscription_plan") or "TRIAL").upper()
+    pool = getattr(request.app.state, "db_pool", None)
+    await _check_plan_change_cooldown(pool, req.user_id)
+
+    registry, rk, profile = await _find_user_profile(req.user_id, db_pool=pool)
+    current_plan = _normalize_tier(profile.get("subscription_plan") or profile.get("tier") or "TRIAL")
     new_idx = TIER_ORDER.index(req.new_plan) if req.new_plan in TIER_ORDER else -1
     cur_idx = TIER_ORDER.index(current_plan) if current_plan in TIER_ORDER else -1
 
@@ -262,9 +501,14 @@ async def upgrade_subscription(req: UpgradeDowngradeRequest):
         raise HTTPException(400, "New plan must be higher tier. Use /subscription/downgrade instead.")
 
     new_details = PLAN_DETAILS[req.new_plan]
+    canonical_plan = _normalize_tier(req.new_plan)
 
-    # If Stripe is available and user has a Stripe subscription, update via Stripe
-    stripe_customer = _get_stripe_customer(req.user_id)
+    # Token balance: use max(current, plan_default) to prevent losing purchased tokens,
+    # but only grant new allocation if current balance is below plan default.
+    current_balance = profile.get("token_balance", 0)
+    safe_balance = max(current_balance, new_details["tokens"])
+
+    stripe_customer = await _get_stripe_customer(req.user_id, db_pool=pool)
     stripe_updated = False
     if STRIPE_AVAILABLE and stripe_customer and stripe.api_key:
         try:
@@ -281,13 +525,32 @@ async def upgrade_subscription(req: UpgradeDowngradeRequest):
                     )
                     stripe_updated = True
         except Exception as e:
-            print(f"   ⚠️  Stripe upgrade failed for {req.user_id}: {e}")
+            logger.warning("upgrade_subscription: Stripe failed for %s: %s", req.user_id, e)
 
-    # Update local billing state
-    profile["subscription_plan"] = req.new_plan
-    profile["subscription_status"] = "ACTIVE"
-    profile["token_balance"] = new_details["tokens"]
-    save_json(DATA_DIR / "user_registry.json", registry)
+    now_str = str(datetime.now())
+
+    if pool:
+        try:
+            await update_user_field_pg(pool, req.user_id, {
+                "tier": _tier_for_db(canonical_plan),
+                "subscription_status": "ACTIVE",
+                "token_balance": safe_balance,
+                "subscription_plan": canonical_plan,
+                "can_access_nate": _can_access_nate(canonical_plan),
+                "plan_changed_at": now_str,
+                "previous_plan": current_plan,
+            })
+        except Exception as e:
+            logger.warning("upgrade_subscription: PG update failed for %s: %s", req.user_id, e)
+
+    if registry is not None:
+        profile["subscription_plan"] = canonical_plan
+        profile["tier"] = _tier_for_db(canonical_plan)
+        profile["subscription_status"] = "ACTIVE"
+        profile["token_balance"] = safe_balance
+        profile["can_access_nate"] = _can_access_nate(canonical_plan)
+        profile["plan_changed_at"] = now_str
+        save_json(DATA_DIR / "user_registry.json", registry)
 
     billing = load_json(DATA_DIR / "billing.json")
     billing.setdefault("subscriptions", {})[req.user_id] = {
@@ -296,7 +559,7 @@ async def upgrade_subscription(req: UpgradeDowngradeRequest):
         "status": "active",
         "tokens_included": new_details["tokens"],
         "previous_plan": current_plan,
-        "changed_at": str(datetime.now()),
+        "changed_at": now_str,
         "stripe_updated": stripe_updated,
     }
     billing.setdefault("transactions", []).append({
@@ -304,7 +567,7 @@ async def upgrade_subscription(req: UpgradeDowngradeRequest):
         "type": "upgrade",
         "from_plan": current_plan,
         "to_plan": req.new_plan,
-        "timestamp": str(datetime.now()),
+        "timestamp": now_str,
     })
     save_json(DATA_DIR / "billing.json", billing)
 
@@ -313,17 +576,27 @@ async def upgrade_subscription(req: UpgradeDowngradeRequest):
         "plan": req.new_plan,
         "stripe_updated": stripe_updated,
         "details": new_details,
+        "token_balance": safe_balance,
     }
 
 
 @router.post("/subscription/downgrade")
-async def downgrade_subscription(req: UpgradeDowngradeRequest):
-    """Change plan downward with proration."""
+async def downgrade_subscription(
+    req: UpgradeDowngradeRequest,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """Change plan downward — deferred to billing cycle end (matches bridge behavior)."""
+    _verify_ownership(req.user_id, auth_user_id)
+
     if req.new_plan not in PLAN_DETAILS:
         raise HTTPException(400, f"Invalid plan: {req.new_plan}")
 
-    registry, rk, profile = _find_user_profile(req.user_id)
-    current_plan = (profile.get("subscription_plan") or "TRIAL").upper()
+    pool = getattr(request.app.state, "db_pool", None)
+    await _check_plan_change_cooldown(pool, req.user_id)
+
+    registry, rk, profile = await _find_user_profile(req.user_id, db_pool=pool)
+    current_plan = _normalize_tier(profile.get("subscription_plan") or profile.get("tier") or "TRIAL")
     new_idx = TIER_ORDER.index(req.new_plan) if req.new_plan in TIER_ORDER else -1
     cur_idx = TIER_ORDER.index(current_plan) if current_plan in TIER_ORDER else -1
 
@@ -331,9 +604,30 @@ async def downgrade_subscription(req: UpgradeDowngradeRequest):
         raise HTTPException(400, "New plan must be lower tier. Use /subscription/upgrade instead.")
 
     new_details = PLAN_DETAILS[req.new_plan]
+    canonical_down = _normalize_tier(req.new_plan)
+    now = datetime.now()
+    now_str = str(now)
 
-    # Stripe downgrade — takes effect at period end
-    stripe_customer = _get_stripe_customer(req.user_id)
+    # Determine billing cycle end — downgrade takes effect then
+    cycle_end = now + timedelta(days=30)
+    if pool:
+        try:
+            row = await pool.fetchrow(
+                """SELECT profile_data->>'billing_cycle_end' AS bce
+                   FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1""",
+                req.user_id,
+            )
+            if row and row["bce"]:
+                try:
+                    parsed_end = datetime.strptime(row["bce"], "%Y-%m-%d")
+                    if parsed_end > now:
+                        cycle_end = parsed_end
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
+            pass
+
+    stripe_customer = await _get_stripe_customer(req.user_id, db_pool=pool)
     stripe_updated = False
     if STRIPE_AVAILABLE and stripe_customer and stripe.api_key:
         try:
@@ -350,36 +644,53 @@ async def downgrade_subscription(req: UpgradeDowngradeRequest):
                     )
                     stripe_updated = True
         except Exception as e:
-            print(f"   ⚠️  Stripe downgrade failed for {req.user_id}: {e}")
+            logger.warning("downgrade_subscription: Stripe failed for %s: %s", req.user_id, e)
 
-    # Update local state
-    profile["subscription_plan"] = req.new_plan
-    profile["subscription_status"] = "ACTIVE" if req.new_plan not in ("TRIAL", "COACH_ONLY") else req.new_plan
-    profile["token_balance"] = min(profile.get("token_balance", 0), new_details["tokens"])
-    save_json(DATA_DIR / "user_registry.json", registry)
+    # Deferred downgrade: keep current plan, set pending_plan for cycle end
+    if pool:
+        try:
+            await update_user_field_pg(pool, req.user_id, {
+                "pending_plan": canonical_down,
+                "pending_plan_effective": str(cycle_end.date()),
+                "plan_changed_at": now_str,
+                "previous_plan": current_plan,
+            })
+        except Exception as e:
+            logger.warning("downgrade_subscription: PG update failed for %s: %s", req.user_id, e)
+
+    if registry is not None:
+        profile["pending_plan"] = canonical_down
+        profile["pending_plan_effective"] = str(cycle_end.date())
+        profile["plan_changed_at"] = now_str
+        save_json(DATA_DIR / "user_registry.json", registry)
 
     billing = load_json(DATA_DIR / "billing.json")
     billing.setdefault("subscriptions", {})[req.user_id] = {
         "user_id": req.user_id,
-        "plan": req.new_plan,
+        "plan": current_plan,
+        "pending_plan": canonical_down,
+        "pending_effective": str(cycle_end.date()),
         "status": "active",
         "tokens_included": new_details["tokens"],
         "previous_plan": current_plan,
-        "changed_at": str(datetime.now()),
+        "changed_at": now_str,
         "stripe_updated": stripe_updated,
     }
     billing.setdefault("transactions", []).append({
         "user_id": req.user_id,
-        "type": "downgrade",
+        "type": "downgrade_scheduled",
         "from_plan": current_plan,
         "to_plan": req.new_plan,
-        "timestamp": str(datetime.now()),
+        "effective_date": str(cycle_end.date()),
+        "timestamp": now_str,
     })
     save_json(DATA_DIR / "billing.json", billing)
 
     return {
-        "status": "downgraded",
-        "plan": req.new_plan,
+        "status": "downgrade_scheduled",
+        "current_plan": current_plan,
+        "pending_plan": canonical_down,
+        "effective_date": str(cycle_end.date()),
         "stripe_updated": stripe_updated,
         "details": new_details,
     }
@@ -390,11 +701,13 @@ async def downgrade_subscription(req: UpgradeDowngradeRequest):
 # =========================================================================
 
 @router.get("/invoices/{user_id}")
-async def get_invoices(user_id: str, limit: int = 20):
-    """Return invoice list. Checks Stripe first, falls back to local txn log."""
+async def get_invoices(user_id: str, request: Request, limit: int = 20):
+    """Return invoice list. Checks Stripe first, falls back to PG transactions, then JSON."""
+    pool = getattr(request.app.state, "db_pool", None)
+
     # Try Stripe
     if STRIPE_AVAILABLE and stripe.api_key:
-        stripe_customer = _get_stripe_customer(user_id)
+        stripe_customer = await _get_stripe_customer(user_id, db_pool=pool)
         if stripe_customer:
             try:
                 invoices = stripe.Invoice.list(customer=stripe_customer, limit=limit)
@@ -417,9 +730,24 @@ async def get_invoices(user_id: str, limit: int = 20):
                     ][:limit],
                 }
             except Exception as e:
-                print(f"   ⚠️  Stripe invoice fetch failed for {user_id}: {e}")
+                logger.warning("get_invoices: Stripe fetch failed for %s: %s", user_id, e)
 
-    # Fallback: local transactions
+    # PG fallback: token_transactions
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                username_row = await conn.fetchrow(
+                    "SELECT username FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1",
+                    user_id,
+                )
+            if username_row:
+                txns = await get_transactions_pg(pool, username_row["username"], limit)
+                if txns:
+                    return {"source": "pg", "invoices": txns}
+        except Exception as e:
+            logger.warning("get_invoices: PG fallback failed for %s: %s", user_id, e)
+
+    # JSON fallback
     billing = load_json(DATA_DIR / "billing.json")
     txns = [t for t in billing.get("transactions", []) if t.get("user_id") == user_id]
     return {"source": "local", "invoices": txns[-limit:]}
@@ -430,43 +758,57 @@ async def get_invoices(user_id: str, limit: int = 20):
 # =========================================================================
 
 @router.get("/payment-methods/{user_id}")
-async def list_payment_methods(user_id: str):
+async def list_payment_methods(user_id: str, request: Request):
     """List saved payment methods from Stripe."""
-    stripe_customer = _get_stripe_customer(user_id)
+    pool = getattr(request.app.state, "db_pool", None)
+    stripe_customer = await _get_stripe_customer(user_id, db_pool=pool)
 
     if STRIPE_AVAILABLE and stripe_customer and stripe.api_key:
         try:
-            methods = stripe.PaymentMethod.list(
-                customer=stripe_customer,
-                type="card",
+            default_pm = (
+                stripe.Customer.retrieve(stripe_customer)
+                .invoice_settings.get("default_payment_method")
             )
-            return {
-                "payment_methods": [
-                    {
+            cards = stripe.PaymentMethod.list(customer=stripe_customer, type="card")
+            result = [
+                {
+                    "id": pm.id,
+                    "type": "card",
+                    "brand": pm.card.brand,
+                    "last4": pm.card.last4,
+                    "exp_month": pm.card.exp_month,
+                    "exp_year": pm.card.exp_year,
+                    "is_default": pm.id == default_pm,
+                }
+                for pm in cards.data
+            ]
+            try:
+                banks = stripe.PaymentMethod.list(customer=stripe_customer, type="us_bank_account")
+                for pm in banks.data:
+                    bank = pm.us_bank_account
+                    result.append({
                         "id": pm.id,
-                        "brand": pm.card.brand,
-                        "last4": pm.card.last4,
-                        "exp_month": pm.card.exp_month,
-                        "exp_year": pm.card.exp_year,
-                        "is_default": pm.id == (
-                            stripe.Customer.retrieve(stripe_customer)
-                            .invoice_settings.get("default_payment_method")
-                        ),
-                    }
-                    for pm in methods.data
-                ]
-            }
+                        "type": "us_bank_account",
+                        "bank_name": bank.bank_name if bank else "Bank",
+                        "last4": bank.last4 if bank else "????",
+                        "account_type": bank.account_type if bank else None,
+                        "is_default": pm.id == default_pm,
+                    })
+            except Exception as e:
+                logger.warning("list_payment_methods: bank account listing failed: %s", e)
+            return {"payment_methods": result}
         except Exception as e:
-            print(f"   ⚠️  Stripe payment methods fetch failed: {e}")
+            logger.warning("list_payment_methods: Stripe fetch failed: %s", e)
             raise HTTPException(502, f"Failed to retrieve payment methods: {e}")
 
     return {"payment_methods": [], "note": "Stripe not configured or no customer linked"}
 
 
 @router.post("/payment-methods")
-async def attach_payment_method(req: PaymentMethodAttachRequest):
+async def attach_payment_method(req: PaymentMethodAttachRequest, request: Request):
     """Attach a new payment method to the user's Stripe customer and set as default."""
-    stripe_customer = _get_stripe_customer(req.user_id)
+    pool = getattr(request.app.state, "db_pool", None)
+    stripe_customer = await _get_stripe_customer(req.user_id, db_pool=pool)
     if not stripe_customer:
         raise HTTPException(404, "No Stripe customer found for this user")
 
@@ -490,14 +832,32 @@ async def attach_payment_method(req: PaymentMethodAttachRequest):
 
 
 @router.delete("/payment-methods/{pm_id}")
-async def detach_payment_method(pm_id: str, user_id: str):
-    """Detach a payment method from the Stripe customer."""
+async def detach_payment_method(
+    pm_id: str,
+    request: Request,
+    auth_user_id: str = Depends(get_current_user_id),
+):
+    """Detach a payment method from the authenticated user's Stripe customer."""
     if not STRIPE_AVAILABLE or not stripe.api_key:
         raise HTTPException(503, "Stripe is not configured")
 
     try:
+        pm = stripe.PaymentMethod.retrieve(pm_id)
+        if pm.customer:
+            pool = getattr(request.app.state, "db_pool", None)
+            if pool:
+                async with pool.acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT profile_data->>'stripe_customer_id' as cid FROM users WHERE username = $1",
+                        auth_user_id,
+                    )
+                    if row and row["cid"] and row["cid"] != pm.customer:
+                        raise HTTPException(403, "Payment method does not belong to your account")
+
         stripe.PaymentMethod.detach(pm_id)
         return {"status": "detached", "payment_method_id": pm_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(400, f"Failed to detach payment method: {e}")
 
@@ -640,8 +1000,543 @@ async def cancel_coaching_session(session_id: str, req: CancelCoachingSessionReq
 # =============================================================================
 
 
+# =============================================================================
+# SCHOOL CODE VERIFICATION & APPLICATION
+# =============================================================================
+
+import re as _re_billing
+import time as _time_billing
+
+_CODE_PATTERN = _re_billing.compile(r'^[A-Z0-9_\-]{2,40}$')
+_verify_rate_limiter: Dict[str, list] = {}
+_VERIFY_WINDOW = 60
+_VERIFY_MAX_ATTEMPTS = 10
+
+
+def _rate_check_verify(key: str) -> bool:
+    """Return True if rate limit exceeded (10 attempts per 60s per key)."""
+    now = _time_billing.time()
+    window = _verify_rate_limiter.setdefault(key, [])
+    _verify_rate_limiter[key] = [t for t in window if now - t < _VERIFY_WINDOW]
+    if len(_verify_rate_limiter[key]) >= _VERIFY_MAX_ATTEMPTS:
+        return True
+    _verify_rate_limiter[key].append(now)
+    return False
+
+
+def _sanitize_code(code: str) -> str:
+    """Normalize and validate discount code format."""
+    cleaned = code.strip().upper()[:40]
+    if not _CODE_PATTERN.match(cleaned):
+        raise HTTPException(400, "Invalid code format")
+    return cleaned
+
+
+class ApplySchoolCodeRequest(BaseModel):
+    school_code: str
+
+
+@router.get("/verify-school-code/{code}")
+async def verify_school_code(code: str, request: Request,
+                             caller: str = Depends(get_current_user_id)):
+    if _rate_check_verify(f"school:{caller}"):
+        raise HTTPException(429, "Too many verification attempts")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(code)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, school_name, school_code, discount_percent,
+                   max_students, current_students, active
+            FROM school_codes
+            WHERE school_code = $1 AND active = TRUE
+        """, safe_code)
+
+    if not row:
+        raise HTTPException(404, "Invalid or expired code")
+    if row["max_students"] and row["current_students"] >= row["max_students"]:
+        raise HTTPException(404, "Invalid or expired code")
+
+    return {
+        "valid": True,
+        "school_name": row["school_name"],
+        "discount_percent": row["discount_percent"],
+        "spots_remaining": (row["max_students"] - row["current_students"]) if row["max_students"] else None,
+    }
+
+
+@router.post("/apply-school-code")
+async def apply_school_code(req: ApplySchoolCodeRequest, request: Request,
+                            caller: str = Depends(get_current_user_id)):
+    """Apply a school code to the authenticated caller's account."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(req.school_code)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Atomic check-and-increment with row lock
+            school = await conn.fetchrow("""
+                SELECT id, school_name, discount_percent, max_students, current_students, active
+                FROM school_codes WHERE school_code = $1 AND active = TRUE
+                FOR UPDATE
+            """, safe_code)
+
+            if not school:
+                raise HTTPException(404, "Invalid or expired code")
+            if school["max_students"] and school["current_students"] >= school["max_students"]:
+                raise HTTPException(400, "Enrollment limit reached")
+
+            # Idempotency: skip if caller already enrolled
+            already = await conn.fetchval("""
+                SELECT school_code_id FROM users WHERE hardware_id = $1
+            """, caller)
+            if already == school["id"]:
+                return {"applied": True, "school_name": school["school_name"],
+                        "discount_percent": school["discount_percent"], "already_enrolled": True}
+
+            await conn.execute("""
+                UPDATE users SET school_code_id = $1, student_verified = TRUE
+                WHERE hardware_id = $2
+            """, school["id"], caller)
+
+            await conn.execute("""
+                UPDATE school_codes SET current_students = current_students + 1
+                WHERE id = $1
+            """, school["id"])
+
+    return {
+        "applied": True,
+        "school_name": school["school_name"],
+        "discount_percent": school["discount_percent"],
+    }
+
+
+# =============================================================================
+# CORPORATE SPONSOR CODE VERIFICATION & APPLICATION
+# =============================================================================
+
+class ApplyCorporateCodeRequest(BaseModel):
+    sponsor_code: str
+
+
+@router.get("/verify-corporate-code/{code}")
+async def verify_corporate_code(code: str, request: Request,
+                                caller: str = Depends(get_current_user_id)):
+    if _rate_check_verify(f"corp:{caller}"):
+        raise HTTPException(429, "Too many verification attempts")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(code)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, company_name, discount_type, discount_value,
+                   pays_full, max_employees, current_employees, active
+            FROM corporate_sponsors WHERE sponsor_code = $1 AND active = TRUE
+        """, safe_code)
+
+    if not row:
+        raise HTTPException(404, "Invalid or expired code")
+    if row["max_employees"] and row["current_employees"] >= row["max_employees"]:
+        raise HTTPException(404, "Invalid or expired code")
+
+    discount_desc = (
+        "Fully sponsored" if row["pays_full"]
+        else f"{row['discount_value']}% off" if row["discount_type"] == "percent"
+        else f"${row['discount_value'] / 100:.2f} off"
+    )
+
+    return {
+        "valid": True,
+        "company_name": row["company_name"],
+        "discount_description": discount_desc,
+        "pays_full": row["pays_full"],
+    }
+
+
+@router.post("/apply-corporate-code")
+async def apply_corporate_code(req: ApplyCorporateCodeRequest, request: Request,
+                               caller: str = Depends(get_current_user_id)):
+    """Apply a corporate sponsor code to the authenticated caller's account."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(req.sponsor_code)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            sponsor = await conn.fetchrow("""
+                SELECT id, company_name, discount_type, discount_value, pays_full,
+                       max_employees, current_employees, active,
+                       COALESCE(platform_tier, 'starter') as platform_tier,
+                       COALESCE(subsidy_percentage, 100) as subsidy_percentage,
+                       COALESCE(allowed_employee_tier, 'STANDARD') as allowed_employee_tier
+                FROM corporate_sponsors WHERE sponsor_code = $1 AND active = TRUE
+                FOR UPDATE
+            """, safe_code)
+
+            if not sponsor:
+                raise HTTPException(404, "Invalid or expired code")
+            if sponsor["max_employees"] and sponsor["current_employees"] >= sponsor["max_employees"]:
+                raise HTTPException(400, "Enrollment limit reached")
+
+            # Idempotency: check if already enrolled under this sponsor
+            caller_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1", caller)
+            if not caller_uuid:
+                raise HTTPException(404, "User not found")
+
+            existing = await conn.fetchval("""
+                SELECT id FROM corporate_enrollments
+                WHERE sponsor_id = $1 AND user_id = $2
+            """, sponsor["id"], caller_uuid)
+            if existing:
+                return {"applied": True, "company_name": sponsor["company_name"],
+                        "pays_full": sponsor["pays_full"], "already_enrolled": True}
+
+            enrollment = await conn.fetchrow("""
+                INSERT INTO corporate_enrollments (sponsor_id, user_id, verified)
+                VALUES ($1, $2, TRUE) RETURNING id
+            """, sponsor["id"], caller_uuid)
+
+            if enrollment:
+                await conn.execute("""
+                    UPDATE users SET corporate_enrollment_id = $1
+                    WHERE hardware_id = $2
+                """, enrollment["id"], caller)
+
+                await conn.execute("""
+                    UPDATE corporate_sponsors SET current_employees = current_employees + 1
+                    WHERE id = $1
+                """, sponsor["id"])
+
+    from app.services.stripe_integration import calculate_subsidized_rate
+    subsidy_info = calculate_subsidized_rate(
+        sponsor["allowed_employee_tier"],
+        sponsor["subsidy_percentage"],
+    )
+
+    return {
+        "applied": True,
+        "company_name": sponsor["company_name"],
+        "pays_full": sponsor["pays_full"],
+        "discount_type": sponsor["discount_type"],
+        "discount_value": sponsor["discount_value"],
+        "subsidy": subsidy_info,
+    }
+
+
+# =============================================================================
+# ACH DIRECT DEBIT (BANK ACCOUNT BILLING)
+# =============================================================================
+
+class ACHSetupRequest(BaseModel):
+    user_id: str
+
+
+class SetDefaultPaymentMethodRequest(BaseModel):
+    user_id: str
+    payment_method_id: str
+
+
+@router.post("/ach/setup")
+async def setup_ach_bank_account(req: ACHSetupRequest, request: Request):
+    """Create a Stripe SetupIntent for ACH Direct Debit via Financial Connections."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    customer_id = None
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM users WHERE hardware_id = $1", req.user_id
+            )
+            if row:
+                customer_id = row["stripe_customer_id"]
+
+    if not customer_id:
+        registry_path = os.path.join(os.getenv("DATA_DIR", "/app/data"), "user_registry.json")
+        try:
+            with open(registry_path) as f:
+                registry = json.load(f)
+            for _, v in registry.items():
+                p = v.get("profile", {})
+                if p.get("hardware_id") == req.user_id:
+                    customer_id = p.get("stripe_customer_id")
+                    break
+        except Exception:
+            pass
+
+    if not customer_id:
+        raise HTTPException(400, "No Stripe customer found for this user")
+
+    try:
+        setup_intent = stripe.SetupIntent.create(
+            customer=customer_id,
+            payment_method_types=["us_bank_account"],
+            payment_method_options={
+                "us_bank_account": {
+                    "financial_connections": {
+                        "permissions": ["payment_method"],
+                    },
+                },
+            },
+        )
+        return {
+            "client_secret": setup_intent.client_secret,
+            "setup_intent_id": setup_intent.id,
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/payment-method/default")
+async def set_default_payment_method(req: SetDefaultPaymentMethodRequest, request: Request):
+    """Set any payment method (card or bank account) as the default for invoices."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    customer_id = None
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM users WHERE hardware_id = $1", req.user_id
+            )
+            if row:
+                customer_id = row["stripe_customer_id"]
+
+    if not customer_id:
+        raise HTTPException(400, "No Stripe customer found")
+
+    try:
+        stripe.Customer.modify(
+            customer_id,
+            invoice_settings={"default_payment_method": req.payment_method_id},
+        )
+        return {"default_payment_method": req.payment_method_id, "updated": True}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, str(e))
+
+
+# =============================================================================
+# SUPERBILL GENERATION (HSA/FSA/INSURANCE)
+# =============================================================================
+
+@router.get("/superbill/{user_id}")
+async def generate_superbill(user_id: str, month: Optional[str] = None, request: Request = None):
+    """
+    Generate a superbill summary for HSA/FSA/insurance reimbursement.
+    Returns structured data (PDF rendering happens on the client).
+    """
+    target_month = month or datetime.now().strftime("%Y-%m")
+
+    pool = getattr(request.app.state, "db_pool", None) if request else None
+
+    services = []
+    total_cents = 0
+
+    if pool:
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow("""
+                SELECT id, name, email FROM users WHERE hardware_id = $1
+            """, user_id)
+
+            if not user:
+                raise HTTPException(404, "User not found")
+
+            year_month = target_month.split("-")
+            start_date = datetime(int(year_month[0]), int(year_month[1]), 1)
+            if int(year_month[1]) == 12:
+                end_date = datetime(int(year_month[0]) + 1, 1, 1)
+            else:
+                end_date = datetime(int(year_month[0]), int(year_month[1]) + 1, 1)
+
+            billing_events = await conn.fetch("""
+                SELECT event_type, amount_cents, description, created_at
+                FROM sanctuary_billing_events
+                WHERE member_id = $1
+                  AND created_at >= $2 AND created_at < $3
+                ORDER BY created_at
+            """, user["id"], start_date, end_date)
+
+            cpt_mapping = {
+                "base_fee": {"code": "90847", "description": "Family therapy session"},
+                "coaching": {"code": "90837", "description": "Individual psychotherapy, 60 min"},
+                "assisted_response": {"code": "90847", "description": "Family therapy — guided response"},
+                "group_coaching": {"code": "90849", "description": "Multi-family group psychotherapy"},
+            }
+
+            for evt in billing_events:
+                cpt = cpt_mapping.get(evt["event_type"], {"code": "90837", "description": evt["event_type"]})
+                services.append({
+                    "date": evt["created_at"].strftime("%Y-%m-%d"),
+                    "cpt_code": cpt["code"],
+                    "description": cpt["description"],
+                    "amount_cents": evt["amount_cents"],
+                })
+                total_cents += evt["amount_cents"]
+
+            client_name = user["name"]
+            client_email = user["email"]
+    else:
+        client_name = user_id
+        client_email = ""
+
+    return {
+        "superbill": {
+            "provider": {
+                "name": "Sovereign Sanctuary LLC",
+                "npi": "",
+                "tax_id": "",
+                "address": "",
+            },
+            "client": {
+                "name": client_name,
+                "email": client_email,
+                "user_id": user_id,
+            },
+            "billing_period": target_month,
+            "services": services,
+            "total_cents": total_cents,
+            "total_formatted": f"${total_cents / 100:.2f}",
+            "generated_at": datetime.now().isoformat(),
+            "disclaimer": (
+                "This superbill is provided for informational purposes. "
+                "Submit to your HSA/FSA administrator or insurance provider for reimbursement. "
+                "Sovereign Sanctuary does not guarantee reimbursement."
+            ),
+        },
+    }
+
+
+# =============================================================================
+# PROMOTIONAL SPECIALS — PUBLIC ENDPOINT
+# =============================================================================
+
+@router.get("/specials/active")
+async def get_active_specials(request: Request):
+    """Return currently active promotional specials."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        return {"specials": []}
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, discount_type, discount_value, applicable_tiers,
+                   starts_at, ends_at, promo_code, max_redemptions, current_redemptions
+            FROM promotional_specials
+            WHERE active = TRUE AND starts_at <= NOW() AND ends_at > NOW()
+            ORDER BY ends_at ASC
+        """)
+
+    return {
+        "specials": [
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "discount_type": r["discount_type"],
+                "discount_value": r["discount_value"],
+                "applicable_tiers": r["applicable_tiers"] or [],
+                "starts_at": r["starts_at"].isoformat(),
+                "ends_at": r["ends_at"].isoformat(),
+                "promo_code": r["promo_code"],
+                "spots_left": (r["max_redemptions"] - r["current_redemptions"]) if r["max_redemptions"] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/verify-promo/{code}")
+async def verify_promo_code(code: str, request: Request,
+                            caller: str = Depends(get_current_user_id)):
+    """Verify a promotional code and return discount details."""
+    if _rate_check_verify(f"promo:{caller}"):
+        raise HTTPException(429, "Too many verification attempts")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(code)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, name, discount_type, discount_value, applicable_tiers,
+                   ends_at, max_redemptions, current_redemptions
+            FROM promotional_specials
+            WHERE promo_code = $1 AND active = TRUE
+              AND starts_at <= NOW() AND ends_at > NOW()
+        """, safe_code)
+
+    if not row:
+        raise HTTPException(404, "Invalid or expired code")
+    if row["max_redemptions"] and row["current_redemptions"] >= row["max_redemptions"]:
+        raise HTTPException(404, "Invalid or expired code")
+
+    return {
+        "valid": True,
+        "name": row["name"],
+        "discount_type": row["discount_type"],
+        "discount_value": row["discount_value"],
+        "applicable_tiers": row["applicable_tiers"] or [],
+        "expires": row["ends_at"].isoformat(),
+    }
+
+
+# =============================================================================
+# COST SCHEDULE — Public-facing fee schedule for transparency
+# =============================================================================
+
+@router.get("/cost-schedule")
+async def get_cost_schedule():
+    """Return the full Master Cost Schedule for display in the app."""
+    return {
+        "tiers": {
+            "COACH_ONLY": {"name": "Coach Only", "monthly": 0, "yearly": 0},
+            "TRIAL": {"name": "Threshold (Trial)", "monthly": 0, "yearly": 0, "duration_days": 14},
+            "STANDARD": {"name": "Inner Chamber", "monthly": 49, "yearly": 490},
+            "TOP_TIER": {"name": "Sovereign Circle", "monthly": 149, "yearly": 1490},
+        },
+        "sanctuary_charges": {
+            "base_fee": {"amount": 20.00, "description": "Per session"},
+            "assisted_response": {"amount": 3.00, "description": "AI-crafted group message"},
+            "coaching_first_free": {"amount": 0, "description": "First coaching per member is free"},
+            "coaching_additional": {"amount": 5.00, "description": "Additional coaching sessions"},
+            "group_coaching": {"amount": 20.00, "description": "Group coaching by Little Nate"},
+        },
+        "family_addons": FAMILY_PRICING,
+        "coaching_packs": [
+            {"sessions": 1, "price": 175, "per_session": 175},
+            {"sessions": 4, "price": 600, "per_session": 150},
+            {"sessions": 8, "price": 1120, "per_session": 140},
+        ],
+        "overages": OVERAGE_PRICING,
+        "payment_fees": {
+            "card": {"rate_percent": 2.9, "fixed_cents": 30, "description": "Credit/Debit Card"},
+            "ach": {"rate_percent": 0.8, "cap_cents": 500, "description": "ACH Direct Debit (Bank Account)"},
+        },
+        "ach_savings_examples": [
+            {"scenario": "Inner Chamber ($49/mo)", "card_fee": 1.72, "ach_fee": 0.39, "savings_monthly": 1.33, "savings_yearly": 15.96},
+            {"scenario": "Sovereign Circle ($149/mo)", "card_fee": 4.62, "ach_fee": 1.19, "savings_monthly": 3.43, "savings_yearly": 41.16},
+            {"scenario": "Sovereign Circle Yearly ($1,490)", "card_fee": 43.51, "ach_fee": 5.00, "savings_total": 38.51},
+            {"scenario": "Family w/ 3 dependents ($229/mo)", "card_fee": 6.94, "ach_fee": 1.83, "savings_monthly": 5.11, "savings_yearly": 61.32},
+        ],
+    }
+
+
+# =============================================================================
+# FAMILY MEMBERS — Used by Flutter billing_screens.dart
+# =============================================================================
+
+
 @router.get("/family/members")
-async def get_family_members(family_id: str):
+async def get_family_members(family_id: str, request: Request):
     """
     Return all members in a family by family_id.
     Used by billing_screens.dart to display the family plan.
@@ -649,6 +1544,42 @@ async def get_family_members(family_id: str):
     if not family_id:
         raise HTTPException(400, "family_id is required")
 
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT hardware_id, username, name, email, role,
+                              tier, subscription_status, profile_data
+                       FROM users
+                       WHERE (family_id::text = $1
+                              OR profile_data->>'family_id' = $1)
+                         AND deleted_at IS NULL
+                       ORDER BY name""",
+                    family_id,
+                )
+                members = []
+                for r in rows:
+                    pd = r.get("profile_data") or {}
+                    if isinstance(pd, str):
+                        try:
+                            pd = json.loads(pd)
+                        except Exception:
+                            pd = {}
+                    members.append({
+                        "id": r.get("hardware_id") or r["username"],
+                        "name": r.get("name") or "",
+                        "email": r.get("email") or "",
+                        "role": r.get("role") or "CLIENT",
+                        "subscription_plan": r.get("tier") or pd.get("subscription_plan", ""),
+                        "subscription_status": r.get("subscription_status") or "",
+                        "joined_date": pd.get("joined_date", ""),
+                    })
+                return {"family_id": family_id, "members": members, "count": len(members)}
+        except Exception as e:
+            logger.warning("get_family_members: PG read failed for family %s: %s", family_id, e)
+
+    # JSON fallback
     registry = load_json(DATA_DIR / "user_registry.json")
     members = []
 
@@ -666,3 +1597,591 @@ async def get_family_members(family_id: str):
             })
 
     return {"family_id": family_id, "members": members, "count": len(members)}
+
+
+class FamilyMemberCheckoutRequest(BaseModel):
+    dependent_username: str
+    ordinal: int
+    success_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+
+
+@router.post("/checkout/family-member")
+async def checkout_family_member(req: FamilyMemberCheckoutRequest, request: Request,
+                                 caller: str = Depends(get_current_user_id)):
+    """Create Stripe checkout for a family member add-on subscription."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    from app.services.stripe_integration import StripeService, family_tier_price_cents, PRICES
+
+    async with pool.acquire() as conn:
+        hoh = await conn.fetchrow(
+            "SELECT id::text as uid, username, profile_data->>'email' as email, "
+            "profile_data->>'name' as name, profile_data->>'stripe_customer_id' as stripe_cid "
+            "FROM users WHERE username = $1",
+            caller,
+        )
+        if not hoh:
+            raise HTTPException(404, "Head of household not found")
+
+        dep = await conn.fetchrow(
+            "SELECT id::text as uid, username, name FROM users WHERE username = $1",
+            req.dependent_username,
+        )
+        if not dep:
+            raise HTTPException(404, f"Dependent {req.dependent_username} not found")
+
+    price_cents = family_tier_price_cents(req.ordinal)
+    price_id = PRICES.get(f"FAMILY_TIER_{req.ordinal}") or PRICES.get("FAMILY_MEMBER")
+
+    import stripe as _stripe
+    _stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    if not _stripe.api_key:
+        raise HTTPException(503, "Stripe not configured")
+
+    svc = StripeService(pool)
+    customer_id = await svc.get_or_create_customer(
+        hoh["uid"], hoh["email"] or "", hoh["name"] or caller
+    )
+
+    checkout_params = {
+        "customer": customer_id,
+        "mode": "subscription",
+        "success_url": req.success_url,
+        "cancel_url": req.cancel_url,
+        "metadata": {
+            "type": "family_member",
+            "hoh_username": caller,
+            "dependent_username": req.dependent_username,
+            "ordinal": str(req.ordinal),
+        },
+    }
+
+    if price_id:
+        checkout_params["line_items"] = [{"price": price_id, "quantity": 1}]
+    else:
+        checkout_params["line_items"] = [{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"Family Member Add-On (Slot {req.ordinal})"},
+                "unit_amount": price_cents,
+                "recurring": {"interval": "month"},
+            },
+            "quantity": 1,
+        }]
+
+    session = _stripe.checkout.Session.create(**checkout_params)
+
+    return {"checkout_url": session.url, "session_id": session.id, "price_cents": price_cents}
+
+
+# ---------------------------------------------------------------------------
+# Token Pack Purchases
+# ---------------------------------------------------------------------------
+
+class TokenPackPurchase(BaseModel):
+    pack_id: str
+    username: str
+    email: Optional[str] = None
+    success_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+
+
+@router.get("/token-packs")
+async def get_token_packs():
+    """Available token packs for purchase."""
+    from app.services.stripe_integration import TOKEN_PACKS
+    return [
+        {
+            "id": pack_id,
+            "label": pack["label"],
+            "tokens": pack["tokens"],
+            "price_cents": pack["price_cents"],
+            "price_display": f"${pack['price_cents'] / 100:.2f}",
+        }
+        for pack_id, pack in TOKEN_PACKS.items()
+    ]
+
+
+@router.post("/token-packs/purchase")
+async def purchase_token_pack(req: TokenPackPurchase, request: Request):
+    """Create Stripe checkout session for a token pack."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    from app.services.stripe_integration import StripeService, TOKEN_PACKS
+    if req.pack_id not in TOKEN_PACKS:
+        raise HTTPException(400, f"Invalid pack: {req.pack_id}")
+
+    svc = StripeService(pool)
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT id::text as uid, profile_data->>'email' as email, profile_data->>'name' as name FROM users WHERE username = $1",
+            req.username,
+        )
+        if not user:
+            raise HTTPException(404, f"User {req.username} not found")
+
+    result = await svc.purchase_token_pack(
+        user_id=user["uid"],
+        username=req.username,
+        email=req.email or user["email"] or "",
+        name=user["name"] or req.username,
+        pack_id=req.pack_id,
+        success_url=req.success_url,
+        cancel_url=req.cancel_url,
+    )
+    return {"checkout_url": result.checkout_url, "session_id": result.session_id}
+
+
+# ---------------------------------------------------------------------------
+# Client-facing token usage (for Token Vault)
+# ---------------------------------------------------------------------------
+
+@router.get("/my-token-usage")
+async def get_my_token_usage(request: Request, days: int = 30):
+    """Current user's token balance, daily/monthly usage, and per-source breakdown."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    user = getattr(request.state, "user", None) or {}
+    username = user.get("username", "")
+    if not username:
+        auth_header = request.headers.get("authorization", "")
+        x_user = request.headers.get("x-user-id", "")
+        if x_user:
+            username = x_user
+
+    if not username:
+        raise HTTPException(401, "Cannot determine user identity")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT username, COALESCE(token_balance, 0) as token_balance,
+                   COALESCE((profile_data->>'token_usage_today')::int, 0) as usage_today,
+                   COALESCE((profile_data->>'token_usage_month')::int, 0) as usage_month
+            FROM users WHERE username = $1
+        """, username)
+
+        if not row:
+            return {"token_balance": 0, "usage_today": 0, "usage_month": 0, "by_source": []}
+
+        from datetime import timezone, timedelta as td
+        cutoff = datetime.now(timezone.utc) - td(days=days)
+        by_source = await conn.fetch("""
+            SELECT COALESCE(source, 'unknown') as source,
+                   SUM(ABS(amount)) as total_tokens
+            FROM token_transactions
+            WHERE username = $1 AND created_at >= $2 AND amount < 0
+            GROUP BY source ORDER BY total_tokens DESC
+        """, username, cutoff)
+
+        share_history = await conn.fetch("""
+            SELECT COUNT(*) as share_count,
+                   COALESCE(SUM(tokens_shared), 0) as total_shared,
+                   COUNT(DISTINCT receiver_username) as unique_recipients
+            FROM token_shares WHERE sharer_username = $1
+        """, username)
+
+        sh = dict(share_history[0]) if share_history else {}
+
+        return {
+            "token_balance": row["token_balance"],
+            "usage_today": row["usage_today"],
+            "usage_month": row["usage_month"],
+            "by_source": [{"source": r["source"], "total_tokens": r["total_tokens"]} for r in by_source],
+            "sharing": {
+                "total_shares": sh.get("share_count", 0),
+                "total_tokens_shared": sh.get("total_shared", 0),
+                "unique_recipients": sh.get("unique_recipients", 0),
+            },
+        }
+
+
+# =============================================================================
+# PRICING CATALOG & CHANGE NOTIFICATION
+# =============================================================================
+
+@router.get("/pricing-catalog")
+async def get_pricing_catalog(request: Request):
+    """Return the full pricing catalog for admin review."""
+    from app.services.stripe_integration import PRICING_CATALOG, PRICES, detect_pricing_drift
+    catalog = []
+    for name, info in PRICING_CATALOG.items():
+        price_id = PRICES.get(info["key"], "")
+        catalog.append({
+            "product": name,
+            "amount": f"${info['amount_cents'] / 100:.2f}",
+            "amount_cents": info["amount_cents"],
+            "interval": info["interval"],
+            "stripe_key": info["key"],
+            "stripe_price_id": price_id or "NOT SET",
+            "configured": bool(price_id),
+        })
+    drift = detect_pricing_drift()
+    return {"catalog": catalog, "total_products": len(catalog), "drift_warnings": drift}
+
+
+class PricingUpdateRequest(BaseModel):
+    product_key: str
+    new_amount_cents: int
+    reason: str = ""
+
+
+@router.post("/pricing-update")
+async def update_pricing(
+    body: PricingUpdateRequest,
+    request: Request,
+    admin: dict = Depends(require_admin),
+):
+    """Admin-only: update a product price and notify support@sovereignsanctuary.net."""
+    from app.services.stripe_integration import PRICING_CATALOG, notify_pricing_change
+
+    target = None
+    target_name = None
+    for name, info in PRICING_CATALOG.items():
+        if info["key"] == body.product_key:
+            target = info
+            target_name = name
+            break
+
+    if not target:
+        raise HTTPException(404, f"Product key '{body.product_key}' not found in catalog")
+
+    if body.new_amount_cents < 0:
+        raise HTTPException(400, "Price cannot be negative")
+
+    old_cents = target["amount_cents"]
+    if old_cents == body.new_amount_cents:
+        return {"status": "no_change", "message": "Price is already set to this amount"}
+
+    target["amount_cents"] = body.new_amount_cents
+
+    changed_items = [{
+        "product": target_name,
+        "old_cents": old_cents,
+        "new_cents": body.new_amount_cents,
+        "interval": target["interval"],
+        "reason": body.reason,
+        "key": body.product_key,
+    }]
+
+    ns = getattr(request.app.state, "notification_system", None)
+    db_pool = getattr(request.app.state, "db_pool", None)
+    notify_pricing_change._db_pool = db_pool
+    admin_name = admin.get("username", "unknown_admin")
+
+    await notify_pricing_change(changed_items, changed_by=admin_name, notification_system=ns)
+
+    return {
+        "status": "updated",
+        "product": target_name,
+        "old_price": f"${old_cents / 100:.2f}",
+        "new_price": f"${body.new_amount_cents / 100:.2f}",
+        "notification_sent": ns is not None,
+        "note": "Update Stripe Price in dashboard and .env on server to match",
+    }
+
+
+# =============================================================================
+# CARD SETUP (SetupIntent for adding a card)
+# =============================================================================
+
+@router.post("/card/setup")
+async def setup_card_payment_method(req: ACHSetupRequest, request: Request):
+    """Create a Stripe SetupIntent for adding a card via Stripe Elements."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    customer_id = None
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM users WHERE hardware_id = $1", req.user_id
+            )
+            if row:
+                customer_id = row["stripe_customer_id"]
+
+    if not customer_id:
+        raise HTTPException(400, "No Stripe customer found for this user")
+
+    try:
+        setup_intent = stripe.SetupIntent.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+        )
+        return {
+            "client_secret": setup_intent.client_secret,
+            "setup_intent_id": setup_intent.id,
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, str(e))
+
+
+# =============================================================================
+# STRIPE CONNECT EXPRESS (Coach Payout Onboarding)
+# =============================================================================
+
+@router.post("/connect/onboard")
+async def create_connect_account(request: Request, user: dict = Depends(require_coach)):
+    """Create a Stripe Connect Express account for a coach and return the onboarding URL."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    hw_id = user.get("hardware_id", "")
+    email = user.get("email", "")
+    profile = user.get("profile", user)
+    existing_connect = (profile.get("stripe_connect_id") or "").strip()
+
+    if existing_connect:
+        try:
+            acct = stripe.Account.retrieve(existing_connect)
+            if not acct.details_submitted:
+                link = stripe.AccountLink.create(
+                    account=existing_connect,
+                    refresh_url="https://coach.sovereignsanctuary.net/settings?connect=refresh",
+                    return_url="https://coach.sovereignsanctuary.net/settings?connect=complete",
+                    type="account_onboarding",
+                )
+                return {"url": link.url, "account_id": existing_connect, "status": "continue_onboarding"}
+            return {"status": "already_connected", "account_id": existing_connect, "payouts_enabled": acct.payouts_enabled}
+        except Exception:
+            pass
+
+    try:
+        account = stripe.Account.create(
+            type="express",
+            email=email or None,
+            metadata={"coach_id": hw_id, "platform": "sovereign_sanctuary"},
+            capabilities={"transfers": {"requested": True}},
+        )
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE users SET profile_data = jsonb_set(
+                       COALESCE(profile_data, '{}'::jsonb),
+                       '{stripe_connect_id}',
+                       $1::jsonb
+                   ) WHERE hardware_id = $2""",
+                json.dumps(account.id), hw_id,
+            )
+
+        link = stripe.AccountLink.create(
+            account=account.id,
+            refresh_url="https://coach.sovereignsanctuary.net/settings?connect=refresh",
+            return_url="https://coach.sovereignsanctuary.net/settings?connect=complete",
+            type="account_onboarding",
+        )
+        return {"url": link.url, "account_id": account.id, "status": "created"}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, f"Stripe Connect error: {e}")
+
+
+@router.get("/connect/status")
+async def connect_status(request: Request, user: dict = Depends(require_coach)):
+    """Check the Stripe Connect status for the current coach."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    profile = user.get("profile", user)
+    connect_id = (profile.get("stripe_connect_id") or "").strip()
+
+    if not connect_id:
+        return {"connected": False, "payouts_enabled": False, "details_submitted": False}
+
+    try:
+        account = stripe.Account.retrieve(connect_id)
+        return {
+            "connected": True,
+            "account_id": connect_id,
+            "payouts_enabled": account.payouts_enabled,
+            "charges_enabled": account.charges_enabled,
+            "details_submitted": account.details_submitted,
+        }
+    except stripe.error.StripeError as e:
+        return {"connected": False, "error": str(e)}
+
+
+@router.post("/connect/dashboard")
+async def connect_dashboard_link(request: Request, user: dict = Depends(require_coach)):
+    """Generate a Stripe Express Dashboard login link for the coach."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    profile = user.get("profile", user)
+    connect_id = (profile.get("stripe_connect_id") or "").strip()
+
+    if not connect_id:
+        raise HTTPException(400, "No Stripe Connect account linked. Complete onboarding first.")
+
+    try:
+        link = stripe.Account.create_login_link(connect_id)
+        return {"url": link.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, f"Cannot create dashboard link: {e}")
+
+
+# =============================================================================
+# DOJO SUBSCRIPTION CHECKOUT (Stripe Checkout for DOJO add-ons)
+# =============================================================================
+
+DOJO_PRICE_MAP = {
+    "therapist": 17500, "project_pm": 25000, "business": 32500,
+    "cnc": 15000, "mcat": 50000, "teacher": 22500,
+    "judge": 210000, "coach_nate": 9000,
+}
+
+DOJO_LABELS = {
+    "therapist": "Therapist DOJO", "project_pm": "Project PM DOJO",
+    "business": "Business DOJO", "cnc": "CNC DOJO",
+    "mcat": "MCAT DOJO", "teacher": "Teacher DOJO",
+    "judge": "Judge DOJO", "coach_nate": "Coach Nate DOJO",
+}
+
+
+class PaymentMethodCheckoutRequest(BaseModel):
+    user_id: str
+    method_type: str = "card"
+
+
+@router.post("/payment-method/add-checkout")
+async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, request: Request):
+    """Create a Stripe Checkout Session in setup mode for adding a card or bank account."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    customer_id = None
+    username = ""
+
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stripe_customer_id, username, profile_data->>'email' as email "
+                "FROM users WHERE hardware_id = $1",
+                body.user_id,
+            )
+            if row:
+                customer_id = row["stripe_customer_id"]
+                username = row["username"] or ""
+                email = row["email"] or ""
+
+    if not customer_id:
+        try:
+            customer = stripe.Customer.create(
+                email=email if 'email' in dir() else None,
+                name=username or body.user_id,
+                metadata={"user_id": body.user_id},
+            )
+            customer_id = customer.id
+            if pool:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET stripe_customer_id = $1 WHERE hardware_id = $2",
+                        customer_id, body.user_id,
+                    )
+        except stripe.error.StripeError as e:
+            raise HTTPException(400, f"Failed to create Stripe customer: {e}")
+
+    method_type = body.method_type.lower()
+    if method_type == "bank":
+        payment_method_types = ["us_bank_account"]
+    else:
+        payment_method_types = ["card"]
+
+    try:
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            mode="setup",
+            payment_method_types=payment_method_types,
+            success_url="https://app.sovereignsanctuary.net/?payment_setup=success",
+            cancel_url="https://app.sovereignsanctuary.net/?payment_setup=cancel",
+        )
+        return {"checkout_url": session.url, "session_id": session.id}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, f"Stripe checkout error: {e}")
+
+
+class DojoCheckoutRequest(BaseModel):
+    dojo_key: str
+
+
+@router.post("/dojo/checkout")
+async def dojo_checkout(body: DojoCheckoutRequest, request: Request, user: dict = Depends(require_coach)):
+    """Create a Stripe Checkout session for a DOJO subscription."""
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+
+    dojo_key = body.dojo_key.lower()
+    if dojo_key not in DOJO_PRICE_MAP:
+        raise HTTPException(400, f"Invalid dojo_key: {dojo_key}")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    hw_id = user.get("hardware_id", "")
+    username = user.get("username", "")
+    email = user.get("email", "")
+
+    from app.services.stripe_integration import PRICES
+    price_id = PRICES.get(f"DOJO_{dojo_key.upper()}")
+
+    customer_id = None
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM users WHERE hardware_id = $1", hw_id
+            )
+            if row:
+                customer_id = row["stripe_customer_id"]
+
+    if not customer_id:
+        try:
+            customer = stripe.Customer.create(
+                email=email or None,
+                name=username,
+                metadata={"coach_id": hw_id},
+            )
+            customer_id = customer.id
+            if pool:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET stripe_customer_id = $1 WHERE hardware_id = $2",
+                        customer_id, hw_id,
+                    )
+        except stripe.error.StripeError as e:
+            raise HTTPException(400, f"Failed to create Stripe customer: {e}")
+
+    try:
+        session_params = {
+            "customer": customer_id,
+            "mode": "subscription",
+            "metadata": {"type": "dojo_subscription", "dojo_key": dojo_key, "coach_id": hw_id},
+            "success_url": "https://coach.sovereignsanctuary.net/?dojo=success&session_id={CHECKOUT_SESSION_ID}",
+            "cancel_url": "https://coach.sovereignsanctuary.net/?dojo=cancel",
+        }
+
+        if price_id:
+            session_params["line_items"] = [{"price": price_id, "quantity": 1}]
+        else:
+            session_params["line_items"] = [{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": DOJO_LABELS.get(dojo_key, f"{dojo_key} DOJO")},
+                    "unit_amount": DOJO_PRICE_MAP[dojo_key],
+                    "recurring": {"interval": "month"},
+                },
+                "quantity": 1,
+            }]
+
+        session = stripe.checkout.Session.create(**session_params)
+        return {"checkout_url": session.url, "session_id": session.id}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, f"Stripe checkout error: {e}")

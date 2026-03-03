@@ -3,13 +3,15 @@ LITTLE NATE — Campaign API
 CRUD operations for drip campaigns and campaign steps.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.services.api_server import require_admin
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 import json
 
-router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
+router = APIRouter(prefix="/api/campaigns", tags=["campaigns"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================

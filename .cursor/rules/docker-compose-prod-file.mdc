@@ -1,0 +1,67 @@
+---
+description: Always use docker-compose.prod.yml on the production server — the default docker-compose.yml has incorrect volume mappings
+alwaysApply: true
+---
+
+# Docker Compose: Always Use `-f docker-compose.prod.yml`
+
+## The Problem
+
+The production server has two compose files:
+
+| File | Purpose | Backend `/app/data` mount |
+|---|---|---|
+| `docker-compose.yml` | Local development | `./data/bridge:/app/data:ro` (WRONG for backend) |
+| `docker-compose.prod.yml` | Production server | `./data/backend:/app/data` (CORRECT, read-write) |
+
+Running bare `docker compose up -d` uses `docker-compose.yml` by default, which mounts the bridge's data directory as read-only into the backend. This causes `session_memory` to fail with `[Errno 30] Read-only file system` and drops service health from 93/93 to 92/93.
+
+## Rule
+
+**Every `docker compose` command on the production server (68.183.168.75) MUST include `-f docker-compose.prod.yml`.**
+
+```bash
+# WRONG — uses docker-compose.yml, wrong volumes
+docker compose up -d
+docker compose up -d backend
+docker compose restart backend
+
+# CORRECT
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d backend
+docker compose -f docker-compose.prod.yml restart backend
+```
+
+## Key Differences Between Files
+
+| Setting | `docker-compose.yml` | `docker-compose.prod.yml` |
+|---|---|---|
+| Backend `/app/data` | `data/bridge:ro` | `data/backend` (rw) |
+| Bridge data cross-ref | Not available | `data/bridge:/app/bridge_data:ro` |
+| Nginx container | Not included | Included (`nate_nginx`) |
+| Health check deps | Basic | Full chain with `condition: service_healthy` |
+
+## Stale Network Error
+
+When switching between compose files or after partial stops, Docker may report:
+
+```
+Error response from daemon: error while removing network: network ... has active endpoints
+```
+
+Fix with:
+
+```bash
+docker network prune -f && docker compose -f docker-compose.prod.yml up -d
+```
+
+## Verification After Any Compose Operation
+
+```bash
+# Confirm correct mount (must show data/backend, NOT data/bridge)
+docker inspect nate_backend --format '{{range .Mounts}}{{.Destination}} -> {{.Source}} ({{.Mode}}){{println}}{{end}}' | grep /app/data
+
+# Confirm full health
+docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'
+# Expected: 93/93 services healthy — ALL SYSTEMS NOMINAL
+```

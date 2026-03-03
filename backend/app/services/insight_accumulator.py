@@ -107,13 +107,14 @@ class InsightAccumulator:
             self._gather_quiz_patterns(),
             self._gather_web_wisdom(),
             self._gather_social_memory(),
+            self._gather_vault_engagement(),
             return_exceptions=True,
         )
 
         source_names = [
             "nevedal_coherence", "therapy_wisdom", "livestream_patterns",
             "marketing_performance", "expression_resonance", "quiz_patterns",
-            "web_wisdom", "social_memory",
+            "web_wisdom", "social_memory", "vault_engagement",
         ]
 
         combined = {}
@@ -433,6 +434,34 @@ class InsightAccumulator:
                 }
             except Exception:
                 return {"weekly_interactions": [], "note": "social memory tables may differ"}
+
+    async def _gather_vault_engagement(self) -> Dict:
+        async with self.db_pool.acquire() as conn:
+            try:
+                rows = await conn.fetch("""
+                    SELECT type, COUNT(*) as cnt
+                    FROM skyeye_activity
+                    WHERE platform = 'vault'
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    GROUP BY type
+                    ORDER BY cnt DESC
+                """)
+                upload_stats = await conn.fetchrow("""
+                    SELECT COUNT(*) as total_items,
+                           COALESCE(SUM(size_bytes), 0) as total_bytes
+                    FROM vault_items
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                """)
+                return {
+                    "weekly_events": [
+                        {"event_type": r["type"], "count": r["cnt"]}
+                        for r in rows
+                    ],
+                    "weekly_uploads": upload_stats["total_items"] if upload_stats else 0,
+                    "weekly_upload_bytes": upload_stats["total_bytes"] if upload_stats else 0,
+                }
+            except Exception:
+                return {"weekly_events": [], "note": "vault engagement tables may not exist"}
 
     # ─── AI Synthesis ─────────────────────────────────────────────────
 

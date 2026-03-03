@@ -3,11 +3,13 @@ LITTLE NATE — Analytics API
 Campaign metrics, funnel data, timeseries, and activity feed.
 """
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+
+from app.services.api_server import require_admin
 from typing import Optional
 from datetime import datetime, timedelta
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+router = APIRouter(prefix="/api/analytics", tags=["analytics"], dependencies=[Depends(require_admin)])
 
 
 # =============================================================================

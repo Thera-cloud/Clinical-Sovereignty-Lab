@@ -12,10 +12,12 @@ import json
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api", tags=["fibres", "mesh"])
+from app.services.api_server import require_admin
+
+router = APIRouter(prefix="/api", tags=["fibres", "mesh"], dependencies=[Depends(require_admin)])
 
 
 # ─── Request Models ──────────────────────────────────────────────────────────

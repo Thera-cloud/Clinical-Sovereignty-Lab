@@ -212,9 +212,15 @@ class UserStore:
 
             # Extract indexed columns from profile
             role = profile.get("role", "CLIENT")
-            tier = (profile.get("tier") or profile.get("subscription_plan") or "STANDARD").upper()
-            # Normalize tier to allowed values
-            allowed_tiers = {"MASTER", "SUPERVISOR", "TOP", "STANDARD", "TRIAL", "DEPENDENT"}
+            raw_tier = (profile.get("tier") or profile.get("subscription_plan") or "STANDARD").upper()
+            _TIER_ALIAS = {
+                "SOVEREIGN_CIRCLE": "TOP_TIER", "SOVEREIGN": "TOP_TIER", "TOP": "TOP_TIER",
+                "INNER_CHAMBER": "STANDARD", "INNER": "STANDARD", "THRESHOLD": "TRIAL",
+                "COACH_ONLY": "STANDARD", "FAMILY_MEMBER": "STANDARD",
+                "FAMILY_DEPENDENT": "DEPENDENT",
+            }
+            tier = _TIER_ALIAS.get(raw_tier, raw_tier)
+            allowed_tiers = {"MASTER", "SUPERVISOR", "TOP", "TOP_TIER", "STANDARD", "TRIAL", "DEPENDENT"}
             if tier not in allowed_tiers:
                 tier = "STANDARD"
             name = profile.get("name", username)
@@ -231,33 +237,83 @@ class UserStore:
             if sub_status not in allowed_statuses:
                 sub_status = "ACTIVE"
 
-            # Family ID: the JSON stores string like "FAM_1834DACF", not a UUID.
-            # Store as NULL in the FK column, keep the string in profile_data.
             family_id_str = profile.get("family_id", "")
+
+            # Extract numeric fields that have dedicated PG columns
+            token_balance = profile.get("token_balance")
+            if token_balance is not None:
+                try:
+                    token_balance = int(token_balance)
+                except (ValueError, TypeError):
+                    token_balance = None
+
+            login_count = profile.get("login_count")
+            if login_count is not None:
+                try:
+                    login_count = int(login_count)
+                except (ValueError, TypeError):
+                    login_count = None
 
             # Store the full profile as JSONB for all the extra fields
             profile_data = json.dumps(profile, default=str)
 
             async with self.pool.acquire() as conn:
+                # Resolve family code (e.g. "FAM_1834DACF") to families.id UUID
+                family_uuid = None
+                if family_id_str:
+                    family_uuid = await conn.fetchval(
+                        "SELECT id FROM families WHERE family_code = $1",
+                        family_id_str,
+                    )
+
                 await conn.execute("""
                     INSERT INTO users (
                         username, password_hash, role, tier, name, email,
                         hardware_id, consent_version, subscription_status,
-                        profile_data, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, NOW())
+                        family_id, profile_data, token_balance, login_count,
+                        updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
+                              COALESCE($12, 0), COALESCE($13, 0), NOW())
                     ON CONFLICT (username) DO UPDATE SET
                         password_hash = EXCLUDED.password_hash,
                         role = EXCLUDED.role,
-                        tier = EXCLUDED.tier,
+                        tier = COALESCE(users.tier, EXCLUDED.tier),
                         name = EXCLUDED.name,
                         email = EXCLUDED.email,
                         hardware_id = EXCLUDED.hardware_id,
-                        consent_version = EXCLUDED.consent_version,
-                        subscription_status = EXCLUDED.subscription_status,
-                        profile_data = EXCLUDED.profile_data,
+                        consent_version = COALESCE(EXCLUDED.consent_version, users.consent_version),
+                        subscription_status = COALESCE(users.subscription_status, EXCLUDED.subscription_status),
+                        family_id = COALESCE(EXCLUDED.family_id, users.family_id),
+                        profile_data = COALESCE(EXCLUDED.profile_data::jsonb, '{}'::jsonb)
+                            || COALESCE(
+                                (SELECT jsonb_object_agg(key, value)
+                                 FROM jsonb_each(COALESCE(users.profile_data, '{}'::jsonb))
+                                 WHERE key = ANY(ARRAY[
+                                     'token_balance',
+                                     'totp_enabled', 'totp_secret',
+                                     'sms_verified', 'sms_phone', 'admin_verify_phone',
+                                     'webauthn_enabled', 'webauthn_credentials',
+                                     'webauthn_challenge', 'webauthn_challenge_issued_at',
+                                     'webauthn_auth_challenge', 'webauthn_auth_challenge_issued_at',
+                                     'sentinel_frozen',
+                                     'checkin_snooze_until',
+                                     'import_batch_id', 'import_source',
+                                     'subscription_plan', 'subscription_status',
+                                     'account_status', 'force_password_reset',
+                                     'deletion_requested_at',
+                                     'certification_status', 'coach_verified',
+                                     'coaching_fee', 'w9_submitted', 'w9_data',
+                                     'stripe_customer_id',
+                                     'free_month_start', 'free_month_end'
+                                 ])),
+                                '{}'::jsonb
+                            ),
+                        token_balance = COALESCE(users.token_balance, EXCLUDED.token_balance, 0),
+                        login_count = COALESCE(EXCLUDED.login_count, users.login_count),
                         updated_at = NOW()
                 """, username, password_hash, role, tier, name, email or None,
-                    hardware_id, consent_version, sub_status, profile_data)
+                    hardware_id, consent_version, sub_status, family_uuid, profile_data,
+                    token_balance, login_count)
             return True
         except Exception as e:
             logger.warning(f"[UserStore] upsert_user failed for {registry_key}: {e}")
@@ -304,27 +360,68 @@ class UserStore:
             logger.warning(f"[UserStore] delete_user failed for {username}: {e}")
             return False
 
+    async def upsert_single(self, registry_key: str, entry: Dict[str, Any]) -> bool:
+        """Upsert a single user entry. Use for targeted writes (registration, password change)."""
+        if not self.is_ready:
+            return False
+        return await self.upsert_user(registry_key, entry)
+
     # -------------------------------------------------------------------------
-    # Sync helper: schedule a background write
+    # Sync helpers: schedule background writes
     # -------------------------------------------------------------------------
 
-    def schedule_sync(self, registry: Dict[str, Any]):
+    def schedule_sync(self, registry: Dict[str, Any], changed_keys: List[str] = None):
         """
-        Schedule a fire-and-forget async write of the registry to PostgreSQL.
-        Safe to call from sync context within the asyncio event loop.
+        Schedule a fire-and-forget async write to PostgreSQL.
+        If changed_keys is provided, only those users are written (O(k) instead of O(n)).
         """
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._background_sync(registry))
+            if changed_keys:
+                loop.create_task(self._background_sync_keys(registry, changed_keys))
+            else:
+                loop.create_task(self._background_sync(registry))
         except RuntimeError:
-            pass  # No running loop — skip PG write
+            pass
+
+    async def _background_sync_keys(self, registry: Dict[str, Any], keys: List[str]):
+        """Write only the specified registry keys to PostgreSQL."""
+        try:
+            written = 0
+            for key in keys:
+                entry = registry.get(key)
+                if entry and isinstance(entry, dict):
+                    if entry.get("credentials") or entry.get("profile"):
+                        if await self.upsert_user(key, entry):
+                            written += 1
+            if written:
+                logger.debug("[UserStore] Targeted sync: %d/%d keys written", written, len(keys))
+        except Exception as e:
+            logger.warning("[UserStore] Targeted sync failed: %s", e)
 
     async def _background_sync(self, registry: Dict[str, Any]):
-        """Background task to sync registry to PostgreSQL."""
+        """Full registry sync — used only for initial load and shutdown."""
         try:
             await self.save_all(registry)
         except Exception as e:
-            logger.warning(f"[UserStore] Background sync failed: {e}")
+            logger.warning("[UserStore] Background sync failed: %s", e)
+
+    async def reload_user(self, username: str) -> Optional[Tuple[str, Dict]]:
+        """Reload a single user from PostgreSQL. Returns (registry_key, entry) or None."""
+        if not self.is_ready:
+            return None
+        try:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT * FROM users WHERE username = $1 AND deleted_at IS NULL",
+                    username,
+                )
+            if row:
+                key, entry = self._row_to_entry(row)
+                return (key, entry)
+        except Exception as e:
+            logger.warning("[UserStore] reload_user failed for %s: %s", username, e)
+        return None
 
     # -------------------------------------------------------------------------
     # Format conversion

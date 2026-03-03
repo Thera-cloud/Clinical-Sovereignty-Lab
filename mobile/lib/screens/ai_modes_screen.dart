@@ -75,6 +75,13 @@ const List<_AIMode> _modes = [
     icon: Icons.visibility,
     color: _Design.gold,
   ),
+  _AIMode(
+    id: 'editor',
+    name: 'Editor',
+    description: 'Literary writing companion — 7 master writers as collective intelligence',
+    icon: Icons.edit_note,
+    color: Color(0xFFF59E0B),
+  ),
 ];
 
 // =============================================================================
@@ -114,6 +121,14 @@ class _AIModesSelectorScreenState extends State<AIModesSelectorScreen> {
     _loadStatus();
   }
 
+  Map<String, String> get _authHeaders {
+    final token = widget.profile?['token']?.toString() ?? '';
+    return {
+      'Content-Type': 'application/json',
+      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+  }
+
   // ===========================================================================
   // API CALLS
   // ===========================================================================
@@ -127,7 +142,7 @@ class _AIModesSelectorScreenState extends State<AIModesSelectorScreen> {
         queryParameters: {'session_id': widget.sessionId},
       );
       final resp = await http
-          .get(uri, headers: {'Content-Type': 'application/json'})
+          .get(uri, headers: _authHeaders)
           .timeout(const Duration(seconds: 30));
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -152,7 +167,7 @@ class _AIModesSelectorScreenState extends State<AIModesSelectorScreen> {
       final resp = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders,
             body: jsonEncode({
               'mode': modeId,
               'session_id': widget.sessionId,
@@ -210,7 +225,7 @@ class _AIModesSelectorScreenState extends State<AIModesSelectorScreen> {
       final resp = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders,
             body: jsonEncode({'mode': _activeModeId}),
           )
           .timeout(const Duration(seconds: 60));
@@ -266,7 +281,7 @@ class _AIModesSelectorScreenState extends State<AIModesSelectorScreen> {
       final resp = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: _authHeaders,
             body: jsonEncode({'mode': _activeModeId}),
           )
           .timeout(const Duration(seconds: 60));

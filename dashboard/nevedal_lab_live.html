@@ -239,6 +239,7 @@
         </div>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span class="header-badge">IRB APPROVED &bull; PROTOCOL #QEC-2026-001</span>
+            <button class="btn btn-gold" id="sim-btn" onclick="toggleSimulation()">&#x26A1; Simulate Session</button>
             <button class="btn btn-secondary" onclick="exportData()">&#x1F4CA; Export Data</button>
             <button class="btn btn-primary" onclick="generateReport()">&#x1F4C4; Generate Report</button>
             <a href="command.html" class="btn btn-secondary">&larr; Back to Dashboard</a>
@@ -1146,6 +1147,72 @@ _recoverAuth();
             if (!lastUpdateAt) return;
             if (Date.now() - lastUpdateAt > 5000) setLive(false);
         }, 1000);
+
+        // === SIMULATE SESSION ===
+        var simInterval = null;
+        var simTick = 0;
+        var simSessionId = null;
+
+        window.toggleSimulation = function() {
+            if (simInterval) {
+                clearInterval(simInterval);
+                simInterval = null;
+                simTick = 0;
+                var btn = document.getElementById("sim-btn");
+                if (btn) { btn.textContent = "\u26A1 Simulate Session"; btn.style.background = "var(--gold)"; }
+                console.log("[Sim] Stopped");
+                return;
+            }
+            if (!ws || !authenticated) { alert("WebSocket not connected. Wait for authentication."); return; }
+            simSessionId = "sim_" + Date.now();
+            var simUser = subjectA || "sim_subject";
+            var btn = document.getElementById("sim-btn");
+            if (btn) { btn.textContent = "\u23F9 Stop Simulation"; btn.style.background = "var(--red-critical)"; }
+
+            simInterval = setInterval(function() {
+                simTick++;
+                var phase = (simTick % 120) / 120;
+                var stressBase = 0.15 + 0.15 * Math.sin(phase * Math.PI * 2);
+                var warmthBase = 0.65 + 0.2 * Math.cos(phase * Math.PI);
+                var payload = {
+                    type: "biometric_update",
+                    session_id: simSessionId,
+                    user_id: simUser,
+                    timestamp: new Date().toISOString(),
+                    biometrics: {
+                        subject_a: {
+                            voice_energy: -25 + Math.random() * 10,
+                            voice_pitch_mean: 140 + Math.random() * 30,
+                            voice_pitch_variance: 15 + Math.random() * 15,
+                            speech_rate: 100 + Math.random() * 60,
+                            pause_ratio: 0.2 + Math.random() * 0.3,
+                            voice_stress_index: stressBase + Math.random() * 0.1,
+                            voice_warmth_index: warmthBase + Math.random() * 0.1,
+                            gaze_contact: 0.5 + Math.random() * 0.4,
+                            body_lean: -5 + Math.random() * 15,
+                            eda: 1.5 + Math.random() * 3
+                        },
+                        subject_b: {
+                            voice_stress_index: 0.12 + Math.random() * 0.08,
+                            voice_warmth_index: 0.80 + Math.random() * 0.15,
+                            gaze_contact: 0.85 + Math.random() * 0.1,
+                            body_lean: 3 + Math.random() * 5,
+                            eda: 1.2 + Math.random() * 0.8,
+                            pause_ratio: 0.35 + Math.random() * 0.15
+                        },
+                        synchrony: {
+                            hrv: 0.4 + Math.random() * 0.4,
+                            breath: 0.3 + Math.random() * 0.5,
+                            voice: 0.5 + Math.random() * 0.3,
+                            posture: 0.4 + Math.random() * 0.4,
+                            gaze: 0.5 + Math.random() * 0.4
+                        }
+                    }
+                };
+                ws.send(JSON.stringify(payload));
+            }, 2000);
+            console.log("[Sim] Started: session=" + simSessionId + " user=" + simUser);
+        };
 
         // === INIT ===
         initChart();

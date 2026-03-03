@@ -76,6 +76,7 @@ class TokenRenewalAgent:
         from app.services.platforms import get_all_adapters
 
         now = datetime.now(timezone.utc)
+        await self._seed_cooldowns_from_db(now)
         adapters = get_all_adapters(self.db_pool)
         failing = await self._detect_failing_platforms(now)
 
@@ -100,6 +101,39 @@ class TokenRenewalAgent:
             await self._notify_admin(platform_name, now)
 
         await self._check_pending_resolutions(adapters, now)
+
+    # ── step 0: seed cooldowns from DB so they survive restarts ─────────
+
+    async def _seed_cooldowns_from_db(self, now: datetime):
+        """Load recent notification timestamps from skyeye_activity so
+        the 2-hour cooldown survives container restarts."""
+        if self._pending_renewals:
+            return  # already populated from a previous sweep
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT DISTINCT ON (platform) platform, created_at
+                    FROM skyeye_activity
+                    WHERE type = 'token_renewal_notification'
+                      AND created_at > $1
+                    ORDER BY platform, created_at DESC
+                """, now - self.NOTIFY_COOLDOWN)
+            for row in rows:
+                plat = row["platform"]
+                notified_at = row["created_at"]
+                if notified_at.tzinfo is None:
+                    notified_at = notified_at.replace(tzinfo=timezone.utc)
+                self._pending_renewals[plat] = {
+                    "notified_at": notified_at,
+                    "attempts": 1,
+                }
+            if self._pending_renewals:
+                logger.info(
+                    "TokenRenewalAgent: seeded cooldowns from DB for %s",
+                    ", ".join(self._pending_renewals.keys()),
+                )
+        except Exception as e:
+            logger.warning("TokenRenewalAgent: failed to seed cooldowns: %s", e)
 
     # ── step 1: detect ───────────────────────────────────────────────────
 
@@ -239,14 +273,26 @@ class TokenRenewalAgent:
 
     # ── step 6: retry failed content ─────────────────────────────────────
 
+    MAX_POST_RETRIES = 3
+
     async def _retry_failed_posts(self, platform: str):
         try:
             async with self.db_pool.acquire() as conn:
                 result = await conn.execute("""
                     UPDATE skyeye_content_queue
-                    SET status = 'approved', error_message = NULL, updated_at = NOW()
-                    WHERE platform = $1 AND status = 'failed'
-                """, platform)
+                    SET status = 'approved',
+                        error_message = NULL,
+                        updated_at = NOW(),
+                        cross_thread_refs = jsonb_set(
+                            COALESCE(cross_thread_refs, '{}'::jsonb),
+                            '{retry_count}',
+                            to_jsonb(COALESCE((cross_thread_refs->>'retry_count')::int, 0) + 1)
+                        )
+                    WHERE platform = $1
+                      AND status = 'failed'
+                      AND COALESCE((cross_thread_refs->>'retry_count')::int, 0) < $2
+                      AND updated_at < NOW() - INTERVAL '30 minutes'
+                """, platform, self.MAX_POST_RETRIES)
             count = int(result.split()[-1]) if result else 0
             if count > 0:
                 await self._log_activity(

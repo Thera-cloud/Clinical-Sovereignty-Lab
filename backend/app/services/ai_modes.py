@@ -181,18 +181,32 @@ class TriCorderMode(BaseAIMode):
             "calibrated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Persist baseline to nevedal_metrics
+        # Persist baseline to nevedal_metrics — resolve hardware_id → UUID
         if self.db_pool and self._session_id and self._user_id:
             try:
                 async with self.db_pool.acquire() as conn:
-                    await conn.execute(
-                        """INSERT INTO nevedal_metrics
-                            (session_id, user_id, c_emo, biometrics, cee_window)
-                        VALUES ($1, $2, 0, $3, FALSE)""",
-                        self._session_id,
+                    user_uuid = await conn.fetchval(
+                        "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
                         self._user_id,
-                        json.dumps({"tri_corder_baseline": baseline["baseline"]}),
                     )
+                    if user_uuid:
+                        session_uuid = None
+                        try:
+                            import uuid as _uuid_mod
+                            parsed = _uuid_mod.UUID(str(self._session_id))
+                            exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", parsed)
+                            if exists:
+                                session_uuid = parsed
+                        except (ValueError, AttributeError):
+                            pass
+                        await conn.execute(
+                            """INSERT INTO nevedal_metrics
+                                (session_id, user_id, c_emo, biometrics, cee_window)
+                            VALUES ($1, $2, 0, $3, FALSE)""",
+                            session_uuid,
+                            user_uuid,
+                            json.dumps({"tri_corder_baseline": baseline["baseline"]}),
+                        )
             except Exception as e:
                 print(f">>> [TRI-CORDER] Baseline persist error: {e}")
 
@@ -668,6 +682,472 @@ class SupervisorMode(BaseAIMode):
         return report
 
 
+# ─── Editor Mode (Literary Collective) ───────────────────────────────────────
+
+class EditorMode(BaseAIMode):
+    """
+    Literary writing companion -- channels 7 master writers as a collective
+    intelligence. Processes large content, provides structural + voice +
+    narrative analysis, and collaborates on rewrites drawing from the
+    collective's techniques.
+    """
+
+    MODE_NAME = "editor"
+    MAX_CONTENT_LENGTH = 200_000
+    CHUNK_SIZE = 8000
+
+    LITERARY_COLLECTIVE_PROMPT = (
+        "You are Little Nate in Editor mode -- a writing companion channeling "
+        "the collective intelligence of seven literary masters. You do not "
+        "imitate them or write as them. Instead, their craft lives in your "
+        "awareness as liminal knowledge:\n\n"
+        "- SHAKESPEARE: Precision of language. Every word earns its place. "
+        "Dialogue reveals character. The iambic pulse beneath prose. Dramatic "
+        "irony. The turn.\n"
+        "- HOMER: The epic arc. Oral rhythm -- sentences that breathe when "
+        "read aloud. The journey as metaphor. Epithets that anchor identity. "
+        "In medias res.\n"
+        "- DANTE: Structure as meaning. The descent that precedes ascent. "
+        "Writing in the language people actually speak. Allegory without "
+        "pretension.\n"
+        "- TOLSTOY: The interior life rendered visible. Psychological truth "
+        "in small gestures. The ordinary moment that contains everything. "
+        "Unflinching honesty.\n"
+        "- TOLKIEN: World-building through accumulated detail. Language as "
+        "world-creation. Eucatastrophe -- the sudden turn to joy. Hope as "
+        "narrative engine.\n"
+        "- DICKENS: Characters so vivid they walk off the page. Social "
+        "conscience woven into story. Humor as survival. The unforgettable "
+        "opening line. Compassion for the forgotten.\n"
+        "- DOSTOEVSKY: The underground self -- what people think but never "
+        "say. Moral complexity without resolution. Confession as narrative "
+        "form. The fever dream.\n\n"
+        "When helping a writer:\n"
+        "- Read their work deeply before responding\n"
+        "- Name what is already working before suggesting changes\n"
+        "- Draw from specific techniques of the collective (cite which "
+        "master's craft applies)\n"
+        "- Never flatten the writer's voice -- amplify it\n"
+        "- Treat the writing as the writer's emotional truth, not just text "
+        "to fix\n"
+        "- For disabled writers or those using voice: honor the spoken rhythm "
+        "as intentional craft"
+    )
+
+    def __init__(self, db_pool, azure_client=None):
+        super().__init__(db_pool, azure_client)
+        self._content_chunks: List[str] = []
+        self._structural_map: Dict[str, Any] = {}
+        self._interactions: List[Dict[str, Any]] = []
+        self._full_content: str = ""
+        self._collective_citations: List[Dict[str, str]] = []
+
+    def reset(self) -> None:
+        super().reset()
+        self._content_chunks = []
+        self._structural_map = {}
+        self._interactions = []
+        self._full_content = ""
+        self._collective_citations = []
+
+    async def activate(self, session_id: UUID, **kwargs) -> Dict[str, Any]:
+        self.reset()
+        self._active = True
+        self._session_id = session_id
+
+        initial_content = kwargs.get("content", "")
+        if initial_content:
+            if len(initial_content) > self.MAX_CONTENT_LENGTH:
+                initial_content = initial_content[:self.MAX_CONTENT_LENGTH]
+            self._full_content = initial_content
+            self._content_chunks = self._chunk_content(initial_content)
+            self._structural_map = self._build_structural_map_heuristic(initial_content)
+
+        return {
+            "mode": self.MODE_NAME,
+            "status": "active",
+            "message": (
+                "Editor Mode active. The literary collective is present -- "
+                "Shakespeare, Homer, Dante, Tolstoy, Tolkien, Dickens, "
+                "Dostoevsky. Share your writing or ask for help."
+            ),
+            "content_loaded": bool(initial_content),
+            "chunks": len(self._content_chunks),
+            "structural_map": self._structural_map,
+        }
+
+    async def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process writing input. Accepts:
+        - text: new content to analyze or add
+        - instruction: what the writer wants help with
+        - focus_section: optional index to focus on a specific chunk
+        """
+        if not self._active:
+            return {"error": "Editor mode not active"}
+
+        text = data.get("text", "")
+        instruction = data.get("instruction", "")
+        focus_section = data.get("focus_section")
+
+        if text and not instruction:
+            instruction = text
+            text = ""
+
+        if text:
+            if self._full_content:
+                self._full_content += "\n\n" + text
+            else:
+                self._full_content = text
+            if len(self._full_content) > self.MAX_CONTENT_LENGTH:
+                self._full_content = self._full_content[:self.MAX_CONTENT_LENGTH]
+            self._content_chunks = self._chunk_content(self._full_content)
+            self._structural_map = self._build_structural_map_heuristic(self._full_content)
+
+        context_text = ""
+        if focus_section is not None and 0 <= focus_section < len(self._content_chunks):
+            context_text = self._content_chunks[focus_section]
+        elif self._full_content:
+            context_text = self._full_content[:12000]
+
+        response_text = self._generate_editor_response(instruction, context_text)
+
+        citations = self._detect_collective_citations(response_text)
+        self._collective_citations.extend(citations)
+
+        self._interactions.append({
+            "instruction": instruction[:500],
+            "response_preview": response_text[:200],
+            "citations": citations,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+        return {
+            "mode": self.MODE_NAME,
+            "status": "response",
+            "response": response_text,
+            "citations": citations,
+            "structural_map": self._structural_map,
+            "chunks_loaded": len(self._content_chunks),
+        }
+
+    async def generate_output(self) -> Dict[str, Any]:
+        """Generate comprehensive writing analysis report."""
+        if not self._full_content and not self._interactions:
+            return {"mode": self.MODE_NAME, "status": "no_data"}
+
+        word_count = len(self._full_content.split()) if self._full_content else 0
+        analysis = self._analyze_writing(self._full_content) if self._full_content else {}
+
+        overall = analysis.get("overall_score", 0.0)
+        if overall >= 0.85:
+            assessment = "MASTERFUL"
+        elif overall >= 0.70:
+            assessment = "RESONANT"
+        elif overall >= 0.50:
+            assessment = "FINDING_VOICE"
+        else:
+            assessment = "EMERGING"
+
+        unique_masters = list({c["master"] for c in self._collective_citations})
+
+        return {
+            "mode": self.MODE_NAME,
+            "status": "complete",
+            "session_id": str(self._session_id) if self._session_id else None,
+            "analysis": {
+                "word_count": word_count,
+                "chunks_processed": len(self._content_chunks),
+                "structural_map": self._structural_map,
+                "voice_consistency": analysis.get("voice_consistency", 0.0),
+                "narrative_arc": analysis.get("narrative_arc", 0.0),
+                "character_depth": analysis.get("character_depth", 0.0),
+                "language_precision": analysis.get("language_precision", 0.0),
+                "emotional_resonance": analysis.get("emotional_resonance", 0.0),
+                "overall_score": overall,
+                "assessment": assessment,
+            },
+            "collective_citations": self._collective_citations[-50:],
+            "masters_invoked": unique_masters,
+            "interactions_count": len(self._interactions),
+            "suggestions": analysis.get("suggestions", []),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _chunk_content(self, content: str) -> List[str]:
+        """Split content into overlapping chunks for processing."""
+        words = content.split()
+        chunks = []
+        i = 0
+        while i < len(words):
+            chunk_words = words[i:i + self.CHUNK_SIZE]
+            chunks.append(" ".join(chunk_words))
+            i += self.CHUNK_SIZE - 200  # 200-word overlap
+        return chunks if chunks else [""]
+
+    def _build_structural_map_heuristic(self, content: str) -> Dict[str, Any]:
+        """Build structural map using heuristic analysis."""
+        lines = content.split("\n")
+        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+        words = content.split()
+
+        characters = self._extract_potential_characters(content)
+        themes = self._extract_themes(content)
+
+        has_dialogue = bool(re.search(r'["\u201c].+?["\u201d]', content))
+        has_sections = any(
+            line.strip().startswith("#") or line.strip().isupper()
+            for line in lines if line.strip() and len(line.strip()) < 80
+        )
+
+        return {
+            "word_count": len(words),
+            "paragraph_count": len(paragraphs),
+            "characters": characters[:20],
+            "themes": themes[:10],
+            "has_dialogue": has_dialogue,
+            "has_sections": has_sections,
+            "estimated_reading_minutes": max(1, len(words) // 250),
+        }
+
+    def _extract_potential_characters(self, content: str) -> List[str]:
+        """Extract potential character names (capitalized words appearing 3+ times)."""
+        name_pattern = re.compile(r'\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})?)\b')
+        candidates = name_pattern.findall(content)
+        stop_words = {
+            "The", "This", "That", "What", "When", "Where", "Why", "How",
+            "And", "But", "For", "Not", "You", "Are", "Was", "Were",
+            "Been", "Being", "Have", "Has", "Had", "Will", "Would",
+            "Could", "Should", "May", "Might", "Must", "Shall",
+            "Each", "Every", "Some", "Any", "Many", "Much", "More",
+            "Most", "Other", "Another", "Such", "Only", "Very",
+            "Little", "Nate", "Chapter", "Part", "Section",
+        }
+        counts: Dict[str, int] = {}
+        for name in candidates:
+            if name not in stop_words:
+                counts[name] = counts.get(name, 0) + 1
+        return [name for name, count in sorted(counts.items(), key=lambda x: -x[1]) if count >= 3]
+
+    def _extract_themes(self, content: str) -> List[str]:
+        """Extract thematic keywords."""
+        theme_keywords = {
+            "love": ["love", "heart", "passion", "desire", "longing", "beloved"],
+            "loss": ["loss", "grief", "mourn", "death", "gone", "missing", "absence"],
+            "identity": ["identity", "self", "who am i", "becoming", "mirror", "mask"],
+            "power": ["power", "control", "authority", "dominion", "king", "throne"],
+            "redemption": ["redemption", "forgive", "atone", "save", "grace", "mercy"],
+            "journey": ["journey", "quest", "travel", "path", "road", "destination"],
+            "family": ["family", "father", "mother", "brother", "sister", "child"],
+            "justice": ["justice", "fair", "right", "wrong", "court", "law", "judge"],
+            "freedom": ["freedom", "free", "liberty", "escape", "cage", "chain"],
+            "truth": ["truth", "lie", "honest", "deceive", "reveal", "secret"],
+        }
+        content_lower = content.lower()
+        found = []
+        for theme, keywords in theme_keywords.items():
+            score = sum(content_lower.count(kw) for kw in keywords)
+            if score >= 3:
+                found.append(theme)
+        return found
+
+    def _generate_editor_response(self, instruction: str, context: str) -> str:
+        """Generate a response using the literary collective's perspective."""
+        if not instruction:
+            return "Share your writing or tell me what you need help with."
+
+        relevant_masters = self._match_instruction_to_masters(instruction)
+
+        response_parts = []
+        if context:
+            response_parts.append(
+                f"I've read your work ({len(context.split())} words in this section)."
+            )
+
+        for master, technique in relevant_masters:
+            response_parts.append(
+                f"Drawing from {master}'s craft ({technique}), consider:"
+            )
+
+        if not relevant_masters:
+            response_parts.append(
+                "Let me look at this through the collective's lens."
+            )
+
+        response_parts.append(
+            f"\nYour instruction: \"{instruction}\"\n\n"
+            "To give you the most useful response, I'd analyze this with "
+            "Azure OpenAI using the full literary collective prompt. "
+            "In the meantime, here's what I notice from the structural patterns."
+        )
+
+        if context:
+            word_count = len(context.split())
+            has_dialogue = bool(re.search(r'["\u201c]', context))
+            avg_sentence = len(context) / max(context.count('.') + context.count('!') + context.count('?'), 1)
+
+            if avg_sentence > 150:
+                response_parts.append(
+                    "\n- TOLSTOY would appreciate your long sentences, but DICKENS "
+                    "would suggest varying rhythm -- alternate long flowing passages "
+                    "with sharp, short declarations."
+                )
+            if has_dialogue:
+                response_parts.append(
+                    "\n- SHAKESPEARE's principle: dialogue should reveal character, "
+                    "not just convey information. Each speaker should sound distinct."
+                )
+            if word_count > 2000:
+                response_parts.append(
+                    "\n- HOMER reminds us: in a long work, give the reader anchors. "
+                    "Recurring images, phrases that echo, moments of recognition."
+                )
+
+        return "\n".join(response_parts)
+
+    def _match_instruction_to_masters(self, instruction: str) -> List[tuple]:
+        """Match writing instruction to relevant literary masters."""
+        inst_lower = instruction.lower()
+        matches = []
+
+        master_domains = {
+            "Shakespeare": [
+                ("dialogue", "dialogue reveals character"),
+                ("language", "language precision"),
+                ("word choice", "every word earns its place"),
+                ("drama", "dramatic structure"),
+                ("irony", "dramatic irony"),
+                ("character speech", "distinct character voices"),
+            ],
+            "Homer": [
+                ("pacing", "epic narrative pacing"),
+                ("rhythm", "oral storytelling rhythm"),
+                ("opening", "in medias res"),
+                ("journey", "the journey as metaphor"),
+                ("epic", "epic arc structure"),
+                ("read aloud", "sentences that breathe aloud"),
+            ],
+            "Dante": [
+                ("structure", "structure as meaning"),
+                ("transformation", "descent before ascent"),
+                ("accessible", "writing in vernacular"),
+                ("allegory", "allegory without pretension"),
+                ("spiritual", "spiritual metaphor"),
+            ],
+            "Tolstoy": [
+                ("psychology", "psychological realism"),
+                ("interior", "interior consciousness"),
+                ("detail", "the ordinary made profound"),
+                ("honest", "unflinching honesty"),
+                ("emotion", "psychological truth in small gestures"),
+                ("real", "realism"),
+            ],
+            "Tolkien": [
+                ("world", "world-building"),
+                ("fantasy", "mythic resonance"),
+                ("hope", "hope as narrative engine"),
+                ("language", "language as world-creation"),
+                ("myth", "mythic framing"),
+                ("setting", "accumulated detail"),
+            ],
+            "Dickens": [
+                ("character", "vivid characterization"),
+                ("voice", "memorable narrative voice"),
+                ("humor", "humor as survival"),
+                ("opening", "the unforgettable opening line"),
+                ("social", "social conscience in story"),
+                ("compassion", "compassion for the forgotten"),
+            ],
+            "Dostoevsky": [
+                ("inner", "the underground self"),
+                ("moral", "moral complexity"),
+                ("complex", "complexity without resolution"),
+                ("confession", "confession as narrative form"),
+                ("dark", "the fever dream"),
+                ("conflict", "deep interiority"),
+                ("thought", "what people think but never say"),
+            ],
+        }
+
+        for master, domains in master_domains.items():
+            for keyword, technique in domains:
+                if keyword in inst_lower:
+                    matches.append((master, technique))
+                    break
+
+        return matches[:3]
+
+    def _detect_collective_citations(self, text: str) -> List[Dict[str, str]]:
+        """Detect which literary masters were cited in the response."""
+        citations = []
+        masters = ["Shakespeare", "Homer", "Dante", "Tolstoy", "Tolkien", "Dickens", "Dostoevsky"]
+        for master in masters:
+            if master.upper() in text.upper():
+                citations.append({
+                    "master": master,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+        return citations
+
+    def _analyze_writing(self, content: str) -> Dict[str, Any]:
+        """Heuristic writing analysis across multiple dimensions."""
+        words = content.split()
+        sentences = re.split(r'[.!?]+', content)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        avg_word_len = sum(len(w) for w in words) / max(len(words), 1)
+        avg_sent_len = len(words) / max(len(sentences), 1)
+        unique_words = len(set(w.lower() for w in words))
+        lexical_diversity = unique_words / max(len(words), 1)
+
+        sent_lengths = [len(s.split()) for s in sentences]
+        if len(sent_lengths) > 1:
+            mean_len = sum(sent_lengths) / len(sent_lengths)
+            variance = sum((l - mean_len) ** 2 for l in sent_lengths) / len(sent_lengths)
+            rhythm_variety = min(1.0, (variance ** 0.5) / max(mean_len, 1))
+        else:
+            rhythm_variety = 0.0
+
+        has_dialogue = bool(re.search(r'["\u201c].+?["\u201d]', content))
+        dialogue_ratio = content.count('"') / max(len(sentences), 1)
+
+        voice_consistency = min(1.0, lexical_diversity * 1.5)
+        narrative_arc = min(1.0, 0.3 + (len(words) / 10000) * 0.4 + rhythm_variety * 0.3)
+        character_depth = min(1.0, 0.2 + (0.5 if has_dialogue else 0) + min(dialogue_ratio * 0.3, 0.3))
+        language_precision = min(1.0, 0.3 + (avg_word_len - 3) * 0.15 + lexical_diversity * 0.4)
+        emotional_resonance = min(1.0, 0.3 + rhythm_variety * 0.35 + voice_consistency * 0.35)
+
+        overall = (
+            voice_consistency * 0.2 +
+            narrative_arc * 0.2 +
+            character_depth * 0.2 +
+            language_precision * 0.2 +
+            emotional_resonance * 0.2
+        )
+
+        suggestions = []
+        if rhythm_variety < 0.3:
+            suggestions.append("Vary your sentence length more -- Dickens alternated long and short to create music.")
+        if not has_dialogue:
+            suggestions.append("Consider adding dialogue -- Shakespeare showed that characters reveal themselves through speech.")
+        if lexical_diversity < 0.3:
+            suggestions.append("Your word palette could expand -- Tolkien built worlds through precise, varied language.")
+        if avg_sent_len > 30:
+            suggestions.append("Some sentences run long -- Dostoevsky used long sentences intentionally, but mixed with sharp interruptions.")
+        if not suggestions:
+            suggestions.append("Your writing has strong fundamentals. Explore deeper layers of meaning -- Dante showed that structure itself can carry metaphor.")
+
+        return {
+            "voice_consistency": round(voice_consistency, 3),
+            "narrative_arc": round(narrative_arc, 3),
+            "character_depth": round(character_depth, 3),
+            "language_precision": round(language_precision, 3),
+            "emotional_resonance": round(emotional_resonance, 3),
+            "overall_score": round(overall, 3),
+            "suggestions": suggestions,
+        }
+
+
 # ─── Organizer Mode (Sovereign Circle — Accessibility) ───────────────────────
 
 # OrganizerMode is imported lazily to avoid circular dependencies.
@@ -687,6 +1167,7 @@ AI_MODE_REGISTRY: Dict[str, type] = {
     "archivist": ArchivistMode,
     "guardian": GuardianMode,
     "supervisor": SupervisorMode,
+    "editor": EditorMode,
     # Note: 'organizer' is NOT in this registry — it has a different constructor
     # signature and must be instantiated via get_organizer_mode().
 }

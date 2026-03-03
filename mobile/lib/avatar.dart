@@ -16,7 +16,10 @@ import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'dart:io';
+
+import 'config/app_config.dart';
 
 // =============================================================================
 // ENUMS - Avatar States
@@ -1687,6 +1690,200 @@ bool canUseAvatarMode(Map<String, dynamic> userProfile) {
   }
   
   return false;
+}
+
+// =============================================================================
+// GLB 3D AVATAR WIDGET
+// =============================================================================
+
+/// 3 unique GLB models mapped therapeutically:
+///   Model A (neutral)   — baseline, resting, attentive, thoughtful
+///   Model B (empathetic) — warm, soft, calming, validating, curious
+///   Model C (intense)    — proud, encouraging, sad, frustrated, mirroring strong emotion
+const String _glbNeutral   = 'mininate%20neutral.glb';
+const String _glbSoft      = 'mininate%20empathetic.glb';
+const String _glbIntense   = 'mininate%20mad.glb';
+
+const Map<AvatarExpression, String> _expressionToGlb = {
+  AvatarExpression.neutral:     _glbNeutral,
+  AvatarExpression.attentive:   _glbNeutral,
+  AvatarExpression.thoughtful:  _glbNeutral,
+  AvatarExpression.warm:        _glbSoft,
+  AvatarExpression.empathetic:  _glbSoft,
+  AvatarExpression.calming:     _glbSoft,
+  AvatarExpression.validating:  _glbSoft,
+  AvatarExpression.curious:     _glbSoft,
+  AvatarExpression.encouraging: _glbIntense,
+  AvatarExpression.proud:       _glbIntense,
+  AvatarExpression.sad:         _glbIntense,
+  AvatarExpression.frustrated:  _glbIntense,
+};
+
+/// 3D GLB avatar that renders the current expression model.
+/// Uses a single ModelViewer keyed by the current GLB URL so the widget
+/// rebuilds cleanly when the expression changes.
+class GlbAvatarWidget extends StatefulWidget {
+  final AvatarExpression expression;
+  final VoiceState voiceState;
+  final VoidCallback? onTap;
+
+  const GlbAvatarWidget({
+    super.key,
+    this.expression = AvatarExpression.neutral,
+    this.voiceState = VoiceState.idle,
+    this.onTap,
+  });
+
+  @override
+  State<GlbAvatarWidget> createState() => _GlbAvatarWidgetState();
+}
+
+class _GlbAvatarWidgetState extends State<GlbAvatarWidget> {
+  bool _loaded = false;
+  String _currentGlb = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _currentGlb = _glbForExpression(widget.expression);
+    _startLoadTimer();
+  }
+
+  @override
+  void didUpdateWidget(GlbAvatarWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.expression != widget.expression) {
+      final newGlb = _glbForExpression(widget.expression);
+      if (newGlb != _currentGlb) {
+        setState(() {
+          _currentGlb = newGlb;
+          _loaded = false;
+        });
+        _startLoadTimer();
+      }
+    }
+  }
+
+  void _startLoadTimer() {
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && !_loaded) setState(() => _loaded = true);
+    });
+  }
+
+  String _glbForExpression(AvatarExpression expr) {
+    return _expressionToGlb[expr] ?? _glbNeutral;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final src = '${AppConfig.avatarGlbBaseUrl}/$_currentGlb';
+
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Container(color: const Color(0xFF050505)),
+          ),
+          Positioned.fill(
+            child: ModelViewer(
+              key: ValueKey(src),
+              src: src,
+              backgroundColor: const Color(0xFF050505),
+              autoRotate: false,
+              cameraControls: true,
+              disableZoom: true,
+              autoPlay: true,
+              loading: Loading.eager,
+              cameraOrbit: '0deg 80deg 2.5m',
+              fieldOfView: '30deg',
+              shadowIntensity: 0.5,
+              exposure: 1.0,
+              interactionPrompt: InteractionPrompt.none,
+            ),
+          ),
+          if (!_loaded)
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFF050505),
+                child: const Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation(Color(0xFFC9A962)),
+                        strokeWidth: 2,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'Loading Avatar...',
+                        style: TextStyle(
+                          color: Color(0xFFC9A962),
+                          fontSize: 14,
+                          fontFamily: 'DM Sans',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          if (widget.voiceState != VoiceState.idle)
+            Positioned(
+              top: 40,
+              left: 0,
+              right: 0,
+              child: _buildVoiceIndicator(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoiceIndicator() {
+    IconData icon;
+    String label;
+    Color color;
+
+    switch (widget.voiceState) {
+      case VoiceState.listening:
+        icon = Icons.mic;
+        label = 'Listening...';
+        color = const Color(0xFF4ECDC4);
+        break;
+      case VoiceState.thinking:
+        icon = Icons.psychology;
+        label = 'Thinking...';
+        color = const Color(0xFFFFD700);
+        break;
+      case VoiceState.speaking:
+        icon = Icons.volume_up;
+        label = 'Speaking';
+        color = const Color(0xFF9D4EDD);
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 50),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(color: color, fontSize: 14)),
+        ],
+      ),
+    );
+  }
 }
 
 // =============================================================================

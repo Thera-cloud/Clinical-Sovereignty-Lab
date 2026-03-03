@@ -658,7 +658,7 @@ async def get_dojo_memories(
     """
     try:
         memories = director.get_memories_for_dojo(limit=limit)
-    except AttributeError:
+    except (AttributeError, TypeError):
         return {"memories": [], "total": 0, "note": "DOJO memory integration pending"}
     
     return {

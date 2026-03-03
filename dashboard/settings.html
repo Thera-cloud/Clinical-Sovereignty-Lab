@@ -345,9 +345,11 @@ _recoverAuth();
             return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
         }
 
+        var _wsRetry = 0;
         function connect() {
             ws = new WebSocket(getWsUrl());
             ws.onopen = function() {
+                _wsRetry = 0;
                 document.getElementById('wsStatus').className = 'ws-status';
                 ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
             };
@@ -364,12 +366,13 @@ _recoverAuth();
                     populateSettings();
                 }
             };
+            ws.onerror = function(e) { console.warn('WS error:', e); };
             ws.onclose = function() {
                 authenticated = false;
                 var el = document.getElementById('wsStatus');
                 el.className = 'ws-status reconnecting';
                 el.textContent = 'Reconnecting...';
-                setTimeout(connect, 3000);
+                var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random()));
             };
         }
 

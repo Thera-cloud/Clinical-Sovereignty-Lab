@@ -1,0 +1,81 @@
+---
+description: Prevent silent exception swallowing in routers and services — invisible failures break auditor trust checks
+globs: backend/app/routers/*.py, backend/app/services/*.py
+alwaysApply: false
+---
+
+# Silent Exception Prevention
+
+## The Problem
+
+30+ `except Exception: pass` blocks in routers silently swallow errors. When an auditor hits one of these endpoints, it returns 200 with empty/broken data, which the auditor may classify as WARNING or the user sees blank UI sections. The error is invisible in logs.
+
+## Rules
+
+### Never Swallow Without Logging
+
+```python
+# BAD — error is invisible
+except Exception:
+    pass
+
+# BAD — debug level is invisible in production (default INFO)
+except Exception as e:
+    logger.debug(f"Failed: {e}")
+
+# BAD — returns empty without explanation
+except Exception:
+    return []
+```
+
+```python
+# GOOD — visible in production logs
+except Exception as e:
+    logger.warning("endpoint_name: query failed: %s", e)
+    return []
+
+# GOOD — specific exception, logged
+except asyncpg.PostgresError as e:
+    logger.warning("endpoint_name: DB query failed: %s", e)
+    raise HTTPException(500, "Database error")
+```
+
+### Severity Guide
+
+| Situation | Level | Example |
+|---|---|---|
+| Core query failed, returning empty | `WARNING` | DB column missing, table doesn't exist |
+| Non-critical enrichment failed | `INFO` | Optional metadata unavailable |
+| Expected empty result | `INFO` | No data yet for new feature |
+| Should never happen | `ERROR` | Constraint violation, auth bypass |
+
+### When `pass` Is Acceptable
+
+Only when the failure is truly expected and has no impact:
+
+```python
+# OK — optional cleanup, failure doesn't affect response
+try:
+    await conn.execute("UPDATE cache SET last_hit = NOW() WHERE key = $1", k)
+except Exception:
+    pass  # cache miss is fine
+```
+
+## Known Hotspots (30+ Silent Handlers)
+
+| File | Count | Priority |
+|---|---|---|
+| `admin.py` | 6 | Medium (admin-only endpoints) |
+| `skyeye_api.py` | 6 | High (audited by SkyEye Tab Auditor) |
+| `sessions.py` | 7 | High (client-facing) |
+| `coherence_api.py` | 4 | High (audited by Nevedal Lab) |
+| `vault_api.py` | 4 | Medium |
+| `webhook_api.py` | 2 | Low (webhooks are fire-and-forget) |
+| `twilio_voice.py` | 3 | High (uses wrong column names) |
+
+## After Fixing a Silent Handler
+
+1. Deploy the fixed file
+2. Restart backend
+3. Check logs: `docker logs nate_backend --since 5m 2>&1 | grep WARNING`
+4. If the handler was hiding a real error (wrong column name, missing table), fix that too

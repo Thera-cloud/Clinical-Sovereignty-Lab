@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discount Management — Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+    --bg-void: #050505; --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+    --border: #252525; --border-active: #333333;
+    --gold: #FFD700; --gold-dim: rgba(255,215,0,0.2); --gold-text: #C9A962;
+    --cyan: #00D4FF; --cyan-dim: rgba(0,212,255,0.1);
+    --red: #FF3B3B; --red-dim: rgba(255,59,59,0.15);
+    --green: #00FF88; --green-dim: rgba(0,255,136,0.1);
+    --orange: #FF9500; --purple: #9D4EDD;
+    --text-primary: #FFFFFF; --text-secondary: #888888; --text-muted: #555555;
+    --font-body: 'DM Sans', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-body); background: var(--bg-void); color: var(--text-primary); min-height: 100vh; }
+.topbar { position: sticky; top: 0; z-index: 200; background: rgba(10,10,10,0.85); backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.back-btn { color: var(--gold-text); text-decoration: none; font-size: 20px; cursor: pointer; }
+.topbar-title { font-size: 18px; font-weight: 700; }
+.main-content { padding: 20px; max-width: 1400px; margin: 0 auto; }
+.tab-bar { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+.tab-btn.active { background: var(--gold-dim); border-color: var(--gold-text); color: var(--gold); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.card-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.card-body { padding: 16px; }
+.icon { font-size: 16px; }
+.form-row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+.form-group label { font-size: 11px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.form-group input, .form-group select { padding: 8px 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 13px; font-family: var(--font-body); }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: var(--gold-text); }
+.btn { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-gold { background: var(--gold); color: #000; }
+.btn-gold:hover:not(:disabled) { background: #e6c200; }
+.btn-cyan { background: var(--cyan-dim); border: 1px solid var(--cyan); color: var(--cyan); }
+.btn-red { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+.btn-green { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+.badge-green { background: var(--green-dim); color: var(--green); }
+.badge-red { background: var(--red-dim); color: var(--red); }
+.badge-cyan { background: var(--cyan-dim); color: var(--cyan); }
+.badge-gold { background: var(--gold-dim); color: var(--gold); }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; padding: 10px 8px; color: var(--text-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+tr:hover { background: rgba(255,255,255,0.02); }
+.status-msg { padding: 8px 12px; border-radius: 6px; font-size: 12px; margin-top: 8px; }
+.status-msg.success { background: var(--green-dim); color: var(--green); }
+.status-msg.error { background: var(--red-dim); color: var(--red); }
+@media (max-width: 768px) { .form-row { flex-direction: column; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <div class="topbar-left">
+        <a class="back-btn" id="backBtn" title="Back to Command">&#8592;</a>
+        <div class="topbar-title"><span>🏷️</span> Discount Management</div>
+    </div>
+    <div style="font-size:11px;color:var(--text-secondary);">Stripe-Synced Coupon &amp; Promo Engine</div>
+</div>
+
+<div class="main-content">
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="dcSwitchTab('promos', this)">Promo Codes</button>
+        <button class="tab-btn" onclick="dcSwitchTab('schools', this)">School Codes</button>
+        <button class="tab-btn" onclick="dcSwitchTab('corporates', this)">Corporate Sponsors</button>
+    </div>
+
+    <!-- TAB 1: Promo Codes -->
+    <div class="tab-panel active" id="tab-promos">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--gold);">🎟️</span> Create Promo Code</div>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group"><label>Name</label><input id="pc-name" placeholder="Launch Sale" maxlength="200"></div>
+                    <div class="form-group"><label>Code</label><input id="pc-code" placeholder="LAUNCH80" maxlength="40" style="text-transform:uppercase;"></div>
+                    <div class="form-group"><label>Type</label>
+                        <select id="pc-type"><option value="percent">Percent Off</option><option value="amount">Fixed Amount Off</option></select>
+                    </div>
+                    <div class="form-group"><label>Value</label><input id="pc-value" type="number" min="1" max="10000" placeholder="80"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Duration</label>
+                        <select id="pc-duration" onchange="dcToggleDurationMonths()">
+                            <option value="once">Once</option><option value="repeating">Repeating</option><option value="forever">Forever</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="pc-months-group" style="display:none;"><label>Months</label><input id="pc-months" type="number" min="1" max="36" value="3"></div>
+                    <div class="form-group"><label>Max Redemptions (optional)</label><input id="pc-max" type="number" min="1" placeholder="Unlimited"></div>
+                    <div class="form-group"><label>Ends At</label><input id="pc-ends" type="datetime-local"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                    <button class="btn btn-gold" id="pc-submit" onclick="dcCreatePromo()">Create Promo Code</button>
+                    <div id="pc-status"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--cyan);">📋</span> All Promo Codes</div>
+                <button class="btn btn-cyan" onclick="dcLoadPromos()">Refresh</button>
+            </div>
+            <div class="card-body" style="overflow-x:auto;">
+                <table><thead><tr>
+                    <th>Code</th><th>Name</th><th>Discount</th><th>Duration</th><th>Ends</th><th>Redeemed</th><th>Stripe</th><th>Status</th><th>Action</th>
+                </tr></thead><tbody id="pc-table">
+                    <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</td></tr>
+                </tbody></table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: School Codes -->
+    <div class="tab-panel" id="tab-schools">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--purple);">🎓</span> Create School Code</div>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group"><label>School Name</label><input id="sc-name" placeholder="University of Texas" maxlength="200"></div>
+                    <div class="form-group"><label>Code</label><input id="sc-code" placeholder="UTEXAS" maxlength="40" style="text-transform:uppercase;"></div>
+                    <div class="form-group"><label>Discount %</label><input id="sc-pct" type="number" min="1" max="100" value="10"></div>
+                    <div class="form-group"><label>Max Students (optional)</label><input id="sc-max" type="number" min="1" placeholder="Unlimited"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                    <button class="btn btn-gold" id="sc-submit" onclick="dcCreateSchool()">Create School Code</button>
+                    <div id="sc-status"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--cyan);">📋</span> All School Codes</div>
+                <button class="btn btn-cyan" onclick="dcLoadSchools()">Refresh</button>
+            </div>
+            <div class="card-body" style="overflow-x:auto;">
+                <table><thead><tr>
+                    <th>Code</th><th>School</th><th>Discount</th><th>Enrolled</th><th>Stripe</th><th>Status</th><th>Action</th>
+                </tr></thead><tbody id="sc-table">
+                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</td></tr>
+                </tbody></table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 3: Corporate Sponsors -->
+    <div class="tab-panel" id="tab-corporates">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--green);">🏢</span> Create Corporate Sponsor</div>
+            </div>
+            <div class="card-body">
+                <div class="form-row">
+                    <div class="form-group"><label>Company Name</label><input id="cc-name" placeholder="Acme Corp" maxlength="200"></div>
+                    <div class="form-group"><label>Code</label><input id="cc-code" placeholder="ACME2026" maxlength="40" style="text-transform:uppercase;"></div>
+                    <div class="form-group"><label>Discount Type</label>
+                        <select id="cc-type" onchange="dcToggleCorpFull()">
+                            <option value="percent">Percent Off</option><option value="amount">Fixed Amount Off</option><option value="full">Fully Sponsored (100%)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="cc-val-group"><label>Value</label><input id="cc-value" type="number" min="0" max="10000" placeholder="20"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Max Employees (optional)</label><input id="cc-max" type="number" min="1" placeholder="Unlimited"></div>
+                    <div class="form-group"><label>Billing Contact Email</label><input id="cc-email" type="email" placeholder="billing@acme.com" maxlength="255"></div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                    <button class="btn btn-gold" id="cc-submit" onclick="dcCreateCorporate()">Create Corporate Sponsor</button>
+                    <div id="cc-status"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--cyan);">📋</span> All Corporate Sponsors</div>
+                <button class="btn btn-cyan" onclick="dcLoadCorporates()">Refresh</button>
+            </div>
+            <div class="card-body" style="overflow-x:auto;">
+                <table><thead><tr>
+                    <th>Code</th><th>Company</th><th>Discount</th><th>Enrolled</th><th>Stripe</th><th>Status</th><th>Action</th>
+                </tr></thead><tbody id="cc-table">
+                    <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</td></tr>
+                </tbody></table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var _dcToken = '';
+
+(function() {
+    try { _dcToken = sessionStorage.getItem('sc_token') || ''; } catch(e) {}
+    if (!_dcToken) {
+        try {
+            var h = window.location.hash;
+            if (h) { var m = h.match(/t=([^&]+)/); if (m) _dcToken = decodeURIComponent(m[1]); }
+        } catch(e) {}
+    }
+    if (!_dcToken) { try { _dcToken = localStorage.getItem('sc_token') || ''; } catch(e) {} }
+    var backBtn = document.getElementById('backBtn');
+    if (backBtn) backBtn.onclick = function() { window.location.href = 'command.html' + window.location.hash; };
+})();
+
+function _esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(s)));
+    return d.innerHTML;
+}
+
+async function _dcFetch(url, opts) {
+    try {
+        var headers = { 'Authorization': 'Bearer ' + _dcToken, 'Content-Type': 'application/json' };
+        var r = await fetch(url, Object.assign({ headers: headers }, opts || {}));
+        if (r.status === 401 || r.status === 403) {
+            alert('Session expired. Please log in again.');
+            window.location.href = 'command.html';
+            return null;
+        }
+        if (!r.ok) {
+            var err = '';
+            try { var j = await r.json(); err = j.detail || ''; } catch(e) {}
+            return { _error: true, status: r.status, detail: err };
+        }
+        return await r.json();
+    } catch(e) { console.error('Discount fetch:', e); return { _error: true, detail: 'Network error' }; }
+}
+
+function dcSwitchTab(tabId, btn) {
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('tab-' + tabId).classList.add('active');
+    if (btn) btn.classList.add('active');
+    if (tabId === 'promos') dcLoadPromos();
+    if (tabId === 'schools') dcLoadSchools();
+    if (tabId === 'corporates') dcLoadCorporates();
+}
+
+function dcToggleDurationMonths() {
+    var v = document.getElementById('pc-duration').value;
+    document.getElementById('pc-months-group').style.display = v === 'repeating' ? '' : 'none';
+}
+
+function dcToggleCorpFull() {
+    var v = document.getElementById('cc-type').value;
+    document.getElementById('cc-val-group').style.display = v === 'full' ? 'none' : '';
+}
+
+function _showStatus(elId, msg, isError) {
+    var el = document.getElementById(elId);
+    el.className = 'status-msg ' + (isError ? 'error' : 'success');
+    el.textContent = msg;
+    setTimeout(function() { el.textContent = ''; el.className = ''; }, 5000);
+}
+
+// ---- Promo Codes ----
+
+async function dcCreatePromo() {
+    var btn = document.getElementById('pc-submit');
+    btn.disabled = true;
+    var code = (document.getElementById('pc-code').value || '').trim().toUpperCase();
+    var name = (document.getElementById('pc-name').value || '').trim();
+    var endsAt = document.getElementById('pc-ends').value;
+    if (!code || !name || !endsAt) { _showStatus('pc-status', 'Name, code, and end date are required', true); btn.disabled = false; return; }
+    if (!/^[A-Z0-9_\-]{2,40}$/.test(code)) { _showStatus('pc-status', 'Code: 2-40 chars, letters/numbers/dash/underscore only', true); btn.disabled = false; return; }
+
+    var body = {
+        name: name,
+        code: code,
+        discount_type: document.getElementById('pc-type').value,
+        discount_value: parseInt(document.getElementById('pc-value').value) || 1,
+        duration: document.getElementById('pc-duration').value,
+        ends_at: new Date(endsAt).toISOString(),
+    };
+    var maxR = parseInt(document.getElementById('pc-max').value);
+    if (maxR > 0) body.max_redemptions = maxR;
+    if (body.duration === 'repeating') body.duration_in_months = parseInt(document.getElementById('pc-months').value) || 3;
+
+    var res = await _dcFetch('/api/admin/discounts/promo', { method: 'POST', body: JSON.stringify(body) });
+    btn.disabled = false;
+    if (!res || res._error) { _showStatus('pc-status', res ? res.detail : 'Failed', true); return; }
+    _showStatus('pc-status', 'Promo code created' + (res.promo && res.promo.stripe_synced ? ' (Stripe synced)' : ''), false);
+    document.getElementById('pc-code').value = '';
+    document.getElementById('pc-name').value = '';
+    dcLoadPromos();
+}
+
+async function dcLoadPromos() {
+    var res = await _dcFetch('/api/admin/discounts/promos');
+    if (!res || res._error) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--red);padding:20px;">Failed to load</td></tr>'; return; }
+    var promos = res.promos || [];
+    if (promos.length === 0) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">No promo codes created yet</td></tr>'; return; }
+    var html = '';
+    promos.forEach(function(p) {
+        var discountStr = p.discount_type === 'percent' ? _esc(p.discount_value) + '%' : '$' + (p.discount_value / 100).toFixed(2);
+        var endsStr = p.ends_at ? new Date(p.ends_at).toLocaleDateString() : '—';
+        var redeemed = (p.current_redemptions || 0) + '/' + (p.max_redemptions || '∞');
+        var stripeBadge = p.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var statusBadge = p.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
+        html += '<tr>';
+        html += '<td style="font-family:var(--font-mono);color:var(--gold);font-weight:700;">' + _esc(p.promo_code) + '</td>';
+        html += '<td>' + _esc(p.name) + '</td>';
+        html += '<td>' + discountStr + ' off</td>';
+        html += '<td>' + _esc(p.duration || 'once') + '</td>';
+        html += '<td>' + endsStr + '</td>';
+        html += '<td>' + redeemed + '</td>';
+        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + statusBadge + '</td>';
+        html += '<td><button class="btn ' + (p.active ? 'btn-red' : 'btn-green') + '" onclick="dcTogglePromo(\'' + _esc(p.id) + '\')">' + (p.active ? 'Deactivate' : 'Activate') + '</button></td>';
+        html += '</tr>';
+    });
+    document.getElementById('pc-table').innerHTML = html;
+}
+
+async function dcTogglePromo(id) {
+    await _dcFetch('/api/admin/discounts/promo/' + encodeURIComponent(id), { method: 'PATCH' });
+    dcLoadPromos();
+}
+
+// ---- School Codes ----
+
+async function dcCreateSchool() {
+    var btn = document.getElementById('sc-submit');
+    btn.disabled = true;
+    var code = (document.getElementById('sc-code').value || '').trim().toUpperCase();
+    var name = (document.getElementById('sc-name').value || '').trim();
+    if (!code || !name) { _showStatus('sc-status', 'School name and code are required', true); btn.disabled = false; return; }
+    if (!/^[A-Z0-9_\-]{2,40}$/.test(code)) { _showStatus('sc-status', 'Code: 2-40 chars, letters/numbers/dash/underscore only', true); btn.disabled = false; return; }
+
+    var body = {
+        school_name: name,
+        school_code: code,
+        discount_percent: parseInt(document.getElementById('sc-pct').value) || 10,
+    };
+    var maxS = parseInt(document.getElementById('sc-max').value);
+    if (maxS > 0) body.max_students = maxS;
+
+    var res = await _dcFetch('/api/admin/discounts/school', { method: 'POST', body: JSON.stringify(body) });
+    btn.disabled = false;
+    if (!res || res._error) { _showStatus('sc-status', res ? res.detail : 'Failed', true); return; }
+    _showStatus('sc-status', 'School code created' + (res.school && res.school.stripe_synced ? ' (Stripe synced)' : ''), false);
+    document.getElementById('sc-code').value = '';
+    document.getElementById('sc-name').value = '';
+    dcLoadSchools();
+}
+
+async function dcLoadSchools() {
+    var res = await _dcFetch('/api/admin/discounts/schools');
+    if (!res || res._error) { document.getElementById('sc-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--red);padding:20px;">Failed to load</td></tr>'; return; }
+    var schools = res.schools || [];
+    if (schools.length === 0) { document.getElementById('sc-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">No school codes created yet</td></tr>'; return; }
+    var html = '';
+    schools.forEach(function(s) {
+        var enrolled = (s.current_students || 0) + '/' + (s.max_students || '∞');
+        var stripeBadge = s.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var statusBadge = s.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
+        html += '<tr>';
+        html += '<td style="font-family:var(--font-mono);color:var(--purple);font-weight:700;">' + _esc(s.school_code) + '</td>';
+        html += '<td>' + _esc(s.school_name) + '</td>';
+        html += '<td>' + _esc(s.discount_percent) + '% off</td>';
+        html += '<td>' + enrolled + '</td>';
+        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + statusBadge + '</td>';
+        html += '<td><button class="btn ' + (s.active ? 'btn-red' : 'btn-green') + '" onclick="dcToggleSchool(\'' + _esc(s.id) + '\')">' + (s.active ? 'Deactivate' : 'Activate') + '</button></td>';
+        html += '</tr>';
+    });
+    document.getElementById('sc-table').innerHTML = html;
+}
+
+async function dcToggleSchool(id) {
+    await _dcFetch('/api/admin/discounts/school/' + encodeURIComponent(id), { method: 'PATCH' });
+    dcLoadSchools();
+}
+
+// ---- Corporate Sponsors ----
+
+async function dcCreateCorporate() {
+    var btn = document.getElementById('cc-submit');
+    btn.disabled = true;
+    var code = (document.getElementById('cc-code').value || '').trim().toUpperCase();
+    var name = (document.getElementById('cc-name').value || '').trim();
+    if (!code || !name) { _showStatus('cc-status', 'Company name and code are required', true); btn.disabled = false; return; }
+    if (!/^[A-Z0-9_\-]{2,40}$/.test(code)) { _showStatus('cc-status', 'Code: 2-40 chars, letters/numbers/dash/underscore only', true); btn.disabled = false; return; }
+
+    var discType = document.getElementById('cc-type').value;
+    var body = {
+        company_name: name,
+        sponsor_code: code,
+        discount_type: discType === 'full' ? 'percent' : discType,
+        discount_value: discType === 'full' ? 100 : (parseInt(document.getElementById('cc-value').value) || 0),
+        pays_full: discType === 'full',
+    };
+    var maxE = parseInt(document.getElementById('cc-max').value);
+    if (maxE > 0) body.max_employees = maxE;
+    var email = (document.getElementById('cc-email').value || '').trim();
+    if (email) body.billing_contact_email = email;
+
+    var res = await _dcFetch('/api/admin/discounts/corporate', { method: 'POST', body: JSON.stringify(body) });
+    btn.disabled = false;
+    if (!res || res._error) { _showStatus('cc-status', res ? res.detail : 'Failed', true); return; }
+    _showStatus('cc-status', 'Corporate sponsor created' + (res.corporate && res.corporate.stripe_synced ? ' (Stripe synced)' : ''), false);
+    document.getElementById('cc-code').value = '';
+    document.getElementById('cc-name').value = '';
+    dcLoadCorporates();
+}
+
+async function dcLoadCorporates() {
+    var res = await _dcFetch('/api/admin/discounts/corporates');
+    if (!res || res._error) { document.getElementById('cc-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--red);padding:20px;">Failed to load</td></tr>'; return; }
+    var corps = res.corporates || [];
+    if (corps.length === 0) { document.getElementById('cc-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">No corporate sponsors created yet</td></tr>'; return; }
+    var html = '';
+    corps.forEach(function(c) {
+        var discStr = c.pays_full ? 'Fully Sponsored' : (c.discount_type === 'percent' ? _esc(c.discount_value) + '%' : '$' + (c.discount_value / 100).toFixed(2)) + ' off';
+        var enrolled = (c.current_employees || 0) + '/' + (c.max_employees || '∞');
+        var stripeBadge = c.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var statusBadge = c.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
+        html += '<tr>';
+        html += '<td style="font-family:var(--font-mono);color:var(--green);font-weight:700;">' + _esc(c.sponsor_code) + '</td>';
+        html += '<td>' + _esc(c.company_name) + '</td>';
+        html += '<td>' + discStr + '</td>';
+        html += '<td>' + enrolled + '</td>';
+        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + statusBadge + '</td>';
+        html += '<td><button class="btn ' + (c.active ? 'btn-red' : 'btn-green') + '" onclick="dcToggleCorporate(\'' + _esc(c.id) + '\')">' + (c.active ? 'Deactivate' : 'Activate') + '</button></td>';
+        html += '</tr>';
+    });
+    document.getElementById('cc-table').innerHTML = html;
+}
+
+async function dcToggleCorporate(id) {
+    await _dcFetch('/api/admin/discounts/corporate/' + encodeURIComponent(id), { method: 'PATCH' });
+    dcLoadCorporates();
+}
+
+// Auto-load on page ready
+document.addEventListener('DOMContentLoaded', function() {
+    dcLoadPromos();
+});
+</script>
+</body>
+</html>

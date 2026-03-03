@@ -768,6 +768,26 @@ class DripScheduler:
     # JOB: Trial Expiration Sweep
     # =========================================================================
 
+    async def _sync_zero_balance(self, username: str):
+        """Write token_balance=0 to PG and publish Redis sync."""
+        try:
+            if self.db_pool:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE users SET token_balance = 0,
+                            profile_data = jsonb_set(COALESCE(profile_data, '{}'::jsonb), '{token_balance}', '0'::jsonb)
+                        WHERE username = $1
+                    """, username)
+            from app.services.api_server import _get_auth_redis
+            r = await _get_auth_redis()
+            if r:
+                await r.publish(
+                    "nate:balance_sync",
+                    json.dumps({"username": username, "token_balance": 0}),
+                )
+        except Exception as e:
+            logger.warning("Balance sync failed for %s during trial sweep: %s", username, e)
+
     async def sweep_trial_expirations(self):
         """
         Hourly sweep for trial management:
@@ -781,15 +801,49 @@ class DripScheduler:
         data_dir = _Path(getattr(settings, "DATA_DIR", "/app/data"))
         registry_path = data_dir / "user_registry.json"
 
-        if not registry_path.exists():
-            return
+        registry = None
+        if self.db_pool:
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        """SELECT username, role, hardware_id, name, email,
+                                  tier, subscription_status, token_balance,
+                                  profile_data, created_at
+                           FROM users WHERE deleted_at IS NULL"""
+                    )
+                if rows:
+                    registry = {}
+                    for row in rows:
+                        pd = row.get("profile_data") or {}
+                        if isinstance(pd, str):
+                            try:
+                                pd = json.loads(pd)
+                            except Exception:
+                                pd = {}
+                        key = f"{(row.get('role') or 'CLIENT').lower()}_{row['username']}"
+                        profile = {**pd}
+                        profile.setdefault("hardware_id", row.get("hardware_id", ""))
+                        profile.setdefault("name", row.get("name", ""))
+                        profile.setdefault("email", row.get("email", ""))
+                        profile.setdefault("username", row["username"])
+                        profile.setdefault("subscription_plan", row.get("tier", ""))
+                        profile.setdefault("subscription_status", row.get("subscription_status", ""))
+                        profile.setdefault("token_balance", row.get("token_balance", 0))
+                        if row.get("created_at"):
+                            profile.setdefault("created_at", str(row["created_at"]))
+                        registry[key] = {"profile": profile}
+            except Exception as e:
+                logger.warning("Trial sweep: PG registry load failed, falling back to JSON: %s", e)
 
-        try:
-            with open(registry_path, "r") as f:
-                registry = json.load(f)
-        except Exception as e:
-            logger.error("Trial sweep: failed to load registry: %s", e)
-            return
+        if registry is None:
+            if not registry_path.exists():
+                return
+            try:
+                with open(registry_path, "r") as f:
+                    registry = json.load(f)
+            except Exception as e:
+                logger.error("Trial sweep: failed to load registry: %s", e)
+                return
 
         now = datetime.now(timezone.utc)
         modified = False
@@ -888,6 +942,9 @@ class DripScheduler:
                 modified = True
                 expirations += 1
 
+                uname = profile.get("username") or key.split("_", 1)[-1] if "_" in key else key
+                await self._sync_zero_balance(uname)
+
                 # Send trial expired email
                 try:
                     from app.services.notifications_service import EmailService
@@ -911,16 +968,45 @@ class DripScheduler:
                             profile["token_balance"] = 0
                             modified = True
                             grace_downgrades += 1
+
+                            uname = profile.get("username") or key.split("_", 1)[-1] if "_" in key else key
+                            await self._sync_zero_balance(uname)
                     except (ValueError, TypeError):
                         pass
 
-        # Save registry if modified
         if modified:
+            if self.db_pool:
+                try:
+                    async with self.db_pool.acquire() as conn:
+                        for _key, entry in registry.items():
+                            profile = entry.get("profile", {})
+                            hw_id = profile.get("hardware_id")
+                            if not hw_id:
+                                continue
+                            await conn.execute(
+                                """UPDATE users SET
+                                       subscription_status = COALESCE($2, subscription_status),
+                                       token_balance = $3,
+                                       profile_data = profile_data || $4::jsonb
+                                   WHERE hardware_id = $1""",
+                                hw_id,
+                                profile.get("subscription_status"),
+                                profile.get("token_balance", 0),
+                                json.dumps({
+                                    k: v for k, v in profile.items()
+                                    if k.startswith("_trial") or k in (
+                                        "trial_expired_at", "_grace_period_end",
+                                        "subscription_plan",
+                                    )
+                                }),
+                            )
+                except Exception as e:
+                    logger.warning("Trial sweep: PG save failed: %s", e)
             try:
                 with open(registry_path, "w") as f:
                     json.dump(registry, f, indent=2, default=str)
             except Exception as e:
-                logger.error("Trial sweep: failed to save registry: %s", e)
+                logger.error("Trial sweep: failed to save JSON registry: %s", e)
 
         if nudges_sent or expirations or grace_downgrades or conversions_logged:
             print(

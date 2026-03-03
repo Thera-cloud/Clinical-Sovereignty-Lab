@@ -1,0 +1,44 @@
+---
+description: Token economy architecture — consumption points, purchase packs, source tagging, and pricing
+alwaysApply: true
+---
+# Token Economics Architecture
+
+## 4 Consumption Points (Source Tags)
+
+Every token deduction in the bridge must include a `source` tag. These are the only valid sources:
+
+| Source Tag | Where | Method | Estimation |
+|---|---|---|---|
+| `ai_chat` | `Cortex.process_interaction` | `billing.use_tokens(uid, word_count * 10, source="ai_chat")` | Word count × 10 |
+| `sanctuary_ai` | Sanctuary AI response handler | `billing.add_token_usage(hoh_id, tokens, source="sanctuary_ai")` | (conv + response words) × 10 |
+| `group_coaching` | Group coaching suggestion | `billing.add_token_usage(hoh_id, tokens, source="group_coaching")` | (conv + suggestion words) × 10 |
+| `private_coaching` | Private coaching response | `billing.add_token_usage(hoh_id, tokens, source="private_coaching")` | (prompt + response words) × 10 |
+
+When adding a new consumption point, assign a unique `source` tag and add it to both the bridge call and the Token Usage Map in `token_lab.html`.
+
+## Token Purchase Packs
+
+| Pack | Tokens | Price | Stripe Key |
+|---|---|---|---|
+| Light | 15,000 | $3.00 | `STRIPE_PRICE_TOKEN_LIGHT` |
+| Standard | 50,000 | $7.00 | `STRIPE_PRICE_TOKEN_STANDARD` |
+| Power | 150,000 | $20.00 | `STRIPE_PRICE_TOKEN_POWER` |
+| Ultimate | 1,000,000 | $125.00 | `STRIPE_PRICE_TOKEN_ULTIMATE` |
+
+Pack definitions live in `TOKEN_PACKS` dict in `stripe_integration.py`. The webhook handler credits tokens on `checkout.session.completed` where `metadata.type == "token_pack"`.
+
+## Token Sharing Fee
+
+$5.00 per 10,000 tokens shared (rounded up). The fee is charged via Stripe PaymentIntent and recorded as a GKM 501(c)(3) donation. Defined in `gkm_api.py` → `_calculate_share_fee_cents()`.
+
+## Token Transaction Logging
+
+`use_tokens()` and `add_token_usage()` in `BillingSystem` accept an optional `source` parameter. When set, `_log_token_transaction()` fires an async task to write to `token_transactions` with the source column. The `db_pool` is injected onto `billing_system` at bridge startup.
+
+## Rules
+
+1. **Never add a consumption point without a source tag** — untagged usage shows as "unknown" in the Token Usage Map.
+2. **Token pack prices are defined in two places** — `TOKEN_PACKS` (code default) and Stripe Price IDs (env vars). If the env var is set, Stripe uses the pre-created price; if not, it falls back to `price_data` with the code amount.
+3. **All pack purchases go through Stripe Checkout** (mode=payment, one-time). Apple/Google IAP is a future extension.
+4. **The `token_transactions.source` column** was added by migration 076. All queries grouping by source must use `COALESCE(source, 'unknown')`.

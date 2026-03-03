@@ -1,0 +1,36 @@
+---
+description: Privacy and security rules for the Nate-to-Nate Community Mesh feature (BLE/NFC group sessions).
+alwaysApply: false
+globs:
+  - "**/community_mesh*"
+  - "**/community_api*"
+  - "backend/migrations/061*"
+---
+
+# Community Mesh Privacy Rules
+
+## Feature Overview
+
+The Community Mesh connects users' Little Nates via BLE/NFC for therapeutic group sessions (AA, SA, therapy groups). Emotional resonance and community wisdom are shared anonymously, while attendance records are tracked with opt-in identity for court/probation compliance.
+
+## Rules
+
+1. **Community wisdom is FULLY anonymous** — the `community_wisdom` table stores only `topic`, `insight_text`, `convergence_count`, and `source_session_count`. No `user_id`, no `session_id`, no participant identifiers. Never add identity columns to this table.
+
+2. **Attendance tracking is OPT-IN** — the `community_check_ins` and `community_attendance_records` tables DO store `user_id` because users opt in to attendance mode for probation/court compliance. The opt-in must be explicit — never auto-enroll users in attendance tracking.
+
+3. **PII stripping on all outgoing BLE data** — before broadcasting any data to connected Nates, run `PIIDetector` (or `_stripPii()`) on the payload. Group names, location names, topic tags, and wisdom insights must all be scrubbed.
+
+4. **Emotional resonance signals carry NO content** — Quakete resonance sharing broadcasts `mood_valence` (a single float) and anonymous state signals ("struggling", "strong today"). Never embed session transcripts, personal stories, or specific details in resonance signals.
+
+5. **Attendance records require cryptographic signatures** — each attendance record includes `signature_b64` (Ed25519 signature from the user's `FibreIdentity`) for tamper-evidence. Export functions must include signature verification status.
+
+6. **Group Manager role is per-session** — any user can become a group manager for a session. This does not grant persistent admin privileges. The manager can only verify attendance for that specific session.
+
+7. **Location data is purpose-limited** — GPS coordinates (`location_lat`, `location_lng`) and `location_name` are stored only in `community_sessions`, `community_check_ins`, and `community_attendance_records`. They are never copied to `community_wisdom` in a way that could deanonymize wisdom entries. `community_wisdom.location_name` is the general location (e.g., "St. Mary's Church") shared by all participants, not per-user.
+
+8. **Attendance export includes only user's own data** — the `GET /api/community/attendance/{user_id}` endpoint returns only records for the requesting user. No cross-user queries are allowed unless the requestor is ADMIN.
+
+9. **BLE service UUID for community mesh** must be distinct from the existing ZEFCP/Quakete UUIDs to prevent protocol confusion.
+
+10. **Tier gating** — Community Mesh is available to TRIAL, STANDARD, and TOP_TIER client roles. COACH_ONLY accounts cannot access it. Enforce this in both the mobile UI and backend API.

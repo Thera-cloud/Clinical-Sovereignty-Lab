@@ -18,6 +18,7 @@ import 'dart:typed_data';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
 
 import 'metrics_widgets.dart';
 import 'updated_screens.dart';
@@ -27,6 +28,10 @@ import 'screens/onboarding_paid_screen.dart';
 
 import 'shared_widgets.dart';
 import 'services/device_shield.dart';
+import 'services/nevedal_flutter.dart';
+import 'config/app_config.dart';
+import 'widgets/vault_attachment_button.dart';
+import 'widgets/upload_progress_indicator.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -1325,6 +1330,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   bool _isTalking = false; 
   bool _isListening = false;
   bool _speechAvailable = false;
+  bool _isTextSelected = false;
   DateTime? _suppressSpeechUntil;
   String _connectionStatus = "Initializing..."; 
   // Real-time metrics from backend
@@ -1333,6 +1339,12 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   int _tokenBalance = 0;
   int _tokenUsage = 0;
 
+  // Vault attachment upload progress
+  UploadProgressState _uploadProgressState = UploadProgressState.idle();
+
+  // Nevedal biometric integration
+  final NevedalService _nevedal = NevedalService();
+
   // Avatar Mode (Top Tier / Sovereign Circle only)
   bool _avatarModeEnabled = false;
   AvatarVisualState _avatarState = const AvatarVisualState();
@@ -1340,10 +1352,105 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
   VoiceState _voiceState = VoiceState.idle;
   double _mouthOpenness = 0.0;
 
+  // AI data-sharing consent (Apple 5.1.1(i) / 5.1.2(i))
+  bool _aiDataConsentGiven = false;
+  static const _aiConsentKey = 'ai_data_consent_v1';
+
+  Future<void> _loadAiConsent() async {
+    try {
+      const storage = FlutterSecureStorage();
+      final stored = await storage.read(key: _aiConsentKey);
+      if (stored == 'true' && mounted) setState(() => _aiDataConsentGiven = true);
+    } catch (_) {}
+  }
+
+  Future<void> _showAiDataConsentDialog() async {
+    final agreed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF111111),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Center(child: Icon(Icons.shield_outlined, color: Color(0xFFC9A962), size: 40)),
+              const SizedBox(height: 12),
+              const Center(child: Text("AI Data Processing Consent",
+                style: TextStyle(color: Color(0xFFC9A962), fontSize: 18, fontWeight: FontWeight.bold))),
+              const SizedBox(height: 16),
+              const Text("Before you start chatting with Little Nate, please review how your data is processed:",
+                style: TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 16),
+              _consentBullet(Icons.chat_bubble_outline, "Your Messages",
+                "Text messages and voice transcriptions are sent to Microsoft Azure OpenAI to generate Little Nate's responses."),
+              _consentBullet(Icons.mic_outlined, "Voice Biometrics",
+                "Voice features (pitch, energy, speech rate, pause ratio) are analyzed locally and sent to our secure server for emotional coherence scoring."),
+              _consentBullet(Icons.lock_outline, "Data Protection",
+                "All data is encrypted in transit (TLS 1.2+) and at rest (AES-256). Microsoft Azure operates under enterprise data protection agreements — your data is NOT used to train their AI models."),
+              _consentBullet(Icons.delete_outline, "Your Rights",
+                "You can delete your data at any time via Settings > Data Deletion. See our Privacy Policy for full details."),
+              const SizedBox(height: 8),
+              const Divider(color: Colors.white24),
+              const SizedBox(height: 8),
+              RichText(text: const TextSpan(style: TextStyle(color: Colors.white60, fontSize: 12), children: [
+                TextSpan(text: "Third-party AI provider: "),
+                TextSpan(text: "Microsoft Azure OpenAI Service", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600)),
+              ])),
+              const SizedBox(height: 4),
+              const Text("Full details in our Privacy Policy (Settings > Legal & Privacy).",
+                style: TextStyle(color: Colors.white38, fontSize: 11)),
+              const SizedBox(height: 20),
+              Row(children: [
+                Expanded(child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: const Text("Decline", style: TextStyle(color: Colors.white54)),
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962),
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: const Text("I Understand & Consent", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+                )),
+              ]),
+            ],
+          )),
+        ),
+      ),
+    );
+    if (agreed == true) {
+      setState(() => _aiDataConsentGiven = true);
+      try { const storage = FlutterSecureStorage(); await storage.write(key: _aiConsentKey, value: 'true'); } catch (_) {}
+    }
+  }
+
+  static Widget _consentBullet(IconData icon, String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(icon, color: const Color(0xFF4ECDC4), size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text(body, style: const TextStyle(color: Colors.white60, fontSize: 12.5, height: 1.4)),
+        ])),
+      ]),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadAiConsent();
     _connectToCortex();
     _initSpeechToText();
 
@@ -1360,6 +1467,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
 
   @override
   void dispose() {
+    _nevedal.dispose();
     _socketSub?.cancel();
     _socket?.sink.close();
     _scrollController.dispose();
@@ -1511,6 +1619,16 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
       if (data['type'] == 'login_success') {
         setState(() => _connectionStatus = "ONLINE (SECURE)");
         _addSystemMsg("Neural Link Established.");
+
+        if (_socket != null) {
+          final sessionId = data['session_id'] as String? ??
+              'session_${DateTime.now().millisecondsSinceEpoch}';
+          _nevedal.initialize(
+            socket: _socket!,
+            sessionId: sessionId,
+            userId: widget.username ?? 'unknown',
+          );
+        }
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
@@ -1529,10 +1647,17 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
          final payload = data['payload'];
          if (payload != null) {
            _audio.processAudioChunk(payload);
+           try {
+             final bytes = base64Decode(payload as String);
+             _nevedal.processNateAudio(bytes);
+           } catch (_) {}
          }
          Future.delayed(const Duration(milliseconds: 200), () {
            if (mounted) setState(() => _isTalking = false);
          });
+      }
+      else if (data['type'] == 'nevedal_state') {
+        _nevedal.handleServerUpdate(data['data'] ?? data);
       }
       else if (data['type'] == 'metrics_update') {
         debugLog('>>> METRICS: Real-time update received');
@@ -1612,6 +1737,14 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
 
   /// Check if user is eligible for Avatar Mode
   /// Uses backend-computed premium_features for integrity (family members inherit from head)
+  bool _canUseVault() {
+    if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
+    final tier = (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
+    final plan = (widget.currentUserProfile?['subscription_plan'] ?? '').toString().toUpperCase();
+    const vaultTiers = {'STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'};
+    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
+  }
+
   bool _canUseAvatarMode() {
     // Primary: Use backend-computed premium_features (authoritative)
     final premiumFeatures = widget.currentUserProfile?['premium_features'];
@@ -1651,6 +1784,11 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     await _stopSpeechAndSuppressLateResults();
     String text = _chatController.text.trim();
     if (text.isEmpty) return;
+
+    if (!_aiDataConsentGiven) {
+      await _showAiDataConsentDialog();
+      if (!_aiDataConsentGiven) return;
+    }
     
     // Check our INTERNAL socket
     if (_socket == null || _connectionStatus.contains("DISCONNECTED")) {
@@ -1804,15 +1942,39 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
           Column(
             children: [
               Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  itemCount: _chatHistory.length,
-                  itemBuilder: (ctx, i) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                    child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("[YOU]") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
-                  )
+                child: GestureDetector(
+                  onTap: () {
+                    if (_isTextSelected) {
+                      setState(() => _isTextSelected = false);
+                    }
+                  },
+                  child: SelectionArea(
+                    onSelectionChanged: (value) {
+                      final selecting = value != null && value.plainText.isNotEmpty;
+                      if (selecting != _isTextSelected) {
+                        setState(() => _isTextSelected = selecting);
+                      }
+                    },
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      physics: _isTextSelected
+                          ? const NeverScrollableScrollPhysics()
+                          : const ClampingScrollPhysics(),
+                      itemCount: _chatHistory.length,
+                      itemBuilder: (ctx, i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                        child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("[YOU]") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
+                      ),
+                    ),
+                  ),
                 ),
               ),
+              if (_uploadProgressState.isVisible)
+                UploadProgressIndicator(
+                  state: _uploadProgressState,
+                  onCancel: () => setState(() => _uploadProgressState = UploadProgressState.idle()),
+                  onDismiss: () => setState(() => _uploadProgressState = UploadProgressState.idle()),
+                ),
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Row(
@@ -1827,6 +1989,19 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
                       onPressed: _speechAvailable ? _toggleListening : null,
                       tooltip: _speechAvailable ? 'Speak your message' : 'Speech not available',
                     ),
+                    if (_canUseVault()) ...[
+                      const SizedBox(width: 4),
+                      VaultAttachmentButton(
+                        profile: widget.currentUserProfile,
+                        socket: _socket,
+                        onVaultItemSelected: (itemId) {
+                          if (itemId != null && itemId.isNotEmpty) {
+                            _chatController.text = '${_chatController.text}[Vault:$itemId] '.trim();
+                          }
+                        },
+                        onUploadProgress: (s) => setState(() => _uploadProgressState = s),
+                      ),
+                    ],
                     const SizedBox(width: 10),
                     Expanded(
                       child: TextField(
@@ -1961,7 +2136,19 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
         }
       }
 
-      // C. Login Failed — show error and return to login screen
+      // Security disconnect — push back to lobby
+      else if (data['type'] == 'security_disconnect') {
+        debugLog(">>> SECURITY DISCONNECT: ${data['reason']}");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(data['reason']?.toString() ?? 'Session terminated for security.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ));
+          Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false);
+        }
+      }
+      // C. Login Failed — show error, stay on screen (never navigate away)
       else if (data['type'] == 'login_failed' || data['type'] == 'login_failure' || data['type'] == 'error') {
         final msg = (data['message'] ?? 'Login failed').toString();
         final errorCode = (data['error_code'] ?? '').toString();
@@ -1974,7 +2161,6 @@ class _CoachDashboardScreenState extends State<CoachDashboardScreen> {
                 : Colors.red,
             duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
           ));
-          Navigator.of(context).pop();
         }
       }
     } catch (e) {
@@ -2388,7 +2574,7 @@ class _SecureRelayScreenState extends State<_SecureRelayScreen> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: isCoach ? const Color(0xFFC9A962).withOpacity(0.3) : Colors.white10),
                         ),
-                        child: Text(m['text'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
+                        child: SelectableText(m['text'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
                       ),
                     );
                   },
@@ -2489,6 +2675,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   bool _showCoachingModal = false;
   Map<String, dynamic>? _coachingOffer;
   String? _assistedResponse; // cached assisted response to post to group chat
+  UploadProgressState _sanctuaryUploadState = UploadProgressState.idle();
 
   // Group Coaching ($20) - private "words to say"
   bool _hasSuggestedResponse = false;
@@ -3099,11 +3286,119 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     }));
   }
 
-  void _declineGroupCoaching() {
-    _channel?.sink.add(jsonEncode({
+  void _declineGroupCoaching({String? reason, String? note}) {
+    final msg = <String, dynamic>{
       'type': 'sanctuary_group_coaching_decline',
       'sanctuary_id': _sanctuaryId,
-    }));
+    };
+    if (reason != null) msg['decline_reason'] = reason;
+    if (note != null && note.trim().isNotEmpty) msg['decline_note'] = note.trim();
+    _channel?.sink.add(jsonEncode(msg));
+  }
+
+  void _showDeclineExplanationDialog() {
+    String? selectedReason;
+    final noteController = TextEditingController();
+
+    const reasons = <Map<String, String>>[
+      {'key': 'budget_tight', 'label': 'We need to watch our budget right now', 'group': 'Financial'},
+      {'key': 'unexpected_expense', 'label': 'We had an unexpected expense this period', 'group': 'Financial'},
+      {'key': 'not_in_budget', 'label': "This wasn't planned in our budget", 'group': 'Financial'},
+      {'key': 'not_right_time', 'label': "It's not the right time for this", 'group': 'Timing'},
+      {'key': 'too_late_tonight', 'label': "It's getting late, maybe next time", 'group': 'Timing'},
+      {'key': 'need_to_think', 'label': "I'd like to think about it first", 'group': 'Timing'},
+      {'key': 'not_needed', 'label': "I don't think we need this right now", 'group': "We're okay"},
+      {'key': 'can_handle_ourselves', 'label': 'We can work this out ourselves', 'group': "We're okay"},
+      {'key': 'too_much_help', 'label': "I think we've had enough help for now", 'group': "We're okay"},
+      {'key': 'child_not_ready', 'label': "I don't think they're ready for this", 'group': 'Other'},
+      {'key': 'family_doing_fine', 'label': "We're doing fine without it", 'group': 'Other'},
+      {'key': 'dont_want_to_discuss', 'label': "I'd rather not go into it", 'group': 'Other'},
+    ];
+
+    final groups = <String>['Financial', 'Timing', "We're okay", 'Other'];
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1a1a2e),
+          title: Row(
+            children: const [
+              Icon(Icons.chat_bubble_outline, color: Color(0xFFC9A962), size: 22),
+              SizedBox(width: 8),
+              Expanded(child: Text('Help us understand', style: TextStyle(color: Colors.white, fontSize: 17))),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Your feedback helps us serve your family better. This is completely optional.",
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  for (final group in groups) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 6),
+                      child: Text(group, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: reasons.where((r) => r['group'] == group).map((r) {
+                        final isSelected = selectedReason == r['key'];
+                        return ChoiceChip(
+                          label: Text(r['label']!, style: TextStyle(color: isSelected ? Colors.black : Colors.white70, fontSize: 12)),
+                          selected: isSelected,
+                          selectedColor: const Color(0xFFC9A962),
+                          backgroundColor: const Color(0xFF2A2A3E),
+                          onSelected: (_) => setDialogState(() => selectedReason = r['key']),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: noteController,
+                    maxLines: 2,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Anything else you\'d like to share? (optional)',
+                      hintStyle: const TextStyle(color: Colors.white30, fontSize: 12),
+                      filled: true,
+                      fillColor: const Color(0xFF2A2A3E),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _declineGroupCoaching();
+              },
+              child: const Text('Skip', style: TextStyle(color: Colors.white30, fontSize: 13)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _declineGroupCoaching(reason: selectedReason ?? 'other', note: noteController.text);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3A3A5E)),
+              child: const Text('Submit', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) => noteController.dispose());
   }
 
   void _showGroupCoachingApprovalDialog(Map<String, dynamic> data) {
@@ -3164,7 +3459,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _declineGroupCoaching();
+              _showDeclineExplanationDialog();
             },
             child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
           ),
@@ -3572,6 +3867,21 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         setState(() {
           final total = (data['total_charges'] as num?)?.toDouble();
           if (total != null) _totalCharges = total;
+          final latest = data['latest_charge'];
+          if (latest is Map) {
+            _billingCharges.insert(0, Map<String, dynamic>.from(latest));
+          }
+        });
+        break;
+
+      case 'sanctuary_billing_summary':
+        setState(() {
+          final total = (data['total_charges'] as num?)?.toDouble();
+          if (total != null) _totalCharges = total;
+          final charges = data['charges'];
+          if (charges is List) {
+            _billingCharges = charges.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          }
         });
         break;
 
@@ -3902,12 +4212,44 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         });
         _showThresholdDialog(data);
         break;
-        
+
+      case 'sanctuary_spending_alert':
+        if (mounted) {
+          final msg = data['message']?.toString() ?? '';
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(msg, style: const TextStyle(fontSize: 12)),
+            backgroundColor: const Color(0xFF2A2A3E),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'View',
+              textColor: const Color(0xFFC9A962),
+              onPressed: _showBillingLedgerSheet,
+            ),
+          ));
+        }
+        break;
+
+      case 'sanctuary_pre_session_estimate':
+        _showPreSessionEstimate(data);
+        break;
+
       // COMPLETION
       case 'sanctuary_completed':
         _showCompletionDialog(data);
         break;
         
+      // SECURITY
+      case 'security_disconnect':
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(data['reason']?.toString() ?? 'Session terminated for security.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ));
+          Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false);
+        }
+        break;
+
       // ERRORS
       case 'error':
         _showError(data['message'] ?? 'An error occurred');
@@ -4193,6 +4535,50 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         ],
       ),
     );
+  }
+
+  void _saveConversation() {
+    if (_messages.isEmpty) return;
+    final buffer = StringBuffer();
+    buffer.writeln('--- Sanctuary Conversation ---');
+    buffer.writeln('Date: ${DateTime.now().toIso8601String()}');
+    buffer.writeln('');
+    for (final msg in _messages) {
+      final sender = (msg['sender_name'] ?? msg['sender'] ?? 'Unknown').toString();
+      final content = (msg['content'] ?? '').toString();
+      buffer.writeln('$sender: $content');
+      buffer.writeln('');
+    }
+    final text = buffer.toString();
+    Clipboard.setData(ClipboardData(text: text));
+    _channel?.sink.add(json.encode({
+      'type': 'export_conversation',
+      'format': 'full',
+    }));
+
+    final token = widget.profile['token'] as String?;
+    final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+    http.post(
+      Uri.parse('$base/api/v1/vault/save-conversation'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+      body: json.encode({
+        'content': text,
+        'title': 'Sanctuary Session — ${DateTime.now().toIso8601String().split("T").first}',
+        'source': 'sanctuary',
+      }),
+    ).catchError((_) {});
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conversation saved to vault & copied'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void _exitSanctuary() {
@@ -4515,6 +4901,58 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003366)),
               child: const Text("Request Coach", style: TextStyle(color: Colors.white)),
             ),
+        ],
+      ),
+    );
+  }
+
+  void _showPreSessionEstimate(Map<String, dynamic> data) {
+    final items = (data['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final minEstimate = (data['minimum_estimate'] as num?)?.toDouble() ?? 0;
+    final currentTotal = (data['current_total'] as num?)?.toDouble() ?? 0;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a2e),
+        title: Row(children: const [
+          Icon(Icons.receipt_long, color: Color(0xFF4ECDC4), size: 20),
+          SizedBox(width: 8),
+          Text('Session Cost Estimate', style: TextStyle(color: Colors.white, fontSize: 16)),
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (currentTotal > 0)
+              Text('Current session total: \$${currentTotal.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.amber, fontSize: 13)),
+            const SizedBox(height: 8),
+            ...items.map((item) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: Text(
+                    '${item["type"]}${item["note"] != null ? " (${item["note"]})" : ""}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  )),
+                  Text('\$${(item["amount"] as num).toStringAsFixed(2)}',
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ],
+              ),
+            )),
+            if (minEstimate > 0) ...[
+              const Divider(color: Colors.white10),
+              Text('Minimum additional cost: \$${minEstimate.toStringAsFixed(2)}',
+                  style: const TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it', style: TextStyle(color: Color(0xFFC9A962))),
+          ),
         ],
       ),
     );
@@ -5053,18 +5491,105 @@ void _syncSanctuaryState() {
                     ),
                   ),
                 const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text("Close", style: TextStyle(color: Color(0xFFFFD700))),
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.receipt_long, size: 14, color: Color(0xFF4ECDC4)),
+                      label: const Text("Cost Schedule", style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 12)),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showCostScheduleSheet();
+                      },
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text("Close", style: TextStyle(color: Color(0xFFFFD700))),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  void _showCostScheduleSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF0A0A0F),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (_, scrollCtrl) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            controller: scrollCtrl,
+            children: [
+              const Text("Master Cost Schedule", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+              const SizedBox(height: 4),
+              const Text("All Family Sanctuary charges", style: TextStyle(color: Colors.white54, fontSize: 12)),
+              const SizedBox(height: 14),
+              _costRow("Base Session Fee", "\$20.00", "Charged once per session"),
+              _costRow("Assisted Response", "\$3.00", "AI-crafted group message"),
+              _costRow("Coaching (1st/member)", "FREE", "First coaching per member"),
+              _costRow("Coaching (additional)", "\$5.00", "Per additional session"),
+              _costRow("Group Coaching", "\$20.00", "Per round, HoH approval required"),
+              const Divider(color: Colors.white10, height: 24),
+              const Text("Membership Tiers", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              _costRow("Threshold (Trial)", "Free 14 days", "50K tokens, 300 AI min"),
+              _costRow("Inner Chamber", "\$49/mo", "Yearly: \$490 (17% savings)"),
+              _costRow("Sovereign Circle", "\$149/mo", "Yearly: \$1,490 (17% savings)"),
+              const Divider(color: Colors.white10, height: 24),
+              const Text("Payment Methods", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
+              const SizedBox(height: 8),
+              _costRow("Credit/Debit Card", "2.9% + \$0.30", "Standard processing"),
+              _costRow("ACH Bank Debit", "0.8% (max \$5)", "Lower fees, 4-5 day settlement"),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text("Close", style: TextStyle(color: Color(0xFFFFD700))),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _costRow(String item, String price, String note) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(item, style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ),
+          SizedBox(
+            width: 80,
+            child: Text(price, style: const TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.w600), textAlign: TextAlign.right),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 3,
+            child: Text(note, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -5116,8 +5641,14 @@ void _syncSanctuaryState() {
             onSelected: (value) {
               if (value == 'exit') _exitSanctuary();
               if (value == 'complete') _completeSanctuary();
+              if (value == 'save_chat') _saveConversation();
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(value: 'save_chat', child: Row(children: [
+                Icon(Icons.save_alt, size: 18, color: Colors.white70),
+                SizedBox(width: 8),
+                Text('Save Conversation'),
+              ])),
               const PopupMenuItem(value: 'exit', child: Text('Exit Sanctuary')),
               PopupMenuItem(
                 value: 'complete',
@@ -5232,9 +5763,28 @@ void _syncSanctuaryState() {
               ],
             ),
             const SizedBox(height: 4),
-            Text(
+            SelectableText(
               content,
               style: const TextStyle(color: Colors.white, fontSize: 15),
+              contextMenuBuilder: (context, editableTextState) {
+                return AdaptiveTextSelectionToolbar.buttonItems(
+                  anchors: editableTextState.contextMenuAnchors,
+                  buttonItems: [
+                    ...editableTextState.contextMenuButtonItems,
+                    ContextMenuButtonItem(
+                      label: 'Push to Nate',
+                      onPressed: () {
+                        editableTextState.hideToolbar();
+                        final sel = editableTextState.textEditingValue.selection;
+                        final text = sel.isValid && !sel.isCollapsed
+                            ? editableTextState.textEditingValue.text.substring(sel.start, sel.end)
+                            : content;
+                        _messageController.text = text;
+                      },
+                    ),
+                  ],
+                );
+              },
             ),
           ],
         ),
@@ -5425,57 +5975,84 @@ void _syncSanctuaryState() {
     );
   }
 
+  bool _sanctuaryCanUseVault() {
+    if (!AppConfig.ENABLE_SOVEREIGN_VAULT) return false;
+    final tier = (widget.profile['tier'] ?? '').toString().toUpperCase();
+    final plan = (widget.profile['subscription_plan'] ?? '').toString().toUpperCase();
+    const vaultTiers = {'STANDARD', 'INNER_CHAMBER', 'TOP_TIER', 'SOVEREIGN_CIRCLE'};
+    return vaultTiers.contains(tier) || vaultTiers.contains(plan);
+  }
+
   Widget _buildInputArea() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 8,
-            offset: Offset(0, -2),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_sanctuaryUploadState.isVisible)
+          UploadProgressIndicator(
+            state: _sanctuaryUploadState,
+            onCancel: () => setState(() => _sanctuaryUploadState = UploadProgressState.idle()),
+            onDismiss: () => setState(() => _sanctuaryUploadState = UploadProgressState.idle()),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          // Speech-to-text button (ACCESSIBILITY)
-          IconButton(
-            icon: Icon(
-              _isListening ? Icons.mic : Icons.mic_none,
-              color: _isListening ? Colors.red : (_speechAvailable ? Colors.white : Colors.grey),
-            ),
-            onPressed: _speechAvailable ? _toggleListening : null,
-            tooltip: _speechAvailable ? 'Speak your message' : 'Speech not available',
-          ),
-          
-          // Text input
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              style: const TextStyle(color: Colors.white),
-              maxLines: null,
-              decoration: InputDecoration(
-                hintText: _isListening ? 'Listening...' : 'Type your message...',
-                hintStyle: TextStyle(
-                  color: _isListening ? Colors.redAccent : Colors.white38,
-                ),
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1E1E1E),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 8,
+                offset: Offset(0, -2),
               ),
-            ),
+            ],
           ),
-          
-          const SizedBox(width: 8),
-          
-          // Send button
-          IconButton(
-            icon: const Icon(Icons.send, color: Color(0xFF003366)),
-            onPressed: _sendMessage,
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none,
+                  color: _isListening ? Colors.red : (_speechAvailable ? Colors.white : Colors.grey),
+                ),
+                onPressed: _speechAvailable ? _toggleListening : null,
+                tooltip: _speechAvailable ? 'Speak your message' : 'Speech not available',
+              ),
+              if (_sanctuaryCanUseVault()) ...[
+                const SizedBox(width: 4),
+                VaultAttachmentButton(
+                  profile: widget.profile,
+                  socket: _channel,
+                  onVaultItemSelected: (itemId) {
+                    if (itemId != null && itemId.isNotEmpty) {
+                      _messageController.text = '${_messageController.text}[Vault:$itemId] '.trim();
+                    }
+                  },
+                  onUploadProgress: (s) => setState(() => _sanctuaryUploadState = s),
+                ),
+              ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _messageController,
+                  style: const TextStyle(color: Colors.white),
+                  maxLines: null,
+                  decoration: InputDecoration(
+                    hintText: _isListening ? 'Listening...' : 'Type your message...',
+                    hintStyle: TextStyle(
+                      color: _isListening ? Colors.redAccent : Colors.white38,
+                    ),
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.send, color: Color(0xFF003366)),
+                onPressed: _sendMessage,
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -5495,7 +6072,7 @@ class LobbyScreen extends StatefulWidget {
   _LobbyScreenState createState() => _LobbyScreenState();
 }
 
-class _LobbyScreenState extends State<LobbyScreen> {
+class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin {
   final HardwareIdentity _identity = HardwareIdentity();
   WebSocketChannel? _channel;
   StreamSubscription? _lobbySub;
@@ -5508,12 +6085,21 @@ class _LobbyScreenState extends State<LobbyScreen> {
   // Credentials for Handoff
   String _tempUser = "";
   String _tempPass = "";
+  String _lastExpectedRole = "CLIENT";
 
   // Admin gate-check: true when we are verifying admin credentials before redirect
   bool _adminGateCheck = false;
 
   // Biometric auto-login state
   bool _hasBiometricCreds = false;
+
+  // Login dialog state (shared with StatefulBuilder)
+  void Function(void Function())? _dialogSetState;
+  String _dialogError = '';
+  int _dialogRemainingAttempts = 5;
+  int _dialogCooldownSeconds = 0;
+  bool _dialogVerifying = false;
+  AnimationController? _shakeController;
   bool _biometricAvailable = false;
   String? _savedUsername;
 
@@ -5656,6 +6242,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
     _tempUser = creds['username']!;
     _tempPass = creds['password']!;
     final role = creds['role']!;
+    _lastExpectedRole = role;
 
     _channel?.sink.add(jsonEncode({
       "type": "login_request",
@@ -5678,6 +6265,84 @@ class _LobbyScreenState extends State<LobbyScreen> {
       _hasBiometricCreds = false;
       _savedUsername = null;
     });
+  }
+
+  void _showForcePasswordResetDialog(String token, String username) {
+    final newPassCtrl = TextEditingController();
+    final confirmPassCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text("Create New Password", style: TextStyle(color: Color(0xFFC9A962))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "You must set a new password before continuing.",
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: newPassCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: "New Password",
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmPassCtrl,
+              obscureText: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: "Confirm Password",
+                labelStyle: TextStyle(color: Colors.white54),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              final np = newPassCtrl.text.trim();
+              final cp = confirmPassCtrl.text.trim();
+              if (np.length < 6) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Password must be at least 6 characters"), backgroundColor: Colors.red),
+                );
+                return;
+              }
+              if (np != cp) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Passwords do not match"), backgroundColor: Colors.red),
+                );
+                return;
+              }
+              _channel?.sink.add(jsonEncode({
+                "type": "force_password_change",
+                "token": token,
+                "username": username,
+                "new_password": np,
+              }));
+              _tempPass = np;
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Updating password..."), backgroundColor: Color(0xFFC9A962)),
+              );
+            },
+            child: const Text("Set Password", style: TextStyle(color: Color(0xFFC9A962))),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Show biometric opt-in dialog after successful manual login.
@@ -5768,6 +6433,10 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
       if (data['type'] == 'login_success') {
         setState(() => _isLoading = false);
+        if (_dialogSetState != null) {
+          _dialogSetState = null;
+          try { Navigator.of(context).pop(); } catch (_) {}
+        }
         
         Map<String, dynamic> profile = data['profile'];
         String role = profile['role'] ?? "CLIENT";
@@ -5828,6 +6497,7 @@ class _LobbyScreenState extends State<LobbyScreen> {
         final user = _tempUser;
         final pass = _tempPass;
         final consentNeeded = data['consent_update_needed'] == true;
+        final coachEthicsNeeded = data['coach_ethics_needed'] == true && role == 'COACH';
         
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
@@ -5842,6 +6512,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
 
           if (consentNeeded) {
             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ReConsentScreen(
+              username: user,
+              password: pass,
+              profile: profile,
+              token: token,
+            )));
+            return;
+          }
+
+          if (coachEthicsNeeded) {
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => CoachEthicsScreen(
               username: user,
               password: pass,
               profile: profile,
@@ -5919,20 +6599,67 @@ class _LobbyScreenState extends State<LobbyScreen> {
           }
         });
         
+      } else if (data['type'] == 'force_password_reset') {
+        setState(() => _isLoading = false);
+        final resetToken = data['token'] ?? '';
+        final resetUser = data['username'] ?? _tempUser;
+        _showForcePasswordResetDialog(resetToken, resetUser);
+
+      } else if (data['type'] == 'security_disconnect') {
+        _lobbySub?.cancel();
+        _lobbySub = null;
+        if (mounted) {
+          setState(() => _isLoading = false);
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => AlertDialog(
+              backgroundColor: const Color(0xFF111111),
+              title: const Row(children: [
+                Icon(Icons.security, color: Color(0xFFEF4444)),
+                SizedBox(width: 8),
+                Text('Security Alert', style: TextStyle(color: Color(0xFFEF4444))),
+              ]),
+              content: Text(
+                data['reason'] ?? 'Your session was terminated due to suspicious activity.',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () { Navigator.pop(context); _connectToBridge(); },
+                  child: const Text('Log In Again', style: TextStyle(color: Color(0xFFC9A962))),
+                ),
+              ],
+            ),
+          );
+        }
       } else if (data['type'] == 'login_failed') {
-        // Safely close loading dialog if one is open
-        try { Navigator.pop(context); } catch (_) {}
         if (mounted) {
           final errorCode = data['error_code'] ?? '';
           final msg = data['message'] ?? 'Login failed';
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(msg),
-            backgroundColor: errorCode == 'WRONG_PORTAL'
-                ? const Color(0xFFC9A962)
-                : Colors.red,
-            duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
-          ));
+          final remaining = data['remaining_attempts'] as int? ?? 5;
+          final cooldown = data['cooldown_seconds'] as int? ?? 0;
           setState(() => _isLoading = false);
+
+          if (_dialogSetState != null) {
+            _dialogError = msg;
+            _dialogRemainingAttempts = remaining;
+            _dialogCooldownSeconds = cooldown;
+            _dialogVerifying = false;
+            try { _dialogSetState!(() {}); } catch (_) {}
+            _shakeController?.forward(from: 0.0);
+            if (cooldown > 0) {
+              _startDialogCooldownTimer();
+            }
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(msg),
+              backgroundColor: errorCode == 'WRONG_PORTAL'
+                  ? const Color(0xFFC9A962)
+                  : Colors.red,
+              duration: Duration(seconds: errorCode == 'WRONG_PORTAL' ? 6 : 4),
+            ));
+          }
         }
       } else if (data['type'] == 'forgot_password_sent') {
         if (mounted) {
@@ -5951,9 +6678,18 @@ class _LobbyScreenState extends State<LobbyScreen> {
       } else if (data['type'] == 'password_reset_success') {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Password updated. Please log in."),
+            content: Text("Password updated. Logging you in..."),
             backgroundColor: Colors.green,
           ));
+          if (_tempUser.isNotEmpty && _tempPass.isNotEmpty) {
+            setState(() => _isLoading = true);
+            _channel?.sink.add(jsonEncode({
+              "type": "login_request",
+              "username": _tempUser,
+              "password": _tempPass,
+              "expected_role": _lastExpectedRole,
+            }));
+          }
         }
       } else if (data['type'] == 'forgot_password_phone_sent') {
         if (mounted) {
@@ -6047,6 +6783,16 @@ class _LobbyScreenState extends State<LobbyScreen> {
     );
   }
 
+  void _startDialogCooldownTimer() {
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted || _dialogCooldownSeconds <= 0) return false;
+      _dialogCooldownSeconds--;
+      try { _dialogSetState?.call(() {}); } catch (_) {}
+      return _dialogCooldownSeconds > 0;
+    });
+  }
+
   void _showLoginDialog(String expectedRole) {
     if (!_isConnected) {
       _connectToBridge();
@@ -6056,72 +6802,117 @@ class _LobbyScreenState extends State<LobbyScreen> {
     TextEditingController userCtrl = TextEditingController();
     TextEditingController passCtrl = TextEditingController();
     bool obscurePass = true;
-    
+    _dialogError = '';
+    _dialogRemainingAttempts = 5;
+    _dialogCooldownSeconds = 0;
+    _dialogVerifying = false;
+    _shakeController?.dispose();
+    _shakeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF111111),
-          title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
-              const SizedBox(height: 10),
-              TextField(
-                controller: passCtrl,
-                obscureText: obscurePass,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: "KEY",
-                  prefixIcon: const Icon(Icons.vpn_key),
-                  suffixIcon: IconButton(
-                    icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
-                    onPressed: () => setDialogState(() => obscurePass = !obscurePass),
-                  ),
+        builder: (ctx, setDialogState) {
+          _dialogSetState = setDialogState;
+          final bool locked = _dialogCooldownSeconds > 0;
+          final int mins = _dialogCooldownSeconds ~/ 60;
+          final int secs = _dialogCooldownSeconds % 60;
+          return AlertDialog(
+            backgroundColor: const Color(0xFF111111),
+            title: Text("$expectedRole ACCESS", style: const TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: userCtrl, style: const TextStyle(color: Colors.white), decoration: const InputDecoration(labelText: "IDENTITY", prefixIcon: Icon(Icons.fingerprint))),
+                const SizedBox(height: 10),
+                ValueListenableBuilder<double>(
+                  valueListenable: _shakeController!,
+                  builder: (context, value, _) {
+                    final double offset = value == 0 ? 0 : sin(value * pi * 4) * 10;
+                    return Transform.translate(
+                      offset: Offset(offset, 0),
+                      child: TextField(
+                        controller: passCtrl,
+                        obscureText: obscurePass,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          labelText: "KEY",
+                          prefixIcon: const Icon(Icons.vpn_key),
+                          suffixIcon: IconButton(
+                            icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                            onPressed: () => setDialogState(() => obscurePass = !obscurePass),
+                          ),
+                          errorText: _dialogError.isNotEmpty ? _dialogError : null,
+                          errorStyle: const TextStyle(color: Color(0xFFEF4444), fontSize: 11),
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () { Navigator.pop(ctx); _showForgotUsernameDialog(); },
-                    child: const Text("Forgot username?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                if (locked)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      "Try again in $mins:${secs.toString().padLeft(2, '0')}",
+                      style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12),
+                    ),
                   ),
-                  TextButton(
-                    onPressed: () { Navigator.pop(ctx); _showForgotPasswordMethodDialog(); },
-                    child: const Text("Forgot password?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                if (!locked && _dialogRemainingAttempts < 3 && _dialogRemainingAttempts > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      "$_dialogRemainingAttempts attempt${_dialogRemainingAttempts == 1 ? '' : 's'} remaining",
+                      style: const TextStyle(color: Color(0xFFC9A962), fontSize: 11),
+                    ),
                   ),
-                ],
-              ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () { _dialogSetState = null; Navigator.pop(ctx); _showForgotUsernameDialog(); },
+                      child: const Text("Forgot username?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ),
+                    TextButton(
+                      onPressed: () { _dialogSetState = null; Navigator.pop(ctx); _showForgotPasswordMethodDialog(); },
+                      child: const Text("Forgot password?", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(child: const Text("ABORT"), onPressed: () { _dialogSetState = null; Navigator.pop(ctx); }),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: locked || _dialogVerifying ? Colors.grey : const Color(0xFFFFD700),
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: locked || _dialogVerifying ? null : () {
+                  _tempUser = userCtrl.text.trim();
+                  _tempPass = passCtrl.text.trim();
+                  if (_tempUser.isEmpty || _tempPass.isEmpty) return;
+                  _lastExpectedRole = expectedRole;
+                  _dialogVerifying = true;
+                  _dialogError = '';
+                  setDialogState(() {});
+                  _channel?.sink.add(jsonEncode({
+                    "type": "login_request",
+                    "username": _tempUser,
+                    "password": _tempPass,
+                    "expected_role": expectedRole
+                  }));
+                },
+                child: _dialogVerifying
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    : const Text("VERIFY"),
+              )
             ],
-          ),
-          actions: [
-            TextButton(child: const Text("ABORT"), onPressed: () => Navigator.pop(ctx)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
-              child: const Text("VERIFY"),
-              onPressed: () {
-                _tempUser = userCtrl.text.trim();
-                _tempPass = passCtrl.text.trim();
-                
-                _channel?.sink.add(jsonEncode({
-                  "type": "login_request",
-                  "username": _tempUser,
-                  "password": _tempPass,
-                  "expected_role": expectedRole
-                }));
-
-                Navigator.pop(ctx); 
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Verifying Credentials...")));
-              },
-            )
-          ],
-        ),
+          );
+        },
       ),
-    );
+    ).then((_) => _dialogSetState = null);
   }
 
   void _showForgotPasswordMethodDialog() {
@@ -6723,6 +7514,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
   bool _isDependent = false;
   TextEditingController _parentCtrl = TextEditingController();
   WebSocketChannel? _regSocket;
+  bool _isRegistering = false;
+  Timer? _regTimeoutTimer;
 
   // Dojo pricing
   static const Map<String, double> _dojoPrices = {
@@ -6733,6 +7526,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
     'mcat': 500.0,
     'teacher': 225.0,
     'judge': 2100.0,
+    'coach_nate': 90.0,
   };
   static const Map<String, String> _dojoLabels = {
     'cnc': 'CNC Machining',
@@ -6742,9 +7536,10 @@ class _SignUpWizardState extends State<SignUpWizard> {
     'business': 'Business',
     'mcat': 'MCAT',
     'judge': 'Judge',
+    'coach_nate': 'Coach Nate',
   };
   // JUDGE is excluded from multi-DOJO volume discounts
-  static const List<int> _dojoDiscounts = [0, 0, 10, 15, 20, 25, 30]; // index = count (excl. JUDGE)
+  static const List<int> _dojoDiscounts = [0, 0, 10, 15, 20, 25, 30, 35]; // index = count (excl. JUDGE)
 
   // Beta invite code
   final _betaCodeCtrl = TextEditingController();
@@ -6815,6 +7610,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
   @override
   void dispose() {
+    _regTimeoutTimer?.cancel();
     _regSocket?.sink.close();
     _regSocket = null;
     super.dispose();
@@ -6833,6 +7629,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
   }
 
   void _submitRegistration() {
+    if (_isRegistering) return;
+
     // 1. Validation
     if (_nameCtrl.text.trim().isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Full Name is required")));
@@ -6875,7 +7673,21 @@ class _SignUpWizardState extends State<SignUpWizard> {
        return;
     }
 
+    setState(() => _isRegistering = true);
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sending Data to Neural Core...")));
+
+    _regTimeoutTimer?.cancel();
+    _regTimeoutTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      setState(() => _isRegistering = false);
+      try { _regSocket?.sink.close(); } catch (_) {}
+      _regSocket = null;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Registration timed out. Please check your connection and try again."),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 6),
+      ));
+    });
 
     // 3. Build Registration Payload FIRST
     final role = _effectiveRole;
@@ -6903,6 +7715,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
       "selected_dojos": role == "COACH" ? _selectedDojos : null,
       "dojo_discount_pct": role == "COACH" ? _calculateDojoDiscount() : null,
       "dojo_monthly_price": role == "COACH" ? _calculateDojoPrice() : null,
+      "coach_ethics_accepted": role == "COACH" ? true : null,
     };
 
     // Include W-9 data for coach registration
@@ -6952,24 +7765,24 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
       // CASE A: Server created account AND logged us in (Ideal)
       if (data['type'] == 'login_success') {
+        _regTimeoutTimer?.cancel();
         final profile = Map<String, dynamic>.from(data['profile'] ?? {});
         final regRole = (profile['role'] ?? _effectiveRole).toString();
         final token = data['token'] ?? "";
 
         HardwareIdentity().saveSession(_userCtrl.text, token.isNotEmpty ? token : "REG_${DateTime.now().millisecondsSinceEpoch}", profile);
 
-        // Defer sink close to avoid "Cannot add event after closing" — closing
-        // synchronously inside the stream callback can race with the WebSocket impl.
         Future.microtask(() {
           try { regSocket.sink.close(); } catch (_) {}
           _regSocket = null;
         });
 
-        // Coaches go to pending approval dialog, not onboarding
+        if (!mounted) return;
+        setState(() => _isRegistering = false);
+
         if (regRole == "COACH") {
           _showCoachPendingDialog();
         } else {
-          // Clients go to onboarding tutorial
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(builder: (_) => OnboardingTutorialScreen(
@@ -6984,15 +7797,19 @@ class _SignUpWizardState extends State<SignUpWizard> {
       // CASE B: Server created account but waits for login
       else if (data['type'] == 'register_success' || data['type'] == 'registration_success') {
         final regRole = _effectiveRole;
-        // Coaches with PENDING_VERIFICATION can't login — show pending dialog
         if (regRole == "COACH") {
+          _regTimeoutTimer?.cancel();
           Future.microtask(() {
             try { regSocket.sink.close(); } catch (_) {}
             _regSocket = null;
           });
+          if (!mounted) return;
+          setState(() => _isRegistering = false);
           _showCoachPendingDialog();
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Identity Created. Logging in...")));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Identity Created. Logging in...")));
+          }
           regSocket.sink.add(jsonEncode({
              "type": "login_request",
              "username": _userCtrl.text.trim(),
@@ -7002,29 +7819,42 @@ class _SignUpWizardState extends State<SignUpWizard> {
         }
       }
       
-      // CASE C: Error (handle all error-like response types)
+      // CASE C: Error
       else if (data['type'] == 'error' || data['type'] == 'registration_failed') {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("FAILURE: ${data['message'] ?? 'Registration failed'}"),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 8),
-        ));
+        _regTimeoutTimer?.cancel();
+        if (mounted) {
+          setState(() => _isRegistering = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("FAILURE: ${data['message'] ?? 'Registration failed'}"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ));
+        }
       }
 
-      // CASE D: Unknown response - show it so we can debug
+      // CASE D: Unknown response
       else {
         debugLog(">>> [REG] Unhandled response type: ${data['type']}");
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Server: ${data['type']} — ${data['message'] ?? jsonEncode(data)}"),
-          duration: const Duration(seconds: 5),
-        ));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("Server: ${data['type']} — ${data['message'] ?? jsonEncode(data)}"),
+            duration: const Duration(seconds: 5),
+          ));
+        }
       }
     }, onError: (e) {
       debugLog(">>> [REG] WebSocket error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e"), backgroundColor: Colors.red));
+      _regTimeoutTimer?.cancel();
+      if (mounted) {
+        setState(() => _isRegistering = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Error: $e"), backgroundColor: Colors.red));
+      }
     }, onDone: () {
       debugLog(">>> [REG] WebSocket closed (regSent=$regSent)");
+      _regTimeoutTimer?.cancel();
       _regSocket = null;
+      if (!mounted) return;
+      setState(() => _isRegistering = false);
       if (!regSent) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text("Connection dropped before registration could be sent. Please try again."),
@@ -8087,9 +8917,18 @@ class _SignUpWizardState extends State<SignUpWizard> {
             
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: _submitRegistration, 
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, minimumSize: const Size(double.infinity, 50)),
-              child: const Text("CREATE ACCOUNT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+              onPressed: _isRegistering ? null : _submitRegistration, 
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isRegistering ? Colors.grey : Colors.blueAccent,
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: _isRegistering
+                ? const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+                    SizedBox(width: 12),
+                    Text("CREATING ACCOUNT...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ])
+                : const Text("CREATE ACCOUNT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
             )
           ],
         ),
@@ -8115,25 +8954,44 @@ class _ReConsentScreenState extends State<ReConsentScreen> {
   bool _agreed = false;
   
   void _send() {
+    final role = widget.profile?['role'] ?? 'CLIENT';
     final ws = WebSocketChannel.connect(Uri.parse(defaultWsUrl));
+    bool loginDone = false;
     ws.stream.listen((message) {
       final data = jsonDecode(message);
-      if (data['type'] == 'login_success' || data['type'] == 'consent_updated') {
-        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => const LobbyScreen()), (r) => false); 
+      if (data['type'] == 'login_success' && !loginDone) {
+        loginDone = true;
+        Future.delayed(const Duration(milliseconds: 300), () {
+          ws.sink.add(jsonEncode({"type": "accept_consent_update"}));
+        });
+      } else if (data['type'] == 'consent_updated') {
+        final updatedProfile = data['profile'] as Map<String, dynamic>? ?? widget.profile ?? {};
+        final tok = widget.token ?? '';
+        final profileWithToken = {...updatedProfile, "token": tok};
+        Widget nextScreen;
+        if (role == 'ADMIN') {
+          nextScreen = AdminDashboardScreen(currentUserProfile: profileWithToken, username: widget.username, password: widget.password);
+        } else if (role == 'COACH') {
+          nextScreen = CoachDashboardScreenV2(currentUserProfile: profileWithToken, username: widget.username, password: widget.password);
+        } else {
+          nextScreen = NeuralInterfaceV2(currentUserProfile: profileWithToken, username: widget.username, password: widget.password);
+        }
+        Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (_) => nextScreen), (r) => false);
+      } else if (data['type'] == 'login_failed') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(data['message']?.toString() ?? 'Login failed. Please try again.'),
+            backgroundColor: Colors.red,
+          ));
+        }
       }
     });
-    // Login first, then accept consent
     ws.sink.add(jsonEncode({
       "type": "login_request",
-      "username": widget.username, 
+      "username": widget.username,
       "password": widget.password,
-      "hardware_id": "WEB_RECONSENT"
+      "expected_role": role,
     }));
-    // After login succeeds, the stream handler above will see login_success
-    // Send consent acceptance right after login
-    Future.delayed(const Duration(milliseconds: 500), () {
-      ws.sink.add(jsonEncode({"type": "accept_consent_update"}));
-    });
   }
 
   
@@ -8156,6 +9014,254 @@ class _ReConsentScreenState extends State<ReConsentScreen> {
           btnText: "I ACCEPT NEW TERMS", 
           onNext: _agreed ? _send : null
         )
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// MODULE 6B: COACH ETHICS & CODE OF CONDUCT GATE
+// =============================================================================
+
+class CoachEthicsScreen extends StatefulWidget {
+  final String username, password;
+  final Map<String, dynamic>? profile;
+  final String? token;
+  const CoachEthicsScreen({super.key, required this.username, required this.password, this.profile, this.token});
+  @override
+  State<CoachEthicsScreen> createState() => _CoachEthicsScreenState();
+}
+
+class _CoachEthicsScreenState extends State<CoachEthicsScreen> {
+  final List<bool> _checks = List.filled(6, false);
+  bool _submitting = false;
+  bool _allChecked = false;
+
+  void _updateCheck(int idx, bool? val) {
+    if (!mounted) return;
+    setState(() {
+      _checks[idx] = val ?? false;
+      _allChecked = _checks.every((c) => c);
+    });
+  }
+
+  void _submit() {
+    if (_submitting || !_allChecked) return;
+    setState(() => _submitting = true);
+
+    final role = widget.profile?['role'] ?? 'COACH';
+    final ws = WebSocketChannel.connect(Uri.parse(defaultWsUrl));
+    bool done = false;
+    bool loginDone = false;
+
+    Future.delayed(const Duration(seconds: 30), () {
+      if (!done && mounted) {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Request timed out. Please try again.')),
+        );
+      }
+    });
+
+    ws.stream.listen((message) {
+      final data = jsonDecode(message);
+      if (data['type'] == 'login_success' && !loginDone) {
+        loginDone = true;
+        Future.delayed(const Duration(milliseconds: 300), () {
+          ws.sink.add(jsonEncode({"type": "accept_coach_ethics"}));
+        });
+      } else if (data['type'] == 'coach_ethics_updated') {
+        done = true;
+        final updatedProfile = data['profile'] as Map<String, dynamic>? ?? widget.profile ?? {};
+        final tok = widget.token ?? '';
+        final profileWithToken = {...updatedProfile, "token": tok};
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (_) => CoachDashboardScreenV2(
+              currentUserProfile: profileWithToken,
+              username: widget.username,
+              password: widget.password,
+            )),
+            (r) => false,
+          );
+        }
+      } else if (data['type'] == 'login_failed') {
+        done = true;
+        if (mounted) {
+          setState(() => _submitting = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(data['message']?.toString() ?? 'Login failed. Please try again.'),
+            backgroundColor: Colors.red,
+          ));
+        }
+      }
+    });
+
+    ws.sink.add(jsonEncode({
+      "type": "login_request",
+      "username": widget.username,
+      "password": widget.password,
+      "expected_role": role,
+    }));
+  }
+
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 24, bottom: 8),
+      child: Text(title,
+        style: const TextStyle(color: Color(0xFFC9A962), fontSize: 18,
+          fontWeight: FontWeight.bold, fontFamily: 'Cormorant Garamond')),
+    );
+  }
+
+  Widget _bodyText(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Text(text,
+        style: const TextStyle(color: Color(0xFFCCCCCC), fontSize: 14, height: 1.6,
+          fontFamily: 'DM Sans')),
+    );
+  }
+
+  Widget _checkbox(int idx, String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 24, height: 24,
+            child: Checkbox(
+              value: _checks[idx],
+              onChanged: (v) => _updateCheck(idx, v),
+              activeColor: const Color(0xFFC9A962),
+              checkColor: const Color(0xFF050505),
+              side: const BorderSide(color: Color(0xFF8B7355)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => _updateCheck(idx, !_checks[idx]),
+              child: Text(label,
+                style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, height: 1.5)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF050505),
+      appBar: AppBar(
+        title: const Text('COACH ETHICS & CODE OF CONDUCT',
+          style: TextStyle(fontFamily: 'Cormorant Garamond', fontSize: 18, letterSpacing: 1.5)),
+        backgroundColor: const Color(0xFF111111),
+        foregroundColor: const Color(0xFFC9A962),
+        automaticallyImplyLeading: false,
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionHeader('A. Professional Ethics'),
+                  _bodyText(
+                    'As a coach utilizing the Sovereign Sanctuary platform, I acknowledge that I am '
+                    'independently responsible for maintaining ethical standards consistent with my '
+                    'professional certification body (e.g., ICF, CCE, NBHWC, or equivalent). I understand '
+                    'that Sovereign Sanctuary does not grant, validate, or replace any professional credential.'
+                  ),
+                  _checkbox(0,
+                    'I confirm I am bound by the ethics and code of conduct of my professional '
+                    'certification body and will maintain active compliance.'
+                  ),
+                  _checkbox(1,
+                    'I understand that my coaching credentials are independent of Sovereign Sanctuary '
+                    'and I am solely responsible for maintaining them.'
+                  ),
+
+                  _sectionHeader('B. Sovereign Sanctuary Code of Conduct'),
+                  _bodyText(
+                    'All client and coachee data encountered on this platform is strictly confidential. '
+                    'You must never extract, download, or transfer platform-generated data including session '
+                    'transcripts, AI insights, coherence metrics, or progress reports.\n\n'
+                    'Clients or coachees who wish to share their history with a departing coach must do so '
+                    'manually and independently. Sovereign Sanctuary will not facilitate or assist in any '
+                    'data transfer to departing coaches.\n\n'
+                    'You agree to maintain professional boundaries in all platform interactions.'
+                  ),
+                  _checkbox(2,
+                    'I accept Sovereign Sanctuary\'s Code of Conduct and will uphold confidentiality, '
+                    'data protection, and professional boundaries.'
+                  ),
+
+                  _sectionHeader('C. Fraud & Intellectual Property Protection'),
+                  _bodyText(
+                    'Any fraudulent activity against the platform, its users, or coachees will result in '
+                    'immediate account freeze pending investigation. During a fraud investigation, the coach '
+                    'waives the right to object to the account freeze and all account data will be inaccessible.\n\n'
+                    'Coaches may retain their client relationships but NO platform data, session history, '
+                    'AI-generated insights, or analytical reports may be taken.\n\n'
+                    'The platform\'s algorithms, data structures, therapeutic methodologies, coherence formulas, '
+                    'and AI training systems are patent-protected intellectual property owned by Sovereign '
+                    'Sanctuary. Unauthorized disclosure or reproduction of proprietary information constitutes '
+                    'IP infringement and is actionable under applicable law.'
+                  ),
+                  _checkbox(3,
+                    'I understand that fraudulent activity will result in immediate account freeze, '
+                    'and I waive the right to contest the freeze during investigation.'
+                  ),
+                  _checkbox(4,
+                    'I acknowledge that all platform algorithms, AI systems, and therapeutic methodologies '
+                    'are proprietary intellectual property protected by patent, and I will not disclose, '
+                    'reproduce, or misappropriate them.'
+                  ),
+
+                  _sectionHeader('D. Final Acknowledgment'),
+                  _checkbox(5,
+                    'I have read, understood, and agree to all sections above. I accept both my professional '
+                    'ethical obligations and Sovereign Sanctuary\'s Code of Conduct, Fraud Policy, and '
+                    'IP Protection terms.'
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              color: Color(0xFF111111),
+              border: Border(top: BorderSide(color: Color(0xFF333333))),
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                onPressed: (_allChecked && !_submitting) ? _submit : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _allChecked ? const Color(0xFFC9A962) : const Color(0xFF333333),
+                  foregroundColor: const Color(0xFF050505),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: _submitting
+                  ? const SizedBox(width: 24, height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF050505)))
+                  : Text(_allChecked ? 'ACCEPT & CONTINUE' : 'REVIEW ALL SECTIONS',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16,
+                        letterSpacing: 1.2)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -8268,15 +9374,19 @@ class SovereignCovenantDoc extends StatelessWidget {
               Text("Sovereign Sanctuary is a Technology Provider, not a Clinic. Coaches are Independent Practitioners. You look solely to the Coach for claims arising from live sessions.", style: TextStyle(color: Colors.amber)),
               SizedBox(height: 15),
               
-              _Header("9. BIOMETRIC DATA & PRIVACY WAIVER"),
-              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. PROCESSING: Data is encrypted and processed by third-party cloud engines (Azure OpenAI).\n3. SOVEREIGNTY: You retain the 'Right to Delete.'", style: TextStyle(color: Colors.white70)),
+              _Header("9. BIOMETRIC DATA & AI DATA SHARING"),
+              Text("1. VIDEO & VOICE: You explicitly consent to the AI analysis of your Voice (Voiceprint) AND Facial Geometry (Video Biometrics).\n2. AI DATA SHARING: Your text messages and voice transcriptions are sent to Microsoft Azure OpenAI Service (a third-party AI provider) to generate AI companion responses. Your data is NOT used to train their AI models. See our Privacy Policy Section 13a for full details.\n3. DATA SENT: Conversation text, session context, and anonymized emotional metrics. PII (name, email, phone) is stripped before transmission.\n4. DATA NOT SENT: Raw audio/video, passwords, payment information.\n5. SOVEREIGNTY: You retain the 'Right to Delete.' You may revoke AI data consent at any time via Settings.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
-              _Header("10. HOLD HARMLESS WAIVER"),
+              _Header("10. YOUR RECORDS ARE YOUR RESPONSIBILITY"),
+              Text("Sovereign Sanctuary is NOT the custodian of your life story. Conversation history and session data has a limited time frame of existence and may be summarized, aged out, or removed during normal operation. If any insight, reflection, or information from your interactions is important to you, it is YOUR responsibility to save and preserve it outside the platform. Use the Data Export feature in Settings regularly. We make no guarantee that any specific conversation or AI-generated insight will remain available indefinitely.", style: TextStyle(color: Colors.white70)),
+              SizedBox(height: 15),
+              
+              _Header("11. HOLD HARMLESS WAIVER"),
               Text("You voluntarily agree to hold the Developers harmless from any claims arising from data breaches, Coach interactions, or AI outputs.", style: TextStyle(color: Colors.white70)),
               SizedBox(height: 15),
               
-              _Header("11. DISPUTE RESOLUTION"),
+              _Header("12. DISPUTE RESOLUTION"),
               Text("BINDING ARBITRATION: You agree that any disputes shall be resolved by binding individual arbitration. You explicitly WAIVE your right to a jury trial or to participate in any CLASS ACTION.", style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
               SizedBox(height: 20),
               _Header("FULL LEGAL AGREEMENT"),

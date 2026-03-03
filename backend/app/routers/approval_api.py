@@ -9,10 +9,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/approval", tags=["Approval Protocol"])
+from app.services.api_server import require_admin
+
+router = APIRouter(prefix="/api/approval", tags=["Approval Protocol"], dependencies=[Depends(require_admin)])
 
 
 # ─── Request Models ──────────────────────────────────────────────────────────

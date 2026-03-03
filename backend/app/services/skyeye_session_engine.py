@@ -23,6 +23,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import settings
+from app.services.skyeye_platform_base import ContentType
 
 logger = logging.getLogger("skyeye.session_engine")
 
@@ -60,7 +61,7 @@ class SkyEyeSessionEngine:
         self._current_session_id: Optional[int] = None
         self._session_actions: List[Dict] = []
         self._session_start: Optional[float] = None
-        self._max_duration_seconds = 900  # 15 minutes default
+        self._max_duration_seconds = 1800  # 30 minutes default
         self._action_count = 0
         self._is_running = False
 
@@ -80,21 +81,27 @@ class SkyEyeSessionEngine:
             logger.warning("Session engine already running")
             return
 
-        # Load settings
         await self._load_settings()
 
-        # Schedule the main session loop
         self.scheduler.add_job(
             self._session_tick,
-            IntervalTrigger(minutes=5),  # Check every 5 minutes
+            IntervalTrigger(minutes=5),
             id="skyeye_session_tick",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+        self.scheduler.add_job(
+            self._engagement_responder_tick,
+            IntervalTrigger(minutes=15),
+            id="skyeye_engagement_responder",
             replace_existing=True,
             max_instances=1,
         )
 
         self.scheduler.start()
         self._is_running = True
-        logger.info("SkyEye Session Engine started")
+        logger.info("SkyEye Session Engine started (+ engagement responder every 15min)")
 
     async def stop(self):
         """Stop the session engine gracefully."""
@@ -152,6 +159,212 @@ class SkyEyeSessionEngine:
             ],
         }
 
+    # ── Engagement Responder (runs independently of sessions) ──────
+
+    async def _engagement_responder_tick(self):
+        """
+        Lightweight loop that runs every 15 minutes, separate from full
+        sessions. Picks up NEW comments from skyeye_notifications that
+        haven't been replied to yet and auto-replies using the content
+        generator. This is the scalable growth engine — it handles
+        thousands of conversations without needing a full session.
+        """
+        if self.is_active:
+            return  # Full session already handling engagement
+
+        try:
+            from app.services.platforms import get_adapter
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+            from app.services.skyeye_monitor import SkyEyeMonitor
+
+            generator = SkyEyeContentGenerator(self.db_pool)
+            monitor = SkyEyeMonitor(self.db_pool)
+
+            unreplied = await self._get_unreplied_comments(limit=20)
+            if not unreplied:
+                return
+
+            replies_sent = 0
+            max_replies_per_tick = 10
+
+            for row in unreplied:
+                if replies_sent >= max_replies_per_tick:
+                    break
+
+                platform = row["platform"]
+                post_id = row["post_id"]
+                actor = row["actor_handle"]
+                comment_text = row["actor_bio"] or ""
+                notif_id = row["id"]
+
+                adapter = get_adapter(platform, self.db_pool)
+                if not adapter:
+                    continue
+
+                try:
+                    authenticated = await adapter.authenticate()
+                    if not authenticated:
+                        continue
+                except Exception:
+                    continue
+
+                social_context = await self._get_social_context(actor, platform)
+
+                reply_data = await generator.generate_reply(
+                    platform=platform,
+                    comment_text=comment_text,
+                    user_handle=actor,
+                    user_context=social_context,
+                )
+
+                if not (reply_data.get("safe") and reply_data.get("content")):
+                    await self._mark_notification_processed(notif_id)
+                    continue
+
+                comments_on_post = await self._safe_adapter_call(
+                    adapter.get_comments, post_id, limit=20
+                )
+
+                comment_id = None
+                for c in comments_on_post:
+                    c_author = getattr(c, "author_handle", "") or ""
+                    if c_author.lower() == actor.lower():
+                        comment_id = getattr(c, "comment_id", None)
+                        break
+
+                if not comment_id:
+                    await self._mark_notification_processed(notif_id)
+                    continue
+
+                already = await self._check_already_replied(platform, comment_id)
+                if already:
+                    await self._mark_notification_processed(notif_id)
+                    continue
+
+                result = await adapter.reply_to_comment(
+                    comment_id, reply_data["content"], post_id=post_id,
+                )
+
+                if result and result.success:
+                    replies_sent += 1
+                    await self._log_social_interaction(
+                        platform, actor,
+                        "reply", reply_data["content"],
+                        comment_text,
+                        comment_id=comment_id,
+                        post_id=post_id,
+                    )
+                    await self._log_engagement_activity(
+                        platform, actor,
+                        comment_text[:100], reply_data["content"][:100],
+                    )
+
+                await self._mark_notification_processed(notif_id)
+
+            if replies_sent > 0:
+                logger.info(
+                    f"Engagement responder: {replies_sent} autonomous replies "
+                    f"sent across {len(set(r['platform'] for r in unreplied))} platforms"
+                )
+
+        except Exception as e:
+            logger.warning(f"Engagement responder tick error: {e}")
+
+    async def _get_unreplied_comments(self, limit: int = 20) -> list:
+        """Fetch comment/reply notifications that haven't been responded to."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT n.id, n.platform, n.post_id, n.actor_handle,
+                           n.actor_bio, n.created_at
+                    FROM skyeye_notifications n
+                    WHERE n.notification_type IN ('comment', 'reply')
+                      AND n.processed = FALSE
+                      AND n.created_at > NOW() - INTERVAL '48 hours'
+                      AND n.actor_handle NOT IN (
+                          'littlenate', 'little_nate', 'littlenatetheog',
+                          'little nate the og'
+                      )
+                    ORDER BY n.created_at ASC
+                    LIMIT $1
+                """, limit)
+                return rows
+        except Exception as e:
+            logger.warning(f"Engagement responder: unreplied query error: {e}")
+            return []
+
+    async def _mark_notification_processed(self, notif_id: int):
+        """Mark a notification as processed so we don't re-attempt it."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE skyeye_notifications SET processed = TRUE
+                    WHERE id = $1
+                """, notif_id)
+        except Exception:
+            pass
+
+    async def _log_engagement_activity(self, platform: str, actor: str,
+                                        comment_snippet: str, reply_snippet: str):
+        """Record an autonomous engagement reply in the activity log."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO skyeye_activity
+                        (type, platform, content, metadata, created_at)
+                    VALUES ('autonomous_reply', $1, $2, $3::jsonb, NOW())
+                """, platform,
+                    f"Replied to @{actor}: {reply_snippet}",
+                    json.dumps({
+                        "actor": actor,
+                        "comment": comment_snippet,
+                        "reply": reply_snippet,
+                    }))
+        except Exception:
+            pass
+
+    async def _safe_adapter_call(self, fn, *args, **kwargs):
+        """Call an adapter method safely, return empty list on error."""
+        try:
+            return await fn(*args, **kwargs)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _extract_interest_signals(text: str) -> list:
+        """Extract topic signals from a user's comment for social memory."""
+        if not text or len(text) < 10:
+            return []
+        text_lower = text.lower()
+        topics = {
+            "therapy": ["therapy", "therapist", "counseling", "counselor"],
+            "mental_health": ["mental health", "anxiety", "depression", "ptsd",
+                              "trauma", "wellness", "self-care", "burnout"],
+            "ai": ["ai", "artificial intelligence", "machine learning",
+                    "chatbot", "language model"],
+            "parenting": ["parent", "child", "kid", "family", "mom", "dad",
+                          "daughter", "son"],
+            "relationships": ["relationship", "partner", "spouse", "marriage",
+                              "dating", "couple"],
+            "coaching": ["coach", "coaching", "mentor", "mentoring",
+                         "supervision"],
+            "faith": ["faith", "prayer", "spiritual", "church", "god",
+                       "believe"],
+            "leadership": ["leader", "leadership", "management", "team",
+                           "executive"],
+            "education": ["school", "student", "teacher", "learning",
+                          "university", "research"],
+            "health": ["health", "exercise", "fitness", "nutrition",
+                       "sleep", "meditation"],
+        }
+        found = []
+        for topic, keywords in topics.items():
+            for kw in keywords:
+                if kw in text_lower:
+                    found.append(topic)
+                    break
+        return found[:5]
+
     # ── Session Tick (Scheduler) ────────────────────────────────────
 
     async def _session_tick(self):
@@ -190,14 +403,22 @@ class SkyEyeSessionEngine:
                     if datetime.now(timezone.utc) < cooldown_until:
                         return False
 
+                # Enforce daily session cap
+                today_count = await conn.fetchval("""
+                    SELECT COUNT(*) FROM skyeye_sessions
+                    WHERE status = 'completed'
+                      AND session_start >= (CURRENT_DATE AT TIME ZONE 'UTC')
+                """)
+                max_daily = await self._get_setting("max_sessions_per_day", 3)
+                if today_count >= max_daily:
+                    return False
+
                 # Check if any platform is due for a session
-                # (simplified — full implementation would check per-platform schedules)
                 platforms = await conn.fetch("""
                     SELECT name FROM skyeye_platforms
                     WHERE enabled = TRUE AND control_mode != 'observation'
                 """)
 
-                # If there are active platforms, we should run
                 return len(platforms) > 0
 
         except Exception as e:
@@ -260,7 +481,9 @@ class SkyEyeSessionEngine:
                 await self._browse_phase(platform_name, adapter)
                 await self._sync_platform_stats(platform_name, adapter)
                 await self._observe_phase(platform_name, adapter, monitor)
+                await self._react_phase(platform_name, adapter, generator)
                 await self._engage_phase(platform_name, adapter, generator, monitor)
+                await self._outreach_phase(platform_name, adapter, generator, monitor)
                 await self._route_engaged_users(platform_name, funnel_router)
                 await self._create_phase(platform_name, adapter, generator)
                 await self._post_phase(platform_name, adapter, generator)
@@ -368,7 +591,7 @@ class SkyEyeSessionEngine:
                 }
             )
         except Exception as e:
-            logger.debug(f"Stats sync skipped for {platform}: {e}")
+            logger.warning(f"Stats sync skipped for {platform}: {e}")
 
     async def _observe_phase(self, platform: str, adapter, monitor):
         """Check comments and mentions on recent posts."""
@@ -626,6 +849,135 @@ class SkyEyeSessionEngine:
         except Exception:
             return None
 
+    async def _react_phase(self, platform: str, adapter, generator):
+        """Process notifications from the Notification Observer: thank followers,
+        reciprocal-like high-value engagers, update social memory for funnel."""
+        if self._is_session_expired():
+            return
+
+        max_dms = 5
+        max_reciprocal_likes = 10
+        dms_sent = 0
+        likes_done = 0
+
+        therapy_keywords = {
+            "therapy", "therapist", "mental health", "counseling",
+            "psycholog", "wellness", "mindful", "healing", "coach",
+            "self care", "growth", "transform",
+        }
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                notifications = await conn.fetch("""
+                    SELECT id, notification_type, post_id, actor_handle,
+                           actor_id, actor_bio, actor_followers
+                    FROM skyeye_notifications
+                    WHERE platform = $1 AND processed = FALSE
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """, platform)
+
+                if not notifications:
+                    return
+
+                processed_ids = []
+
+                for n in notifications:
+                    if self._is_session_expired():
+                        break
+
+                    n_type = n["notification_type"]
+                    handle = n["actor_handle"]
+                    bio = n["actor_bio"] or ""
+                    followers = n["actor_followers"] or 0
+
+                    if n_type in ("comment", "reply"):
+                        continue
+
+                    await conn.execute("""
+                        INSERT INTO skyeye_social_memory
+                            (platform_handle, platform, interaction_count,
+                             last_interaction, created_at)
+                        VALUES ($1, $2, 1, NOW(), NOW())
+                        ON CONFLICT (platform_handle, platform) DO UPDATE SET
+                            interaction_count = skyeye_social_memory.interaction_count + 1,
+                            last_interaction = NOW()
+                    """, handle, platform)
+
+                    if n_type == "new_follower":
+                        bio_lower = bio.lower()
+                        is_relevant = any(k in bio_lower for k in therapy_keywords)
+                        send_dm_fn = getattr(adapter, "send_dm", None)
+
+                        if (is_relevant and send_dm_fn and dms_sent < max_dms
+                                and platform == "x" and n.get("actor_id")):
+                            reply_data = await generator.generate_reply(
+                                platform,
+                                "New follower welcome",
+                                handle,
+                                {"interests": bio[:200], "tone_notes": "warm, brief welcome"},
+                            )
+                            if reply_data.get("safe") and reply_data.get("content"):
+                                ok = await send_dm_fn(n["actor_id"], reply_data["content"])
+                                if ok:
+                                    dms_sent += 1
+                                    await self._log_social_interaction(
+                                        platform, handle,
+                                        "follower_welcome", reply_data["content"], "",
+                                    )
+                                    await self._log_action(
+                                        platform, SessionState.ENGAGING, "follower_dm",
+                                        target_user=handle,
+                                        detail={"summary": f"Welcomed new follower @{handle}"},
+                                    )
+
+                    elif n_type in ("like", "repost", "reaction"):
+                        like_fn = getattr(adapter, "like_tweet", None)
+                        is_high_value = followers > 500
+                        already_liked = await self._check_social_memory(
+                            platform, handle, "reciprocal_like"
+                        )
+
+                        if (like_fn and is_high_value and not already_liked
+                                and likes_done < max_reciprocal_likes and platform == "x"):
+                            search_fn = getattr(adapter, "search_tweets", None)
+                            if search_fn:
+                                their_posts = await search_fn(
+                                    f"from:{handle}", limit=1,
+                                    since=datetime.now(timezone.utc) - timedelta(hours=48),
+                                )
+                                if their_posts:
+                                    ok = await like_fn(their_posts[0].item_id)
+                                    if ok:
+                                        likes_done += 1
+                                        await self._log_social_interaction(
+                                            platform, handle,
+                                            "reciprocal_like", "", "",
+                                        )
+
+                    processed_ids.append(n["id"])
+
+                if processed_ids:
+                    await conn.execute("""
+                        UPDATE skyeye_notifications SET processed = TRUE
+                        WHERE id = ANY($1::int[])
+                    """, processed_ids)
+
+                if dms_sent > 0 or likes_done > 0:
+                    await self._log_action(
+                        platform, SessionState.ENGAGING, "react_summary",
+                        detail={
+                            "summary": (
+                                f"Reacted to {len(processed_ids)} notifications: "
+                                f"{dms_sent} welcome DMs, {likes_done} reciprocal likes"
+                            ),
+                            "total_processed": len(processed_ids),
+                        },
+                    )
+
+        except Exception as e:
+            logger.warning(f"React phase error on {platform}: {e}")
+
     async def _engage_phase(self, platform: str, adapter, generator, monitor):
         """Engage with comments — reply to safe, interesting ones."""
         if self._is_session_expired():
@@ -650,16 +1002,22 @@ class SkyEyeSessionEngine:
                     if replies_sent >= max_replies or self._is_session_expired():
                         break
 
-                    # Skip own comments
-                    if comment.author_handle.lower() in ("littlenate", "little_nate"):
+                    if comment.author_handle.lower() in (
+                        "littlenate", "little_nate", "littlenatetheog",
+                        "little nate the og",
+                    ):
                         continue
 
-                    # Scan for threats first
+                    already_replied = await self._check_already_replied(
+                        platform, comment.comment_id
+                    )
+                    if already_replied:
+                        continue
+
                     scan = await monitor.scan_comment(comment)
                     if scan["threat_type"] != "safe":
-                        continue  # Threats handled by monitor, don't reply
+                        continue
 
-                    # Check social memory for this user
                     social_context = await self._get_social_context(
                         comment.author_handle, platform
                     )
@@ -688,21 +1046,220 @@ class SkyEyeSessionEngine:
                                     "summary": f"Replied to @{comment.author_handle}",
                                     "comment": comment.text[:100],
                                     "reply": reply_data["content"][:100],
+                                    "comment_id": comment.comment_id,
+                                    "post_id": post.item_id,
                                 }
                             )
 
-                            # Log social interaction
                             await self._log_social_interaction(
                                 platform, comment.author_handle,
                                 "reply", reply_data["content"],
                                 comment.text,
+                                comment_id=comment.comment_id,
+                                post_id=post.item_id,
                             )
+
+            # Tier 1: Reply to @mentions (separate from own-post comments)
+            try:
+                since = datetime.now(timezone.utc) - timedelta(hours=4)
+                mentions = await adapter.get_mentions(since=since, limit=10)
+                for m in mentions:
+                    if replies_sent >= max_replies or self._is_session_expired():
+                        break
+                    if m.author_handle.lower() in ("littlenate", "little_nate"):
+                        continue
+                    social_ctx = await self._get_social_context(
+                        m.author_handle, platform
+                    )
+                    reply_data = await generator.generate_reply(
+                        platform=platform,
+                        comment_text=m.text,
+                        user_handle=m.author_handle,
+                        user_context=social_ctx,
+                    )
+                    if reply_data.get("safe") and reply_data.get("content"):
+                        result = await adapter.reply_to_comment(
+                            m.mention_id, reply_data["content"]
+                        )
+                        if result and result.success:
+                            replies_sent += 1
+                            await self._log_action(
+                                platform, SessionState.ENGAGING, "reply_mention",
+                                target_user=m.author_handle,
+                                detail={
+                                    "summary": f"Replied to @mention from {m.author_handle}",
+                                    "mention": m.text[:100],
+                                    "reply": reply_data["content"][:100],
+                                    "comment_id": m.mention_id,
+                                }
+                            )
+                            await self._log_social_interaction(
+                                platform, m.author_handle,
+                                "reply_mention", reply_data["content"],
+                                m.text,
+                                comment_id=m.mention_id,
+                            )
+            except Exception as e:
+                logger.warning(f"Mention-reply error on {platform}: {e}")
 
             if replies_sent > 0:
                 logger.info(f"Engagement on {platform}: {replies_sent} replies sent")
 
         except Exception as e:
             logger.warning(f"Engage phase error on {platform}: {e}")
+
+    async def _outreach_phase(self, platform: str, adapter, generator, monitor):
+        """Tier 2 autonomous engagement: like, follow, quote-tweet relevant content."""
+        if self._is_session_expired():
+            return
+
+        try:
+            max_likes = 5
+            max_follows = 3
+            likes_done = 0
+            follows_done = 0
+            quote_done = False
+
+            # Search for relevant content
+            search_fn = getattr(adapter, "search_tweets", None)
+            if not search_fn:
+                return
+
+            since = datetime.now(timezone.utc) - timedelta(hours=12)
+            results = await search_fn(
+                "mental health OR therapy OR wellness OR self care",
+                limit=15, since=since,
+            )
+            if not results:
+                return
+
+            best_for_quote = None
+            best_engagement = 0
+
+            for item in results:
+                if self._is_session_expired():
+                    break
+
+                # Like relevant posts
+                like_fn = getattr(adapter, "like_tweet", None)
+                if like_fn and likes_done < max_likes:
+                    ok = await like_fn(item.item_id)
+                    if ok:
+                        likes_done += 1
+                        await self._log_action(
+                            platform, SessionState.ENGAGING, "like",
+                            detail={
+                                "summary": f"Liked post by @{item.author_handle}",
+                                "tweet_id": item.item_id,
+                            }
+                        )
+
+                # Track best candidate for quote tweet
+                engagement = (item.like_count or 0) + (item.comment_count or 0) * 3
+                if engagement > best_engagement:
+                    best_engagement = engagement
+                    best_for_quote = item
+
+                # Follow relevant accounts
+                follow_fn = getattr(adapter, "follow_user", None)
+                if (follow_fn and follows_done < max_follows and
+                        item.raw_data and item.raw_data.get("_author", {}).get("description", "")):
+                    bio = item.raw_data["_author"]["description"].lower()
+                    therapy_keywords = {"therapy", "therapist", "mental health", "counseling",
+                                        "psycholog", "wellness", "mindful", "healing"}
+                    if any(k in bio for k in therapy_keywords):
+                        author_id = item.raw_data.get("author_id", "")
+                        if author_id:
+                            already = await self._check_social_memory(
+                                platform, item.author_handle, "follow"
+                            )
+                            if not already:
+                                ok = await follow_fn(author_id)
+                                if ok:
+                                    follows_done += 1
+                                    await self._log_action(
+                                        platform, SessionState.ENGAGING, "follow",
+                                        target_user=item.author_handle,
+                                        detail={
+                                            "summary": f"Followed @{item.author_handle}",
+                                            "user_id": author_id,
+                                        }
+                                    )
+                                    await self._log_social_interaction(
+                                        platform, item.author_handle,
+                                        "follow", "", bio,
+                                    )
+
+            # Quote tweet the best candidate (max 1 per session)
+            if best_for_quote and not quote_done and not self._is_session_expired():
+                try:
+                    reply_data = await generator.generate_reply(
+                        platform=platform,
+                        comment_text=best_for_quote.text,
+                        user_handle=best_for_quote.author_handle,
+                        user_context={"interaction_type": "quote_tweet"},
+                    )
+                    if reply_data.get("safe") and reply_data.get("content"):
+                        enriched = await self._append_hashtags(
+                            platform, reply_data["content"]
+                        )
+                        qt_text = f"{enriched}\n\nhttps://x.com/i/status/{best_for_quote.item_id}"
+                        result = await adapter.post_content(qt_text, content_type=ContentType.TEXT)
+                        if result and result.success:
+                            quote_done = True
+                            await self._log_action(
+                                platform, SessionState.ENGAGING, "quote_tweet",
+                                target_user=best_for_quote.author_handle,
+                                detail={
+                                    "summary": f"Quote-tweeted @{best_for_quote.author_handle}",
+                                    "source_tweet": best_for_quote.item_id,
+                                }
+                            )
+                except Exception as e:
+                    logger.warning(f"Quote tweet error: {e}")
+
+            # Tier 3: check for DM-worthy users and create approval requests
+            try:
+                dm_candidates = [
+                    item for item in results
+                    if item.raw_data and item.raw_data.get("_author", {}).get("description", "")
+                    and any(k in item.raw_data["_author"]["description"].lower()
+                            for k in ("therapist", "counselor", "psychologist", "mental health pro"))
+                ]
+                for candidate in dm_candidates[:2]:
+                    author = candidate.raw_data.get("_author", {})
+                    author_id = candidate.raw_data.get("author_id", "")
+                    if not author_id:
+                        continue
+                    already_requested = await self._check_engagement_request(
+                        platform, author_id
+                    )
+                    if already_requested:
+                        continue
+                    welcome_msg = (
+                        f"Hi @{candidate.author_handle}, I'm Little Nate — an AI companion "
+                        f"focused on mental health support. I noticed your work in this space "
+                        f"and would love to connect. Feel free to check out sovereignsanctuary.net"
+                    )
+                    await self._create_engagement_request(
+                        platform=platform,
+                        action_type="dm",
+                        target_user=f"@{candidate.author_handle}",
+                        target_user_id=author_id,
+                        content_preview=welcome_msg,
+                        reason=f"Mental health professional found via search. Bio: {author.get('description', '')[:150]}",
+                        context={"bio": author.get("description", ""), "tweet": candidate.text[:200]},
+                    )
+            except Exception as e:
+                logger.warning(f"Tier 3 DM candidate scan error: {e}")
+
+            logger.info(
+                f"Outreach on {platform}: {likes_done} likes, "
+                f"{follows_done} follows, quote={'yes' if quote_done else 'no'}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Outreach phase error on {platform}: {e}")
 
     async def _create_phase(self, platform: str, adapter, generator):
         """Generate new content for this platform."""
@@ -715,6 +1272,11 @@ class SkyEyeSessionEngine:
             control_mode = await self._get_platform_mode(platform)
             if control_mode == "observation":
                 return  # Observation only — don't create content
+
+            # Skip content creation if platform has persistent posting failures
+            if await self._has_persistent_failures(platform):
+                logger.info(f"Create phase skipped for {platform}: persistent posting failures detected")
+                return
 
             # Check if there are approved expressions waiting to be posted
             from app.services.skyeye_expressions import SkyEyeExpressionsService
@@ -762,32 +1324,50 @@ class SkyEyeSessionEngine:
                 except Exception:
                     pass
 
+                # Query LRI signals for drift-correction context
+                gen_context = {"recent_posts": recent_texts}
+                voice_correction = await self._get_voice_correction_context()
+                if voice_correction:
+                    gen_context["voice_correction"] = voice_correction
+
+                # For X: every 3rd post is a long-form article (4000 chars)
+                gen_platform = platform
+                if platform == "x":
+                    total_x = await self._get_recent_post_count("x", hours=72)
+                    if total_x > 0 and total_x % 3 == 0:
+                        gen_platform = "x_article"
+
                 try:
                     post_data = await generator.generate_strategic_post(
-                        platform=platform,
-                        context={"recent_posts": recent_texts}
+                        platform=gen_platform,
+                        context=gen_context,
                     )
                 except Exception:
                     post_data = await generator.generate_post(
-                        platform=platform,
+                        platform=gen_platform,
                         topic="Something meaningful from today — your choice. "
                               "Draw from your lived experience with real people.",
-                        context={"recent_posts": recent_texts}
+                        context=gen_context,
                     )
 
+                is_article = gen_platform == "x_article"
                 if post_data.get("safe") and post_data.get("content"):
+                    enriched = await self._append_hashtags(
+                        platform, post_data["content"]
+                    ) if not is_article else post_data["content"]
                     queue_id = await generator.queue_content(
-                        platform=platform,
-                        content=post_data["content"],
-                        content_type="post",
+                        platform=gen_platform,
+                        content=enriched,
+                        content_type="article" if is_article else "post",
                         generated_by="session_engine",
                     )
 
+                    action_label = "create_article" if is_article else "create_post"
                     if queue_id:
                         await self._log_action(
-                            platform, SessionState.CREATING, "create_post",
+                            platform, SessionState.CREATING, action_label,
                             detail={
-                                "summary": f"Generated new post (queue #{queue_id})",
+                                "summary": f"Generated {'article' if is_article else 'post'} (queue #{queue_id})",
                                 "queue_id": queue_id,
                             }
                         )
@@ -811,7 +1391,7 @@ class SkyEyeSessionEngine:
                 status_filter = "draft"
 
             queue_items = await generator.get_queue(
-                status=status_filter, platform=platform, limit=3,
+                status=status_filter, platform=platform, limit=1,
                 respect_schedule=True,
             )
 
@@ -825,11 +1405,15 @@ class SkyEyeSessionEngine:
 
                 content_text = item.get("content_text", "")
                 media_url = item.get("media_url")
+                ct = item.get("content_type", "post")
 
-                # Post to platform
+                from app.services.skyeye_platform_base import ContentType
+                post_ct = ContentType.ARTICLE if ct == "article" else ContentType.POST
+
                 result = await adapter.post_content(
                     text=content_text,
                     media_url=media_url,
+                    content_type=post_ct,
                 )
 
                 if result.success:
@@ -1207,6 +1791,31 @@ class SkyEyeSessionEngine:
         except Exception:
             return "observation"
 
+    PERSISTENT_FAILURE_THRESHOLD = 5
+
+    async def _has_persistent_failures(self, platform: str) -> bool:
+        """Check if a platform has repeated identical failures in the last 24h.
+        Returns True if content creation should be skipped."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT COUNT(*) as fail_count,
+                           COUNT(DISTINCT LEFT(error_message, 80)) as distinct_errors
+                    FROM skyeye_content_queue
+                    WHERE platform = $1
+                      AND status = 'failed'
+                      AND updated_at > NOW() - INTERVAL '24 hours'
+                """, platform)
+                if not row:
+                    return False
+                fail_count = row["fail_count"]
+                distinct_errors = row["distinct_errors"]
+                if fail_count >= self.PERSISTENT_FAILURE_THRESHOLD and distinct_errors <= 2:
+                    return True
+        except Exception:
+            pass
+        return False
+
     async def _get_setting(self, key: str, default: int = 0,
                             platform: Optional[str] = None) -> int:
         """Get a setting value from skyeye_settings."""
@@ -1254,31 +1863,129 @@ class SkyEyeSessionEngine:
 
     async def _log_social_interaction(self, platform: str, handle: str,
                                        interaction_type: str,
-                                       nate_message: str, user_message: str):
+                                       nate_message: str, user_message: str,
+                                       comment_id: str = None,
+                                       post_id: str = None):
         """Log a social interaction and update social memory."""
+        import json as _json
         try:
+            meta = {}
+            if comment_id:
+                meta["comment_id"] = comment_id
+            if post_id:
+                meta["post_id"] = post_id
+            meta_str = _json.dumps(meta) if meta else "{}"
+
             async with self.db_pool.acquire() as conn:
-                # Log interaction
                 await conn.execute("""
                     INSERT INTO skyeye_social_interactions
                         (platform, platform_handle, interaction_type,
-                         nate_message, user_message, created_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW())
+                         nate_message, user_message, metadata, created_at)
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
                 """, platform, handle, interaction_type,
-                     nate_message[:1000], user_message[:1000])
+                     nate_message[:1000], user_message[:1000], meta_str)
 
-                # Update or create social memory
-                await conn.execute("""
-                    INSERT INTO skyeye_social_memory
-                        (platform_handle, platform, interaction_count,
-                         last_interaction, created_at)
-                    VALUES ($1, $2, 1, NOW(), NOW())
-                    ON CONFLICT (platform_handle, platform) DO UPDATE SET
-                        interaction_count = skyeye_social_memory.interaction_count + 1,
-                        last_interaction = NOW()
-                """, handle, platform)
+                interest_keywords = self._extract_interest_signals(user_message)
+                if interest_keywords:
+                    await conn.execute("""
+                        INSERT INTO skyeye_social_memory
+                            (platform_handle, platform, interaction_count,
+                             interests, last_interaction, created_at)
+                        VALUES ($1, $2, 1, $3, NOW(), NOW())
+                        ON CONFLICT (platform_handle, platform) DO UPDATE SET
+                            interaction_count = skyeye_social_memory.interaction_count + 1,
+                            interests = (
+                                SELECT ARRAY(SELECT DISTINCT unnest(
+                                    skyeye_social_memory.interests || $3
+                                ))
+                            ),
+                            last_interaction = NOW()
+                    """, handle, platform, interest_keywords)
+                else:
+                    await conn.execute("""
+                        INSERT INTO skyeye_social_memory
+                            (platform_handle, platform, interaction_count,
+                             last_interaction, created_at)
+                        VALUES ($1, $2, 1, NOW(), NOW())
+                        ON CONFLICT (platform_handle, platform) DO UPDATE SET
+                            interaction_count = skyeye_social_memory.interaction_count + 1,
+                            last_interaction = NOW()
+                    """, handle, platform)
         except Exception as e:
             logger.debug(f"Failed to log social interaction: {e}")
+
+    async def _get_voice_correction_context(self) -> Optional[str]:
+        """Query LRI signals from liminal_presence_analysis and build
+        drift-correction instructions for the content generator."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT DISTINCT ON (agent) agent, signal, detail, metadata
+                    FROM liminal_presence_analysis
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    ORDER BY agent, created_at DESC
+                """)
+            if not rows:
+                return None
+
+            signals = {}
+            for r in rows:
+                signals[r["agent"]] = {
+                    "signal": r["signal"],
+                    "detail": r["detail"] or "",
+                    "metadata": r["metadata"] if isinstance(r["metadata"], dict) else {},
+                }
+
+            parts = []
+            drift = signals.get("language_drift", {})
+            drift_signal = drift.get("signal", "GREEN")
+            if drift_signal in ("RED", "YELLOW"):
+                meta = drift.get("metadata", {})
+                dims = meta.get("dimensions", {})
+                elevated = [
+                    d for d, v in dims.items()
+                    if isinstance(v, (int, float)) and v > 0.3
+                ]
+                dim_str = ", ".join(elevated) if elevated else "overall voice drift"
+                parts.append(
+                    f"VOICE CORRECTION ACTIVE: Your Language Drift Monitor detected "
+                    f"{drift_signal} — elevated {dim_str}. "
+                    f"Reduce these patterns in this post. "
+                    f"Write simpler, shorter, more relational content."
+                )
+
+            field = signals.get("field_response", {})
+            field_meta = field.get("metadata", {})
+            if field_meta.get("authority_alert"):
+                parts.append(
+                    "AUTHORITY ALERT: Audience members are projecting authority "
+                    "onto you. This post must be non-authoritative and peer-level."
+                )
+
+            if not parts:
+                return None
+
+            correction = "\n".join(parts)
+
+            # Log that voice correction was applied
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO skyeye_activity (type, platform, content, created_at)
+                        VALUES ('voice_correction_applied', 'system',
+                                $1::jsonb, NOW())
+                    """, json.dumps({
+                        "drift_signal": drift_signal,
+                        "field_signal": field.get("signal", "GREEN"),
+                        "correction": correction[:500],
+                    }))
+            except Exception as e:
+                logger.debug(f"Failed to log voice correction event: {e}")
+
+            return correction
+        except Exception as e:
+            logger.debug(f"LRI context unavailable: {e}")
+            return None
 
     async def _get_recent_post_count(self, platform: str, hours: int = 12) -> int:
         """Count recently posted items on this platform."""
@@ -1307,3 +2014,141 @@ class SkyEyeSessionEngine:
                     """, self._current_session_id, status)
         except Exception as e:
             logger.error(f"Failed to update session status: {e}")
+
+    # ── Tier 1: Hashtag Enrichment ───────────────────────────────────
+
+    HASHTAG_POOLS = {
+        "general": [
+            "#MentalHealth", "#Therapy", "#Wellness", "#SelfCare",
+            "#MentalHealthMatters", "#TherapyWorks", "#Healing",
+            "#MindfulLiving", "#EmotionalHealth", "#AITherapy",
+        ],
+        "ai": [
+            "#AICompanion", "#AITherapy", "#TechForGood",
+            "#MentalHealthTech", "#DigitalWellness",
+        ],
+        "community": [
+            "#YouAreNotAlone", "#EndTheStigma", "#BreakTheSilence",
+            "#MentalHealthAwareness", "#SovereignSanctuary",
+        ],
+    }
+
+    async def _append_hashtags(self, platform: str, content: str,
+                                count: int = 4) -> str:
+        """Append contextually relevant hashtags to post content."""
+        import random
+        if platform in ("linkedin",):
+            count = min(count, 3)
+
+        existing_tags = {w.lower() for w in content.split() if w.startswith("#")}
+
+        pool = list(self.HASHTAG_POOLS["general"])
+        lower_content = content.lower()
+        if any(k in lower_content for k in ("ai", "tech", "digital", "nate")):
+            pool.extend(self.HASHTAG_POOLS["ai"])
+        if any(k in lower_content for k in ("community", "together", "support", "stigma")):
+            pool.extend(self.HASHTAG_POOLS["community"])
+
+        candidates = [t for t in pool if t.lower() not in existing_tags]
+        random.shuffle(candidates)
+        chosen = candidates[:count]
+        if not chosen:
+            return content
+        return f"{content}\n\n{' '.join(chosen)}"
+
+    # ── Tier 3: Engagement Request Helpers ───────────────────────────
+
+    async def _create_engagement_request(
+        self, platform: str, action_type: str, target_user: str,
+        content_preview: str, target_user_id: str = None,
+        reason: str = None, context: Dict = None,
+    ) -> Optional[int]:
+        """Insert a Tier 3 engagement request and notify via Big Nate Chat."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    INSERT INTO engagement_requests
+                        (platform, action_type, target_user, target_user_id,
+                         content_preview, reason, context, session_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    RETURNING id
+                """, platform, action_type, target_user, target_user_id,
+                     content_preview, reason,
+                     json.dumps(context) if context else None,
+                     self._current_session_id)
+
+                request_id = row["id"] if row else None
+
+                if request_id:
+                    pending_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM engagement_requests WHERE status = 'pending'"
+                    )
+                    await self._notify_tier3_request(pending_count)
+
+                return request_id
+        except Exception as e:
+            logger.warning(f"Failed to create engagement request: {e}")
+            return None
+
+    async def _notify_tier3_request(self, count: int):
+        """Post a notification to Big Nate Chat about pending requests."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO skyeye_chat (sender, message, metadata)
+                    VALUES ('little_nate', $1, $2)
+                """,
+                    f"I have {count} engagement request(s) waiting for your review. "
+                    f"Check the Engagement Requests tab when you get a chance.",
+                    json.dumps({"mode": "admin", "tier3_pending": True, "count": count})
+                )
+        except Exception as e:
+            logger.debug(f"Failed to notify about tier 3 request: {e}")
+
+    async def _check_engagement_request(self, platform: str,
+                                         target_user_id: str) -> bool:
+        """Check if an engagement request already exists for this user."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchval("""
+                    SELECT 1 FROM engagement_requests
+                    WHERE platform = $1 AND target_user_id = $2
+                      AND status IN ('pending', 'approved')
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    LIMIT 1
+                """, platform, target_user_id)
+                return row is not None
+        except Exception:
+            return False
+
+    async def _check_social_memory(self, platform: str, handle: str,
+                                    interaction_type: str) -> bool:
+        """Check if we've already done this interaction with this user."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchval("""
+                    SELECT 1 FROM skyeye_social_interactions
+                    WHERE platform = $1 AND platform_handle = $2
+                      AND interaction_type = $3
+                    LIMIT 1
+                """, platform, handle, interaction_type)
+                return row is not None
+        except Exception:
+            return False
+
+    async def _check_already_replied(self, platform: str, comment_id: str) -> bool:
+        """Check if Nate already replied to this specific comment."""
+        if not comment_id:
+            return False
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchval("""
+                    SELECT 1 FROM skyeye_social_interactions
+                    WHERE platform = $1
+                      AND interaction_type IN ('reply', 'reply_mention')
+                      AND metadata->>'comment_id' = $2
+                    LIMIT 1
+                """, platform, comment_id)
+                return row is not None
+        except Exception:
+            return False

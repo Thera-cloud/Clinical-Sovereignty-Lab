@@ -19,8 +19,13 @@ _logger = logging.getLogger("tier_enforcement")
 
 TIER_LEVELS = {
     "threshold": 0,       # Free trial
+    "trial": 0,           # Alias
+    "coach_only": 0,      # Alias
     "inner_chamber": 1,   # $49/mo
+    "standard": 1,        # Alias
     "sovereign_circle": 2,  # $149/mo
+    "top_tier": 2,        # Alias
+    "top": 2,             # Alias
 }
 
 # Feature limits per tier (monthly)
@@ -61,6 +66,21 @@ TIER_LIMITS: Dict[str, Dict[str, Any]] = {
 }
 
 
+_TIER_LIMIT_ALIAS = {
+    "standard": "inner_chamber",
+    "top_tier": "sovereign_circle",
+    "top": "sovereign_circle",
+    "trial": "threshold",
+    "coach_only": "threshold",
+}
+
+
+def _resolve_tier_key(tier: str) -> str:
+    """Map any tier alias to its TIER_LIMITS key."""
+    key = tier.lower().replace(" ", "_")
+    return _TIER_LIMIT_ALIAS.get(key, key)
+
+
 class TierEnforcement:
     """Server-side tier gating for API endpoints."""
 
@@ -70,7 +90,7 @@ class TierEnforcement:
         Decorator: require the user to be at least `minimum_tier`.
         Must be used on endpoints that receive `user` from Depends(get_current_user).
         """
-        min_level = TIER_LEVELS.get(minimum_tier, 0)
+        min_level = TIER_LEVELS.get(minimum_tier.lower().replace(" ", "_"), 0)
 
         def decorator(func):
             @functools.wraps(func)
@@ -100,7 +120,7 @@ class TierEnforcement:
     @staticmethod
     def get_limit(tier: str, feature: str) -> int:
         """Get the limit for a specific feature at a given tier. -1 means unlimited."""
-        tier_key = tier.lower().replace(" ", "_")
+        tier_key = _resolve_tier_key(tier)
         limits = TIER_LIMITS.get(tier_key, TIER_LIMITS["threshold"])
         return limits.get(feature, 0)
 

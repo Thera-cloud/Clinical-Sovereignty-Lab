@@ -1,0 +1,103 @@
+# Sentinel False Positive Prevention
+
+## The Problem (Mar 2026 Incident)
+
+The Sentinel's `_SENTINEL_SKIP` frozenset in `bridge_server.py` was missing ~45 read-only message types. When the admin had multiple dashboard tabs open, auto-refresh polling (get_metrics, get_dojo_subscriptions, classroom_get_sessions, etc.) accumulated in the 5-minute rate window. At 227.7 actions/min vs the 2.5/min baseline, each message added +25 to the cumulative session score, causing a false freeze within minutes.
+
+Additionally, Comcast rotated Nathan's IP address, so the new IP was scored as "Unknown IP: +40" on every action.
+
+## Rule 1: Every New Read-Only Handler Must Be Added to `_SENTINEL_SKIP`
+
+When adding a new WebSocket message handler to `bridge_server.py`, if the handler only reads data (no writes, no state changes, no account mutations), add its message type string to `_SENTINEL_SKIP`.
+
+The skip set is organized by category:
+- Auth & lifecycle
+- WebAuthn / MFA
+- Conversational / AI
+- Admin data-fetch (dashboard auto-refresh)
+- Client / generic data-fetch
+- Coach data-fetch
+- Coach mesh / hierarchy
+- Nevedal research (passive reads)
+- Classroom (coaching tools)
+
+**Only these action types should remain SCORED** (not in skip list):
+- `admin_approve_coach`, `admin_reject_coach` — coach approval
+- `admin_approve_upgrade`, `admin_reject_upgrade` — tier changes
+- `admin_approve_corp_admin`, `admin_reject_corp_admin` — corp admin approval
+- `admin_assign_coach`, `admin_remove_coach` — coach assignment
+- `admin_merge_families`, `admin_unmerge_family_member`, `admin_separate_family_member` — family mgmt
+- `admin_suspend_user`, `admin_reactivate_user` — account suspension
+- `admin_force_disconnect` — force disconnect
+- `admin_reset_user_password` — credential change
+- `admin_preview_merge`, `admin_preview_separation` — preview operations (low risk but kept for visibility)
+- Judge/DOJO evaluation actions — `judge_debate_ruling`, `judge_mentoring_evaluate`
+
+## Rule 2: Dynamic IP — Register After Rotation
+
+Nathan uses Comcast, which rotates residential IPs periodically. After an IP rotation:
+
+1. The new IP triggers "Unknown IP: +40" on every Sentinel-scored action
+2. Combined with rapid rate (+25), the session score accumulates quickly to freeze threshold
+
+**After any IP rotation**, update the DrNevedal1 sentinel baseline:
+
+```sql
+UPDATE users SET profile_data = jsonb_set(
+  profile_data,
+  '{sentinel_baseline,known_ips}',
+  (profile_data->'sentinel_baseline'->'known_ips' || '"NEW_IP"'::jsonb)
+)
+WHERE username = 'DrNevedal1';
+```
+
+Then restart `nate_bridge` to reload the in-memory cache.
+
+**How to find the current IP**: Check `last -5` on the server, or `grep` recent nginx access logs for the admin's subdomain.
+
+## Rule 3: Rate Detection Baseline
+
+| Parameter | Default | DrNevedal1 Override | Why |
+|---|---|---|---|
+| `typical_actions_per_minute` | 2.5 | 10.0 | Admin dashboards auto-poll multiple tabs |
+| Rate threshold | 3x typical | 3x = 30/min | False positive at 2.5 * 3 = 7.5/min was too low |
+| `typical_hours` | Learned | All 24 hours | Admin works at all hours |
+
+The rate check adds +25 when `rate > typical * 3`. With the default 2.5/min, anything over 7.5/min triggers — an admin with 2 dashboard tabs open exceeds this easily.
+
+## Rule 4: Diagnosing False Positive vs Real Attack
+
+When a Sentinel freeze occurs, check these before assuming intrusion:
+
+| Check | Command | False Positive Indicator |
+|---|---|---|
+| SSH history | `last -20` on server | IP matches Nathan's previous sessions |
+| Bash history | `cat /root/.bash_history \| tail -40` | Commands show local macOS paths, flutter build, rsync |
+| Bridge logs | `docker logs nate_bridge --since 30m 2>&1 \| grep RECEIVED \| awk -F'type=' '{print $2}' \| sort \| uniq -c \| sort -rn` | High counts on read-only types (get_metrics, etc.) |
+| IP whois | `whois IP \| grep -i org` | Comcast / Xfinity = residential ISP |
+
+**Key pattern**: If the rapid rate is from read-only message types AND the IP resolves to a residential ISP Nathan uses, it's a false positive caused by missing `_SENTINEL_SKIP` entries or IP rotation.
+
+## Rule 5: How to Unfreeze
+
+**Preferred**: Tap YubiKey on the Hardware Security tab (red "Unfreeze Session" button). This clears both DB (`sentinel_frozen: false`) and in-memory state.
+
+**Emergency SQL** (if WebAuthn is unavailable):
+
+```sql
+UPDATE users SET profile_data = jsonb_set(profile_data, '{sentinel_frozen}', 'false')
+WHERE username = 'DrNevedal1';
+```
+
+Then restart `nate_bridge` to clear in-memory `_frozen_sessions` set.
+
+**Backend restart alone is insufficient** — it clears in-memory state but NOT the `sentinel_frozen` flag in the DB. The Hardware Security Auditor checks the DB flag, so trust will remain broken until the DB is updated.
+
+## Rule 6: Never Block Nathan's IP at iptables Level
+
+The Mar 2026 incident showed that adding an `iptables -A INPUT -s IP -j DROP` rule for Nathan's IP made the entire server unreachable (required DigitalOcean console to recover). Before any IP-level block:
+
+1. Verify the IP is NOT in `last -20` output
+2. Verify the IP is NOT Nathan's ISP (Comcast/Xfinity)
+3. Use nginx deny/rate-limit first, not iptables
+4. iptables is the nuclear option — only for confirmed hostile IPs after thorough verification

@@ -11,10 +11,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Form, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, Form, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
-router = APIRouter(prefix="/api/dojo", tags=["dojo"])
+from app.services.api_server import require_coach
+
+router = APIRouter(prefix="/api/dojo", tags=["dojo"], dependencies=[Depends(require_coach)])
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/app/data"))
 VAULT_ROOT = DATA_DIR / "Vaults"

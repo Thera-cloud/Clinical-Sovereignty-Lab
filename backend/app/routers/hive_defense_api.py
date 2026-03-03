@@ -1314,7 +1314,9 @@ async def threat_dropbox_upload(
     Extracts text/URLs/emails locally, then proxies recon to the Sandbox VPS.
     """
     content_type = file.content_type or "application/octet-stream"
-    filename = file.filename or "unknown"
+    import re as _re
+    _raw_fn = file.filename or "unknown"
+    filename = _re.sub(r'[^\w\-.]', '_', _raw_fn.split("/")[-1].split("\\")[-1])[:255] or "unknown"
 
     if content_type not in ALLOWED_UPLOAD_TYPES and not filename.endswith((".eml", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".csv", ".html")):
         raise HTTPException(400, f"Unsupported file type: {content_type}. Accepted: images, PDF, text, HTML, EML")
@@ -1388,3 +1390,244 @@ async def threat_dropbox_upload(
             f"{len(phones)} phones, {len(domains)} domains from {filename}"
         ),
     }
+
+
+# =============================================================================
+# SENTINEL DEFENSE ORCHESTRATION (Patent Claims 30-56)
+# =============================================================================
+
+@router.get("/v4/sentinel-freeze/history")
+async def sentinel_freeze_history(request: Request, limit: int = 50):
+    """Get recent Sentinel freeze events with forensic details."""
+    pool = _get_pool(request)
+    if not pool:
+        return {"freezes": [], "count": 0}
+    try:
+        rows = await pool.fetch(
+            "SELECT id, ip, uid, sentinel_score, reasons, actions_taken, "
+            "defcon_level, mirror_namespace_id, trap_id, frozen_at, "
+            "disengaged_at, interactions_mirrored, recon_report_sent "
+            "FROM sentinel_freeze_history ORDER BY frozen_at DESC LIMIT $1",
+            limit,
+        )
+        return {
+            "freezes": [
+                {
+                    "id": r["id"],
+                    "ip": r["ip"],
+                    "uid": r["uid"],
+                    "sentinel_score": r["sentinel_score"],
+                    "reasons": r["reasons"],
+                    "actions_taken": r["actions_taken"],
+                    "defcon_level": r["defcon_level"],
+                    "mirror_namespace_id": r["mirror_namespace_id"],
+                    "trap_id": r["trap_id"],
+                    "frozen_at": r["frozen_at"].isoformat() if r["frozen_at"] else None,
+                    "disengaged_at": r["disengaged_at"].isoformat() if r["disengaged_at"] else None,
+                    "interactions_mirrored": r["interactions_mirrored"],
+                    "recon_report_sent": r["recon_report_sent"],
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+    except Exception as e:
+        logger.warning("sentinel_freeze_history: %s", e)
+        return {"freezes": [], "count": 0}
+
+
+@router.get("/v4/sentinel-freeze/banned-ips")
+async def sentinel_banned_ips(request: Request):
+    """List all actively banned IPs."""
+    pool = _get_pool(request)
+    if not pool:
+        return {"banned_ips": [], "count": 0}
+    try:
+        rows = await pool.fetch(
+            "SELECT ip, reason, banned_at, sentinel_score "
+            "FROM sentinel_banned_ips WHERE active = TRUE ORDER BY banned_at DESC"
+        )
+        return {
+            "banned_ips": [
+                {
+                    "ip": r["ip"],
+                    "reason": r["reason"],
+                    "banned_at": r["banned_at"].isoformat(),
+                    "sentinel_score": r["sentinel_score"],
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+    except Exception as e:
+        logger.warning("sentinel_banned_ips: %s", e)
+        return {"banned_ips": [], "count": 0}
+
+
+@router.post("/v4/sentinel-freeze/unban")
+async def sentinel_unban_ip(request: Request, body: dict = {}):
+    """Remove an IP from the ban list."""
+    ip = body.get("ip", "")
+    if not ip:
+        raise HTTPException(400, "ip required")
+    pool = _get_pool(request)
+    if not pool:
+        raise HTTPException(503, "No database")
+    await pool.execute(
+        "UPDATE sentinel_banned_ips SET active = FALSE WHERE ip = $1", ip
+    )
+    orchestrator = getattr(request.app.state, "sentinel_orchestrator", None)
+    if orchestrator and orchestrator._sase:
+        orchestrator._sase.remove_from_blocklist(ip)
+    return {"status": "unbanned", "ip": ip}
+
+
+@router.post("/v4/mirror/deploy")
+async def deploy_mirror_trap(request: Request, body: dict = {}):
+    """Manually deploy a Mirror Trap for a specific IP."""
+    ip = body.get("ip", "")
+    if not ip:
+        raise HTTPException(400, "ip required")
+
+    orchestrator = getattr(request.app.state, "sentinel_orchestrator", None)
+    if not orchestrator:
+        raise HTTPException(503, "Sentinel orchestrator not initialized")
+
+    namespace_id = await orchestrator._route_to_mirror(ip)
+    return {
+        "status": "deployed",
+        "ip": ip,
+        "namespace_id": namespace_id,
+    }
+
+
+# =============================================================================
+# PROJECTED HELIX AUTHORIZATION (Patent Claims 53-56)
+# =============================================================================
+
+@router.get("/v4/projection/pending")
+async def helix_pending_authorizations(request: Request):
+    """List pending Helix authorization requests."""
+    pool = _get_pool(request)
+    if not pool:
+        return {"authorizations": [], "count": 0}
+    try:
+        rows = await pool.fetch(
+            "SELECT id, approval_code, attacker_ip, sentinel_score, proposed_at, "
+            "expires_at, notification_sent_email, notification_sent_sms "
+            "FROM helix_authorization WHERE status = 'PENDING' "
+            "AND expires_at > NOW() ORDER BY proposed_at DESC"
+        )
+        return {
+            "authorizations": [
+                {
+                    "id": r["id"],
+                    "approval_code": r["approval_code"],
+                    "attacker_ip": r["attacker_ip"],
+                    "sentinel_score": r["sentinel_score"],
+                    "proposed_at": r["proposed_at"].isoformat(),
+                    "expires_at": r["expires_at"].isoformat(),
+                    "email_sent": r["notification_sent_email"],
+                    "sms_sent": r["notification_sent_sms"],
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+    except Exception as e:
+        logger.warning("helix_pending: %s", e)
+        return {"authorizations": [], "count": 0}
+
+
+# These approval/denial endpoints are PUBLIC (no auth) — accessed via email links
+# They are registered on a separate sub-router below
+_helix_public_router = APIRouter(
+    prefix="/api/hive-defense",
+    tags=["hive_defense_helix"],
+)
+
+
+@_helix_public_router.get("/v4/projection/approve/{code}")
+async def helix_approve(request: Request, code: str):
+    """Approve a Projected Helix deployment (from email link or SMS)."""
+    orchestrator = getattr(request.app.state, "sentinel_orchestrator", None)
+    if not orchestrator:
+        return {"status": "error", "message": "System not initialized"}
+    result = await orchestrator.handle_helix_approval(code, channel="email")
+    if result.get("status") == "approved":
+        return {
+            "status": "approved",
+            "message": f"Projected Helix APPROVED for IP {result.get('attacker_ip')}. "
+                       f"Helix deployment initiated.",
+        }
+    return result
+
+
+@_helix_public_router.get("/v4/projection/deny/{code}")
+async def helix_deny(request: Request, code: str):
+    """Deny a Projected Helix deployment."""
+    orchestrator = getattr(request.app.state, "sentinel_orchestrator", None)
+    if not orchestrator:
+        return {"status": "error", "message": "System not initialized"}
+    result = await orchestrator.handle_helix_denial(code, channel="email")
+    return result
+
+
+@_helix_public_router.post("/v4/projection/sms-webhook")
+async def helix_sms_webhook(request: Request):
+    """
+    Twilio SMS webhook for Helix approval/denial.
+    Parses inbound SMS like 'APPROVE ABC12345' or 'DENY ABC12345'.
+    """
+    form = await request.form()
+    body_text = form.get("Body", "").strip().upper()
+    from_number = form.get("From", "")
+
+    orchestrator = getattr(request.app.state, "sentinel_orchestrator", None)
+    if not orchestrator:
+        return {"status": "ignored"}
+
+    parts = body_text.split()
+    if len(parts) >= 2:
+        action = parts[0]
+        code = parts[1]
+
+        if action == "APPROVE":
+            result = await orchestrator.handle_helix_approval(code, channel="sms")
+            logger.info("Helix SMS APPROVE from %s: %s", from_number, result)
+            return result
+        elif action == "DENY":
+            result = await orchestrator.handle_helix_denial(code, channel="sms")
+            logger.info("Helix SMS DENY from %s: %s", from_number, result)
+            return result
+
+    if body_text == "STATUS":
+        pool = _get_pool(request)
+        if pool:
+            try:
+                row = await pool.fetchrow(
+                    "SELECT ip, sentinel_score, frozen_at, interactions_mirrored "
+                    "FROM sentinel_freeze_history WHERE disengaged_at IS NULL "
+                    "ORDER BY frozen_at DESC LIMIT 1"
+                )
+                if row:
+                    from datetime import datetime, timezone
+                    elapsed = int((datetime.now(timezone.utc) - row["frozen_at"].replace(tzinfo=timezone.utc)).total_seconds() / 60)
+                    ns = getattr(request.app.state, "notification_system", None)
+                    shield = getattr(request.app.state, "admin_contact_shield", None)
+                    if ns and shield and shield._alert_phone:
+                        await ns.send_sms(
+                            shield._alert_phone,
+                            f"[MIRROR STATUS]\n"
+                            f"IP: {row['ip']} | Score: {row['sentinel_score']}\n"
+                            f"Active: {elapsed}min\n"
+                            f"Interactions: {row['interactions_mirrored'] or 0}",
+                        )
+            except Exception as e:
+                logger.warning("Helix SMS STATUS failed: %s", e)
+
+    return {"status": "ok"}
+
+
+# Export the public router for registration in main.py
+helix_public_router = _helix_public_router

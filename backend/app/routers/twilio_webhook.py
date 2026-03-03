@@ -148,6 +148,49 @@ async def handle_incoming_sms(request: Request):
         print(f">>> [TWILIO_WEBHOOK] HELP request received")
         return Response(content=twiml, media_type="application/xml")
 
+    # Check-in snooze replies: "1", "2", or "3" (days)
+    if keyword in ("1", "2", "3"):
+        days = int(keyword)
+        try:
+            import asyncpg
+            from datetime import datetime, timedelta, timezone
+
+            db_pool = getattr(router, "_db_pool", None)
+            if db_pool:
+                async with db_pool.acquire() as conn:
+                    user_row = await conn.fetchrow(
+                        "SELECT username FROM users WHERE profile_data->>'phone' LIKE '%' || $1 || '%'",
+                        phone[-10:],
+                    )
+                    if user_row:
+                        snooze_until = datetime.now(timezone.utc) + timedelta(days=days)
+                        await conn.execute(
+                            """UPDATE users SET profile_data = jsonb_set(
+                                COALESCE(profile_data, '{}'::jsonb),
+                                '{checkin_snooze_until}', to_jsonb($1::text)
+                            ) WHERE username = $2""",
+                            snooze_until.isoformat(), user_row["username"],
+                        )
+                        await conn.execute(
+                            """UPDATE nate_checkins SET status = 'snoozed',
+                                snooze_days = $1, snooze_until = $2, responded_at = NOW()
+                            WHERE user_id = $3 AND status = 'sent'
+                              AND created_at > NOW() - INTERVAL '7 days'
+                            """,
+                            days, snooze_until, user_row["username"],
+                        )
+                        print(f">>> [TWILIO_WEBHOOK] Check-in snooze: {days} day(s) for {user_row['username']}")
+                        twiml = (
+                            '<?xml version="1.0" encoding="UTF-8"?>'
+                            f'<Response><Message>'
+                            f'Got it! Little Nate will check back in {days} day{"s" if days > 1 else ""}. '
+                            f'Take care!'
+                            f'</Message></Response>'
+                        )
+                        return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f">>> [TWILIO_WEBHOOK] Snooze handling error: {e}")
+
     # Check for approval protocol keywords (Sovereign Swarm strategy proposals)
     if keyword.startswith(APPROVAL_PREFIXES) or keyword in APPROVAL_SYNONYMS:
         try:
@@ -175,7 +218,100 @@ async def handle_incoming_sms(request: Request):
         except Exception as e:
             print(f">>> [TWILIO_WEBHOOK] Approval handling error: {e}")
 
-    # Unknown keyword — acknowledge silently
+    # Free-text reply — check if this is a response to a recent check-in
+    if len(Body.strip()) > 3:
+        try:
+            db_pool = getattr(router, "_db_pool", None)
+            if db_pool:
+                from datetime import datetime, timedelta, timezone
+
+                async with db_pool.acquire() as conn:
+                    user_row = await conn.fetchrow(
+                        "SELECT username, role FROM users WHERE profile_data->>'phone' LIKE '%' || $1 || '%'",
+                        phone[-10:],
+                    )
+                    if user_row:
+                        checkin_row = await conn.fetchrow(
+                            """SELECT id FROM nate_checkins
+                               WHERE user_id = $1 AND status = 'sent'
+                                 AND created_at > NOW() - INTERVAL '7 days'
+                               ORDER BY created_at DESC LIMIT 1""",
+                            user_row["username"],
+                        )
+                        checkin_id = None
+                        if checkin_row:
+                            checkin_id = checkin_row["id"]
+                            await conn.execute(
+                                """UPDATE nate_checkins
+                                   SET status = 'responded', responded_at = NOW()
+                                   WHERE id = $1""",
+                                checkin_id,
+                            )
+
+                        await conn.execute(
+                            """INSERT INTO checkin_wisdom
+                               (user_id, role, checkin_id, channel, response_text)
+                               VALUES ($1, $2, $3, 'sms', $4)""",
+                            user_row["username"], user_row["role"],
+                            checkin_id, Body.strip(),
+                        )
+                        print(f">>> [TWILIO_WEBHOOK] Check-in reply stored for {user_row['username']}")
+                        twiml = (
+                            '<?xml version="1.0" encoding="UTF-8"?>'
+                            '<Response><Message>'
+                            'Little Nate heard you. Open the app when you\'re ready: '
+                            'https://app.sovereignsanctuary.net'
+                            '</Message></Response>'
+                        )
+                        return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f">>> [TWILIO_WEBHOOK] Free-text reply handling error: {e}")
+
+    # Free-text reply — store as check-in wisdom if a recent check-in exists
+    if len(Body.strip()) > 3:
+        try:
+            from datetime import datetime, timezone
+
+            db_pool = getattr(router, "_db_pool", None)
+            if db_pool:
+                async with db_pool.acquire() as conn:
+                    user_row = await conn.fetchrow(
+                        "SELECT username, role FROM users WHERE profile_data->>'phone' LIKE '%' || $1 || '%'",
+                        phone[-10:],
+                    )
+                    if user_row:
+                        checkin_row = await conn.fetchrow("""
+                            SELECT id FROM nate_checkins
+                            WHERE user_id = $1 AND status = 'sent'
+                              AND created_at > NOW() - INTERVAL '7 days'
+                            ORDER BY created_at DESC LIMIT 1
+                        """, user_row["username"])
+
+                        checkin_id = checkin_row["id"] if checkin_row else None
+
+                        if checkin_row:
+                            await conn.execute("""
+                                UPDATE nate_checkins SET status = 'responded', responded_at = NOW()
+                                WHERE id = $1
+                            """, checkin_id)
+
+                        await conn.execute("""
+                            INSERT INTO checkin_wisdom (user_id, role, checkin_id, channel, response_text)
+                            VALUES ($1, $2, $3, 'sms', $4)
+                        """, user_row["username"], user_row["role"], checkin_id, Body.strip()[:5000])
+
+                        print(f">>> [TWILIO_WEBHOOK] Check-in wisdom stored for {user_row['username']}")
+                        twiml = (
+                            '<?xml version="1.0" encoding="UTF-8"?>'
+                            '<Response><Message>'
+                            'Little Nate heard you. Open the app when you\'re ready: '
+                            'https://app.sovereignsanctuary.net'
+                            '</Message></Response>'
+                        )
+                        return Response(content=twiml, media_type="application/xml")
+        except Exception as e:
+            print(f">>> [TWILIO_WEBHOOK] Free-text handler error: {e}")
+
     print(f">>> [TWILIO_WEBHOOK] Unhandled message received ({len(Body)} chars)")
     return Response(
         content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',

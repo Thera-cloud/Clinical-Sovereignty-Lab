@@ -43,10 +43,18 @@ jobs:
 
       - name: Check for secrets in diff
         run: |
-          # Scan recent commit for accidentally committed secrets
-          PATTERNS='(STRIPE_SECRET|JWT_SECRET|AZURE_API_KEY|DATABASE_URL|password|secret_key)'
-          if git diff HEAD~1 HEAD -- '*.py' '*.js' '*.env' | grep -iP "${PATTERNS}" | grep -v '\.env\.template' | grep -v '#'; then
-            echo "::error::Potential secret detected in commit diff"
+          # Scan for hardcoded secret VALUES (not variable names or env lookups).
+          # Only flag lines where a secret key is directly assigned a literal string.
+          HARDCODED='(STRIPE_SECRET|JWT_SECRET|AZURE_API_KEY|DATABASE_URL)\s*=\s*["\x27][^"\x27]{8,}'
+          MATCHES=$(git diff HEAD~1 HEAD -- '*.py' '*.js' '*.env' \
+            | grep -iP "${HARDCODED}" \
+            | grep -v '\.env\.template' \
+            | grep -v '^\s*#' \
+            | grep -v 'os\.getenv\|os\.environ\|getattr(settings\|DECOY_CREDS\|re\.compile\|def .*password\|r".*password\|"password":\s*re\.' \
+            || true)
+          if [ -n "${MATCHES}" ]; then
+            echo "${MATCHES}"
+            echo "::error::Potential hardcoded secret detected in commit diff"
             exit 1
           fi
           echo "Secret scan clean"

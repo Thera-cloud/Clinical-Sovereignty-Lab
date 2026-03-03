@@ -3,9 +3,15 @@ LITTLE NATE — Main API Server Entry Point
 Clinical Sovereignty Lab
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+_REDIS_URL_EARLY = os.environ.get("REDIS_URL", "")
+_REDIS_PW_EARLY = os.environ.get("REDIS_PASSWORD", "")
+_REDIS_HOST_EARLY = os.environ.get("REDIS_HOST", "redis")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import asyncpg
@@ -33,9 +39,11 @@ import app.routers.response_api as response_api
 import app.routers.golden_ticket_api as golden_ticket_api
 import app.routers.analytics_api as analytics_api
 import app.routers.webhook_api as webhook_api
+from app.routers.webhook_api import meta_webhook_router
 import app.routers.skyeye_api as skyeye_api
 import app.routers.marketing_api as marketing_api
 import app.routers.coherence_api as coherence_api
+import app.routers.client_data_api as client_data_api
 import app.routers.fibre_api as fibre_api
 import app.routers.approval_api as approval_api
 import app.routers.strategic_memory_api as strategic_memory_api
@@ -53,6 +61,8 @@ import app.routers.quakete_api as quakete_api
 import app.routers.counter_intelligence_api as counter_intelligence_api
 import app.routers.me2me as me2me_api
 import app.routers.hive_defense_api as hive_defense_api
+import app.routers.assessments as assessments_api
+import app.routers.trust_enforcer_api as trust_enforcer_api
 
 
 # =============================================================================
@@ -115,8 +125,13 @@ async def lifespan(app: FastAPI):
     # Store pool in app state
     app.state.db_pool = db_pool
 
-    # Share db_pool with twilio_webhook router for approval protocol
+    # Share db_pool with twilio_webhook and sendgrid_inbound routers
     twilio_webhook.router._db_pool = db_pool
+    try:
+        from app.routers.sendgrid_inbound import router as _sg_router
+        _sg_router._db_pool = db_pool
+    except Exception:
+        pass
 
     # Register Stripe billing router (needs db_pool at creation time)
     try:
@@ -564,6 +579,14 @@ async def lifespan(app: FastAPI):
             except Exception as mem_err:
                 print(f"   ⚠️  Memory Tiering failed to init: {mem_err}")
 
+            try:
+                from app.services.session_memory_store import SessionMemoryStore
+                _sms_root = Path(os.environ.get("DATA_DIR", "/app/data"))
+                app.state.session_memory_store = SessionMemoryStore(storage_root=_sms_root)
+                print("   ✅ Session Memory Store initialized")
+            except Exception as sms_err:
+                print(f"   ⚠️  Session Memory Store failed to init: {sms_err}")
+
             print(f"   ✅ Sovereign Swarm initialized "
                   f"({len(FIBRE_REGISTRY)} Fibre types registered)")
 
@@ -816,7 +839,7 @@ async def lifespan(app: FastAPI):
             sovereign_mind=_sovereign_mind, notifications=notifications_svc, db_pool=db_pool,
         )
         autonomy_mgr = AutonomyManager(fibre_manager=_fibre_manager, db_pool=db_pool)
-        emotional_weather = EmotionalWeatherService(nevedal_engine=_nevedal_engine, sovereign_mind=_sovereign_mind)
+        emotional_weather = EmotionalWeatherService(nevedal_engine=_nevedal_engine, sovereign_mind=_sovereign_mind, db_pool=db_pool)
         briefing_gen = BriefingGenerator(
             coherence_engine=_coherence_engine, nevedal_engine=_nevedal_engine,
             foresight_engine=_foresight_engine, pattern_engine=_pattern_engine,
@@ -1370,6 +1393,15 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # Bridge may not be loaded yet in all deployment modes
 
+        # Share SovereignMind with the WebSocket bridge for HoH observation wisdom feed
+        try:
+            from app.websocket.bridge_server import set_sovereign_mind
+            _sm_ref = getattr(app.state, "sovereign_mind", None)
+            if _sm_ref:
+                set_sovereign_mind(_sm_ref)
+        except Exception:
+            pass
+
         # ================================================================
         # START PHASE 8 WORKERS
         # ================================================================
@@ -1619,17 +1651,9 @@ async def lifespan(app: FastAPI):
         except Exception as _hv_err:
             print(f"   ⚠️  Heritage Vault init failed: {_hv_err}")
 
-        # Register Transit Inspection middleware
-        from app.middleware.transit_inspection import TransitInspectionMiddleware
-        app.add_middleware(TransitInspectionMiddleware, transit_guardian=app.state.hive_v4["transit_guardian"])
-
-        # Register Pipeline Drum middleware
-        from app.middleware.drum_tap import DrumTapMiddleware
-        app.add_middleware(DrumTapMiddleware, pipeline_drum=_pipeline_drum)
-
-        # Register Webhook Rate Limit middleware
-        from app.middleware.webhook_rate_limit import WebhookRateLimitMiddleware
-        app.add_middleware(WebhookRateLimitMiddleware, max_requests=120, window_seconds=60)
+        # NOTE: Middleware registration moved to module level (after CORS).
+        # Starlette does not allow app.add_middleware() after the app has started.
+        # The middleware classes use lazy lookup via app.state to find their services.
 
         # ── Upstream Canary Network (Section 13.10.8) ──
         try:
@@ -1769,7 +1793,7 @@ async def lifespan(app: FastAPI):
                                                         from app.websocket.notification_system import NotificationSystem
                                                         import os as _os_purge
                                                         _ns = NotificationSystem(
-                                                            _rv.get("data_dir", "data/bridge"),
+                                                            _rv.get("data_dir", _os_purge.getenv("DATA_DIR", "/app/data")),
                                                             _os_purge.getenv("SENDGRID_API_KEY")
                                                         )
                                                         await _ns.send_account_permanently_deleted(
@@ -1878,9 +1902,10 @@ async def lifespan(app: FastAPI):
         if _notify_sys is None:
             from app.websocket.notification_system import NotificationSystem
             _notify_sys = NotificationSystem(
-                data_dir=os.environ.get("DATA_DIR", "data/bridge"),
+                data_dir=os.environ.get("DATA_DIR", "/app/data"),
                 sendgrid_key=os.environ.get("SENDGRID_API_KEY"),
             )
+            app.state.notification_system = _notify_sys
         _admin_phone = _tra_settings.ADMIN_ALERT_PHONE or os.environ.get("ADMIN_VERIFY_PHONE", "")
         _admin_email = (_tra_settings.ADMIN_ALERT_EMAILS or "").split(",")[0].strip()
         _token_renewal_agent = TokenRenewalAgent(
@@ -1919,6 +1944,698 @@ async def lifespan(app: FastAPI):
     except Exception as taa_err:
         print(f"   ⚠️  Token Audit Agent init failed: {taa_err}")
 
+    # ── Content Queue Janitor — archives exhausted posts, detects error patterns ──
+    _content_janitor = None
+    try:
+        from app.services.content_queue_janitor import ContentQueueJanitor
+        _content_janitor = ContentQueueJanitor(db_pool, interval_seconds=21600)
+        await _content_janitor.start()
+        app.state.content_queue_janitor = _content_janitor
+        print("   ✅ ContentQueueJanitor started (6h cycle, stagger 70s)")
+    except Exception as cqj_err:
+        print(f"   ⚠️  ContentQueueJanitor init failed: {cqj_err}")
+
+    # ── Token Lifecycle Predictor — early warning for expiring tokens ──
+    _token_predictor = None
+    try:
+        from app.services.token_lifecycle_predictor import TokenLifecyclePredictor
+        _tlp_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _tlp_phone = _admin_phone if '_admin_phone' in dir() else os.environ.get("ADMIN_VERIFY_PHONE", "")
+        _tlp_email = _admin_email if '_admin_email' in dir() else os.environ.get("ADMIN_ALERT_EMAILS", "").split(",")[0].strip()
+        _token_predictor = TokenLifecyclePredictor(
+            db_pool,
+            notification_system=_tlp_notify,
+            admin_phone=_tlp_phone,
+            admin_email=_tlp_email,
+            interval_seconds=43200,
+        )
+        await _token_predictor.start()
+        app.state.token_lifecycle_predictor = _token_predictor
+        print("   ✅ TokenLifecyclePredictor started (12h scan, stagger 80s)")
+    except Exception as tlp_err:
+        print(f"   ⚠️  TokenLifecyclePredictor init failed: {tlp_err}")
+
+    # ── Database Maintenance Agent — prunes stale rows, tracks DB health ──
+    _db_maintenance = None
+    try:
+        from app.services.db_maintenance_agent import DatabaseMaintenanceAgent
+        _db_maintenance = DatabaseMaintenanceAgent(db_pool, interval_seconds=86400)
+        await _db_maintenance.start()
+        app.state.db_maintenance_agent = _db_maintenance
+        print("   ✅ DatabaseMaintenanceAgent started (24h cycle, stagger 90s)")
+    except Exception as dbm_err:
+        print(f"   ⚠️  DatabaseMaintenanceAgent init failed: {dbm_err}")
+
+    # ── Session Recovery Agent — retries failed AI session summaries ──
+    _session_recovery = None
+    try:
+        from app.services.session_recovery_agent import SessionRecoveryAgent
+        _session_recovery = SessionRecoveryAgent(db_pool, interval_seconds=7200)
+        await _session_recovery.start()
+        app.state.session_recovery_agent = _session_recovery
+        print("   ✅ SessionRecoveryAgent started (2h cycle, stagger 100s)")
+    except Exception as sra_err:
+        print(f"   ⚠️  SessionRecoveryAgent init failed: {sra_err}")
+
+    # ── Expose worker lists on app.state for digest visibility ──
+    app.state._workers_list = _workers
+    app.state._hive_workers_list = _hive_workers
+
+    # ── Agent Status Digest — 3x daily trust report covering all agents ──
+    _agent_digest = None
+    try:
+        from app.services.agent_status_digest import AgentStatusDigest
+        _digest_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _agent_digest = AgentStatusDigest(
+            app_state=app.state,
+            db_pool=db_pool,
+            notification_system=_digest_notify,
+        )
+        await _agent_digest.start()
+        app.state.agent_status_digest = _agent_digest
+        print("   ✅ AgentStatusDigest started (5am/5pm/11pm UTC, stagger 110s)")
+    except Exception as asd_err:
+        print(f"   ⚠️  AgentStatusDigest init failed: {asd_err}")
+
+    # ── SkyEye Tab Auditor — 3x daily endpoint trust scorecard ──
+    _tab_auditor = None
+    try:
+        from app.services.skyeye_tab_auditor import SkyEyeTabAuditor
+        _tab_audit_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _tab_auditor = SkyEyeTabAuditor(
+            db_pool=db_pool,
+            notification_system=_tab_audit_notify,
+            app_state=app.state,
+        )
+        await _tab_auditor.start()
+        app.state.skyeye_tab_auditor = _tab_auditor
+        print("   ✅ SkyEyeTabAuditor started (5am/5pm/11pm UTC, stagger 120s)")
+    except Exception as sta_err:
+        print(f"   ⚠️  SkyEyeTabAuditor init failed: {sta_err}")
+
+    # ── Sovereign Command Tab Auditor — 3x daily command dashboard trust scorecard ──
+    _cmd_auditor = None
+    try:
+        from app.services.command_tab_auditor import SovereignCommandAuditor
+        _cmd_audit_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _cmd_auditor = SovereignCommandAuditor(
+            db_pool=db_pool,
+            notification_system=_cmd_audit_notify,
+            app_state=app.state,
+        )
+        await _cmd_auditor.start()
+        app.state.command_tab_auditor = _cmd_auditor
+        print("   ✅ SovereignCommandAuditor started (5am/5pm/11pm UTC, stagger 130s)")
+    except Exception as cta_err:
+        print(f"   ⚠️  SovereignCommandAuditor init failed: {cta_err}")
+
+    # ── The Eye Auditor — 3x daily surveillance & analytics trust scorecard ──
+    _eye_auditor = None
+    try:
+        from app.services.the_eye_auditor import TheEyeAuditor
+        _eye_audit_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _eye_auditor = TheEyeAuditor(
+            db_pool=db_pool,
+            notification_system=_eye_audit_notify,
+            app_state=app.state,
+        )
+        await _eye_auditor.start()
+        app.state.the_eye_auditor = _eye_auditor
+        print("   ✅ TheEyeAuditor started (5am/5pm/11pm UTC, stagger 140s)")
+    except Exception as tea_err:
+        print(f"   ⚠️  TheEyeAuditor init failed: {tea_err}")
+
+    # ── Login Auditor — 3x daily blind WebSocket login test ──
+    _login_auditor = None
+    try:
+        from app.services.login_auditor import LoginAuditor
+        _login_audit_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _login_auditor = LoginAuditor(
+            db_pool=db_pool,
+            notification_system=_login_audit_notify,
+            app_state=app.state,
+        )
+        await _login_auditor.start()
+        app.state.login_auditor = _login_auditor
+        print("   ✅ LoginAuditor started (5am/5pm/11pm UTC, stagger 150s)")
+    except Exception as la_err:
+        print(f"   ⚠️  LoginAuditor init failed: {la_err}")
+
+    # ── Client App Auditor — 3x daily client-facing endpoint trust scorecard ──
+    _client_auditor = None
+    try:
+        from app.services.client_app_auditor import ClientAppAuditor
+        _client_audit_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _client_auditor = ClientAppAuditor(
+            db_pool=db_pool,
+            notification_system=_client_audit_notify,
+            app_state=app.state,
+        )
+        await _client_auditor.start()
+        app.state.client_app_auditor = _client_auditor
+        print("   ✅ ClientAppAuditor started (5am/5pm/11pm UTC, stagger 160s)")
+    except Exception as caa_err:
+        print(f"   ⚠️  ClientAppAuditor init failed: {caa_err}")
+
+    # ── Coach & DOJO Auditor — 3x daily coach/DOJO endpoint trust scorecard ──
+    _coach_dojo_auditor = None
+    try:
+        from app.services.coach_dojo_auditor import CoachDojoAuditor
+        _cd_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _coach_dojo_auditor = CoachDojoAuditor(
+            db_pool=db_pool, notification_system=_cd_notify, app_state=app.state,
+        )
+        await _coach_dojo_auditor.start()
+        app.state.coach_dojo_auditor = _coach_dojo_auditor
+        print("   ✅ CoachDojoAuditor started (5am/5pm/11pm UTC, stagger 170s)")
+    except Exception as cd_err:
+        print(f"   ⚠️  CoachDojoAuditor init failed: {cd_err}")
+
+    # ── Billing Pipeline Auditor — 3x daily billing endpoint trust scorecard ──
+    _billing_auditor = None
+    try:
+        from app.services.billing_auditor import BillingPipelineAuditor
+        _ba_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _billing_auditor = BillingPipelineAuditor(
+            db_pool=db_pool, notification_system=_ba_notify, app_state=app.state,
+        )
+        await _billing_auditor.start()
+        app.state.billing_auditor = _billing_auditor
+        print("   ✅ BillingPipelineAuditor started (5am/5pm/11pm UTC, stagger 180s)")
+    except Exception as ba_err:
+        print(f"   ⚠️  BillingPipelineAuditor init failed: {ba_err}")
+
+    # ── Defense Health Auditor — 3x daily defense subsystem trust scorecard ──
+    _defense_auditor = None
+    try:
+        from app.services.defense_auditor import DefenseHealthAuditor
+        _da_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _defense_auditor = DefenseHealthAuditor(
+            db_pool=db_pool, notification_system=_da_notify, app_state=app.state,
+        )
+        await _defense_auditor.start()
+        app.state.defense_auditor = _defense_auditor
+        print("   ✅ DefenseHealthAuditor started (5am/5pm/11pm UTC, stagger 190s)")
+    except Exception as da_err:
+        print(f"   ⚠️  DefenseHealthAuditor init failed: {da_err}")
+
+    # ── AI Pipeline Auditor — 3x daily Azure OpenAI/TTS/Nevedal trust scorecard ──
+    _ai_pipeline_auditor = None
+    try:
+        from app.services.ai_pipeline_auditor import AIPipelineAuditor
+        _ap_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _ai_pipeline_auditor = AIPipelineAuditor(
+            db_pool=db_pool, notification_system=_ap_notify, app_state=app.state,
+        )
+        await _ai_pipeline_auditor.start()
+        app.state.ai_pipeline_auditor = _ai_pipeline_auditor
+        print("   ✅ AIPipelineAuditor started (5am/5pm/11pm UTC, stagger 200s)")
+    except Exception as ap_err:
+        print(f"   ⚠️  AIPipelineAuditor init failed: {ap_err}")
+
+    # ── WebSocket Flow Auditor — 3x daily WS flow trust scorecard ──
+    _ws_flow_auditor = None
+    try:
+        from app.services.ws_flow_auditor import WebSocketFlowAuditor
+        _wf_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _ws_flow_auditor = WebSocketFlowAuditor(
+            db_pool=db_pool, notification_system=_wf_notify, app_state=app.state,
+        )
+        await _ws_flow_auditor.start()
+        app.state.ws_flow_auditor = _ws_flow_auditor
+        print("   ✅ WebSocketFlowAuditor started (5am/5pm/11pm UTC, stagger 210s)")
+    except Exception as wf_err:
+        print(f"   ⚠️  WebSocketFlowAuditor init failed: {wf_err}")
+
+    # ── Tier Gating Auditor — 3x daily tier feature gate trust scorecard ──
+    _tier_gating_auditor = None
+    try:
+        from app.services.tier_gating_auditor import TierGatingAuditor
+        _tg_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _tier_gating_auditor = TierGatingAuditor(
+            db_pool=db_pool, notification_system=_tg_notify, app_state=app.state,
+        )
+        await _tier_gating_auditor.start()
+        app.state.tier_gating_auditor = _tier_gating_auditor
+        print("   ✅ TierGatingAuditor started (5am/5pm/11pm UTC, stagger 220s)")
+    except Exception as tg_err:
+        print(f"   ⚠️  TierGatingAuditor init failed: {tg_err}")
+
+    # ── Nevedal Research Lab Auditor — 3x daily Nevedal Lab endpoint trust scorecard ──
+    _nevedal_lab_auditor = None
+    try:
+        from app.services.nevedal_lab_auditor import NevedalLabAuditor
+        _nl_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _nevedal_lab_auditor = NevedalLabAuditor(
+            db_pool=db_pool, notification_system=_nl_notify, app_state=app.state,
+        )
+        await _nevedal_lab_auditor.start()
+        app.state.nevedal_lab_auditor = _nevedal_lab_auditor
+        print("   ✅ NevedalLabAuditor started (5am/5pm/11pm UTC, stagger 230s)")
+    except Exception as nl_err:
+        print(f"   ⚠️  NevedalLabAuditor init failed: {nl_err}")
+
+    # ── Hardware Security Auditor — 3x daily admin MFA posture trust scorecard ──
+    _hw_security_auditor = None
+    try:
+        from app.services.hardware_security_auditor import HardwareSecurityAuditor
+        _hs_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _hw_security_auditor = HardwareSecurityAuditor(
+            db_pool=db_pool, notification_system=_hs_notify, app_state=app.state,
+        )
+        await _hw_security_auditor.start()
+        app.state.hw_security_auditor = _hw_security_auditor
+        print("   ✅ HardwareSecurityAuditor started (5am/5pm/11pm UTC, stagger 240s)")
+    except Exception as hs_err:
+        print(f"   ⚠️  HardwareSecurityAuditor init failed: {hs_err}")
+
+    # ── System Integrity Auditor — preventive security/billing/sync checks ──
+    _system_integrity_auditor = None
+    try:
+        from app.services.system_integrity_auditor import SystemIntegrityAuditor
+        _si_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _system_integrity_auditor = SystemIntegrityAuditor(
+            db_pool=db_pool, notification_system=_si_notify, app_state=app.state,
+        )
+        await _system_integrity_auditor.start()
+        app.state.system_integrity_auditor = _system_integrity_auditor
+        print("   ✅ SystemIntegrityAuditor started (5am/5pm/11pm UTC, stagger 250s)")
+    except Exception as si_err:
+        print(f"   ⚠️  SystemIntegrityAuditor init failed: {si_err}")
+
+    # ── DOJO Session Auditor — 3x daily DOJO/Zoom session trust scorecard ──
+    _dojo_session_auditor = None
+    try:
+        from app.services.dojo_session_auditor import DojoSessionAuditor
+        _ds_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _dojo_session_auditor = DojoSessionAuditor(
+            db_pool=db_pool, notification_system=_ds_notify, app_state=app.state,
+        )
+        await _dojo_session_auditor.start()
+        app.state.dojo_session_auditor = _dojo_session_auditor
+        print("   ✅ DojoSessionAuditor started (5am/5pm/11pm UTC, stagger 260s)")
+    except Exception as ds_err:
+        print(f"   ⚠️  DojoSessionAuditor init failed: {ds_err}")
+
+    # ── Wisdom Pipeline Auditor — 3x daily knowledge learning loop trust scorecard ──
+    _wisdom_pipeline_auditor = None
+    try:
+        from app.services.wisdom_pipeline_auditor import WisdomPipelineAuditor
+        _wp_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _wisdom_pipeline_auditor = WisdomPipelineAuditor(
+            db_pool=db_pool, notification_system=_wp_notify, app_state=app.state,
+        )
+        await _wisdom_pipeline_auditor.start()
+        app.state.wisdom_pipeline_auditor = _wisdom_pipeline_auditor
+        print("   ✅ WisdomPipelineAuditor started (5am/5pm/11pm UTC, stagger 270s)")
+    except Exception as wp_err:
+        print(f"   ⚠️  WisdomPipelineAuditor init failed: {wp_err}")
+
+    # ── Settings Tab Auditor — 3x daily settings feature trust scorecard ──
+    _settings_tab_auditor = None
+    try:
+        from app.services.settings_tab_auditor import SettingsTabAuditor
+        _st_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _settings_tab_auditor = SettingsTabAuditor(
+            db_pool=db_pool, notification_system=_st_notify, app_state=app.state,
+        )
+        await _settings_tab_auditor.start()
+        app.state.settings_tab_auditor = _settings_tab_auditor
+        print("   ✅ SettingsTabAuditor started (5am/5pm/11pm UTC, stagger 280s)")
+    except Exception as st_err:
+        print(f"   ⚠️  SettingsTabAuditor init failed: {st_err}")
+
+    # ── Notification Observer — polls social engagement every 30min ──
+    _notif_observer = None
+    try:
+        from app.services.notification_observer import NotificationObserver
+        _no_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _notif_observer = NotificationObserver(
+            db_pool=db_pool, notification_system=_no_notify, app_state=app.state,
+        )
+        await _notif_observer.start()
+        app.state.notification_observer = _notif_observer
+        print("   ✅ NotificationObserver started (every 30min, stagger 260s)")
+    except Exception as no_err:
+        print(f"   ⚠️  NotificationObserver init failed: {no_err}")
+
+    # ── Sentinel Defense Orchestrator — House of Mirrors wiring ──
+    _sentinel_orchestrator = None
+    try:
+        from app.services.security.sentinel_defense_orchestrator import SentinelDefenseOrchestrator
+        from app.services.security.defcon_recon_reporter import DefconReconReporter
+
+        _sdo_sase = getattr(app.state, "hive_v4", {}).get("sase_controller")
+        _sdo_defcon = _hive_defense.get("defcon_controller") if _hive_defense else None
+        _sdo_mirror = _hive_defense.get("mirror_shell") if _hive_defense else None
+        _sdo_notify = getattr(app.state, "notification_system", None)
+        _sdo_shield = None
+        try:
+            from app.services.security.admin_contact_shield import get_shield
+            _sdo_shield = get_shield()
+            if _sdo_notify:
+                _sdo_shield.set_notification_system(_sdo_notify)
+        except Exception:
+            pass
+
+        _sdo_recon = DefconReconReporter(db_pool=db_pool, notification_system=_sdo_notify)
+
+        _sentinel_orchestrator = SentinelDefenseOrchestrator(
+            db_pool=db_pool,
+            sase_controller=_sdo_sase,
+            defcon_controller=_sdo_defcon,
+            mirror_shell=_sdo_mirror,
+            notification_system=_sdo_notify,
+            admin_contact_shield=_sdo_shield,
+            recon_reporter=_sdo_recon,
+        )
+        app.state.sentinel_orchestrator = _sentinel_orchestrator
+
+        _loaded_bans = await _sentinel_orchestrator.load_persistent_bans()
+        print(f"   ✅ SentinelDefenseOrchestrator initialized ({_loaded_bans} persistent bans loaded)")
+    except Exception as sdo_err:
+        print(f"   ⚠️  SentinelDefenseOrchestrator init failed: {sdo_err}")
+
+    # ── Community Mesh Engine — Nate-to-Nate group wisdom ──
+    _community_mesh = None
+    try:
+        from app.services.community_mesh_engine import CommunityMeshEngine
+        _cm_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _community_mesh = CommunityMeshEngine(
+            db_pool=db_pool, notification_system=_cm_notify, app_state=app.state,
+        )
+        await _community_mesh.start()
+        app.state.community_mesh_engine = _community_mesh
+        print("   ✅ CommunityMeshEngine started (6h convergence, stagger 300s)")
+    except Exception as cm_err:
+        print(f"   ⚠️  CommunityMeshEngine init failed: {cm_err}")
+
+    # ── Liminal Coaching Engine — external conversation coaching ──
+    _liminal_engine = None
+    try:
+        from app.services.liminal_coaching_engine import LiminalCoachingEngine
+        _liminal_engine = LiminalCoachingEngine(db_pool=db_pool, app_state=app.state)
+        app.state.liminal_coaching_engine = _liminal_engine
+        print("   ✅ LiminalCoachingEngine initialized")
+    except Exception as lce_err:
+        print(f"   ⚠️  LiminalCoachingEngine init failed: {lce_err}")
+
+    # ── DOJO Mentor Engine — multi-DOJO AI mentorship ──
+    _dojo_mentor = None
+    try:
+        from app.services.dojo_mentor_engine import DojoMentorEngine
+        _dojo_mentor = DojoMentorEngine(db_pool=db_pool, app_state=app.state)
+        app.state.dojo_mentor_engine = _dojo_mentor
+        print("   ✅ DojoMentorEngine initialized")
+    except Exception as dme_err:
+        print(f"   ⚠️  DojoMentorEngine init failed: {dme_err}")
+
+    # ── DOJO Mentor Zoom — Zoom meeting integration for mentored sessions ──
+    _dojo_zoom = None
+    try:
+        from app.services.dojo_mentor_zoom import DojoMentorZoom
+        _dojo_zoom = DojoMentorZoom(db_pool=db_pool, app_state=app.state)
+        app.state.dojo_mentor_zoom = _dojo_zoom
+        print("   ✅ DojoMentorZoom initialized")
+    except Exception as dmz_err:
+        print(f"   ⚠️  DojoMentorZoom init failed: {dmz_err}")
+
+    # ── Coach Hierarchy Auditor — 16-check trust scorecard ──
+    _coach_hierarchy_auditor = None
+    try:
+        from app.services.coach_hierarchy_auditor import CoachHierarchyAuditor
+        _coach_hierarchy_auditor = CoachHierarchyAuditor(
+            db_pool=db_pool,
+            notification_system=_notify_sys if _token_renewal_agent else None,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        await _coach_hierarchy_auditor.start()
+        app.state.coach_hierarchy_auditor = _coach_hierarchy_auditor
+        print("   ✅ CoachHierarchyAuditor started (3x daily, stagger 290s)")
+    except Exception as cha_err:
+        print(f"   ⚠️  CoachHierarchyAuditor init failed: {cha_err}")
+
+    # ── Coaching Mesh Engine — BLE group training sessions ──
+    _coaching_mesh = None
+    try:
+        from app.services.coaching_mesh_engine import CoachingMeshEngine
+        _coaching_mesh = CoachingMeshEngine(db_pool=db_pool, app_state=app.state)
+        app.state.coaching_mesh_engine = _coaching_mesh
+        print("   ✅ CoachingMeshEngine initialized")
+    except Exception as cme2_err:
+        print(f"   ⚠️  CoachingMeshEngine init failed: {cme2_err}")
+
+    # ── Call Coaching Engine — Twilio Media Stream processing ──
+    _call_coaching = None
+    try:
+        from app.services.call_coaching_engine import CallCoachingEngine
+        _call_coaching = CallCoachingEngine(db_pool=db_pool, app_state=app.state)
+        app.state.call_coaching_engine = _call_coaching
+        print("   ✅ CallCoachingEngine initialized")
+    except Exception as cce_err:
+        print(f"   ⚠️  CallCoachingEngine init failed: {cce_err}")
+
+    # ── Trust Enforcer — Meta-agent enforcing 100% trust across all 16 auditors ──
+    _trust_enforcer = None
+    try:
+        from app.services.trust_enforcer import TrustEnforcer
+        _te_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+        _trust_enforcer = TrustEnforcer(
+            db_pool=db_pool, notification_system=_te_notify, app_state=app.state,
+            redis_url=_REDIS_URL_EARLY,
+            redis_password=_REDIS_PW_EARLY,
+        )
+        await _trust_enforcer.start()
+        app.state.trust_enforcer = _trust_enforcer
+        print("   ✅ TrustEnforcer started (5:10am/5:10pm/11:10pm UTC, 10min stagger)")
+    except Exception as te_err:
+        print(f"   ⚠️  TrustEnforcer init failed: {te_err}")
+
+    # ── Assessment Engine — AI-driven dynamic assessments for clients ──
+    _assessment_engine = None
+    try:
+        from app.services.assessment_engine import AssessmentEngine
+        _assessment_engine = AssessmentEngine(db_pool=db_pool)
+        app.state.assessment_engine = _assessment_engine
+        print("   ✅ AssessmentEngine initialized")
+    except Exception as ae_err:
+        print(f"   ⚠️  AssessmentEngine init failed: {ae_err}")
+
+    # ── Liminal Presence Agents — protect Little Nate's voice and presence quality ──
+    _silence_sentinel = None
+    try:
+        from app.services.silence_sentinel import SilenceSentinel
+        _silence_sentinel = SilenceSentinel(db_pool=db_pool)
+        await _silence_sentinel.start()
+        app.state.silence_sentinel = _silence_sentinel
+        print("   ✅ SilenceSentinel started (every 30min, stagger 290s)")
+    except Exception as ss_err:
+        print(f"   ⚠️  SilenceSentinel init failed: {ss_err}")
+
+    _language_drift_monitor = None
+    try:
+        from app.services.language_drift_monitor import LanguageDriftMonitor
+        _language_drift_monitor = LanguageDriftMonitor(db_pool=db_pool)
+        await _language_drift_monitor.start()
+        app.state.language_drift_monitor = _language_drift_monitor
+        print("   ✅ LanguageDriftMonitor started (every 6h, stagger 300s)")
+    except Exception as ldm_err:
+        print(f"   ⚠️  LanguageDriftMonitor init failed: {ldm_err}")
+
+    _field_response_parser = None
+    try:
+        from app.services.field_response_parser import FieldResponseParser
+        _field_response_parser = FieldResponseParser(db_pool=db_pool)
+        await _field_response_parser.start()
+        app.state.field_response_parser = _field_response_parser
+        print("   ✅ FieldResponseParser started (every 2h, stagger 310s)")
+    except Exception as frp_err:
+        print(f"   ⚠️  FieldResponseParser init failed: {frp_err}")
+
+    _liminal_presence_auditor = None
+    try:
+        from app.services.liminal_presence_auditor import LiminalPresenceAuditor
+        _liminal_presence_auditor = LiminalPresenceAuditor(
+            db_pool=db_pool, app_state=app.state,
+        )
+        await _liminal_presence_auditor.start()
+        app.state.liminal_presence_auditor = _liminal_presence_auditor
+        print("   ✅ LiminalPresenceAuditor started (3x daily, stagger 320s)")
+    except Exception as lpa_err:
+        print(f"   ⚠️  LiminalPresenceAuditor init failed: {lpa_err}")
+
+    _pmb_auditor = None
+    try:
+        from app.services.pmb_command_center_auditor import PmbCommandCenterAuditor
+        _pmb_auditor = PmbCommandCenterAuditor(
+            db_pool=db_pool, app_state=app.state,
+        )
+        await _pmb_auditor.start()
+        app.state.pmb_command_center_auditor = _pmb_auditor
+        print("   ✅ PmbCommandCenterAuditor started (3x daily, stagger 110s)")
+    except Exception as pmb_err:
+        print(f"   ⚠️  PmbCommandCenterAuditor init failed: {pmb_err}")
+
+    _data_uniformity_tracer = None
+    try:
+        from app.services.data_uniformity_tracer import DataUniformityTracer
+        _data_uniformity_tracer = DataUniformityTracer(
+            db_pool=db_pool, app_state=app.state,
+        )
+        await _data_uniformity_tracer.start()
+        app.state.data_uniformity_tracer = _data_uniformity_tracer
+        print("   ✅ DataUniformityTracer started (3x daily, stagger 300s)")
+    except Exception as dut_err:
+        print(f"   ⚠️  DataUniformityTracer init failed: {dut_err}")
+
+    _token_lab_auditor = None
+    try:
+        from app.services.token_lab_auditor import TokenLabAuditor
+        _token_lab_auditor = TokenLabAuditor(
+            db_pool=db_pool,
+            notification_system=None,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        await _token_lab_auditor.start()
+        app.state.token_lab_auditor = _token_lab_auditor
+        print("   ✅ TokenLabAuditor started (3x daily, stagger 100s)")
+    except Exception as tla_err:
+        print(f"   ⚠️  TokenLabAuditor init failed: {tla_err}")
+
+    # ── GKM Ministry Auditor — 3x daily GKM endpoint trust scorecard ──
+    _gkm_auditor = None
+    try:
+        from app.services.gkm_auditor import GkmAuditor
+        _gkm_auditor = GkmAuditor(
+            db_pool=db_pool,
+            notification_system=None,
+            auth_token=os.environ.get("SKYEYE_AUDIT_TOKEN", ""),
+            app_state=app.state,
+        )
+        await _gkm_auditor.start()
+        app.state.gkm_auditor = _gkm_auditor
+        print("   ✅ GkmAuditor started (3x daily, stagger 110s)")
+    except Exception as gkm_err:
+        print(f"   ⚠️  GkmAuditor init failed: {gkm_err}")
+
+    # ── Nate Check-In Auditor — 3x daily check-in system trust scorecard ──
+    _nate_checkin_auditor = None
+    try:
+        from app.services.nate_checkin_auditor import NateCheckInAuditor
+        _nate_checkin_auditor = NateCheckInAuditor(
+            db_pool=db_pool,
+            notification_system=None,
+            app_state=app.state,
+        )
+        await _nate_checkin_auditor.start()
+        app.state.nate_checkin_auditor = _nate_checkin_auditor
+        print("   ✅ NateCheckInAuditor started (3x daily, stagger 330s)")
+    except Exception as nca_err:
+        print(f"   ⚠️  NateCheckInAuditor init failed: {nca_err}")
+
+    # ── Token Usage Agent — daily/monthly reset, per-source snapshots ──
+    _token_usage_agent = None
+    try:
+        from app.services.token_usage_agent import TokenUsageAgent
+        _token_usage_agent = TokenUsageAgent(
+            db_pool=db_pool, app_state=app.state,
+        )
+        await _token_usage_agent.start()
+        app.state.token_usage_agent = _token_usage_agent
+        print("   ✅ TokenUsageAgent started (30min cycle, daily/monthly reset)")
+    except Exception as tua_err:
+        print(f"   ⚠️  TokenUsageAgent init failed: {tua_err}")
+
+    # ── Nate Check-In Agent — 72h inactivity outreach for clients + coaches ──
+    _nate_checkin_agent = None
+    try:
+        from app.services.nate_checkin_agent import NateCheckInAgent
+        _checkin_notify = getattr(app.state, "notification_system", None)
+        if _checkin_notify is None:
+            from app.websocket.notification_system import NotificationSystem
+            _checkin_notify = NotificationSystem(
+                data_dir=os.environ.get("DATA_DIR", "/app/data"),
+                sendgrid_key=os.environ.get("SENDGRID_API_KEY"),
+            )
+            app.state.notification_system = _checkin_notify
+        _nate_checkin_agent = NateCheckInAgent(
+            db_pool=db_pool,
+            notification_system=_checkin_notify,
+            app_state=app.state,
+        )
+        await _nate_checkin_agent.start()
+        app.state.nate_checkin_agent = _nate_checkin_agent
+        print("   ✅ NateCheckInAgent started (30min cycle, stagger 310s)")
+    except Exception as nca_err:
+        print(f"   ⚠️  NateCheckInAgent init failed: {nca_err}")
+
+    # ── F-Code Engine — ICD-10-CM suggestion service (request-response, no background loop) ──
+    _fcode_engine = None
+    try:
+        from app.services.fcode_engine import FCodeEngine
+        _fcode_engine = FCodeEngine(db_pool=db_pool)
+        app.state.fcode_engine = _fcode_engine
+        print("   ✅ FCodeEngine initialized")
+    except Exception as fce_err:
+        print(f"   ⚠️  FCodeEngine init failed: {fce_err}")
+
+    # ── Session Payment Agent — 72h advance payment collection ──
+    _session_payment_agent = None
+    try:
+        from app.services.session_payment_agent import SessionPaymentAgent
+        _session_payment_agent = SessionPaymentAgent(db_pool=db_pool, app_state=app.state)
+        await _session_payment_agent.start()
+        app.state.session_payment_agent = _session_payment_agent
+        print("   ✅ SessionPaymentAgent started (30min cycle)")
+    except Exception as spa_err:
+        print(f"   ⚠️  SessionPaymentAgent init failed: {spa_err}")
+
+    # ── Signup Sharing Agent — daily revenue sharing calculation ──
+    _signup_sharing_agent = None
+    try:
+        from app.services.signup_sharing_agent import SignupSharingAgent
+        _signup_sharing_agent = SignupSharingAgent(db_pool=db_pool, app_state=app.state)
+        await _signup_sharing_agent.start()
+        app.state.signup_sharing_agent = _signup_sharing_agent
+        print("   ✅ SignupSharingAgent started (daily at 2AM UTC)")
+    except Exception as ssa_err:
+        print(f"   ⚠️  SignupSharingAgent init failed: {ssa_err}")
+
+    # ── QuickBooks Sync Agent — syncs financial data to QB Online every 6h ──
+    _qb_sync_agent = None
+    try:
+        from app.services.quickbooks_sync_agent import QuickBooksSyncAgent
+        _qb_sync_agent = QuickBooksSyncAgent(db_pool=db_pool, app_state=app.state)
+        await _qb_sync_agent.start()
+        app.state.quickbooks_sync_agent = _qb_sync_agent
+        print("   ✅ QuickBooksSyncAgent started (6h cycle)")
+    except Exception as qb_err:
+        print(f"   ⚠️  QuickBooksSyncAgent init failed: {qb_err}")
+
+    # ── QuickBooks Auditor — 3x daily 10-check trust scorecard ──
+    _qb_auditor = None
+    try:
+        from app.services.quickbooks_auditor import QuickBooksAuditor
+        _qb_auditor = QuickBooksAuditor(db_pool=db_pool, app_state=app.state)
+        await _qb_auditor.start()
+        app.state.quickbooks_auditor = _qb_auditor
+        print("   ✅ QuickBooksAuditor started (stagger 105s)")
+    except Exception as qba_err:
+        print(f"   ⚠️  QuickBooksAuditor init failed: {qba_err}")
+
+    # ── Corporate Command Auditor — 3x daily 12-check trust scorecard ──
+    _corp_auditor = None
+    try:
+        from app.services.corporate_command_auditor import CorporateCommandAuditor
+        _corp_auditor = CorporateCommandAuditor(db_pool=db_pool, app_state=app.state)
+        await _corp_auditor.start()
+        app.state.corporate_command_auditor = _corp_auditor
+        print("   ✅ CorporateCommandAuditor started (stagger 115s)")
+    except Exception as cca_err:
+        print(f"   ⚠️  CorporateCommandAuditor init failed: {cca_err}")
+
     # ── Insight Accumulator — unifies all wisdom sources into coherent intelligence ──
     _insight_accumulator = None
     try:
@@ -1941,6 +2658,43 @@ async def lifespan(app: FastAPI):
     except Exception as wr_err:
         print(f"   ⚠️  Web Content Reader init failed: {wr_err}")
 
+    # ── Register SKYEYE_AUDIT_TOKEN in Redis for auditor auth ──
+    # Uses _REDIS_URL_EARLY captured at module scope before load_dotenv clobbers it.
+    _audit_token = os.environ.get("SKYEYE_AUDIT_TOKEN", "")
+    if _audit_token:
+        try:
+            import redis as _sync_redis
+            if _REDIS_URL_EARLY:
+                _audit_r = _sync_redis.from_url(
+                    _REDIS_URL_EARLY, decode_responses=True,
+                    socket_connect_timeout=10, socket_timeout=10,
+                )
+            else:
+                _audit_r = _sync_redis.Redis(
+                    host=_REDIS_HOST_EARLY,
+                    port=int(os.environ.get("REDIS_PORT", "6379")),
+                    password=_REDIS_PW_EARLY or None,
+                    decode_responses=True,
+                    socket_connect_timeout=10, socket_timeout=10,
+                )
+            _env = os.environ.get("ENVIRONMENT", "production")
+            _audit_key = f"nate:{_env}:auth:{_audit_token}"
+            _audit_profile = json.dumps({
+                "role": "ADMIN",
+                "name": "DrNevedal1",
+                "username": "DrNevedal1",
+                "hardware_id": "ADMIN_DRNEVEDAL1_ID",
+                "email": "admin_nevedalnj@sovereignsanctuary.net",
+                "is_audit_token": True,
+            })
+            _audit_r.setex(_audit_key, 86400 * 365, _audit_profile)
+            _audit_r.close()
+            print("   ✅ SKYEYE_AUDIT_TOKEN registered in Redis (365-day TTL)")
+        except Exception as _at_err:
+            print(f"   ⚠️  SKYEYE_AUDIT_TOKEN registration failed: {_at_err}")
+    else:
+        print("   ⚠️  SKYEYE_AUDIT_TOKEN not set — auditors will fall back to Redis scan")
+
     # ── HIVE DEFENSE v4.3: Startup Health Summary ──
     _healthy_count = 0
     _degraded_list = []
@@ -1959,9 +2713,59 @@ async def lifespan(app: FastAPI):
         ("token_audit_agent", _token_audit_agent is not None),
         ("insight_accumulator", _insight_accumulator is not None),
         ("web_content_reader", _web_reader is not None),
+        ("content_queue_janitor", _content_janitor is not None),
+        ("token_lifecycle_predictor", _token_predictor is not None),
+        ("db_maintenance_agent", _db_maintenance is not None),
+        ("session_recovery_agent", _session_recovery is not None),
+        ("agent_status_digest", _agent_digest is not None),
+        ("skyeye_tab_auditor", _tab_auditor is not None),
+        ("command_tab_auditor", _cmd_auditor is not None),
+        ("the_eye_auditor", _eye_auditor is not None),
+        ("login_auditor", _login_auditor is not None),
+        ("client_app_auditor", _client_auditor is not None),
+        ("coach_dojo_auditor", _coach_dojo_auditor is not None),
+        ("billing_auditor", _billing_auditor is not None),
+        ("defense_auditor", _defense_auditor is not None),
+        ("ai_pipeline_auditor", _ai_pipeline_auditor is not None),
+        ("ws_flow_auditor", _ws_flow_auditor is not None),
+        ("tier_gating_auditor", _tier_gating_auditor is not None),
+        ("nevedal_lab_auditor", _nevedal_lab_auditor is not None),
+        ("hw_security_auditor", _hw_security_auditor is not None),
+        ("system_integrity_auditor", _system_integrity_auditor is not None),
+        ("dojo_session_auditor", _dojo_session_auditor is not None),
+        ("wisdom_pipeline_auditor", _wisdom_pipeline_auditor is not None),
+        ("settings_tab_auditor", _settings_tab_auditor is not None),
+        ("notification_observer", _notif_observer is not None),
+        ("community_mesh_engine", _community_mesh is not None),
+        ("liminal_coaching_engine", _liminal_engine is not None),
+        ("dojo_mentor_engine", _dojo_mentor is not None),
+        ("dojo_mentor_zoom", _dojo_zoom is not None),
+        ("coach_hierarchy_auditor", _coach_hierarchy_auditor is not None),
+        ("coaching_mesh_engine", _coaching_mesh is not None),
+        ("call_coaching_engine", _call_coaching is not None),
+        ("trust_enforcer", _trust_enforcer is not None),
+        ("assessment_engine", _assessment_engine is not None),
+        ("silence_sentinel", _silence_sentinel is not None),
+        ("language_drift_monitor", _language_drift_monitor is not None),
+        ("field_response_parser", _field_response_parser is not None),
+        ("liminal_presence_auditor", _liminal_presence_auditor is not None),
+        ("pmb_command_center_auditor", _pmb_auditor is not None),
+        ("data_uniformity_tracer", _data_uniformity_tracer is not None),
+        ("token_lab_auditor", _token_lab_auditor is not None),
+        ("gkm_auditor", _gkm_auditor is not None),
+        ("token_usage_agent", _token_usage_agent is not None),
+        ("nate_checkin_agent", _nate_checkin_agent is not None),
+        ("nate_checkin_auditor", _nate_checkin_auditor is not None),
+        ("fcode_engine", _fcode_engine is not None),
+        ("session_payment_agent", _session_payment_agent is not None),
+        ("signup_sharing_agent", _signup_sharing_agent is not None),
+        ("quickbooks_sync_agent", _qb_sync_agent is not None),
+        ("quickbooks_auditor", _qb_auditor is not None),
+        ("corporate_command_auditor", _corp_auditor is not None),
         ("hot_memory", getattr(app.state, "hot_memory", None) is not None),
         ("warm_memory", getattr(app.state, "warm_memory", None) is not None),
         ("cold_memory", getattr(app.state, "cold_memory", None) is not None),
+        ("sentinel_orchestrator", _sentinel_orchestrator is not None),
     ]
     _hv4 = getattr(app.state, "hive_v4", {})
     _hive_services = [
@@ -2085,6 +2889,109 @@ async def lifespan(app: FastAPI):
         await _taa.stop()
         print("   ✅ Token Audit Agent stopped")
 
+    # Stop Content Queue Janitor
+    _cqj = getattr(app.state, "content_queue_janitor", None)
+    if _cqj:
+        await _cqj.stop()
+        print("   ✅ ContentQueueJanitor stopped")
+
+    # Stop Token Lifecycle Predictor
+    _tlp = getattr(app.state, "token_lifecycle_predictor", None)
+    if _tlp:
+        await _tlp.stop()
+        print("   ✅ TokenLifecyclePredictor stopped")
+
+    # Stop Database Maintenance Agent
+    _dbm = getattr(app.state, "db_maintenance_agent", None)
+    if _dbm:
+        await _dbm.stop()
+        print("   ✅ DatabaseMaintenanceAgent stopped")
+
+    # Stop Session Recovery Agent
+    _sra = getattr(app.state, "session_recovery_agent", None)
+    if _sra:
+        await _sra.stop()
+        print("   ✅ SessionRecoveryAgent stopped")
+
+    # Stop Session Payment Agent
+    _spa = getattr(app.state, "session_payment_agent", None)
+    if _spa:
+        await _spa.stop()
+        print("   ✅ SessionPaymentAgent stopped")
+
+    # Stop Signup Sharing Agent
+    _ssa = getattr(app.state, "signup_sharing_agent", None)
+    if _ssa:
+        await _ssa.stop()
+        print("   ✅ SignupSharingAgent stopped")
+
+    # Stop Agent Status Digest
+    _asd = getattr(app.state, "agent_status_digest", None)
+    if _asd:
+        await _asd.stop()
+        print("   ✅ AgentStatusDigest stopped")
+
+    # Stop SkyEye Tab Auditor
+    _sta = getattr(app.state, "skyeye_tab_auditor", None)
+    if _sta:
+        await _sta.stop()
+        print("   ✅ SkyEyeTabAuditor stopped")
+
+    # Stop Sovereign Command Tab Auditor
+    _cta = getattr(app.state, "command_tab_auditor", None)
+    if _cta:
+        await _cta.stop()
+        print("   ✅ SovereignCommandAuditor stopped")
+
+    # Stop The Eye Auditor
+    _tea = getattr(app.state, "the_eye_auditor", None)
+    if _tea:
+        await _tea.stop()
+        print("   ✅ TheEyeAuditor stopped")
+
+    # Stop Login Auditor
+    _la = getattr(app.state, "login_auditor", None)
+    if _la:
+        await _la.stop()
+        print("   ✅ LoginAuditor stopped")
+
+    # Stop Client App Auditor
+    _caa = getattr(app.state, "client_app_auditor", None)
+    if _caa:
+        await _caa.stop()
+        print("   ✅ ClientAppAuditor stopped")
+
+    # Stop new auditors
+    for _attr, _label in [
+        ("coach_dojo_auditor", "CoachDojoAuditor"),
+        ("billing_auditor", "BillingPipelineAuditor"),
+        ("defense_auditor", "DefenseHealthAuditor"),
+        ("ai_pipeline_auditor", "AIPipelineAuditor"),
+        ("ws_flow_auditor", "WebSocketFlowAuditor"),
+        ("tier_gating_auditor", "TierGatingAuditor"),
+        ("nevedal_lab_auditor", "NevedalLabAuditor"),
+        ("hw_security_auditor", "HardwareSecurityAuditor"),
+        ("system_integrity_auditor", "SystemIntegrityAuditor"),
+        ("notification_observer", "NotificationObserver"),
+        ("community_mesh_engine", "CommunityMeshEngine"),
+        ("trust_enforcer", "TrustEnforcer"),
+        ("silence_sentinel", "SilenceSentinel"),
+        ("language_drift_monitor", "LanguageDriftMonitor"),
+        ("field_response_parser", "FieldResponseParser"),
+        ("liminal_presence_auditor", "LiminalPresenceAuditor"),
+        ("pmb_command_center_auditor", "PmbCommandCenterAuditor"),
+        ("data_uniformity_tracer", "DataUniformityTracer"),
+        ("token_lab_auditor", "TokenLabAuditor"),
+        ("gkm_auditor", "GkmAuditor"),
+        ("token_usage_agent", "TokenUsageAgent"),
+        ("nate_checkin_agent", "NateCheckInAgent"),
+        ("nate_checkin_auditor", "NateCheckInAuditor"),
+    ]:
+        _agent = getattr(app.state, _attr, None)
+        if _agent:
+            await _agent.stop()
+            print(f"   ✅ {_label} stopped")
+
     # Stop Insight Accumulator
     _ia = getattr(app.state, "insight_accumulator", None)
     if _ia:
@@ -2117,10 +3024,12 @@ async def lifespan(app: FastAPI):
     
     # 2. Persist session memory index
     try:
-        from app.services.session_memory_store import SessionMemoryStore
-        mem_store = SessionMemoryStore()
-        mem_store._save_index()
-        print("   ✅ Session memory index saved")
+        mem_store = getattr(app.state, "session_memory_store", None)
+        if mem_store:
+            mem_store._save_index()
+            print("   ✅ Session memory index saved")
+        else:
+            print("   ⚠️  Session memory store was not initialized, skipping index save")
     except Exception as mem_err:
         print(f"   ⚠️  Session memory index save failed: {mem_err}")
     
@@ -2173,6 +3082,18 @@ async def lifespan(app: FastAPI):
             print("   ✅ Wisdom Mesh disconnected")
         except Exception:
             pass
+    # Stop QB Sync Agent, QB Auditor, Corp Command Auditor
+    for _agent_name, _agent_var in [
+        ("QuickBooksSyncAgent", _qb_sync_agent),
+        ("QuickBooksAuditor", _qb_auditor),
+        ("CorporateCommandAuditor", _corp_auditor),
+    ]:
+        if _agent_var:
+            try:
+                await _agent_var.stop()
+            except Exception:
+                pass
+
     if db_pool:
         await db_pool.close()
     print("   ✅ Database disconnected")
@@ -2205,6 +3126,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =============================================================================
+# HIVE DEFENSE MIDDLEWARE (registered at module level — Starlette requirement)
+# Services are resolved lazily via app.state during request processing.
+# =============================================================================
+from app.middleware.transit_inspection import TransitInspectionMiddleware
+from app.middleware.drum_tap import DrumTapMiddleware
+from app.middleware.webhook_rate_limit import WebhookRateLimitMiddleware
+
+app.add_middleware(TransitInspectionMiddleware, app_state=app.state)
+app.add_middleware(DrumTapMiddleware, app_state=app.state)
+app.add_middleware(WebhookRateLimitMiddleware, max_requests=120, window_seconds=60)
+
 
 # =============================================================================
 # ROUTES
@@ -2229,6 +3162,11 @@ app.include_router(sessions_api.router)
 app.include_router(admin_api.router)
 app.include_router(coach_api.router)
 app.include_router(billing_api.router)
+try:
+    from app.routers.scholarship_api import router as scholarship_router
+    app.include_router(scholarship_router)
+except Exception as _sch_err:
+    print(f"   ⚠️  Scholarship router failed: {_sch_err}")
 app.include_router(dojo_api.router)
 app.include_router(twilio_webhook.router)
 
@@ -2240,6 +3178,7 @@ app.include_router(response_api.router)
 app.include_router(golden_ticket_api.router)
 app.include_router(analytics_api.router)
 app.include_router(webhook_api.router)
+app.include_router(meta_webhook_router)
 
 # Zoom endpoints are additive and gated behind ENABLE_ZOOM (and missing env checks inside the router)
 if settings.ENABLE_ZOOM:
@@ -2256,6 +3195,7 @@ if settings.ENABLE_SKYEYE:
 
 # Coherence Engine (Sovereign Swarm)
 app.include_router(coherence_api.router)
+app.include_router(client_data_api.router)
 
 # Fibre & Mesh API (Sovereign Swarm)
 app.include_router(fibre_api.router)
@@ -2307,6 +3247,151 @@ app.include_router(me2me_api.router)
 
 # Phase 8: Hive Defense Protocol
 app.include_router(hive_defense_api.router)
+try:
+    app.include_router(hive_defense_api.helix_public_router)
+except Exception:
+    pass
+app.include_router(assessments_api.router)
+app.include_router(trust_enforcer_api.router)
+
+# Coach Hierarchy & Coaching Mesh API
+try:
+    from app.routers.coach_hierarchy_api import router as coach_hierarchy_router
+    app.include_router(coach_hierarchy_router)
+except Exception as _ch_err:
+    print(f"   ⚠️  Coach Hierarchy router failed: {_ch_err}")
+
+# Community Mesh — Nate-to-Nate group wisdom + attendance
+try:
+    from app.routers.community_api import router as community_router
+    app.include_router(community_router)
+except Exception as _cm_err:
+    print(f"   ⚠️  Community API router failed: {_cm_err}")
+
+# Data Export — GDPR/CCPA user data download
+try:
+    from app.routers.data_export import router as data_export_router
+    app.include_router(data_export_router)
+except Exception as _de_err:
+    print(f"   ⚠️  Data Export router failed: {_de_err}")
+
+# Receipt Validation — Apple/Google IAP receipt verification
+try:
+    from app.routers.receipt_validation import router as receipt_router
+    app.include_router(receipt_router)
+except Exception as _rv_err:
+    print(f"   ⚠️  Receipt Validation router failed: {_rv_err}")
+
+# Twilio Voice — Live call coaching
+try:
+    from app.routers.twilio_voice import router as twilio_voice_router
+    app.include_router(twilio_voice_router)
+except Exception as _tv_err:
+    print(f"   ⚠️  Twilio Voice router failed: {_tv_err}")
+
+# PMB Reports — Globe Command Center
+try:
+    from app.routers.pmb_reports_api import router as pmb_reports_router
+    app.include_router(pmb_reports_router)
+except Exception as _pmb_err:
+    print(f"   ⚠️  PMB Reports router failed: {_pmb_err}")
+
+try:
+    from app.routers.token_lab_api import router as token_lab_router
+    app.include_router(token_lab_router)
+except Exception as _tl_err:
+    print(f"   ⚠️  Token Lab router failed: {_tl_err}")
+
+try:
+    from app.routers.gkm_api import router as gkm_router
+    app.include_router(gkm_router)
+except Exception as _gkm_err:
+    print(f"   ⚠️  GKM router failed: {_gkm_err}")
+
+try:
+    from app.routers.sendgrid_inbound import router as sendgrid_inbound_router
+    app.include_router(sendgrid_inbound_router)
+except Exception as _sg_err:
+    print(f"   ⚠️  SendGrid Inbound router failed: {_sg_err}")
+
+try:
+    from app.routers.bulk_import import router as bulk_import_router
+    app.include_router(bulk_import_router)
+except Exception as _bi_err:
+    print(f"   ⚠️  Bulk Import router failed: {_bi_err}")
+
+# Coach FOLDER API
+try:
+    from app.routers.folder_api import router as folder_router
+    app.include_router(folder_router)
+except Exception as _fl_err:
+    print(f"   ⚠️  Folder API router failed: {_fl_err}")
+
+# Coach Forms API (templates, PDF/Excel generation, email distribution)
+try:
+    from app.routers.forms_api import router as forms_router
+    app.include_router(forms_router)
+except Exception as _fm_err:
+    print(f"   ⚠️  Forms API router failed: {_fm_err}")
+
+# F-Code API (ICD-10-CM suggestions, coach assignments, transgenerational)
+try:
+    from app.routers.fcode_api import router as fcode_router
+    app.include_router(fcode_router)
+except Exception as _fc_err:
+    print(f"   ⚠️  F-Code API router failed: {_fc_err}")
+
+# Coach Schedule API (availability, calendar sync)
+try:
+    from app.routers.schedule_api import router as schedule_router
+    app.include_router(schedule_router)
+except Exception as _sc_err:
+    print(f"   ⚠️  Schedule API router failed: {_sc_err}")
+
+# Coach Sign-Up Code API (revenue sharing)
+try:
+    from app.routers.signup_code_api import router as signup_code_router
+    app.include_router(signup_code_router)
+except Exception as _su_err:
+    print(f"   ⚠️  Sign-Up Code API router failed: {_su_err}")
+
+# School Discount Code API (student verification & enrollment)
+try:
+    from app.routers.school_code_api import router as school_code_router
+    app.include_router(school_code_router)
+except Exception as _sc_err:
+    print(f"   ⚠️  School Code API router failed: {_sc_err}")
+
+# QuickBooks Integration API (admin-only auth-gated + public OAuth callback)
+try:
+    from app.routers.quickbooks_api import router as quickbooks_router, oauth_router as quickbooks_oauth_router
+    app.include_router(quickbooks_router)
+    app.include_router(quickbooks_oauth_router)
+except Exception as _qb_err:
+    print(f"   ⚠️  QuickBooks router failed: {_qb_err}")
+
+# Corp QuickBooks API (CORP_ADMIN auth-gated + public OAuth callback)
+try:
+    from app.routers.corp_quickbooks_api import router as corp_qb_router, oauth_router as corp_qb_oauth_router
+    app.include_router(corp_qb_router)
+    app.include_router(corp_qb_oauth_router)
+except Exception as _cqb_err:
+    print(f"   ⚠️  Corp QuickBooks router failed: {_cqb_err}")
+
+# Coach QuickBooks API (coach auth-gated + public OAuth callback)
+try:
+    from app.routers.coach_quickbooks_api import router as coach_qb_router, oauth_router as coach_qb_oauth_router
+    app.include_router(coach_qb_router)
+    app.include_router(coach_qb_oauth_router)
+except Exception as _coqb_err:
+    print(f"   ⚠️  Coach QuickBooks router failed: {_coqb_err}")
+
+# Corporate Command API (CORP_ADMIN dashboard)
+try:
+    from app.routers.corporate_command_api import router as corporate_command_router
+    app.include_router(corporate_command_router)
+except Exception as _cc_err:
+    print(f"   ⚠️  Corporate Command API router failed: {_cc_err}")
 
 
 # =============================================================================

@@ -1,0 +1,60 @@
+# Intellectual Property Protection Protocol
+
+## Overview
+
+Little Nate enforces role-based information compartmentalization across all chat entry points. Coaches and clients must NEVER learn about Sovereign Command, Corporate Command, or admin-only features through AI responses.
+
+## Three Defense Layers
+
+| Layer | Location | Mechanism |
+|---|---|---|
+| 1. System Prompt | Quantum Observer, COACH_NATE, CLIENT_HELP, COACH_HELP | IP BOUNDARY block in the prompt instructs the AI to refuse restricted topics |
+| 2. Pre-Filter | `check_ip_boundary()` in `bridge_server.py`, `_check_coach_ip_boundary()` in `skyeye_chat.py` | Scans incoming messages for restricted topic keywords; deflects before calling Azure |
+| 3. Post-Filter | `sanitize_ai_response()` in `bridge_server.py`, `_sanitize_coach_response()` in `skyeye_chat.py` | Scans AI responses for leaked restricted terms; replaces with deflection if found |
+
+## Chat Entry Points and Their Protection
+
+| Entry Point | Message Type | Protection Path |
+|---|---|---|
+| Client AI chat | `chat_message`, `nate_query` | `process_interaction()` → pre-filter + Quantum Observer prompt + post-filter |
+| Coach AI chat (bridge) | `coach_nate_query`, `ask_nate_coaching` | `process_interaction()` → pre-filter + Quantum Observer prompt + post-filter |
+| Coach Insights Chat (REST) | `POST /api/coach/nate-chat` | `send_coach_message()` → `_check_coach_ip_boundary()` + COACH_NATE prompt + `_sanitize_coach_response()` |
+| Help & FAQ | `help_query` | `check_ip_boundary()` + CLIENT_HELP / COACH_HELP prompt |
+| Big Nate Chat (Admin) | `POST /api/skyeye/chat` | NO IP restriction — admin has full access |
+
+## Restricted Topics by Role
+
+### CLIENT — Cannot discuss:
+- Sovereign Command, Coach Command, Corporate Command (any dashboard)
+- SkyEye, Marketing Brain, Content Queue, Drip Scheduler
+- Hive Defense, Trust Auditors, Token Lab, Big Nate Chat
+- Coach Hierarchy, Supervised Hours, Coaching Mesh
+- Backend architecture, databases, APIs, deployment, Docker
+- GKM Ministry admin, QuickBooks, billing admin
+- Night School Director, Wisdom Pipeline internals
+- Funnel Router, Golden Ticket, Quiz Factory
+
+### COACH — Cannot discuss:
+- Sovereign Command, Corporate Command
+- SkyEye Content Engine, Marketing Brain, Campaign Management
+- Hive Defense, Trust Auditors, Trust Enforcer
+- Big Nate Chat (admin version), Token Lab (admin view)
+- Backend architecture, databases, APIs, deployment
+- GKM Ministry admin, QuickBooks admin
+- Liminal Presence agents (admin monitoring)
+- Other coaches' clients or data
+
+### ADMIN — No restrictions (full access to all topics)
+
+## Threshold for Deflection
+
+The pre-filter triggers when **2 or more** restricted topic keywords match in a single message. This avoids false positives from casual mentions while catching deliberate probing.
+
+## Rules
+
+1. **Never weaken the IP boundary prompts** — they exist because Little Nate leaked Sovereign Command details to a coach.
+2. **Every new chat entry point must include IP protection** — if adding a new message handler or REST endpoint that calls Azure OpenAI, wire it through `check_ip_boundary()` or the class-level equivalent.
+3. **Admin chat is exempt** — `ADMIN` role bypasses all IP checks. The `LITTLE_NATE_SYSTEM_PROMPT` has no restrictions.
+4. **The post-filter is a safety net** — the system prompt should prevent most leaks, but if the AI somehow discusses restricted topics, the post-filter catches it.
+5. **Adding new restricted topics** — update BOTH the system prompt boundary text AND the keyword sets (`IP_RESTRICTED_TOPICS_CLIENT`, `IP_RESTRICTED_TOPICS_COACH`, `_COACH_IP_RESTRICTED`).
+6. **Test after changes** — ask Little Nate (as a coach) about "Sovereign Command features" and verify the deflection response.

@@ -246,11 +246,36 @@ class NevedalHandler:
             self.admin_subscribers.discard(ws)
     
     async def _store_state(self, state: NevedalState):
-        """Store in database"""
+        """Store in database. Resolves hardware_id → UUID for FK columns."""
         if not self.db_pool:
             return
         try:
             async with self.db_pool.acquire() as conn:
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                    state.user_id,
+                )
+                if not user_uuid:
+                    return
+
+                session_uuid = None
+                if state.session_id:
+                    try:
+                        import uuid as _uuid_mod
+                        parsed = _uuid_mod.UUID(str(state.session_id))
+                        exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", parsed)
+                        if exists:
+                            session_uuid = parsed
+                    except (ValueError, AttributeError):
+                        pass
+
+                dyad_uuid = None
+                if state.dyad_partner_id:
+                    dyad_uuid = await conn.fetchval(
+                        "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                        state.dyad_partner_id,
+                    )
+
                 await conn.execute("""
                     INSERT INTO nevedal_metrics (
                         session_id, user_id, dyad_partner_id, recorded_at,
@@ -258,7 +283,7 @@ class NevedalHandler:
                         cee_window, cee_duration_seconds
                     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 """,
-                    state.session_id, state.user_id, state.dyad_partner_id,
+                    session_uuid, user_uuid, dyad_uuid,
                     state.timestamp, state.c_emo, state.p_ent, state.t_tunnel,
                     state.gamma_env, state.e_g_joint, state.cee_window,
                     state.cee_duration_seconds

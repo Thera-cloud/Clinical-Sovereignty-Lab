@@ -22,10 +22,11 @@ logger = logging.getLogger("marketing.funnel_router")
 # =============================================================================
 
 SCORING_WEIGHTS = {
-    "interaction_count": 0.30,   # How many times they've engaged
+    "interaction_count": 0.25,   # How many times they've engaged
     "recency_days": 0.25,       # How recent the last interaction (inverse)
-    "interest_alignment": 0.25,  # Do their interests match our pillars?
-    "platform_value": 0.20,     # Platform conversion potential
+    "interest_alignment": 0.20,  # Do their interests match our pillars?
+    "platform_value": 0.15,     # Platform conversion potential
+    "notification_count": 0.15,  # Passive engagement signals (likes, reposts, follows)
 }
 
 PLATFORM_VALUE = {
@@ -125,6 +126,10 @@ class FunnelRouter:
         # Platform value
         platform = user_context.get("platform", "")
         scores["platform_value"] = PLATFORM_VALUE.get(platform, 0.5)
+
+        # Notification/passive engagement signals (likes, reposts, follows)
+        notif_count = user_context.get("notification_count", 0)
+        scores["notification_count"] = min(notif_count / 5, 1.0)
 
         # Weighted sum
         total = sum(
@@ -342,16 +347,24 @@ class FunnelRouter:
                     GROUP BY audience_type
                 """, str(days))
 
-                # By platform
+                # By platform — include all enabled platforms even with zero funnel data
                 by_platform = await conn.fetch("""
                     SELECT
-                        platform,
-                        COUNT(*) as total,
-                        COUNT(converted_at) as conversions,
-                        AVG(engagement_score) as avg_score
-                    FROM funnel_routing_log
-                    WHERE created_at > NOW() - ($1 || ' days')::interval
-                    GROUP BY platform
+                        sp.name as platform,
+                        COALESCE(f.total, 0) as total,
+                        COALESCE(f.conversions, 0) as conversions,
+                        COALESCE(f.avg_score, 0) as avg_score
+                    FROM skyeye_platforms sp
+                    LEFT JOIN (
+                        SELECT platform, COUNT(*) as total,
+                               COUNT(converted_at) as conversions,
+                               AVG(engagement_score) as avg_score
+                        FROM funnel_routing_log
+                        WHERE created_at > NOW() - ($1 || ' days')::interval
+                        GROUP BY platform
+                    ) f ON LOWER(f.platform) = LOWER(sp.name)
+                    WHERE sp.enabled = true
+                    ORDER BY COALESCE(f.total, 0) DESC, sp.name
                 """, str(days))
 
                 return {
@@ -367,7 +380,7 @@ class FunnelRouter:
     # ── Private Methods ──────────────────────────────────────────────
 
     async def _get_social_memory(self, handle: str, platform: str) -> Optional[Dict]:
-        """Get social memory record for a user."""
+        """Get social memory record for a user, enriched with notification count."""
         try:
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow("""
@@ -376,9 +389,16 @@ class FunnelRouter:
                 """, handle, platform)
                 if row:
                     result = dict(row)
-                    # Parse interests if stored as text[]
                     if result.get("interests") and isinstance(result["interests"], list):
-                        pass  # Already a list
+                        pass
+                    try:
+                        notif_count = await conn.fetchval("""
+                            SELECT COUNT(*) FROM skyeye_notifications
+                            WHERE actor_handle = $1 AND platform = $2
+                        """, handle, platform)
+                        result["notification_count"] = notif_count or 0
+                    except Exception:
+                        result["notification_count"] = 0
                     return result
                 return None
         except Exception as e:

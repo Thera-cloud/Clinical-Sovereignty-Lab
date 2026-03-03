@@ -1,0 +1,33 @@
+---
+description: Session Dialog Dynamic Dropdowns — 5 session types with cascading population
+globs: mobile/lib/updated_screens.dart
+alwaysApply: false
+---
+
+# Session Dialog Dynamic Dropdowns
+
+## 5 Session Types
+
+The `_openCreateSessionDialog()` in `updated_screens.dart` supports:
+
+| Type | Secondary Dropdown | Client Dropdown Shows |
+|---|---|---|
+| CLIENT | None | All clients |
+| COACH | None | Active assistant coaches from `_assistantMetrics` |
+| FAMILY | Family ID | Clients matching selected `family_id` |
+| GROUP | Group ID | Clients matching selected `group_id` |
+| CORPORATE | Company | Clients matching selected `company_id` |
+
+## Data Sources
+
+- `_clients` (from `coach_get_clients` WS response) provides `family_id`, `group_id`, `company_id`, `company_name`
+- `_assistantMetrics` (from `/api/coach/hierarchy/assistant-metrics` REST) provides active assistant coaches
+- Unique IDs are derived at render time: `familyIds`, `groupIds`, `companyMap`
+
+## Rules
+
+1. **Secondary dropdown only renders when data exists** — if no clients have `group_id` assigned, the Group ID dropdown is hidden
+2. **Selecting a session type resets** both `selectedSecondaryId` and `selectedClientId`
+3. **Selecting a secondary ID resets** `selectedClientId`
+4. **`_scheduleSessionViaApi()` passes `selectedSecondaryId`** in the `familyId` field, with `session_type` providing context
+5. **`coach_get_clients` must return `group_id`** — added to `bridge_server.py` alongside existing `family_id`, `company_id`, `company_name`

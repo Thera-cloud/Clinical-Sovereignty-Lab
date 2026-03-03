@@ -1044,6 +1044,7 @@ _recoverAuth();
         function connect() {
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
+                _dojoReconnectAttempts = 0;
                 // Prefer token auth (works across tabs)
                 if (tokenParam) {
                     socket.send(JSON.stringify({
@@ -1063,8 +1064,16 @@ _recoverAuth();
                 }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setTimeout(connect, 3000); };
+            socket.onerror = function(e) { console.warn('DOJO WS error:', e); };
+            socket.onclose = function() {
+                var attempt = Math.min(_dojoReconnectAttempts, 10);
+                var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+                var jitter = Math.floor(baseMs * 0.2 * Math.random());
+                _dojoReconnectAttempts++;
+                setTimeout(connect, baseMs + jitter);
+            };
         }
+        var _dojoReconnectAttempts = 0;
 
         var currentNateMessage = null;
         var fullResponse = "";
@@ -1115,10 +1124,30 @@ _recoverAuth();
                 
                 console.log(">>> Dojo authenticated as " + role + " (fromCoachCommand: " + isFromCoachCommand + ")");
                 
-                // Gate DOJO modes based on coach's selected_dojos (subscription-backed)
+                // Gate DOJO modes based on coach's dojo_subscriptions (primary) or selected_dojos (legacy)
+                var dojoSubs = (data.profile || {}).dojo_subscriptions || {};
                 var selectedDojos = (data.profile || {}).selected_dojos || [];
+
+                // Compute active dojos from dojo_subscriptions (mirrors backend get_active_dojos)
+                var computedActive = [];
+                if (dojoSubs && typeof dojoSubs === 'object' && Object.keys(dojoSubs).length > 0) {
+                    var today = new Date().toISOString().slice(0, 10);
+                    for (var dk in dojoSubs) {
+                        if (!dojoSubs.hasOwnProperty(dk)) continue;
+                        var sub = dojoSubs[dk];
+                        if (!sub || typeof sub !== 'object') continue;
+                        if (sub.status === 'active') {
+                            computedActive.push(dk);
+                        } else if (sub.status === 'cancelled') {
+                            var accessEnd = sub.access_end_date || '';
+                            if (!accessEnd || accessEnd >= today) computedActive.push(dk);
+                        }
+                    }
+                }
+                // Use computed active if available, fall back to selected_dojos
+                var effectiveDojos = computedActive.length > 0 ? computedActive : selectedDojos;
                 // Store globally for re-application
-                window._gatedDojos = selectedDojos;
+                window._gatedDojos = effectiveDojos;
                 
                 var allModes = ['therapist','project_pm','business','cnc','mcat','teacher','judge'];
                 var modeLabels = {
@@ -1133,15 +1162,20 @@ _recoverAuth();
                 
                 // Determine which dojos this user can access
                 var allowedDojos;
-                if (role === "ADMIN" || selectedDojos.length === 0) {
+                if (role === "ADMIN" || effectiveDojos.length === 0) {
                     // ADMIN or no subscription data: show all dojos
                     allowedDojos = allModes.slice();
                 } else {
                     // COACH with subscription-gated dojos
-                    allowedDojos = selectedDojos.slice();
+                    allowedDojos = effectiveDojos.slice();
                 }
                 
                 console.log(">>> Dojo gating check: role=" + role + ", selectedDojos=", selectedDojos, "allowedDojos=", allowedDojos);
+                console.log(">>> Dojo subscriptions raw:", JSON.stringify(dojoSubs));
+                console.log(">>> Dojo computedActive:", computedActive, "effectiveDojos:", effectiveDojos);
+                if (role === "COACH" && allowedDojos.indexOf("judge") === -1) {
+                    console.warn(">>> JUDGE DOJO NOT VISIBLE — check dojo_subscriptions for judge entry with status=active");
+                }
                 
                 // === DESKTOP: Show/hide mode tabs ===
                 var desktopTabs = document.querySelectorAll("#modeTabs .mode-tab");

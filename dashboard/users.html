@@ -44,6 +44,11 @@
         .user-tier { font-size: 9px; padding: 3px 8px; border-radius: 4px; background: var(--bg-elevated); color: var(--text-secondary); }
         .user-tier.coach-verified { background: rgba(0, 255, 136, 0.15); color: var(--green); }
         .user-tier.coach-pending { background: rgba(255, 149, 0, 0.15); color: var(--orange); }
+        .user-tier.coach-master { background: rgba(157, 78, 221, 0.15); color: #9D4EDD; }
+        .user-tier.coach-assistant { background: rgba(78, 205, 196, 0.15); color: #4ECDC4; }
+        .coach-sub-filters { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+        .coach-sub-chip { padding: 4px 10px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; font-size: 9px; color: var(--text-secondary); cursor: pointer; }
+        .coach-sub-chip.active { border-color: var(--gold); color: var(--gold); }
         .user-tier.online { background: rgba(0, 255, 136, 0.15); color: var(--green); }
         .user-meta { font-size: 10px; color: var(--text-secondary); margin-left: 46px; }
         .content { padding: 24px; overflow-y: auto; }
@@ -94,6 +99,12 @@
                     <span class="filter-chip" onclick="setFilter('coach', this)">Coaches</span>
                     <span class="filter-chip" onclick="setFilter('admin', this)">Admins</span>
                 </div>
+                <div class="coach-sub-filters" id="coachSubFilters" style="display:none">
+                    <span class="coach-sub-chip active" onclick="setCoachSub('all_coaches', this)">All Coaches</span>
+                    <span class="coach-sub-chip" onclick="setCoachSub('master', this)">Master</span>
+                    <span class="coach-sub-chip" onclick="setCoachSub('assistant', this)">Assistant</span>
+                    <span class="coach-sub-chip" onclick="setCoachSub('independent', this)">Independent</span>
+                </div>
             </div>
             <div class="user-list" id="userList">Loading...</div>
         </aside>
@@ -126,6 +137,7 @@ _recoverAuth();
         }
         var SERVER_URL = getWsUrl();
         var socket = null;
+        var _wsRetry = 0;
         var allUsers = [];
         var selectedUser = null;
         var currentFilter = "all";
@@ -143,6 +155,7 @@ _recoverAuth();
             }
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
+                _wsRetry = 0;
                 var profileStr = (sessionStorage.getItem("profile") || localStorage.getItem("sc_profile"));
                 var profile = profileStr ? JSON.parse(profileStr) : {};
                 socket.send(JSON.stringify({
@@ -152,7 +165,8 @@ _recoverAuth();
                 }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setTimeout(connect, 3000); };
+            socket.onerror = function(e) { console.warn('WS error:', e); };
+            socket.onclose = function() { var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random())); };
         }
 
         function handleMessage(event) {
@@ -274,9 +288,14 @@ _recoverAuth();
             alert(msg);
         }
 
+        var coachSubFilter = "all_coaches";
+
         function renderUserList() {
             var list = document.getElementById("userList");
             var search = document.getElementById("searchInput").value.toLowerCase();
+            var subPanel = document.getElementById("coachSubFilters");
+            if (subPanel) subPanel.style.display = (currentFilter === "coach") ? "flex" : "none";
+
             var filtered = [];
             for (var i = 0; i < allUsers.length; i++) {
                 var u = allUsers[i];
@@ -287,6 +306,12 @@ _recoverAuth();
                 var role = (u.role || "").toLowerCase();
                 var matchesFilter = currentFilter === "all" || role === currentFilter || (currentFilter === "client" && (role === "user" || role === "client"));
                 if (matchesSearch && matchesFilter) {
+                    if (currentFilter === "coach" && coachSubFilter !== "all_coaches") {
+                        var ct = (u.coach_type || "INDEPENDENT").toUpperCase();
+                        if (coachSubFilter === "master" && ct !== "MASTER") continue;
+                        if (coachSubFilter === "assistant" && ct !== "ASSISTANT") continue;
+                        if (coachSubFilter === "independent" && ct !== "INDEPENDENT") continue;
+                    }
                     filtered.push(u);
                 }
             }
@@ -306,11 +331,17 @@ _recoverAuth();
                 var initials = getInitials(user.name || user.username);
                 var isOnline = user.online;
 
-                // Build tier/status badge
                 var badgeText = r;
                 var badgeClass = "user-tier";
                 if (r === "COACH") {
-                    if (user.coach_verified) {
+                    var ct = (user.coach_type || "").toUpperCase();
+                    if (ct === "MASTER") {
+                        badgeText = "MASTER COACH";
+                        badgeClass = "user-tier coach-master";
+                    } else if (ct === "ASSISTANT") {
+                        badgeText = "ASSISTANT";
+                        badgeClass = "user-tier coach-assistant";
+                    } else if (user.coach_verified) {
                         badgeText = "COACH ✓";
                         badgeClass = "user-tier coach-verified";
                     } else if (user.subscription_status === "PENDING_VERIFICATION") {
@@ -322,7 +353,6 @@ _recoverAuth();
                     badgeText = plan;
                 }
 
-                // Build meta line
                 var metaParts = [];
                 if (user.family_id) metaParts.push(user.family_id);
                 else metaParts.push("No Family");
@@ -341,6 +371,14 @@ _recoverAuth();
                 html += "</div>";
             }
             list.innerHTML = html;
+        }
+
+        function setCoachSub(sub, elem) {
+            coachSubFilter = sub;
+            var chips = document.querySelectorAll(".coach-sub-chip");
+            for (var i = 0; i < chips.length; i++) chips[i].classList.remove("active");
+            elem.classList.add("active");
+            renderUserList();
         }
 
         function getInitials(name) {
@@ -390,6 +428,23 @@ _recoverAuth();
             html += "<div class='profile-field'><span class='field-label'>Subscription</span><span class='field-value green'>" + (user.subscription_plan || user.tier || "TRIAL") + "</span></div>";
             if (r === "COACH") {
                 html += "<div class='profile-field'><span class='field-label'>Verified</span><span class='field-value " + (user.coach_verified ? "green'>✓ Verified" : "' style='color:var(--orange)'>Pending") + "</span></div>";
+                var coachType = (user.coach_type || "INDEPENDENT").toUpperCase();
+                var ctColor = coachType === "MASTER" ? "#9D4EDD" : coachType === "ASSISTANT" ? "#4ECDC4" : "var(--text-secondary)";
+                html += "<div class='profile-field'><span class='field-label'>Coach Type</span><span class='field-value' style='color:" + ctColor + "'>" + coachType + "</span></div>";
+                if (coachType === "ASSISTANT" && user.master_coach_id) {
+                    var masterName = user.master_coach_id;
+                    for (var mi = 0; mi < allUsers.length; mi++) {
+                        if (allUsers[mi].id === user.master_coach_id) { masterName = allUsers[mi].name || allUsers[mi].username; break; }
+                    }
+                    html += "<div class='profile-field'><span class='field-label'>Master Coach</span><span class='field-value' style='color:#9D4EDD'>" + masterName + "</span></div>";
+                }
+                if (coachType === "MASTER") {
+                    var assistantCount = 0;
+                    for (var ai = 0; ai < allUsers.length; ai++) {
+                        if (allUsers[ai].master_coach_id === user.id) assistantCount++;
+                    }
+                    html += "<div class='profile-field'><span class='field-label'>Assistants</span><span class='field-value'>" + assistantCount + "</span></div>";
+                }
             }
             if (r === "CLIENT") {
                 html += "<div class='profile-field'><span class='field-label'>Assigned Coach</span><span class='field-value'>" + (user.assigned_coach_id || "None") + "</span></div>";

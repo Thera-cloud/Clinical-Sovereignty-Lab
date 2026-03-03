@@ -32,18 +32,26 @@ MAX_BODY_INSPECT_BYTES = 65536  # 64KB
 class TransitInspectionMiddleware(BaseHTTPMiddleware):
     """Middleware that feeds request metadata to TransitGuardian."""
 
-    def __init__(self, app, transit_guardian=None):
+    def __init__(self, app, transit_guardian=None, app_state=None):
         super().__init__(app)
         self._guardian = transit_guardian
+        self._app_state = app_state
+
+    def _get_guardian(self):
+        if self._guardian:
+            return self._guardian
+        if self._app_state:
+            return getattr(self._app_state, "hive_v4", {}).get("transit_guardian")
+        return None
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         path = request.url.path
 
-        # Skip exempt paths
         if path in EXEMPT_PATHS or path.startswith("/static"):
             return await call_next(request)
 
-        if not self._guardian:
+        guardian = self._get_guardian()
+        if not guardian:
             return await call_next(request)
 
         start_time = time.time()
@@ -71,7 +79,7 @@ class TransitInspectionMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
 
-            result = await self._guardian.inspect_transit(
+            result = await guardian.inspect_transit(
                 direction="inbound",
                 source=request.client.host if request.client else "unknown",
                 destination="internal_api",

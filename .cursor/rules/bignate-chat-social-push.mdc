@@ -1,0 +1,39 @@
+---
+description: Rules for pushing Big Nate chat conversations out to social media platforms.
+alwaysApply: false
+globs:
+  - "**/skyeye_chat*"
+  - "**/skyeye_content*"
+---
+
+# Big Nate Chat → Social Media Push
+
+## Feature Overview
+
+Admin (DrNevedal1) can direct Big Nate (SkyEye Chat) to push conversation insights out to social media platforms. This converts the Sovereign Command chat dialogue into queued social content.
+
+## How It Works
+
+1. Admin says "post this to X" or "push this out to social" or "share this on LinkedIn" in Big Nate Chat (Marketing mode)
+2. The `push_chat_to_social` action pattern is detected in `skyeye_chat.py`
+3. Recent chat history (last 10 messages) is extracted as context
+4. `SkyEyeContentGenerator.generate_post()` creates platform-appropriate content from the conversation
+5. Content is queued via `queue_content()` with `generated_by: "big_nate_chat_push"`
+6. Queued content posts during the next SkyEye session cycle
+
+## Rules
+
+1. **Chat content is transformed, not copied verbatim** — the content generator creates platform-native posts (tweets, LinkedIn articles, etc.) inspired by the conversation, not raw chat transcripts.
+
+2. **Default platforms** — if the admin says "push to social" without specifying, content is queued for X and LinkedIn (the two primary platforms). Specific platform targeting overrides this default.
+
+3. **All content passes through safety checks** — `generate_post()` includes the content safety pipeline (HEPA filter, PII detection). Admin chat content is not exempt from safety checks.
+
+4. **Tracking** — posts generated from chat push are tagged `generated_by: "big_nate_chat_push"` in `skyeye_content_queue`, enabling separate analytics tracking in the Growth Dashboard.
+
+5. **Action trigger patterns**:
+   - "post this to X" / "push this to LinkedIn" / "share this on Instagram"
+   - "push this out to social" / "share this everywhere"
+   - "turn this into a post" / "convert this to a tweet"
+
+6. **X article detection** — both `generate_content` and `push_chat_to_social` detect article intent via keywords ("article", "long post", "essay", "deep dive", "thought piece", "extended"). When detected with X as the target, the `x_article` voice profile (4,000 chars) is used instead of the standard `x` voice (280 chars). The queue normalizes `x_article` back to platform `x` with `content_type = "article"`.

@@ -3,8 +3,9 @@
 // =============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 import '../config/app_config.dart';
@@ -34,13 +35,11 @@ class _Design {
 // =============================================================================
 class SecureSearchScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
-  final WebSocketChannel? socket;
   final String? prefillQuery;
 
   const SecureSearchScreen({
     super.key,
     required this.profile,
-    this.socket,
     this.prefillQuery,
   });
 
@@ -48,127 +47,66 @@ class SecureSearchScreen extends StatefulWidget {
   State<SecureSearchScreen> createState() => _SecureSearchScreenState();
 }
 
-class _SecureSearchScreenState extends State<SecureSearchScreen> {
+class _SecureSearchScreenState extends State<SecureSearchScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
-  WebSocketChannel? _socket;
-  StreamSubscription? _socketSub;
+  late TabController _tabController;
 
-  bool _authenticated = false;
-  bool _authenticating = true;
+  // Search tab state
   bool _isSearching = false;
-  bool _isPushing = false;
   List<Map<String, dynamic>> _results = [];
   int _totalMatches = 0;
   String? _errorMessage;
   int? _expandedIndex;
   final Set<int> _selectedIndices = {};
+  String? _token;
+
+  // Browse tab state
+  bool _isBrowseLoading = false;
+  List<Map<String, dynamic>> _sessions = [];
+  int _totalSessions = 0;
+  String? _browseError;
+  int? _expandedSession;
+  int? _expandedBrowseEntry;
+  bool _browseLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 1 && !_browseLoaded) {
+        _loadSessions();
+      }
+    });
     if (widget.prefillQuery != null && widget.prefillQuery!.isNotEmpty) {
       _searchController.text = widget.prefillQuery!;
     }
-    _connectAndAuth();
+    _initToken();
   }
 
-  Future<void> _connectAndAuth() async {
-    try {
-      _socket = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
-      _socketSub = _socket!.stream.listen(
-        (message) {
-          try {
-            _handleMessage(jsonDecode(message));
-          } catch (_) {}
-        },
-        onError: (_) {
-          if (mounted) setState(() { _errorMessage = 'Connection lost.'; _authenticating = false; });
-        },
-        onDone: () {
-          if (mounted) setState(() { _authenticated = false; });
-        },
-      );
-
-      final hardwareId = widget.profile['hardware_id'] ?? '';
-      if (hardwareId.toString().isEmpty) {
-        setState(() { _errorMessage = 'Missing identity.'; _authenticating = false; });
-        return;
-      }
-
-      const storage = FlutterSecureStorage(
-        aOptions: AndroidOptions(encryptedSharedPreferences: true),
-      );
-      final token = await storage.read(key: 'session_token');
-      if (token == null || token.isEmpty) {
-        setState(() { _errorMessage = 'Session expired. Please log out and back in.'; _authenticating = false; });
-        return;
-      }
-
-      _socket!.sink.add(jsonEncode({
-        'type': 'auth',
-        'hardware_id': hardwareId,
-        'token': token,
-      }));
-    } catch (e) {
-      if (mounted) setState(() { _errorMessage = 'Failed to connect: $e'; _authenticating = false; });
+  Future<void> _initToken() async {
+    const storage = FlutterSecureStorage(
+      aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    );
+    _token = await storage.read(key: 'session_token');
+    if (widget.prefillQuery != null && widget.prefillQuery!.isNotEmpty) {
+      _performSearch();
     }
   }
 
-  void _handleMessage(Map<String, dynamic> data) {
-    if (!mounted) return;
-    final type = data['type']?.toString() ?? '';
-
-    switch (type) {
-      case 'auth_success':
-      case 'login_success':
-        setState(() { _authenticated = true; _authenticating = false; _errorMessage = null; });
-        if (widget.prefillQuery != null && widget.prefillQuery!.isNotEmpty) {
-          Future.delayed(const Duration(milliseconds: 300), () { if (mounted) _performSearch(); });
-        }
-        break;
-
-      case 'auth_failed':
-      case 'login_failed':
-        setState(() {
-          _authenticated = false; _authenticating = false;
-          _errorMessage = data['message']?.toString() ?? 'Authentication failed.';
-        });
-        break;
-
-      case 'memory_search_results':
-        setState(() {
-          _results = (data['results'] as List?)
-              ?.map((e) => Map<String, dynamic>.from(e as Map))
-              .toList() ?? [];
-          _totalMatches = data['total_matches'] as int? ?? _results.length;
-          _isSearching = false;
-          _errorMessage = null;
-          _expandedIndex = null;
-          _selectedIndices.clear();
-        });
-        break;
-
-      case 'memory_search_error':
-        setState(() {
-          _errorMessage = data['error']?.toString() ?? 'Search failed';
-          _isSearching = false;
-        });
-        break;
-
-      case 'nate_response':
-        if (_isPushing) {
-          setState(() { _isPushing = false; });
-          if (mounted) {
-            Navigator.pop(context);
-          }
-        }
-        break;
-    }
-  }
-
-  void _performSearch() {
+  // ===========================================================================
+  // SEARCH TAB
+  // ===========================================================================
+  Future<void> _performSearch() async {
     final query = _searchController.text.trim();
-    if (query.isEmpty || !_authenticated) return;
+    if (query.isEmpty) return;
+
+    final hwId = (widget.profile['hardware_id'] ?? '').toString();
+    if (hwId.isEmpty || _token == null) {
+      setState(() { _errorMessage = 'Session expired.'; });
+      return;
+    }
 
     setState(() {
       _isSearching = true;
@@ -178,27 +116,77 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
       _selectedIndices.clear();
     });
 
-    _socket?.sink.add(jsonEncode({
-      'type': 'memory_search',
-      'query': query,
-      'limit': 30,
-    }));
+    try {
+      final url = '${AppConfig.apiBaseUrl}/api/client/memory/search/$hwId?q=${Uri.encodeComponent(query)}&limit=30';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _results = (data['results'] as List?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ?? [];
+          _totalMatches = data['total_matches'] as int? ?? _results.length;
+          _isSearching = false;
+          _errorMessage = null;
+        });
+      } else {
+        setState(() { _errorMessage = 'Search failed (${resp.statusCode})'; _isSearching = false; });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _errorMessage = 'Connection error: $e'; _isSearching = false; });
+    }
+  }
+
+  // ===========================================================================
+  // BROWSE TAB
+  // ===========================================================================
+  Future<void> _loadSessions() async {
+    final hwId = (widget.profile['hardware_id'] ?? '').toString();
+    if (hwId.isEmpty || _token == null) {
+      setState(() { _browseError = 'Session expired.'; });
+      return;
+    }
+
+    setState(() { _isBrowseLoading = true; _browseError = null; });
+
+    try {
+      final url = '${AppConfig.apiBaseUrl}/api/client/memory/sessions/$hwId';
+      final resp = await http.get(
+        Uri.parse(url),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 20));
+
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        setState(() {
+          _sessions = (data['sessions'] as List?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ?? [];
+          _totalSessions = data['total_sessions'] as int? ?? _sessions.length;
+          _isBrowseLoading = false;
+          _browseLoaded = true;
+        });
+      } else {
+        setState(() { _browseError = 'Failed to load sessions (${resp.statusCode})'; _isBrowseLoading = false; });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _browseError = 'Connection error: $e'; _isBrowseLoading = false; });
+    }
   }
 
   void _pushToNate() {
     if (_selectedIndices.isEmpty) return;
-
     final entries = _selectedIndices
         .map((i) => _results[i])
         .toList()
       ..sort((a, b) => (a['index'] as int).compareTo(b['index'] as int));
-
-    setState(() { _isPushing = true; });
-
-    _socket?.sink.add(jsonEncode({
-      'type': 'memory_push_to_nate',
-      'entries': entries,
-    }));
+    Navigator.pop(context, {'push_entries': entries});
   }
 
   String _formatTimestamp(String raw) {
@@ -214,11 +202,24 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
     }
   }
 
+  String _formatDate(String raw) {
+    try {
+      final dt = DateTime.parse(raw);
+      final months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      final now = DateTime.now();
+      final diff = now.difference(dt).inDays;
+      if (diff == 0) return 'Today';
+      if (diff == 1) return 'Yesterday';
+      return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+    } catch (_) {
+      return raw;
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
-    _socketSub?.cancel();
-    _socket?.sink.close();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -229,29 +230,35 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
       appBar: AppBar(
         backgroundColor: _Design.bgChamber,
         elevation: 0,
-        title: const Text('Memory Search',
+        title: const Text('Memory',
           style: TextStyle(color: _Design.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: _Design.gold),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: _Design.gold,
+          labelColor: _Design.gold,
+          unselectedLabelColor: _Design.textSecondary,
+          tabs: const [
+            Tab(icon: Icon(Icons.search, size: 18), text: 'Search'),
+            Tab(icon: Icon(Icons.auto_stories, size: 18), text: 'Browse by Story'),
+          ],
+        ),
       ),
-      body: _authenticating
-          ? _buildLoading('Connecting to Nate\'s memory...')
-          : !_authenticated
-              ? _buildError()
-              : _buildBody(),
-      floatingActionButton: _selectedIndices.isNotEmpty
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildSearchTab(),
+          _buildBrowseTab(),
+        ],
+      ),
+      floatingActionButton: _tabController.index == 0 && _selectedIndices.isNotEmpty
           ? FloatingActionButton.extended(
-              onPressed: _isPushing ? null : _pushToNate,
+              onPressed: _pushToNate,
               backgroundColor: _Design.gold,
               foregroundColor: _Design.bgVoid,
-              icon: _isPushing
-                  ? const SizedBox(width: 18, height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(_Design.bgVoid)))
-                  : const Icon(Icons.send_rounded),
+              icon: const Icon(Icons.send_rounded),
               label: Text(
-                _isPushing
-                    ? 'Sending...'
-                    : 'Push to Little Nate (${_selectedIndices.length})',
+                'Push to Little Nate (${_selectedIndices.length})',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             )
@@ -259,39 +266,11 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
     );
   }
 
-  Widget _buildLoading(String message) {
-    return Center(child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_Design.gold)),
-        const SizedBox(height: 16),
-        Text(message, style: const TextStyle(color: _Design.textSecondary)),
-      ],
-    ));
-  }
-
-  Widget _buildError() {
-    return Center(child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const Icon(Icons.lock_outline, color: _Design.red, size: 48),
-        const SizedBox(height: 16),
-        Text(_errorMessage ?? 'Unable to connect.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: _Design.textSecondary, fontSize: 16)),
-        const SizedBox(height: 24),
-        ElevatedButton.icon(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(Icons.arrow_back), label: const Text('Go Back'),
-          style: ElevatedButton.styleFrom(backgroundColor: _Design.gold, foregroundColor: _Design.bgVoid),
-        ),
-      ]),
-    ));
-  }
-
-  Widget _buildBody() {
+  // ===========================================================================
+  // SEARCH TAB UI
+  // ===========================================================================
+  Widget _buildSearchTab() {
     return Column(children: [
-      // Search bar
       Container(
         padding: const EdgeInsets.all(16),
         color: _Design.bgChamber,
@@ -352,14 +331,9 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
         ]),
       ),
 
-      // Results
       Expanded(
         child: _results.isNotEmpty
-            ? ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                itemCount: _results.length,
-                itemBuilder: (ctx, i) => _buildResultCard(i),
-              )
+            ? _buildGroupedResults()
             : _isSearching
                 ? _buildLoading('Searching Nate\'s memory...')
                 : Center(child: Padding(
@@ -384,6 +358,265 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
                   )),
       ),
     ]);
+  }
+
+  Widget _buildGroupedResults() {
+    final Map<String, List<int>> groups = {};
+    for (var i = 0; i < _results.length; i++) {
+      final sessionDate = (_results[i]['session_date'] as String?)
+          ?? (_results[i]['timestamp'] as String? ?? '')
+              .toString()
+              .substring(0, (_results[i]['timestamp'] as String? ?? '').length >= 10 ? 10 : 0);
+      final key = sessionDate.isNotEmpty ? sessionDate : 'Unknown';
+      groups.putIfAbsent(key, () => []).add(i);
+    }
+    final sortedKeys = groups.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+      itemCount: sortedKeys.length,
+      itemBuilder: (ctx, gi) {
+        final dateKey = sortedKeys[gi];
+        final indices = groups[dateKey]!;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Row(children: [
+                const Icon(Icons.calendar_today, color: _Design.goldDim, size: 14),
+                const SizedBox(width: 8),
+                Text(_formatDate(dateKey),
+                  style: const TextStyle(color: _Design.gold, fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                Text('${indices.length} match${indices.length == 1 ? '' : 'es'}',
+                  style: const TextStyle(color: _Design.textMuted, fontSize: 12)),
+                const Spacer(),
+                Container(height: 1, width: 40, color: _Design.goldDim.withOpacity(0.3)),
+              ]),
+            ),
+            ...indices.map((i) => _buildResultCard(i)),
+          ],
+        );
+      },
+    );
+  }
+
+  // ===========================================================================
+  // BROWSE TAB UI
+  // ===========================================================================
+  Widget _buildBrowseTab() {
+    if (_isBrowseLoading) return _buildLoading('Loading your story...');
+    if (_browseError != null) {
+      return Center(child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.error_outline, color: _Design.red, size: 48),
+          const SizedBox(height: 16),
+          Text(_browseError!, textAlign: TextAlign.center,
+            style: const TextStyle(color: _Design.textSecondary, fontSize: 16)),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: _loadSessions,
+            icon: const Icon(Icons.refresh), label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.gold, foregroundColor: _Design.bgVoid),
+          ),
+        ]),
+      ));
+    }
+    if (_sessions.isEmpty) {
+      return Center(child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.auto_stories, color: _Design.goldDim, size: 64),
+          const SizedBox(height: 16),
+          const Text('Your Story Begins Here',
+            style: TextStyle(color: _Design.textPrimary, fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          const Text(
+            'Every conversation with Little Nate becomes a chapter in your story. '
+            'Start talking and your journey will appear here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: _Design.textSecondary, fontSize: 14)),
+        ]),
+      ));
+    }
+
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        color: _Design.bgChamber,
+        child: Row(children: [
+          const Icon(Icons.auto_stories, color: _Design.goldDim, size: 18),
+          const SizedBox(width: 8),
+          Text('$_totalSessions session${_totalSessions == 1 ? '' : 's'}',
+            style: const TextStyle(color: _Design.textSecondary, fontSize: 13)),
+        ]),
+      ),
+      Expanded(
+        child: ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          itemCount: _sessions.length,
+          itemBuilder: (ctx, i) => _buildSessionChapter(i),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _buildSessionChapter(int index) {
+    final session = _sessions[index];
+    final date = session['date'] as String? ?? '';
+    final entryCount = session['entry_count'] as int? ?? 0;
+    final preview = session['preview'] as String? ?? '';
+    final entries = (session['entries'] as List?)
+        ?.map((e) => Map<String, dynamic>.from(e as Map))
+        .toList() ?? [];
+    final isExpanded = _expandedSession == index;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: _Design.bgElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isExpanded
+              ? _Design.gold.withOpacity(0.4)
+              : _Design.goldDim.withOpacity(0.15),
+        ),
+      ),
+      child: Column(children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => setState(() {
+            _expandedSession = isExpanded ? null : index;
+            _expandedBrowseEntry = null;
+          }),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: _Design.gold.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(child: Text(
+                  '${index + 1}',
+                  style: const TextStyle(color: _Design.gold, fontSize: 16, fontWeight: FontWeight.bold),
+                )),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_formatDate(date),
+                    style: const TextStyle(color: _Design.textPrimary, fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(preview,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _Design.textSecondary, fontSize: 13)),
+                ],
+              )),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _Design.cyan.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text('$entryCount',
+                  style: const TextStyle(color: _Design.cyan, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(width: 4),
+              Icon(isExpanded ? Icons.expand_less : Icons.expand_more,
+                color: _Design.goldDim, size: 22),
+            ]),
+          ),
+        ),
+        if (isExpanded) ...[
+          Container(height: 1, color: _Design.goldDim.withOpacity(0.15)),
+          ...entries.asMap().entries.map((mapEntry) {
+            final ei = mapEntry.key;
+            final e = mapEntry.value;
+            final ts = e['timestamp'] as String? ?? '';
+            final user = e['user'] as String? ?? '';
+            final ai = e['ai'] as String? ?? '';
+            final isEntryExpanded = _expandedBrowseEntry == ei;
+
+            return InkWell(
+              onTap: () => setState(() {
+                _expandedBrowseEntry = isEntryExpanded ? null : ei;
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(color: _Design.goldDim.withOpacity(0.08)),
+                  ),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    const Icon(Icons.access_time, color: _Design.textMuted, size: 12),
+                    const SizedBox(width: 4),
+                    Text(_formatTimestamp(ts),
+                      style: const TextStyle(color: _Design.textMuted, fontSize: 11)),
+                  ]),
+                  const SizedBox(height: 6),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: _Design.cyan.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(3)),
+                      child: const Text('You', style: TextStyle(color: _Design.cyan, fontSize: 10, fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: isEntryExpanded
+                      ? SelectableText(user,
+                          style: const TextStyle(color: _Design.textPrimary, fontSize: 13))
+                      : Text(user,
+                          style: const TextStyle(color: _Design.textPrimary, fontSize: 13),
+                          maxLines: 2, overflow: TextOverflow.ellipsis)),
+                  ]),
+                  const SizedBox(height: 4),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: _Design.gold.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(3)),
+                      child: const Text('Nate', style: TextStyle(color: _Design.gold, fontSize: 10, fontWeight: FontWeight.w600)),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(child: isEntryExpanded
+                      ? SelectableText(ai,
+                          style: const TextStyle(color: _Design.textSecondary, fontSize: 13))
+                      : Text(ai,
+                          style: const TextStyle(color: _Design.textSecondary, fontSize: 13),
+                          maxLines: 2, overflow: TextOverflow.ellipsis)),
+                  ]),
+                ]),
+              ),
+            );
+          }),
+        ],
+      ]),
+    );
+  }
+
+  // ===========================================================================
+  // SHARED WIDGETS
+  // ===========================================================================
+  Widget _buildLoading(String message) {
+    return Center(child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_Design.gold)),
+        const SizedBox(height: 16),
+        Text(message, style: const TextStyle(color: _Design.textSecondary)),
+      ],
+    ));
   }
 
   Widget _buildResultCard(int index) {
@@ -417,7 +650,6 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
           ),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Header: timestamp + select checkbox
           Row(children: [
             const Icon(Icons.access_time, color: _Design.textMuted, size: 14),
             const SizedBox(width: 6),
@@ -450,7 +682,6 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
           ]),
           const SizedBox(height: 10),
 
-          // "You said" preview
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -460,16 +691,15 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
               child: const Text('You', style: TextStyle(color: _Design.cyan, fontSize: 11, fontWeight: FontWeight.w600)),
             ),
             const SizedBox(width: 8),
-            Expanded(child: Text(
-              isExpanded ? userFull : userPreview,
-              style: const TextStyle(color: _Design.textPrimary, fontSize: 14),
-              maxLines: isExpanded ? null : 2,
-              overflow: isExpanded ? null : TextOverflow.ellipsis,
-            )),
+            Expanded(child: isExpanded
+              ? SelectableText(userFull,
+                  style: const TextStyle(color: _Design.textPrimary, fontSize: 14))
+              : Text(userPreview,
+                  style: const TextStyle(color: _Design.textPrimary, fontSize: 14),
+                  maxLines: 2, overflow: TextOverflow.ellipsis)),
           ]),
           const SizedBox(height: 8),
 
-          // "Nate said" preview
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -479,15 +709,35 @@ class _SecureSearchScreenState extends State<SecureSearchScreen> {
               child: const Text('Nate', style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.w600)),
             ),
             const SizedBox(width: 8),
-            Expanded(child: Text(
-              isExpanded ? aiFull : aiPreview,
-              style: const TextStyle(color: _Design.textSecondary, fontSize: 14),
-              maxLines: isExpanded ? null : 2,
-              overflow: isExpanded ? null : TextOverflow.ellipsis,
-            )),
+            Expanded(child: isExpanded
+              ? SelectableText(aiFull,
+                  style: const TextStyle(color: _Design.textSecondary, fontSize: 14))
+              : Text(aiPreview,
+                  style: const TextStyle(color: _Design.textSecondary, fontSize: 14),
+                  maxLines: 2, overflow: TextOverflow.ellipsis)),
           ]),
 
-          // Expand indicator
+          if (isExpanded) ...[
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              SizedBox(
+                height: 32,
+                child: TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(
+                      text: 'You: $userFull\n\nNate: $aiFull',
+                    ));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)),
+                    );
+                  },
+                  icon: const Icon(Icons.copy, size: 14, color: _Design.goldDim),
+                  label: const Text('Copy', style: TextStyle(color: _Design.goldDim, fontSize: 11)),
+                ),
+              ),
+            ]),
+          ],
+
           if (!isExpanded) ...[
             const SizedBox(height: 6),
             const Center(child: Icon(Icons.expand_more, color: _Design.textMuted, size: 18)),

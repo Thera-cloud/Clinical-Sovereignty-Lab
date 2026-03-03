@@ -1,6 +1,6 @@
 """
 LITTLE NATE — Webhook API
-SendGrid and Twilio event webhook handlers for delivery tracking.
+SendGrid, Twilio, and Meta/Instagram event webhook handlers.
 Tapped through Pipeline Drum for environmental sensing (Hive Defense v4.3).
 SendGrid HMAC-SHA256 signature verification (Hive Defense v4.3 — GAP H1).
 """
@@ -12,6 +12,7 @@ import logging
 import os
 import time as _time
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from typing import Optional, List
 from datetime import datetime
 import json
@@ -19,6 +20,8 @@ import json
 _logger = logging.getLogger("webhook_api")
 
 SENDGRID_WEBHOOK_VERIFICATION_KEY = os.getenv("SENDGRID_WEBHOOK_VERIFICATION_KEY", "")
+INSTAGRAM_WEBHOOK_VERIFY_TOKEN = os.getenv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "")
+INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -275,5 +278,102 @@ async def twilio_status_callback(request: Request):
                    WHERE provider_message_id = $2""",
                 new_status, message_sid
             )
+
+    return {"status": "ok"}
+
+
+# =============================================================================
+# META / INSTAGRAM WEBHOOKS
+# =============================================================================
+
+meta_webhook_router = APIRouter(prefix="/api/skyeye/webhooks", tags=["meta-webhooks"])
+
+
+def _verify_meta_signature(payload: bytes, signature: str) -> bool:
+    """Verify X-Hub-Signature-256 header from Meta webhook payloads."""
+    if not INSTAGRAM_APP_SECRET:
+        _logger.warning("INSTAGRAM_APP_SECRET not set — skipping Meta signature verification")
+        return True
+    if not signature or not signature.startswith("sha256="):
+        return False
+    expected = "sha256=" + hmac.new(
+        INSTAGRAM_APP_SECRET.encode(),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+@meta_webhook_router.get("/instagram")
+async def instagram_webhook_verify(request: Request):
+    """
+    Meta webhook verification (GET).
+    Meta sends hub.mode, hub.verify_token, hub.challenge.
+    We verify the token matches ours and return the challenge as plain text.
+    """
+    mode = request.query_params.get("hub.mode", "")
+    token = request.query_params.get("hub.verify_token", "")
+    challenge = request.query_params.get("hub.challenge", "")
+
+    if mode == "subscribe" and token == INSTAGRAM_WEBHOOK_VERIFY_TOKEN:
+        _logger.info("Meta webhook verified successfully")
+        return PlainTextResponse(content=challenge)
+
+    _logger.warning("Meta webhook verification failed: mode=%s token_match=%s", mode, token == INSTAGRAM_WEBHOOK_VERIFY_TOKEN)
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+@meta_webhook_router.post("/instagram")
+async def instagram_webhook_receive(request: Request):
+    """
+    Meta webhook event receiver (POST).
+    Receives Instagram DM events, story mentions, etc.
+    Verifies X-Hub-Signature-256 before processing.
+    """
+    raw_body = await request.body()
+
+    _tap_pipeline_drum(request, "/api/skyeye/webhooks/instagram", "POST", 200, raw_body)
+
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not _verify_meta_signature(raw_body, signature):
+        _logger.warning("Meta webhook REJECTED: invalid signature")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    obj = payload.get("object", "")
+    entries = payload.get("entry", [])
+
+    _logger.info("Meta webhook received: object=%s entries=%d", obj, len(entries))
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        for entry in entries:
+            ig_id = entry.get("id", "")
+            messaging = entry.get("messaging", [])
+            for msg_event in messaging:
+                sender_id = msg_event.get("sender", {}).get("id", "")
+                message = msg_event.get("message", {})
+                msg_text = message.get("text", "")
+
+                if msg_text:
+                    try:
+                        async with pool.acquire() as conn:
+                            await conn.execute(
+                                """INSERT INTO skyeye_activity (type, platform, content, created_at)
+                                   VALUES ($1, $2, $3, NOW())""",
+                                "instagram_dm_received",
+                                "instagram",
+                                json.dumps({
+                                    "sender_id": sender_id,
+                                    "ig_account": ig_id,
+                                    "text_length": len(msg_text),
+                                }),
+                            )
+                    except Exception as e:
+                        _logger.warning("Failed to log IG DM event: %s", e)
 
     return {"status": "ok"}

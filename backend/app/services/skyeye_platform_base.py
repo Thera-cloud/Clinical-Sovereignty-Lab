@@ -701,6 +701,7 @@ class SocialPlatformAdapter(ABC):
                         account_id = COALESCE($6, skyeye_platform_tokens.account_id),
                         account_name = COALESCE($7, skyeye_platform_tokens.account_name),
                         status = 'connected',
+                        error_message = NULL,
                         last_refreshed = NOW(),
                         updated_at = NOW()
                 """, self.platform_name, enc_access, enc_refresh,

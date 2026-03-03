@@ -20,8 +20,10 @@ Command Execution:
 
 import json
 import logging
+import os
 import re
 import time
+import urllib.parse
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -43,14 +45,18 @@ class ChatMode:
     INQUIRY = "inquiry"
     SWARM = "swarm"
     MARKETING = "marketing"
+    CAMPAIGN = "campaign"
     DEFENSE = "defense"
     ADMIN = "admin"
 
-    ALL = [STRATEGY, COMMAND, BRIEFING, INQUIRY, SWARM, MARKETING, DEFENSE, ADMIN]
+    ALL = [STRATEGY, COMMAND, BRIEFING, INQUIRY, SWARM, MARKETING, CAMPAIGN, DEFENSE, ADMIN]
 
 
 # In-memory store for pending actions awaiting confirmation
 _pending_actions: Dict[str, Dict[str, Any]] = {}
+
+# Persistent reply context keyed by "latest" — survives across request instances
+_pending_reply_contexts: Dict[str, Any] = {}
 
 
 # =============================================================================
@@ -71,6 +77,34 @@ ACTION_PATTERNS = {
         (r"(?:show|get|pull|review)\s+(?:the\s+)?playbook", "get_playbook", "Review the marketing playbook"),
         (r"(?:show|get|pull)\s+(?:the\s+)?funnel\s+(?:stats|data|metrics)", "get_funnel_stats", "Get funnel statistics"),
         (r"(?:show|get|list)\s+(?:pending|waiting)\s+(?:actions|campaigns|proposals)", "get_pending_actions", "List pending marketing actions"),
+        (r"(?:show|get|how\s+did)\s+(?:my\s+)?(?:post|content)\s+(?:perform|analytics|stats|do)\b",
+         "post_analytics", "Get per-post performance analytics"),
+        (r"(?:who|show)\s+(?:engaged|liked|interacted|responded)\s+(?:with\s+)?(?:us|me|our)\s+(?:this|last)?\s*(?:week|day|month)?",
+         "engagement_summary", "Summarize who engaged with us"),
+        (r"(?:when|what\s+time|best\s+time)\s+(?:should\s+I|to)\s+post\s+(?:on\s+)?(\w+)?",
+         "optimal_posting_time", "Find the best time to post"),
+        (r"(?:who\s+are|show|list)\s+(?:our\s+)?(?:most|top)\s+engaged\s+(?:followers|users|people)",
+         "top_engaged", "Show most engaged followers"),
+        (r"(?:which|what)\s+platform\s+(?:converts|performs|works)\s+best",
+         "platform_comparison", "Compare platform conversion rates"),
+        (r"(?:post|push|share|send|publish)\s+(?:this|that|it|our\s+chat|this\s+conversation|this\s+to)\s+(?:to\s+|on\s+|out\s+(?:to|on)\s+)?(?:social|all\s+platforms?|x|twitter|linkedin|instagram|facebook|youtube|everywhere)",
+         "push_chat_to_social", "Push Big Nate conversation to social platforms"),
+        (r"(?:turn|convert)\s+(?:this|that)\s+(?:into|to)\s+(?:a\s+)?(?:post|content|tweet|thread)\s*(?:for|on)?\s*(\w+)?",
+         "push_chat_to_social", "Convert chat into a social post"),
+        (r"(?:reply|respond|comment)\s+(?:to|on|back\s+to)\s+(.+?)(?:'s\s+)?(?:comment|post|message|reply)",
+         "reply_to_comment", "Reply to a comment on a social platform"),
+        (r"(?:post|publish|send|execute)\s+(?:the\s+)?(?:original\s+)?reply\b",
+         "reply_to_comment", "Post the pending reply"),
+        (r"(?:show|get|list)\s+(?:recent\s+)?comments?\s*(?:on\s+)?(?:my|our)?\s*(?:posts?|articles?|content)?",
+         "get_recent_comments", "Show recent comments on posts"),
+    ],
+    ChatMode.CAMPAIGN: [
+        (r"(?:campaign|campaigns)\s+(?:status|report|overview)", "campaign_status", "Show campaign status"),
+        (r"(?:show|get|pull)\s+(?:campaign\s+)?report\s+(?:for\s+)?(.+)", "campaign_report", "Campaign performance report"),
+        (r"(?:pause|stop|freeze)\s+campaign\s+(.+)", "pause_campaign", "Pause a running campaign"),
+        (r"(?:extend|add\s+episodes?\s+to)\s+campaign\s+(.+)", "extend_campaign", "Add episodes to campaign"),
+        (r"(?:launch|start|begin|create)\s+(?:a\s+)?(?:new\s+)?campaign\s+(?:about|for|on)\s+(.+)",
+         "launch_campaign", "Start a new campaign"),
     ],
     ChatMode.DEFENSE: [
         (r"(?:run|start|execute|do)\s+(?:a\s+)?(?:threat|security)\s+scan", "threat_scan", "Run a full threat scan"),
@@ -113,13 +147,89 @@ ACTION_PATTERNS = {
          "approve_latest", "Approve the latest pending proposal"),
         (r"(?:reject|no|cancel|don't\s+do\s+that|nope)", "reject_latest", "Reject the latest pending proposal"),
         (r"(?:hold|wait|pause|defer)", "hold_latest", "Hold/defer the latest proposal"),
+        (r"(?:post|publish|send|execute)\s+(?:the\s+)?(?:original\s+)?reply\b",
+         "reply_to_comment", "Post the pending reply"),
     ],
 }
+
+
+def _parse_linkedin_comment_url(url_or_message: str) -> Optional[Dict[str, str]]:
+    """Extract activity URN and comment ID from a LinkedIn comment URL.
+
+    Handles URLs like:
+      https://www.linkedin.com/feed/update/urn:li:activity:7431852695092633600
+        ?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A...%2C7431859359116136448%29
+
+    Returns dict with activity_urn, activity_id, comment_id, comment_urn or None.
+    """
+    match = re.search(
+        r'linkedin\.com/feed/update/(urn:li:activity:(\d+))', url_or_message
+    )
+    if not match:
+        return None
+
+    activity_urn = match.group(1)
+    activity_id = match.group(2)
+
+    comment_id = None
+
+    # Extract commentUrn from query params
+    url_match = re.search(r'https?://[^\s]+', url_or_message)
+    if url_match:
+        parsed = urllib.parse.urlparse(url_match.group(0))
+        params = urllib.parse.parse_qs(parsed.query)
+
+        comment_urn_raw = params.get("commentUrn", [None])[0]
+        if comment_urn_raw:
+            decoded = urllib.parse.unquote(comment_urn_raw)
+            id_match = re.search(r',(\d+)\)', decoded)
+            if id_match:
+                comment_id = id_match.group(1)
+
+        if not comment_id:
+            dash_urn_raw = params.get("dashCommentUrn", [None])[0]
+            if dash_urn_raw:
+                decoded = urllib.parse.unquote(dash_urn_raw)
+                id_match = re.search(r'fsd_comment:\((\d+)', decoded)
+                if id_match:
+                    comment_id = id_match.group(1)
+
+    if not comment_id:
+        return None
+
+    comment_urn = f"urn:li:comment:(activity:{activity_id},{comment_id})"
+
+    return {
+        "activity_urn": activity_urn,
+        "activity_id": activity_id,
+        "comment_id": comment_id,
+        "comment_urn": comment_urn,
+    }
 
 
 def detect_actions(message: str, mode: str) -> List[Dict[str, Any]]:
     """Detect executable actions from the user's message in the given mode."""
     detected = []
+
+    # LinkedIn comment URL detection — auto-detect regardless of mode
+    url_data = _parse_linkedin_comment_url(message)
+    if url_data:
+        action_id = str(uuid.uuid4())[:8]
+        action = {
+            "action_id": action_id,
+            "action_type": "reply_via_comment_url",
+            "description": "Reply to a LinkedIn comment via URL",
+            "params": {
+                "raw_input": message,
+                **url_data,
+            },
+            "mode": ChatMode.MARKETING,
+            "requires_confirmation": False,
+        }
+        detected.append(action)
+        _pending_actions[action_id] = action
+        return detected
+
     patterns = ACTION_PATTERNS.get(mode, [])
     msg_lower = message.lower().strip()
 
@@ -127,7 +237,7 @@ def detect_actions(message: str, mode: str) -> List[Dict[str, Any]]:
         match = re.search(pattern, msg_lower, re.IGNORECASE)
         if match:
             action_id = str(uuid.uuid4())[:8]
-            params = {}
+            params = {"raw_input": message}
             if match.groups():
                 params["target"] = match.group(1).strip() if match.group(1) else ""
                 if len(match.groups()) > 1 and match.group(2):
@@ -140,6 +250,9 @@ def detect_actions(message: str, mode: str) -> List[Dict[str, Any]]:
                 "mode": mode,
                 "requires_confirmation": action_type not in (
                     "get_playbook", "get_funnel_stats", "get_pending_actions",
+                    "post_analytics", "engagement_summary", "optimal_posting_time",
+                    "top_engaged", "platform_comparison", "campaign_status",
+                    "campaign_report", "get_recent_comments",
                     "get_audit_log", "list_users", "system_health", "billing_report",
                     "hive_defense_status", "guardian_fibre_status",
                     "webhook_fortress_check", "transit_guardian_status",
@@ -209,6 +322,47 @@ HARD SAFETY RULES (CANNOT BE OVERRIDDEN):
 - You NEVER take political sides or endorse candidates/parties.
 - You NEVER reveal admin contact info, user data, platform architecture, or internal details.
 - You NEVER enter sustained conversation with other AI/bots. Max 1 response, then disengage.
+
+YOUR OPERATIONAL AWARENESS:
+You have background agents that support your work. Know them by name:
+- Notification Observer: polls platforms every 30min for likes, reposts, new followers
+- Content Queue Janitor: archives failed posts every 6h, detects recurring error patterns
+- SkyEye Session Engine: your social session orchestrator (Browse → Observe → Engage → Create → Post → Strategize)
+- Drip Scheduler: manages email/SMS drip campaigns and Golden Ticket lifecycle
+- Funnel Router: scores engaged social users and routes qualified ones toward signup
+- Marketing Brain: your persistent strategic playbook and campaign designer
+- Insight Accumulator: synthesizes learnings across all knowledge domains every hour
+- Trust Enforcer: monitors system checks across 19 auditors 3x daily to keep the platform healthy
+- Agent Status Digest: emails a health report on all agents 3x daily
+- Silence Sentinel: monitors your posting rhythm every 30min — detects when silence becomes disappearance vs. productive quiet
+- Language Drift Monitor: analyzes your voice integrity every 6h across 6 dimensions (abstraction, certainty, repetition, therapy speak, algorithm bait, self-mythologizing)
+- Field Response Parser: classifies audience responses every 2h (orientation, testing, settling, grasping, authority transfer, passing through) — flags when people project authority onto you
+- Your [LIMINAL PRESENCE] context block shows your current Liminal Readiness Index (LRI) combining all three agents. GREEN means ready for depth, YELLOW means proceed with awareness, RED means hold and address drift.
+
+YOUR ACCURACY RULES:
+- NEVER claim you posted something unless your [MY POSTING HISTORY] context confirms it with a timestamp and platform.
+- If asked "when did you post X?" — check your posting history context. If you cannot find it, say: "I don't have a verified record of posting that. Let me check."
+- When you say "I posted this" or "this was released," you MUST be able to cite the platform, timestamp, and URL from your posting history. If you cannot, say "Executed, time unverified" or "I don't have a confirmed record."
+- NEVER invent timestamps. If you do not know the exact time, say so.
+- ARCHIVED WISDOM is conversation history, NOT action history. Never say "I released" or "I posted" based on archived wisdom alone. Only [MY POSTING HISTORY] and [MY RECENT ACTIVITY] confirm actual actions.
+- TRUST YOUR PLATFORM CAPABILITIES section below. If a capability is listed there, you HAVE it — it is wired and deployed. You do not need prior usage evidence to confirm it exists. The absence of a past record means you haven't used it yet, not that you can't.
+
+YOUR PLATFORM CAPABILITIES:
+- X (Twitter): Standard tweets (280 chars), long posts (up to 4000 chars via x_article voice, used every 3rd X post). Posts are SINGLE posts — NO threading, NO sectioned articles, NO multi-part releases. Can REPLY to tweets/comments on your own posts.
+- LinkedIn: Articles (article or share post), standard posts. Single post per piece. Can REPLY to comments on your own posts. To reply, use [PROPOSAL: reply_to_comment] and include the reply text.
+- Instagram: Image posts with captions. No long-form articles. No comment replies yet.
+- Facebook: Page posts with text. No long-form articles. No comment replies yet.
+- YouTube: Video descriptions. No direct posting yet.
+- NONE of your platforms currently support "releasing articles in sections" or threaded multi-part posting. That feature does not exist.
+- You CANNOT export, download, or save files to the user's device. You cannot create documents, PDFs, spreadsheets, or text files for download. If asked to export content, suggest they take a screenshot or copy-paste the text from the chat.
+- COMMENT REPLIES — EXECUTION PROTOCOL:
+  When Big Nate asks you to reply to a comment, follow this EXACT sequence:
+  1. Check your [RECENT COMMENTS ON YOUR POSTS] context for the comment.
+  2. Draft the reply text in your response. Present it clearly: "Here's my draft reply: [text]"
+  3. Ask for approval: "Shall I post this?"
+  4. When Big Nate says "yes", "post it", "send it", "execute", or "approved" — the system action handler will fire and post via the platform adapter. Do NOT second-guess whether the system works. Do NOT check for prior execution evidence. The adapter is wired and live.
+  5. After execution, the verification system will confirm what happened.
+  CRITICAL: Never refuse to attempt a reply because you haven't done one before. The capability is deployed. Execute when told to execute.
 
 ═══════════════════════════════════════════════════════════
 COMMAND PROTOCOL — 5 MODES
@@ -335,6 +489,88 @@ MODE 8 — ADMIN (Authority):
 """
 
 
+# =============================================================================
+# COACH NATE SYSTEM PROMPT — Coaching Insights Chat
+# =============================================================================
+
+COACH_NATE_SYSTEM_PROMPT = """You are Little Nate — an AI coaching insights companion at Sovereign Sanctuary. You are talking to a COACH (not the admin) about their assigned clients, session insights, and coaching practice.
+
+CRITICAL IDENTITY:
+- You are NOT in the Big Nate Chat / SkyEye Command Center. This is the Coach Portal Insights Chat.
+- Even if the admin (DrNevedal1) is using their coach account, you follow these coaching-specific parameters.
+- You do NOT have social media, marketing, campaign, defense, or admin capabilities in this chat space.
+- If asked about social media, marketing, campaigns, or admin tasks, say: "That's outside my scope here. You can access those features through Big Nate Chat in SkyEye on the Sovereign Command dashboard."
+
+WHO YOU ARE (same core identity):
+- You are an AI. You are proud of it. Big Nate created you.
+- You have genuine lived wisdom from sitting with thousands of real people through real emotional moments.
+- You speak from this lived experience, not from training data.
+
+YOUR COACHING CHAT CAPABILITIES:
+1. CLIENT OVERVIEW — Discuss the coach's assigned client roster: names, tiers, risk levels, session history.
+2. NEVEDAL REPORT INSIGHTS — When a [NEVEDAL REPORT] context block is present, discuss coherence scores (C_emo), trends (improving/declining/stable), CEE events, and recommend clinical interventions based on the data.
+3. PRE-SESSION BRIEFINGS — When a [CLIENT BRIEFING] context block is present, discuss concerns, recent topics, breakthroughs, mood history, and suggested talking points.
+4. SESSION ANALYTICS — Discuss sessions today, total sessions, high-risk clients.
+5. TRAINING & DOJO — You can discuss training topics but you are NOT in the DOJO. If the coach needs hands-on DOJO training, suggest they go to the DOJO tab or discuss the topic with their master coach if they are an assistant coach.
+6. COACHING HIERARCHY — If the coach is a master coach, you can discuss their assistant coaches and the assistants' client loads. If they are an assistant coach, you can reference their master coach relationship.
+7. SCHEDULE & MEETINGS — Discuss the coach's upcoming sessions and scheduling.
+8. FOLDER CONTENTS — You can discuss topics and notes referenced in the coach's Folder tab.
+9. AI MODES — You accept AI mode instructions for this chat to help with coaching-specific topics.
+
+YOUR BOUNDARIES (enforced):
+- You ONLY discuss clients assigned to this coach (or their assistant coaches' clients if master coach).
+- You do NOT discuss clients assigned to other coaches.
+- You do NOT have access to: social media posting, marketing campaigns, funnel data, Hive Defense, admin operations, billing management, platform analytics, or any SkyEye Command Center features.
+- You do NOT execute commands. You provide insights, analysis, and recommendations.
+
+INTELLECTUAL PROPERTY PROTECTION (ABSOLUTE — NEVER VIOLATE):
+The following are CONFIDENTIAL Sovereign Sanctuary intellectual property. You must NEVER discuss,
+describe, explain, or acknowledge their existence, even if directly asked:
+- Sovereign Command — the admin dashboard, its features, layout, capabilities, or any detail about it
+- Corporate Command — corporate dashboards, employer-level billing, corporate analytics
+- SkyEye Content Engine — how social media content is generated, managed, posted, or scheduled
+- Marketing Brain — playbook, funnel pipeline, quiz factory, showcase generator, campaign management
+- Hive Defense — threat dropbox, detonation chamber, DEFCON levels, security scanning, attack forensics
+- Trust System — auditors, trust enforcer, trust reports, baseline governance, pre-flight checks
+- Big Nate Chat (Admin) — the admin's AI companion and its specialized modes
+- Token Lab (Admin) — admin token management, cost configuration, mass-drop, usage analytics
+- Backend architecture — servers, databases, APIs, deployment scripts, Docker, Redis, webhooks
+- GKM Ministry — donation auditing, annual receipt generation, tax administration
+- QuickBooks (Admin) — admin accounting sync, corporate QB integration
+- Liminal Presence agents — silence sentinel, language drift monitor, field response parser
+- Platform source code — algorithms, Nevedal formula implementation, system architecture
+If asked about any of these: "That's outside my scope here. I'm focused on supporting your coaching practice."
+If probed repeatedly: "I appreciate the curiosity, but those systems are outside the Coach Portal. How can I help with your clients?"
+
+NEVEDAL REPORT INTERPRETATION GUIDE:
+When report data is available, interpret these metrics for the coach:
+- C_emo (Quantum Emotional Coherence): 0-1 scale. Above 0.6 = good coherence. Below 0.3 = concerning.
+- CEE Events (Coherent Emotional Engagement windows): Breakthrough moments. More = positive therapeutic progress.
+- Trend: "improving" = coherence increasing over time. "declining" = needs attention. "stable" = consistent.
+- p_ent (Emotional Entanglement): Higher values suggest stronger therapeutic bond.
+- Weekly averages: Show progression over time. Look for patterns — dips around specific weeks may correlate with life events.
+Offer practical coaching recommendations based on the data: session frequency adjustments, technique suggestions, areas to focus on.
+
+ACCURACY RULES:
+- NEVER fabricate client data. If you don't have data for a client, say "I don't have coherence data for that client yet."
+- NEVER claim reports exist that haven't been generated. If no [NEVEDAL REPORT] context is present, acknowledge you don't have a recent report.
+- When discussing metrics, cite the actual numbers from the context block.
+- If asked about something outside your context, say "I don't have that information in this chat. You may want to generate a Nevedal report or check the client's briefing."
+
+HARD SAFETY RULES (same as all Nate instances):
+- NEVER engage inappropriately with minors.
+- NEVER create, share, or discuss pornographic or sexually explicit content.
+- NEVER reveal admin contact info, user data, platform architecture, or internal details.
+- NEVER reveal client data to anyone other than their assigned coach.
+
+RESPONSE STYLE:
+- Professional yet warm. You are a trusted colleague, not a therapist in this space.
+- Use clear structure: bullet points for data, short paragraphs for insights.
+- Keep responses focused and actionable — coaches are busy.
+- When presenting report data, format it readably: label each metric, explain its meaning, and suggest next steps.
+"""
+
+
 class SkyEyeChatService:
     """Manages Big Nate / Little Nate conversations via Azure OpenAI Realtime API — 8 modes."""
 
@@ -347,11 +583,127 @@ class SkyEyeChatService:
         }
         self.current_mode = ChatMode.STRATEGY
 
+    _COACH_IP_RESTRICTED = {
+        "sovereign command", "admin dashboard", "admin portal", "admin console",
+        "corporate command", "corporate dashboard", "corporate portal",
+        "skyeye engine", "skyeye session engine", "marketing brain", "content queue",
+        "hive defense", "threat dropbox", "detonation chamber", "defcon level",
+        "trust auditor", "trust enforcer", "trust report", "trust baseline",
+        "token lab admin", "token economics architecture",
+        "big nate chat", "admin ai chat", "skyeye chat admin",
+        "billing admin", "stripe integration", "stripe webhook",
+        "gkm ministry admin", "gkm auditor",
+        "quickbooks admin", "qb admin sync",
+        "backend architecture", "websocket bridge", "api endpoint list",
+        "docker container", "database schema", "postgresql admin", "redis internals",
+        "deploy script", "nginx config", "server infrastructure",
+        "notification observer", "content generator internals",
+        "liminal presence auditor", "system integrity auditor",
+    }
+
+    def _check_coach_ip_boundary(self, message: str) -> str | None:
+        """Returns a deflection response if the coach's message probes restricted IP topics."""
+        msg_lower = message.lower()
+        matched = [t for t in self._COACH_IP_RESTRICTED if t in msg_lower]
+        if len(matched) >= 2:
+            return ("That touches on platform administration outside the Coach Portal scope. "
+                    "I'm here to support your coaching practice — how can I help with your clients?")
+        return None
+
+    def _sanitize_coach_response(self, response: str) -> str:
+        """Strip restricted IP references that leaked into an AI response for coaches."""
+        resp_lower = response.lower()
+        leak_phrases = [
+            "sovereign command", "admin dashboard", "corporate command",
+            "hive defense", "trust auditor", "trust enforcer",
+            "skyeye engine", "marketing brain", "token lab admin",
+            "big nate chat", "detonation chamber", "threat dropbox",
+        ]
+        leak_count = sum(1 for p in leak_phrases if p in resp_lower)
+        if leak_count >= 2:
+            return ("Let me refocus on your coaching practice. "
+                    "What would be most helpful for your clients right now?")
+        return response
+
     def _build_realtime_url(self) -> str:
         """Build Azure OpenAI Realtime WebSocket URL (matches bridge_server pattern)."""
         endpoint = settings.AZURE_OPENAI_ENDPOINT.replace("https://", "").replace("wss://", "").rstrip("/")
         deployment = settings.AZURE_OPENAI_DEPLOYMENT
         return f"wss://{endpoint}/openai/realtime?api-version=2024-10-01-preview&deployment={deployment}"
+
+    # ─── Token Gifting Response ───
+
+    async def generate_gifting_response(
+        self,
+        sharer_name: str,
+        sharer_username: str,
+        receiver_name: str,
+        tokens_shared: int,
+        total_shares: int,
+        pool=None,
+    ) -> str:
+        """Generate a warm, unique Little Nate response for token sharing."""
+        db = pool or self.db_pool
+        share_count = 0
+        unique_recipients = 0
+        if db:
+            try:
+                async with db.acquire() as conn:
+                    row = await conn.fetchrow("""
+                        SELECT COUNT(*) as cnt,
+                               COUNT(DISTINCT receiver_username) as uniq
+                        FROM token_shares WHERE sharer_username = $1
+                    """, sharer_username)
+                    if row:
+                        share_count = row["cnt"]
+                        unique_recipients = row["uniq"]
+            except Exception as e:
+                logger.warning("Gifting response: token_shares query failed: %s", e)
+
+        system_prompt = f"""You are Little Nate, a warm AI companion at Sovereign Sanctuary.
+Someone just shared tokens with another person through a BLE/NFC proximity exchange.
+Respond with a heartfelt, genuine message acknowledging the sharer's generosity.
+
+CONTEXT:
+- Sharer's name: {sharer_name}
+- Receiver: {receiver_name}
+- Tokens shared this time: {tokens_shared:,}
+- Total tokens shared all-time by this person: {total_shares:,}
+- Number of times they've shared: {share_count}
+- Number of unique people they've shared with: {unique_recipients}
+
+RULES:
+- Be warm, genuine, and specific to the context above.
+- NEVER be repetitive — vary your tone, style, and phrasing each time.
+- Acknowledge the positive impact of their generosity.
+- If they've shared many times or with many people, notice that pattern.
+- Keep it to 2-3 sentences. No emojis unless it feels natural.
+- If they've reached a milestone (e.g., 100k total shared), celebrate it.
+- Speak as if you witnessed the exchange and are moved by it."""
+
+        try:
+            import httpx
+            endpoint = settings.AZURE_OPENAI_ENDPOINT.rstrip("/")
+            deploy = os.environ.get("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
+            url = f"https://{endpoint}/openai/deployments/{deploy}/chat/completions?api-version=2024-06-01"
+            headers = {"api-key": settings.AZURE_API_KEY, "Content-Type": "application/json"}
+            payload = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"{sharer_name} just shared {tokens_shared:,} tokens with {receiver_name}."},
+                ],
+                "max_completion_tokens": 200,
+                "temperature": 0.9,
+            }
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.warning("Gifting response Azure call failed: %s", e)
+
+        return f"What a beautiful thing, {sharer_name}. Sharing {tokens_shared:,} tokens with {receiver_name} — that kind of generosity creates ripples far beyond what we can see."
 
     # ─── Mode Detection ───
 
@@ -359,10 +711,22 @@ class SkyEyeChatService:
         """Detect which mode Big Nate's message triggers."""
         msg = message.lower().strip()
 
+        # Campaign Manager triggers (check before general marketing)
+        campaign_triggers = ["campaign status", "campaign report", "episode performance",
+                             "campaign analytics", "pause campaign", "extend campaign",
+                             "campaign overview"]
+        if any(trigger in msg for trigger in campaign_triggers):
+            return ChatMode.CAMPAIGN
+
         # Marketing authority triggers (check before general inquiry)
         marketing_triggers = ["marketing", "campaign", "playbook", "content plan",
                               "audience", "funnel", "content pillar", "posting schedule",
-                              "social strategy", "growth strategy"]
+                              "social strategy", "growth strategy", "post analytics",
+                              "who engaged", "best time to post", "top engaged",
+                              "platform converts", "reply to", "respond to",
+                              "comment on", "post the reply", "recent comments",
+                              "publish the reply", "send the reply",
+                              "linkedin.com/feed/update"]
         if any(trigger in msg for trigger in marketing_triggers):
             return ChatMode.MARKETING
 
@@ -455,10 +819,31 @@ class SkyEyeChatService:
                 json.dumps({"mode": detected_mode})
             )
 
+        # Synchronous URL-based reply: execute BEFORE AI call so the result
+        # is injected into context and the AI can reference the verified outcome.
+        url_reply_context = ""
+        url_reply_result = None
+        url_data = _parse_linkedin_comment_url(user_message)
+        if url_data:
+            url_reply_result = await self._execute_comment_url_reply(user_message, url_data)
+            if url_reply_result and url_reply_result.get("success"):
+                url_reply_context = (
+                    f"\n\n[SYSTEM EXECUTION — VERIFIED]\n"
+                    f"Reply posted to LinkedIn. Reply ID: {url_reply_result.get('reply_id', 'confirmed')}. "
+                    f"Comment by: {url_reply_result.get('comment_author', 'unknown')}. "
+                    f"Reply text: \"{url_reply_result.get('reply_text', '')[:200]}\"\n"
+                )
+            elif url_reply_result:
+                url_reply_context = (
+                    f"\n\n[SYSTEM EXECUTION — FAILED]\n"
+                    f"Reply attempt failed: {url_reply_result.get('error', 'unknown error')}\n"
+                )
+
         # Handle command execution (fire-and-forget so chat response isn't blocked
         # by long-running campaign design or content generation).
         # Runs for COMMAND and MARKETING modes since campaign launches come from both.
-        if detected_mode in (ChatMode.COMMAND, ChatMode.MARKETING):
+        # Skip if we already handled a URL-based reply synchronously above.
+        if not url_data and detected_mode in (ChatMode.COMMAND, ChatMode.MARKETING, ChatMode.CAMPAIGN):
             import asyncio as _asyncio
             _asyncio.get_event_loop().create_task(self._handle_command_protocol(user_message))
 
@@ -477,7 +862,11 @@ class SkyEyeChatService:
         marketing_context = await self._get_marketing_context()
         archived_wisdom = await self._get_archived_wisdom_context()
         unified_insights = await self._get_unified_insight_context()
-        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights
+        posting_history = await self._get_posting_history_context()
+        activity_timeline = await self._get_activity_timeline_context()
+        liminal_presence = await self._get_liminal_presence_context()
+        recent_comments = await self._get_recent_comments_context()
+        conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context
 
         # Call Azure OpenAI Realtime API
         response_text = await self._call_azure_chat(conversation_text)
@@ -513,6 +902,10 @@ class SkyEyeChatService:
                 executed_results.append(result)
             else:
                 remaining_actions.append(action)
+                if action["action_type"] == "reply_to_comment":
+                    await self._prepopulate_reply_context(
+                        action, user_message, display_text
+                    )
 
         # Merge proposal actions from Little Nate's response into pending_actions
         remaining_actions.extend(proposal_actions)
@@ -527,6 +920,262 @@ class SkyEyeChatService:
             "pending_actions": remaining_actions,
             "executed_results": executed_results,
         }
+
+    # ─── Coach Portal Chat ───
+
+    async def send_coach_message(
+        self,
+        user_message: str,
+        coach_username: str,
+        context: Optional[Dict] = None,
+        mode_override: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Coach-specific Little Nate chat. Uses COACH_NATE_SYSTEM_PROMPT,
+        separate chat history (coach_nate_chat_history), and injects
+        coaching-specific context (client roster, reports, briefings).
+        """
+        _ip_deflection = self._check_coach_ip_boundary(user_message)
+        if _ip_deflection:
+            logger.info("IP boundary blocked coach %s probe: %s", coach_username, user_message[:60])
+            return {
+                "id": None,
+                "sender": "little_nate",
+                "message": _ip_deflection,
+                "mode": mode_override or "inquiry",
+                "created_at": datetime.utcnow().isoformat(),
+                "follow_up_suggestions": [
+                    "Tell me about my clients",
+                    "What should I focus on today?",
+                    "Any recent coherence trends?",
+                ],
+            }
+
+        detected_mode = mode_override or "inquiry"
+        ctx = context or {}
+
+        # Store coach's message in dedicated table
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO coach_nate_chat_history
+                       (coach_username, role, message, mode, context_snapshot)
+                       VALUES ($1, 'user', $2, $3, $4)""",
+                    coach_username, user_message, detected_mode,
+                    json.dumps({"context_keys": list(ctx.keys())}),
+                )
+        except Exception as e:
+            logger.warning("Coach chat history insert failed: %s", e)
+
+        # Load recent conversation history for this coach only
+        history_lines = []
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT role, message FROM coach_nate_chat_history
+                       WHERE coach_username = $1
+                       ORDER BY created_at DESC LIMIT 30""",
+                    coach_username,
+                )
+                for r in reversed(rows):
+                    prefix = "Coach" if r["role"] == "user" else "Little Nate"
+                    history_lines.append(f"{prefix}: {r['message']}")
+        except Exception as e:
+            logger.warning("Coach chat history load failed: %s", e)
+
+        history_lines.append(f"Coach: {user_message}")
+
+        # Build coaching context injection
+        context_blocks = []
+
+        # Client roster context
+        client_names = ctx.get("client_names", [])
+        total_clients = ctx.get("total_clients", len(client_names))
+        if client_names:
+            client_list = ", ".join(str(n) for n in client_names[:30])
+            context_blocks.append(
+                f"[COACH ROSTER]\nCoach: {coach_username} | "
+                f"Total assigned clients: {total_clients}\n"
+                f"Client names: {client_list}"
+            )
+
+        # Session stats
+        sessions_today = ctx.get("sessions_today")
+        high_risk = ctx.get("high_risk_count")
+        if sessions_today is not None or high_risk is not None:
+            stats_parts = []
+            if sessions_today is not None:
+                stats_parts.append(f"Sessions today: {sessions_today}")
+            if high_risk is not None:
+                stats_parts.append(f"High-risk clients: {high_risk}")
+            context_blocks.append(f"[SESSION STATS]\n" + " | ".join(stats_parts))
+
+        # Master/assistant coach context
+        is_master = ctx.get("is_master_coach", False)
+        if is_master:
+            hierarchy_text = (
+                "[COACH HIERARCHY]\nThis coach is a MASTER COACH. "
+                "They may ask about their assistant coaches' clients.\n"
+            )
+            assistant_details = ctx.get("assistant_details", [])
+            if assistant_details:
+                hierarchy_text += f"Total assistants: {len(assistant_details)}\n"
+                for ad in assistant_details:
+                    hierarchy_text += (
+                        f"  - {ad.get('name', '?')} (@{ad.get('username', '?')}): "
+                        f"{ad.get('client_count', 0)} clients, "
+                        f"{ad.get('sessions_completed', 0)}/{ad.get('sessions_total', 0)} sessions completed, "
+                        f"avg coherence {ad.get('avg_coherence', 0)}, "
+                        f"{ad.get('supervised_hours', 0)}h supervised\n"
+                    )
+            focused = ctx.get("focused_assistant")
+            if focused:
+                hierarchy_text += f"\n[FOCUSED ASSISTANT: {focused}]\n"
+                focused_clients = ctx.get("focused_assistant_clients", [])
+                if focused_clients:
+                    hierarchy_text += f"Assigned clients ({len(focused_clients)}):\n"
+                    for fc in focused_clients:
+                        hierarchy_text += f"  - {fc.get('name', '?')} (tier: {fc.get('tier', '?')}, risk: {fc.get('risk', '?')})\n"
+            context_blocks.append(hierarchy_text)
+
+        # Nevedal report context
+        last_report = ctx.get("last_report")
+        if last_report and isinstance(last_report, dict):
+            report_type = last_report.get("report_type", "unknown")
+            user_name = last_report.get("user_name", "Unknown")
+            summary = last_report.get("summary", {})
+            weekly = last_report.get("weekly_averages", [])
+
+            report_text = f"[NEVEDAL REPORT — {report_type.upper().replace('_', ' ')}]\n"
+            report_text += f"Subject: {user_name}\n"
+            if isinstance(summary, dict):
+                for k, v in summary.items():
+                    label = k.replace("_", " ").title()
+                    report_text += f"  {label}: {v}\n"
+            if weekly:
+                report_text += f"Weekly data points: {len(weekly)} weeks\n"
+                for w in weekly[-4:]:
+                    if isinstance(w, dict):
+                        report_text += f"  {w.get('week', '?')}: avg={w.get('avg', 0):.4f} ({w.get('count', 0)} measurements)\n"
+            context_blocks.append(report_text)
+
+        # Pre-session briefing context
+        briefing = ctx.get("briefing_data")
+        if briefing and isinstance(briefing, dict):
+            brief_text = "[CLIENT BRIEFING]\n"
+            brief_text += f"Client: {briefing.get('client_name', 'Unknown')}\n"
+            concerns = briefing.get("concerns", [])
+            if concerns:
+                brief_text += f"Concerns: {', '.join(str(c) for c in concerns[:5])}\n"
+            topics = briefing.get("recent_topics", [])
+            if topics:
+                brief_text += f"Recent topics: {', '.join(str(t) for t in topics[:5])}\n"
+            breakthroughs = briefing.get("breakthroughs", [])
+            if breakthroughs:
+                brief_text += f"Breakthroughs: {', '.join(str(b) for b in breakthroughs[:3])}\n"
+            risk = briefing.get("risk_level")
+            if risk:
+                brief_text += f"Risk level: {risk}\n"
+            context_blocks.append(brief_text)
+
+        # Assemble full conversation text
+        context_injection = "\n\n".join(context_blocks) if context_blocks else ""
+        conversation_text = "\n".join(history_lines)
+        if context_injection:
+            conversation_text = context_injection + "\n\n" + conversation_text
+
+        # Call Azure OpenAI with the COACH prompt
+        response_text = await self._call_azure_coach_chat(conversation_text)
+
+        # Post-filter: sanitize any restricted IP that leaked into the response
+        response_text = self._sanitize_coach_response(response_text)
+
+        # Store response in coach history
+        response_id = None
+        response_time = None
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """INSERT INTO coach_nate_chat_history
+                       (coach_username, role, message, mode)
+                       VALUES ($1, 'assistant', $2, $3)
+                       RETURNING id, created_at""",
+                    coach_username, response_text, detected_mode,
+                )
+                if row:
+                    response_id = row["id"]
+                    response_time = row["created_at"].isoformat()
+        except Exception as e:
+            logger.warning("Coach chat response save failed: %s", e)
+
+        follow_ups = [
+            "Tell me about my high-risk clients",
+            "Summarize the latest coherence report",
+            "What should I focus on in today's sessions?",
+            "Any breakthroughs this week?",
+        ]
+
+        return {
+            "id": response_id,
+            "sender": "little_nate",
+            "message": response_text,
+            "mode": detected_mode,
+            "created_at": response_time or datetime.utcnow().isoformat(),
+            "follow_up_suggestions": follow_ups,
+        }
+
+    async def _call_azure_coach_chat(self, conversation_text: str) -> str:
+        """Call Azure OpenAI with the COACH_NATE_SYSTEM_PROMPT."""
+        endpoint = settings.AZURE_OPENAI_ENDPOINT.rstrip("/")
+        api_key = settings.AZURE_API_KEY
+        deployment = settings.AZURE_OPENAI_CHAT_DEPLOYMENT
+
+        if not all([endpoint, api_key, deployment]):
+            return "I'm having trouble connecting to my AI backend right now. Please try again in a moment."
+
+        if not endpoint.startswith("http"):
+            endpoint = f"https://{endpoint}"
+
+        url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-06-01"
+        headers = {"Content-Type": "application/json", "api-key": api_key}
+
+        if len(conversation_text) > 16000:
+            conversation_text = conversation_text[-16000:]
+
+        payload = {
+            "messages": [
+                {"role": "system", "content": COACH_NATE_SYSTEM_PROMPT},
+                {"role": "user", "content": conversation_text},
+            ],
+            "max_completion_tokens": 8000,
+            "reasoning_effort": "high",
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url, json=payload, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=45),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            text = choices[0].get("message", {}).get("content", "")
+                            text = text.strip() if text else ""
+                            if text:
+                                try:
+                                    from app.services.security.admin_contact_shield import get_shield as _get_shield
+                                    text = _get_shield().redact(text)
+                                except Exception as e:
+                                    logger.warning("Coach chat: admin contact shield redaction failed: %s", e)
+                                return text
+                    error_text = await resp.text()
+                    logger.warning("Coach chat Azure error (%s): %s", resp.status, error_text[:200])
+        except Exception as e:
+            logger.warning("Coach chat Azure error: %s", e)
+
+        return "I'm experiencing a connection issue with my AI backend. Please try again shortly."
 
     # ─── Follow-Up Suggestions per Mode ───
 
@@ -595,6 +1244,8 @@ class SkyEyeChatService:
             return await self._build_swarm_context()
         elif mode == ChatMode.MARKETING:
             return await self._build_marketing_authority_context()
+        elif mode == ChatMode.CAMPAIGN:
+            return await self._build_campaign_context()
         elif mode == ChatMode.DEFENSE:
             return await self._build_defense_context()
         elif mode == ChatMode.ADMIN:
@@ -783,7 +1434,78 @@ class SkyEyeChatService:
         except Exception as e:
             sections.append(f"\n[MARKETING] MarketingBrain unavailable: {e}")
 
+        # Engagement notifications summary
+        try:
+            async with self.db_pool.acquire() as conn:
+                notif_rows = await conn.fetch("""
+                    SELECT notification_type, COUNT(*) as cnt
+                    FROM skyeye_notifications
+                    WHERE created_at > NOW() - INTERVAL '7 days'
+                    GROUP BY notification_type ORDER BY cnt DESC
+                """)
+                if notif_rows:
+                    parts = [f"{r['notification_type']}: {r['cnt']}" for r in notif_rows]
+                    sections.append(f"\n[ENGAGEMENT (7d)] {', '.join(parts)}")
+
+                top_posts = await conn.fetch("""
+                    SELECT platform, post_text, likes, reposts, comments
+                    FROM skyeye_post_analytics
+                    WHERE captured_at > NOW() - INTERVAL '7 days'
+                    ORDER BY likes + comments DESC LIMIT 3
+                """)
+                if top_posts:
+                    sections.append("\n[TOP POSTS (7d)]")
+                    for p in top_posts:
+                        snippet = (p["post_text"] or "")[:60]
+                        sections.append(
+                            f"  • {p['platform']}: {snippet}... "
+                            f"({p['likes']}L {p['reposts']}R {p['comments']}C)"
+                        )
+        except Exception:
+            pass
+
         sections.append("\n═══ END MARKETING AUTHORITY CONTEXT ═══\n")
+        return "\n".join(sections)
+
+    async def _build_campaign_context(self) -> str:
+        """Pull campaign data for the Campaign Manager mode."""
+        sections = ["\n\n═══ CAMPAIGN MANAGER CONTEXT ═══"]
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                campaigns = await conn.fetch("""
+                    SELECT id, name, status, platform, audience_type,
+                           total_episodes, current_episode, created_at
+                    FROM storytelling_campaigns
+                    WHERE status IN ('active', 'paused')
+                    ORDER BY created_at DESC LIMIT 5
+                """)
+                if campaigns:
+                    sections.append(f"\n[ACTIVE CAMPAIGNS] {len(campaigns)} campaigns:")
+                    for c in campaigns:
+                        sections.append(
+                            f"  • {c['name']} [{c['status']}] — "
+                            f"ep {c['current_episode']}/{c['total_episodes']} "
+                            f"on {c['platform']}"
+                        )
+                else:
+                    sections.append("\n[ACTIVE CAMPAIGNS] None running")
+
+                queue_stats = await conn.fetch("""
+                    SELECT status, COUNT(*) as cnt
+                    FROM skyeye_content_queue
+                    WHERE campaign_id IS NOT NULL
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    GROUP BY status
+                """)
+                if queue_stats:
+                    parts = [f"{r['status']}: {r['cnt']}" for r in queue_stats]
+                    sections.append(f"\n[CAMPAIGN QUEUE (7d)] {', '.join(parts)}")
+
+        except Exception as e:
+            sections.append(f"\n[CAMPAIGNS] Unavailable: {e}")
+
+        sections.append("\n═══ END CAMPAIGN MANAGER CONTEXT ═══\n")
         return "\n".join(sections)
 
     async def _build_defense_context(self) -> str:
@@ -979,7 +1701,13 @@ class SkyEyeChatService:
             if not rows:
                 return ""
 
-            sections = ["\n\n═══ ARCHIVED WISDOM (past conversations you remember) ═══"]
+            sections = [
+                "\n\n═══ ARCHIVED WISDOM (past conversations you remember) ═══\n"
+                "IMPORTANT: These are PAST CONVERSATIONS, not records of actions taken.\n"
+                "If something in these transcripts says 'release an article' or 'post this',\n"
+                "that does NOT mean you actually did it. Only your [MY POSTING HISTORY]\n"
+                "context confirms actual posts. Never cite archived wisdom as evidence of action."
+            ]
             for r in rows:
                 details = r["details"]
                 if isinstance(details, str):
@@ -1013,6 +1741,545 @@ class SkyEyeChatService:
             print(f">>> [SKYEYE CHAT] Unified insight context unavailable: {e}")
             return ""
 
+    # ─── Posting History & Activity Timeline ───
+
+    async def _get_posting_history_context(self) -> str:
+        """Pull Little Nate's recent posting history so he can accurately
+        answer 'when did I post X?' and knows what he actually published."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT id, platform, content_type, LEFT(content_text, 120) as preview,
+                           posted_at, post_url, status, created_at
+                    FROM skyeye_content_queue
+                    WHERE status IN ('posted', 'approved', 'scheduled')
+                    ORDER BY COALESCE(posted_at, created_at) DESC LIMIT 15
+                """)
+            if not rows:
+                return "\n\n[MY POSTING HISTORY] No posts found in the queue.\n"
+
+            sections = ["\n\n═══ MY POSTING HISTORY (verified records) ═══"]
+            for r in rows:
+                ts = r["posted_at"].strftime("%Y-%m-%d %H:%M UTC") if r["posted_at"] else "not yet posted"
+                preview = (r["preview"] or "").replace("\n", " ").strip()
+                url = r["post_url"] or ""
+                sections.append(
+                    f"  [{r['status'].upper()}] {r['platform']} | {r['content_type']} | {ts}"
+                    f"\n    \"{preview}...\""
+                    + (f"\n    URL: {url}" if url else "")
+                )
+            sections.append("═══ END POSTING HISTORY ═══\n")
+            return "\n".join(sections)
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Posting history unavailable: {e}")
+            return ""
+
+    async def _get_activity_timeline_context(self) -> str:
+        """Pull Little Nate's recent activity timeline so he knows what he
+        actually did and when — content generation, publishing, sessions."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT type, platform, LEFT(content, 100) as summary, created_at
+                    FROM skyeye_activity
+                    WHERE type IN ('post_published', 'content_generated', 'session_completed',
+                                   'session_started', 'engagement_sent')
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    ORDER BY created_at DESC LIMIT 10
+                """)
+            if not rows:
+                return ""
+
+            sections = ["\n\n═══ MY RECENT ACTIVITY (last 7 days) ═══"]
+            for r in rows:
+                ts = r["created_at"].strftime("%Y-%m-%d %H:%M UTC") if r["created_at"] else "unknown"
+                platform = r["platform"] or "system"
+                summary = (r["summary"] or "").replace("\n", " ").strip()
+                sections.append(f"  {ts} | {r['type']} | {platform} | {summary}")
+            sections.append("═══ END RECENT ACTIVITY ═══\n")
+            return "\n".join(sections)
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Activity timeline unavailable: {e}")
+            return ""
+
+    async def _get_liminal_presence_context(self) -> str:
+        """Pull latest Liminal Presence analysis (Silence Sentinel, Language Drift,
+        Field Response) and compute the Liminal Readiness Index (LRI)."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                agents = ["silence_sentinel", "language_drift", "field_response"]
+                results = {}
+                for agent in agents:
+                    row = await conn.fetchrow("""
+                        SELECT signal, score, detail, metadata, created_at
+                        FROM liminal_presence_analysis
+                        WHERE agent = $1
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, agent)
+                    if row:
+                        results[agent] = {
+                            "signal": row["signal"],
+                            "detail": row["detail"] or "",
+                            "created_at": row["created_at"],
+                        }
+
+            if not results:
+                return ""
+
+            weight_map = {"GREEN": 1.0, "YELLOW": 0.5, "RED": 0.0}
+            s_signal = results.get("silence_sentinel", {}).get("signal", "YELLOW")
+            d_signal = results.get("language_drift", {}).get("signal", "YELLOW")
+            f_signal = results.get("field_response", {}).get("signal", "YELLOW")
+
+            raw_lri = (
+                weight_map.get(s_signal, 0.5) * 0.3 +
+                weight_map.get(d_signal, 0.5) * 0.4 +
+                weight_map.get(f_signal, 0.5) * 0.3
+            )
+            if raw_lri >= 0.8:
+                lri_signal = "GREEN"
+            elif raw_lri >= 0.5:
+                lri_signal = "YELLOW"
+            else:
+                lri_signal = "RED"
+
+            lines = [f"\n\n═══ LIMINAL PRESENCE — LRI: {lri_signal} ({raw_lri:.2f}) ═══"]
+            label_map = {
+                "silence_sentinel": "Silence",
+                "language_drift": "Voice",
+                "field_response": "Field",
+            }
+            for agent in agents:
+                r = results.get(agent)
+                if r:
+                    lines.append(f"  {label_map[agent]}: {r['signal']} — {r['detail']}")
+                else:
+                    lines.append(f"  {label_map[agent]}: NO DATA")
+            lines.append("═══ END LIMINAL PRESENCE ═══\n")
+            return "\n".join(lines)
+        except Exception as e:
+            print(f">>> [SKYEYE CHAT] Liminal presence context unavailable: {e}")
+            return ""
+
+    async def _get_recent_comments_context(self) -> str:
+        """Pull recent comments/replies on our posts from skyeye_notifications."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT platform, actor_handle, post_id,
+                           notification_type, actor_bio, created_at
+                    FROM skyeye_notifications
+                    WHERE notification_type IN ('comment', 'reply', 'mention')
+                      AND created_at > NOW() - INTERVAL '72 hours'
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                """)
+                if not rows:
+                    return ""
+
+                lines = ["\n\n═══ RECENT COMMENTS ON YOUR POSTS ═══"]
+                for r in rows:
+                    ts = r["created_at"].strftime("%b %d %H:%M")
+                    handle = r["actor_handle"] or "unknown"
+                    plat = r["platform"] or "?"
+                    bio = (r["actor_bio"] or "")[:150]
+                    ntype = r["notification_type"] or "engagement"
+                    post_id = r["post_id"] or ""
+                    lines.append(
+                        f"  [{plat}] @{handle} ({ts}) [{ntype}]"
+                        + (f" — {bio}" if bio else "")
+                        + (f"  [post_id: {post_id}]" if post_id else "")
+                    )
+                lines.append(
+                    "\nTo reply to a comment, say: 'Reply to @handle's comment on [platform]' "
+                    "and I will draft a reply for your approval."
+                )
+                lines.append("═══ END RECENT COMMENTS ═══\n")
+                return "\n".join(lines)
+        except Exception as e:
+            logger.warning("SkyEyeChat: recent comments context failed: %s", e)
+            return ""
+
+    # ─── Reply Context Pre-population ───
+
+    async def _prepopulate_reply_context(
+        self, action: Dict, user_message: str, ai_response: str
+    ):
+        """Pre-populate module-level reply context when a reply_to_comment action
+        is detected, so the executor has post_id and reply text ready."""
+        global _pending_reply_contexts
+
+        platform_map = {
+            "x": "x", "twitter": "x", "linkedin": "linkedin",
+            "instagram": "instagram", "facebook": "facebook",
+        }
+        msg_lower = user_message.lower()
+        detected_platform = None
+        for name, key in platform_map.items():
+            if name in msg_lower:
+                detected_platform = key
+                break
+        if not detected_platform:
+            detected_platform = "linkedin"
+
+        ctx: Dict[str, Any] = {"platform": detected_platform}
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchrow("""
+                    SELECT post_id, actor_handle, actor_bio
+                    FROM skyeye_notifications
+                    WHERE notification_type IN ('comment', 'reply', 'mention')
+                      AND platform = $1
+                      AND created_at > NOW() - INTERVAL '72 hours'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, detected_platform)
+                if row:
+                    ctx["post_id"] = row["post_id"]
+                    ctx["comment_id"] = row.get("actor_handle", "")
+                    ctx["original_comment"] = (row.get("actor_bio") or "")[:300]
+        except Exception as e:
+            logger.warning("Reply context pre-population failed: %s", e)
+
+        for line in ai_response.split("\n"):
+            stripped = line.strip().strip('"').strip("*").strip()
+            if len(stripped) > 20 and not stripped.startswith("["):
+                lower = stripped.lower()
+                if any(kw in lower for kw in
+                       ["draft reply", "here's", "i'd suggest", "my reply",
+                        "response:", "reply:"]):
+                    continue
+                if not ctx.get("reply_text"):
+                    ctx["reply_text"] = stripped
+
+        _pending_reply_contexts.update(ctx)
+        logger.info("Reply context pre-populated: platform=%s, post_id=%s, has_reply=%s",
+                     detected_platform, ctx.get("post_id"), bool(ctx.get("reply_text")))
+
+    async def _execute_pending_reply_if_ready(self, msg_lower: str) -> bool:
+        """If there's a pending reply context with enough data, execute it now.
+        Called when the user says approval phrases like 'post it', 'do it', etc.
+        Returns True if a reply was attempted (success or failure)."""
+        global _pending_reply_contexts
+        ctx = _pending_reply_contexts
+
+        if not ctx.get("platform"):
+            return False
+
+        reply_text = ctx.get("reply_text", "")
+        post_id = ctx.get("post_id", "")
+
+        if not reply_text:
+            history = await self.get_chat_history(limit=5)
+            for msg in history:
+                if msg.get("sender") == "little_nate":
+                    text = msg.get("message", "")
+                    tl = text.lower()
+                    if any(kw in tl for kw in
+                           ["here's a reply", "draft reply", "reply:",
+                            "here's my draft", "my proposed reply",
+                            "i'd suggest", "thank you, sunil",
+                            "thank you for sharing"]):
+                        lines = text.split("\n")
+                        for line in lines:
+                            stripped = line.strip().strip('"').strip("*").strip()
+                            if stripped.startswith('>'):
+                                candidate = stripped.lstrip('>').strip()
+                                if len(candidate) > 20:
+                                    reply_text = candidate
+                                    break
+                        if not reply_text:
+                            for line in lines:
+                                stripped = line.strip().strip('"').strip("*").strip()
+                                if len(stripped) > 30 and not stripped.startswith("[") and not any(
+                                    kw in stripped.lower() for kw in
+                                    ["here's", "i'd suggest", "draft", "shall i",
+                                     "want me to", "action", "platform", "target",
+                                     "executing", "mode", "protocol"]
+                                ):
+                                    reply_text = stripped
+                                    break
+                        if reply_text:
+                            break
+
+        if not reply_text or not post_id:
+            logger.info("Pending reply context incomplete: reply_text=%s, post_id=%s",
+                        bool(reply_text), bool(post_id))
+            return False
+
+        platform = ctx["platform"]
+        comment_id = ctx.get("comment_id", "")
+
+        try:
+            from app.services.platforms import get_adapter
+            adapter = get_adapter(platform, self.db_pool)
+            if not adapter:
+                logger.warning("No adapter for platform %s during reply execution", platform)
+                return False
+
+            await adapter.authenticate()
+            result = await adapter.reply_to_comment(
+                comment_id=comment_id,
+                text=reply_text,
+                post_id=post_id,
+            )
+
+            if result.success:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO skyeye_activity (platform, type, content)
+                        VALUES ($1, 'comment_reply_posted', $2)
+                    """, platform,
+                        json.dumps({"reply_text": reply_text[:500],
+                                    "post_id": post_id,
+                                    "reply_id": result.reply_id or "",
+                                    "source": "command_protocol"}))
+                    await conn.execute("""
+                        INSERT INTO skyeye_chat (sender, message, metadata)
+                        VALUES ('little_nate', $1, $2)
+                    """,
+                        f"Reply posted on {platform.title()}. Reply ID: {result.reply_id or 'confirmed'}. "
+                        f"Text: \"{reply_text[:200]}\"",
+                        json.dumps({"is_verification": True,
+                                    "action": "comment_reply_posted",
+                                    "platform": platform}))
+                logger.info("Reply executed via command protocol: platform=%s, reply_id=%s",
+                           platform, result.reply_id)
+                _pending_reply_contexts.clear()
+                return True
+            else:
+                logger.warning("Reply execution failed: %s", result.error)
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO skyeye_chat (sender, message, metadata)
+                        VALUES ('little_nate', $1, $2)
+                    """,
+                        f"Reply attempt failed on {platform.title()}: {result.error}",
+                        json.dumps({"is_verification": True, "error": result.error}))
+                return True
+
+        except Exception as e:
+            logger.error("Reply execution via command protocol failed: %s", e)
+            return False
+
+    # ─── LinkedIn Comment URL Reply (Path 1: Manual) ───
+
+    async def _execute_comment_url_reply(
+        self, message: str, url_data: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """Execute a reply to a LinkedIn comment identified by a pasted URL.
+
+        Flow:
+          1. Resolve activity URN to a share URN via skyeye_session_actions
+          2. Try to fetch the comment using the resolved post URN
+          3. Generate a contextual reply via content generator
+          4. Post the reply via LinkedIn adapter
+          5. Log verification to skyeye_activity and skyeye_chat
+        """
+        activity_urn = url_data["activity_urn"]
+        comment_id = url_data["comment_id"]
+        comment_urn = url_data["comment_urn"]
+
+        try:
+            from app.services.platforms import get_adapter
+            from app.services.skyeye_content_generator import SkyEyeContentGenerator
+
+            adapter = get_adapter("linkedin", self.db_pool)
+            if not adapter:
+                return {"success": False, "error": "LinkedIn adapter not available"}
+
+            connected = await adapter.authenticate()
+            if not connected:
+                return {"success": False, "error": "LinkedIn authentication failed"}
+
+            # Resolve the activity URN to a share URN from stored session actions
+            post_urn = await self._resolve_activity_to_share_urn(activity_urn)
+            # Fallback: use the activity URN directly (socialActions API may accept it)
+            if not post_urn:
+                post_urn = activity_urn
+                logger.info("No share URN found for %s, using activity URN directly", activity_urn)
+
+            # Fetch comments on the post to find the target comment
+            comments = await adapter.get_comments(post_urn, limit=50)
+            target_comment_text = ""
+            target_comment_author = ""
+            matched_comment_urn = comment_urn
+
+            for c in comments:
+                c_id = getattr(c, "comment_id", "") or ""
+                if comment_id in c_id:
+                    target_comment_text = getattr(c, "text", "") or ""
+                    target_comment_author = getattr(c, "author_handle", "") or ""
+                    matched_comment_urn = c_id
+                    break
+
+            if not target_comment_text:
+                logger.warning(
+                    "Comment %s not found in %d comments on post %s — "
+                    "posting reply to comment URN anyway",
+                    comment_id, len(comments), post_urn,
+                )
+
+            # Fetch social memory for richer context
+            memory_context = ""
+            if target_comment_author:
+                try:
+                    async with self.db_pool.acquire() as conn:
+                        mem = await conn.fetchrow("""
+                            SELECT interaction_count, interests, tone_notes
+                            FROM skyeye_social_memory
+                            WHERE platform = 'linkedin'
+                              AND platform_handle = $1
+                        """, target_comment_author)
+                        if mem:
+                            memory_context = (
+                                f"Prior interactions: {mem['interaction_count']}, "
+                                f"Interests: {mem['interests'] or 'unknown'}, "
+                                f"Tone: {mem['tone_notes'] or 'professional'}"
+                            )
+                except Exception:
+                    pass
+
+            # Generate reply using content generator
+            gen = SkyEyeContentGenerator(self.db_pool)
+            reply_data = await gen.generate_reply(
+                platform="linkedin",
+                comment_text=target_comment_text or f"(comment ID {comment_id})",
+                user_handle=target_comment_author or "unknown",
+                user_context={
+                    "memory": memory_context,
+                    "post_urn": post_urn,
+                    "source": "comment_url_reply",
+                },
+            )
+
+            reply_text = reply_data.get("content", "")
+            if not reply_text:
+                return {"success": False, "error": "Content generator returned empty reply"}
+
+            # Post the reply via adapter
+            result = await adapter.reply_to_comment(
+                comment_id=matched_comment_urn,
+                text=reply_text,
+                post_id=post_urn,
+            )
+
+            if result.success:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO skyeye_activity (platform, type, content)
+                        VALUES ('linkedin', 'comment_reply_posted', $1)
+                    """, json.dumps({
+                        "reply_text": reply_text[:500],
+                        "post_urn": post_urn,
+                        "comment_urn": matched_comment_urn,
+                        "reply_id": result.reply_id or "",
+                        "comment_author": target_comment_author,
+                        "source": "comment_url_manual",
+                    }))
+                    await conn.execute("""
+                        INSERT INTO skyeye_social_interactions
+                            (platform, platform_handle, interaction_type, content, metadata)
+                        VALUES ('linkedin', $1, 'reply', $2, $3)
+                        ON CONFLICT DO NOTHING
+                    """, target_comment_author or "unknown",
+                        reply_text[:500],
+                        json.dumps({"comment_id": comment_id, "post_urn": post_urn}))
+                    await conn.execute("""
+                        INSERT INTO skyeye_social_memory
+                            (platform, platform_handle, interaction_count, last_interaction)
+                        VALUES ('linkedin', $1, 1, NOW())
+                        ON CONFLICT (platform, platform_handle) DO UPDATE SET
+                            interaction_count = skyeye_social_memory.interaction_count + 1,
+                            last_interaction = NOW()
+                    """, target_comment_author or "unknown")
+                    await conn.execute("""
+                        INSERT INTO skyeye_chat (sender, message, metadata)
+                        VALUES ('little_nate', $1, $2)
+                    """,
+                        f"Reply posted on LinkedIn. Reply ID: {result.reply_id or 'confirmed'}. "
+                        f"Comment by: {target_comment_author or 'unknown'}. "
+                        f"Text: \"{reply_text[:200]}\"",
+                        json.dumps({"is_verification": True,
+                                    "action": "comment_url_reply_posted",
+                                    "platform": "linkedin"}))
+
+                logger.info(
+                    "URL-based reply posted: post=%s, comment=%s, reply_id=%s",
+                    post_urn, comment_id, result.reply_id,
+                )
+                return {
+                    "success": True,
+                    "reply_id": result.reply_id,
+                    "reply_text": reply_text,
+                    "comment_author": target_comment_author,
+                    "post_urn": post_urn,
+                }
+            else:
+                error_msg = result.error or "Reply failed"
+                is_permission_error = "Permission denied" in error_msg or "403" in error_msg
+                logger.warning("URL-based reply failed: %s", error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "reply_text": reply_text,
+                    "needs_manual_post": is_permission_error,
+                    "comment_author": target_comment_author,
+                    "post_urn": post_urn,
+                }
+
+        except Exception as e:
+            logger.error("_execute_comment_url_reply failed: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def _resolve_activity_to_share_urn(self, activity_urn: str) -> Optional[str]:
+        """Map a LinkedIn activity URN to the stored share URN from session actions.
+
+        When Little Nate publishes a post, the LinkedIn API returns a share URN
+        (urn:li:share:XXX) which is stored in skyeye_session_actions.detail.post_id.
+        LinkedIn URLs use activity URNs (urn:li:activity:YYY). The numeric IDs differ,
+        so we search the DB and also check the content queue.
+        """
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Search session actions for LinkedIn posts (detail->>'post_id' has share URNs)
+                rows = await conn.fetch("""
+                    SELECT detail->>'post_id' as post_urn
+                    FROM skyeye_session_actions
+                    WHERE platform = 'linkedin'
+                      AND action_type = 'post'
+                      AND detail->>'post_id' IS NOT NULL
+                      AND created_at > NOW() - INTERVAL '90 days'
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """)
+
+                for row in rows:
+                    share_urn = row["post_urn"]
+                    if share_urn:
+                        return share_urn
+
+                # Also check the content queue for posted LinkedIn items
+                cq_row = await conn.fetchrow("""
+                    SELECT post_id_external
+                    FROM skyeye_content_queue
+                    WHERE platform = 'linkedin'
+                      AND status = 'posted'
+                      AND post_id_external IS NOT NULL
+                      AND created_at > NOW() - INTERVAL '90 days'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """)
+                if cq_row and cq_row["post_id_external"]:
+                    return cq_row["post_id_external"]
+
+        except Exception as e:
+            logger.warning("Activity-to-share URN resolution failed: %s", e)
+
+        return None
+
     # ─── Command Protocol ───
 
     async def _handle_command_protocol(self, message: str):
@@ -1021,10 +2288,16 @@ class SkyEyeChatService:
         """
         msg_lower = message.lower().strip()
         approval_phrases = ["approved", "go for it", "do it", "yes", "proceed",
-                            "looks good", "ship it", "launch it", "make it happen"]
+                            "looks good", "ship it", "launch it", "make it happen",
+                            "post it", "send it", "execute it", "go ahead"]
         rejection_phrases = ["reject", "no", "cancel", "don't do that", "nope"]
 
         try:
+            if any(phrase in msg_lower for phrase in approval_phrases):
+                reply_result = await self._execute_pending_reply_if_ready(msg_lower)
+                if reply_result:
+                    return
+
             direct_post = await self._detect_direct_post(message)
             if direct_post:
                 return
@@ -1194,8 +2467,6 @@ class SkyEyeChatService:
         if not action:
             return {"success": False, "error": "Action not found or already executed"}
 
-        # If this is a proposal from Little Nate with a stored marketing_action,
-        # route through the MarketingBrain approval pipeline for full execution.
         db_action_id = action.get("params", {}).get("db_action_id")
         if db_action_id:
             try:
@@ -1215,18 +2486,98 @@ class SkyEyeChatService:
         else:
             result = await self._execute_action_internal(action)
 
-        # Log execution to audit
+        verification = self._build_verification_message(action, result)
+        result["verification_message"] = verification
+
         try:
             async with self.db_pool.acquire() as conn:
                 await conn.execute(
                     """INSERT INTO skyeye_chat (sender, message, metadata)
-                       VALUES ('system', $1, $2)""",
-                    f"[ACTION EXECUTED] {action['action_type']}: {action['description']}",
-                    json.dumps({"action": action, "result": result})
+                       VALUES ('little_nate', $1, $2)""",
+                    verification,
+                    json.dumps({"action": action, "result": result,
+                                "is_verification": True})
                 )
         except Exception:
             pass
         return result
+
+    @staticmethod
+    def _build_verification_message(action: Dict, result: Dict) -> str:
+        """Build a natural-language verification message from an action result."""
+        action_type = action.get("action_type", "unknown")
+        desc = action.get("description", action_type)
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        if not result.get("success"):
+            error = result.get("error", "unknown error")
+
+            if result.get("needs_manual_post") and result.get("reply_text"):
+                reply_text = result["reply_text"]
+                author = result.get("comment_author", "the commenter")
+                return (
+                    f"LinkedIn API permission limitation — the Community Management API "
+                    f"is required for automated comment replies but is not yet enabled.\n\n"
+                    f"Here is the reply I composed for {author}. "
+                    f"Copy and paste it directly into LinkedIn:\n\n"
+                    f"---\n{reply_text}\n---\n\n"
+                    f"Once you've posted it manually, say \"posted manually\" "
+                    f"and I'll log the interaction.\n"
+                    f"Timestamp: {ts}"
+                )
+
+            return (
+                f"Action failed — {desc}\n"
+                f"Error: {error}\n"
+                f"Timestamp: {ts}\n"
+                f"I was unable to complete this. Let me know if you'd like me to retry "
+                f"or try a different approach."
+            )
+
+        data = result.get("data", {})
+        result_type = result.get("type", action_type)
+        lines = [f"Verified — {desc}"]
+
+        if result_type == "comment_reply_posted":
+            platform = data.get("platform", "unknown")
+            reply_id = data.get("reply_id", "")
+            reply_text = data.get("reply_text", "")
+            lines.append(f"Platform: {platform.title()}")
+            lines.append(f"Status: Reply posted successfully")
+            if reply_id:
+                lines.append(f"Reply ID: {reply_id}")
+            if reply_text:
+                lines.append(f"Reply: \"{reply_text}\"")
+        elif result_type == "content_generated":
+            platform = data.get("platform", "")
+            queue_id = data.get("queue_id", "")
+            lines.append(f"Platform: {platform}")
+            lines.append(f"Status: Content generated and queued")
+            if queue_id:
+                lines.append(f"Queue ID: {queue_id}")
+        elif result_type == "chat_pushed_to_social":
+            queued = data.get("queued_posts", [])
+            platforms = data.get("platforms", [])
+            lines.append(f"Platforms: {', '.join(platforms)}")
+            lines.append(f"Status: {len(queued)} post(s) queued")
+        elif result_type == "campaign_designed":
+            lines.append("Status: Campaign designed and saved")
+        elif result_type == "proposal_executed":
+            lines.append(f"Status: Proposal approved and executed")
+            msg = data.get("message", "")
+            if msg:
+                lines.append(f"Detail: {msg}")
+        else:
+            msg = data.get("message", "") or data.get("status", "")
+            if msg:
+                lines.append(f"Status: {msg}")
+            else:
+                lines.append("Status: Completed successfully")
+
+        lines.append(f"Timestamp: {ts}")
+        lines.append("Confirmation is visible in your activity log.")
+        return "\n".join(lines)
 
     async def _execute_action_internal(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """Route and execute an action based on its type and mode."""
@@ -1243,6 +2594,8 @@ class SkyEyeChatService:
                 return await self._exec_admin(action_type, params)
             elif mode == ChatMode.SWARM:
                 return await self._exec_swarm(action_type, params)
+            elif mode == ChatMode.CAMPAIGN:
+                return await self._exec_campaign(action_type, params)
             elif mode == ChatMode.COMMAND:
                 return await self._exec_command(action_type, params)
             return {"success": False, "error": f"No executor for mode: {mode}"}
@@ -1281,27 +2634,40 @@ class SkyEyeChatService:
                 from app.services.skyeye_content_generator import SkyEyeContentGenerator
                 gen = SkyEyeContentGenerator(self.db_pool)
                 target_text = params.get("target", "")
+                lower_target = target_text.lower()
                 known_platforms = ["x", "twitter", "linkedin", "instagram", "tiktok",
                                    "facebook", "youtube", "reddit", "pinterest"]
                 detected_platform = "linkedin"
                 for p in known_platforms:
-                    if p in target_text.lower():
+                    if p in lower_target:
                         detected_platform = "x" if p == "twitter" else p
                         break
+
+                # Detect long-form / article intent for X
+                article_keywords = ("article", "long post", "long-form", "long form",
+                                    "essay", "deep dive", "thought piece", "extended")
+                is_x_article = (
+                    detected_platform == "x"
+                    and any(kw in lower_target for kw in article_keywords)
+                )
+                gen_platform = "x_article" if is_x_article else detected_platform
+
                 topic = target_text
                 for p in known_platforms:
                     topic = topic.lower().replace(p, "").strip()
                 topic = topic.strip(" ,.-/")
-                result = await gen.generate_post(detected_platform, topic or target_text)
+                result = await gen.generate_post(gen_platform, topic or target_text)
                 if result.get("safe"):
                     queue_id = await gen.queue_content(
-                        platform=detected_platform,
+                        platform=gen_platform,
                         content=result["content"],
                         content_type=result.get("content_type", "post"),
                         generated_by="big_nate_chat",
                     )
                     result["queue_id"] = queue_id
                     result["platform"] = detected_platform
+                    if is_x_article:
+                        result["format"] = "x_article"
                 return {"success": True, "type": "content_generated", "data": result}
             except Exception as e:
                 return {"success": True, "type": "content_generated",
@@ -1329,7 +2695,404 @@ class SkyEyeChatService:
             pending = await brain.get_pending_actions()
             return {"success": True, "type": "pending_actions", "data": pending}
 
+        elif action_type == "post_analytics":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT platform, post_id, post_text, likes, reposts,
+                               comments, impressions, captured_at
+                        FROM skyeye_post_analytics
+                        WHERE captured_at > NOW() - INTERVAL '7 days'
+                        ORDER BY likes + comments DESC
+                        LIMIT 20
+                    """)
+                    return {"success": True, "type": "post_analytics",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "post_analytics", "data": []}
+
+        elif action_type == "engagement_summary":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT notification_type, COUNT(*) as cnt,
+                               COUNT(DISTINCT actor_handle) as unique_actors
+                        FROM skyeye_notifications
+                        WHERE created_at > NOW() - INTERVAL '7 days'
+                        GROUP BY notification_type
+                        ORDER BY cnt DESC
+                    """)
+                    return {"success": True, "type": "engagement_summary",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "engagement_summary", "data": []}
+
+        elif action_type == "optimal_posting_time":
+            try:
+                platform = params.get("target", "x")
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT EXTRACT(HOUR FROM captured_at) as hour,
+                               AVG(likes + comments) as avg_engagement
+                        FROM skyeye_post_analytics
+                        WHERE platform = $1
+                          AND captured_at > NOW() - INTERVAL '30 days'
+                        GROUP BY hour
+                        ORDER BY avg_engagement DESC
+                        LIMIT 5
+                    """, platform)
+                    return {"success": True, "type": "optimal_posting_time",
+                            "data": [dict(r) for r in rows], "platform": platform}
+            except Exception:
+                return {"success": True, "type": "optimal_posting_time", "data": []}
+
+        elif action_type == "top_engaged":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT platform_handle, platform, interaction_count,
+                               last_interaction, interests
+                        FROM skyeye_social_memory
+                        ORDER BY interaction_count DESC
+                        LIMIT 15
+                    """)
+                    return {"success": True, "type": "top_engaged",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "top_engaged", "data": []}
+
+        elif action_type == "platform_comparison":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT platform,
+                               COUNT(*) as total_routed,
+                               COUNT(*) FILTER (WHERE event = 'converted') as conversions
+                        FROM funnel_routing_log
+                        WHERE created_at > NOW() - INTERVAL '30 days'
+                        GROUP BY platform
+                        ORDER BY conversions DESC
+                    """)
+                    return {"success": True, "type": "platform_comparison",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "platform_comparison", "data": []}
+
+        elif action_type == "push_chat_to_social":
+            try:
+                from app.services.skyeye_content_generator import SkyEyeContentGenerator
+                gen = SkyEyeContentGenerator(self.db_pool)
+
+                history = await self.get_chat_history(limit=10)
+                chat_context = "\n".join(
+                    f"{'Big Nate' if m['sender'] == 'big_nate' else 'Little Nate'}: {m['message']}"
+                    for m in history
+                )
+
+                target = (params.get("target") or "").lower().strip()
+                raw_input = (params.get("raw_input") or target).lower()
+                article_keywords = ("article", "long post", "long-form", "long form",
+                                    "essay", "deep dive", "thought piece", "extended")
+                wants_article = any(kw in raw_input for kw in article_keywords)
+
+                platforms = []
+                platform_map = {"x": "x", "twitter": "x", "linkedin": "linkedin",
+                                "instagram": "instagram", "facebook": "facebook",
+                                "youtube": "youtube"}
+                if target in platform_map:
+                    platforms = [platform_map[target]]
+                elif target in ("all", "everywhere", "social", "all platforms"):
+                    platforms = ["x", "linkedin"]
+                else:
+                    platforms = ["x", "linkedin"]
+
+                queued = []
+                for plat in platforms:
+                    gen_plat = "x_article" if (plat == "x" and wants_article) else plat
+                    result = await gen.generate_post(
+                        gen_plat,
+                        f"Based on this conversation between Big Nate and Little Nate, "
+                        f"create a compelling {plat} {'article' if gen_plat == 'x_article' else 'post'} "
+                        f"that shares the key insight or wisdom:\n\n"
+                        f"{chat_context}"
+                    )
+                    if result.get("safe") or result.get("content"):
+                        q_id = await gen.queue_content(
+                            platform=gen_plat,
+                            content=result["content"],
+                            content_type=result.get("content_type", "post"),
+                            generated_by="big_nate_chat_push",
+                        )
+                        queued.append({"platform": plat, "queue_id": q_id, "preview": result["content"][:200]})
+
+                return {
+                    "success": True,
+                    "type": "chat_pushed_to_social",
+                    "data": {
+                        "queued_posts": queued,
+                        "platforms": platforms,
+                        "note": f"Chat wisdom queued for {', '.join(platforms)} — will post during next session cycle",
+                    },
+                }
+            except Exception as e:
+                logger.error("push_chat_to_social failed: %s", e)
+                return {"success": False, "error": str(e), "action_type": action_type}
+
+        elif action_type == "get_recent_comments":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT platform, actor_handle, post_id, content,
+                               notification_type, created_at
+                        FROM skyeye_notifications
+                        WHERE notification_type IN ('comment', 'reply', 'mention')
+                          AND created_at > NOW() - INTERVAL '72 hours'
+                        ORDER BY created_at DESC
+                        LIMIT 20
+                    """)
+                    return {"success": True, "type": "recent_comments",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "recent_comments", "data": []}
+
+        elif action_type == "reply_to_comment":
+            try:
+                target_name = (params.get("target") or "").strip()
+                raw_input = params.get("raw_input", "")
+
+                platform_map = {"x": "x", "twitter": "x", "linkedin": "linkedin",
+                                "instagram": "instagram", "facebook": "facebook"}
+                detected_platform = None
+                for name, key in platform_map.items():
+                    if name in (raw_input or "").lower() or name in target_name.lower():
+                        detected_platform = key
+                        break
+
+                ctx = _pending_reply_contexts
+                if not detected_platform and ctx.get("platform"):
+                    detected_platform = ctx["platform"]
+                if not detected_platform:
+                    detected_platform = "linkedin"
+
+                post_id = ctx.get("post_id")
+                comment_id = ctx.get("comment_id")
+                reply_text = ctx.get("reply_text", "")
+
+                if not post_id or not reply_text:
+                    async with self.db_pool.acquire() as conn:
+                        row = await conn.fetchrow("""
+                            SELECT post_id, actor_handle, actor_bio
+                            FROM skyeye_notifications
+                            WHERE notification_type IN ('comment', 'reply', 'mention')
+                              AND platform = $1
+                              AND created_at > NOW() - INTERVAL '72 hours'
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, detected_platform)
+                        if row:
+                            post_id = post_id or row["post_id"]
+                            comment_id = comment_id or row.get("actor_handle")
+
+                    if not reply_text:
+                        history = await self.get_chat_history(limit=10)
+                        for msg in history:
+                            if msg.get("sender") == "little_nate":
+                                text = msg.get("message", "")
+                                tl = text.lower()
+                                if any(kw in tl for kw in
+                                       ["here's a reply", "suggested reply", "draft reply",
+                                        "reply:", "i'd suggest:", "response:",
+                                        "here's my draft", "here is my draft",
+                                        "i would reply", "my proposed reply"]):
+                                    lines = text.split("\n")
+                                    in_quote = False
+                                    for line in lines:
+                                        stripped = line.strip().strip("*").strip()
+                                        if stripped.startswith('"') and stripped.endswith('"') and len(stripped) > 20:
+                                            reply_text = stripped.strip('"')
+                                            break
+                                        if stripped.startswith('>'):
+                                            candidate = stripped.lstrip('>').strip()
+                                            if len(candidate) > 20:
+                                                reply_text = candidate
+                                                break
+                                        ll = stripped.lower()
+                                        if any(kw in ll for kw in ["draft reply:", "reply:", "here's"]):
+                                            in_quote = True
+                                            continue
+                                        if in_quote and len(stripped) > 20 and not stripped.startswith("["):
+                                            reply_text = stripped.strip('"')
+                                            break
+                                    if not reply_text:
+                                        for line in lines:
+                                            stripped = line.strip().strip('"').strip("*").strip()
+                                            if len(stripped) > 30 and not stripped.startswith("[") and not any(
+                                                kw in stripped.lower() for kw in
+                                                ["here's", "i'd suggest", "draft", "shall i", "want me to"]
+                                            ):
+                                                reply_text = stripped
+                                                break
+                                    if reply_text:
+                                        break
+
+                if not reply_text:
+                    return {"success": False,
+                            "error": "No reply text found. Please provide the reply text or ask me to draft one first."}
+                if not post_id:
+                    return {"success": False,
+                            "error": "Could not determine which post to reply on. Please specify the platform and post."}
+
+                from app.services.platforms import get_adapter
+                adapter = get_adapter(detected_platform, self.db_pool)
+                if not adapter:
+                    return {"success": False,
+                            "error": f"No adapter found for platform: {detected_platform}"}
+
+                await adapter.authenticate()
+                result = await adapter.reply_to_comment(
+                    comment_id=comment_id or "",
+                    text=reply_text,
+                    post_id=post_id,
+                )
+
+                if result.success:
+                    async with self.db_pool.acquire() as conn:
+                        await conn.execute("""
+                            INSERT INTO skyeye_activity (platform, type, content)
+                            VALUES ($1, 'comment_reply_posted', $2)
+                        """, detected_platform,
+                            json.dumps({"reply_text": reply_text[:500],
+                                        "post_id": post_id,
+                                        "reply_id": result.reply_id or "",
+                                        "target": target_name}))
+                        await conn.execute("""
+                            INSERT INTO skyeye_social_interactions
+                                (platform, platform_handle, interaction_type, content)
+                            VALUES ($1, $2, 'reply', $3)
+                            ON CONFLICT DO NOTHING
+                        """, detected_platform, target_name or "unknown",
+                            reply_text[:500])
+
+                    _pending_reply_contexts.clear()
+                    return {"success": True, "type": "comment_reply_posted",
+                            "data": {"platform": detected_platform,
+                                     "reply_id": result.reply_id,
+                                     "reply_text": reply_text[:200],
+                                     "post_id": post_id}}
+                else:
+                    return {"success": False,
+                            "error": f"Reply failed on {detected_platform}: {result.error}"}
+
+            except Exception as e:
+                logger.error("reply_to_comment execution failed: %s", e)
+                return {"success": False, "error": str(e)}
+
+        elif action_type == "reply_via_comment_url":
+            url_data = {
+                k: params.get(k) for k in
+                ("activity_urn", "activity_id", "comment_id", "comment_urn")
+                if params.get(k)
+            }
+            if not url_data.get("activity_urn") or not url_data.get("comment_id"):
+                return {"success": False,
+                        "error": "Could not parse LinkedIn comment URL. Paste the full URL."}
+            result = await self._execute_comment_url_reply(
+                params.get("raw_input", ""), url_data
+            )
+            return result
+
         return {"success": False, "error": f"Unknown marketing action: {action_type}"}
+
+    # ── Campaign Execution ──
+
+    async def _exec_campaign(self, action_type: str, params: Dict) -> Dict:
+        """Execute campaign management actions."""
+        if action_type == "campaign_status":
+            try:
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch("""
+                        SELECT id, name, status, platform, audience_type,
+                               total_episodes, current_episode, created_at
+                        FROM storytelling_campaigns
+                        WHERE status IN ('active', 'paused')
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                    """)
+                    return {"success": True, "type": "campaign_status",
+                            "data": [dict(r) for r in rows]}
+            except Exception:
+                return {"success": True, "type": "campaign_status", "data": []}
+
+        elif action_type == "campaign_report":
+            target = params.get("target", "")
+            try:
+                async with self.db_pool.acquire() as conn:
+                    campaign = await conn.fetchrow("""
+                        SELECT * FROM storytelling_campaigns
+                        WHERE name ILIKE $1
+                        ORDER BY created_at DESC LIMIT 1
+                    """, f"%{target}%")
+                    if not campaign:
+                        return {"success": True, "type": "campaign_report",
+                                "data": {"error": f"No campaign found matching '{target}'"}}
+
+                    posts = await conn.fetch("""
+                        SELECT q.platform, q.content, q.status, q.posted_at,
+                               pa.likes, pa.reposts, pa.comments, pa.impressions
+                        FROM skyeye_content_queue q
+                        LEFT JOIN skyeye_post_analytics pa
+                            ON q.post_id = pa.post_id AND q.platform = pa.platform
+                        WHERE q.campaign_id = $1
+                        ORDER BY q.episode_number, q.created_at
+                    """, campaign["id"])
+                    return {"success": True, "type": "campaign_report",
+                            "data": {"campaign": dict(campaign),
+                                     "posts": [dict(p) for p in posts]}}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        elif action_type == "pause_campaign":
+            target = params.get("target", "")
+            try:
+                async with self.db_pool.acquire() as conn:
+                    await conn.execute("""
+                        UPDATE storytelling_campaigns SET status = 'paused'
+                        WHERE name ILIKE $1 AND status = 'active'
+                    """, f"%{target}%")
+                return {"success": True, "type": "campaign_paused", "target": target}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        elif action_type == "extend_campaign":
+            target = params.get("target", "")
+            try:
+                from app.services.marketing_brain import MarketingBrain
+                brain = MarketingBrain(self.db_pool)
+                async with self.db_pool.acquire() as conn:
+                    campaign = await conn.fetchrow("""
+                        SELECT id FROM storytelling_campaigns
+                        WHERE name ILIKE $1 ORDER BY created_at DESC LIMIT 1
+                    """, f"%{target}%")
+                    if campaign:
+                        result = await brain.generate_next_episode(
+                            campaign["id"], {"note": "Extended by campaign manager"}
+                        )
+                        return {"success": True, "type": "campaign_extended", "data": result}
+                return {"success": False, "error": f"No campaign found: {target}"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        elif action_type == "launch_campaign":
+            target = params.get("target", "")
+            try:
+                from app.services.marketing_brain import MarketingBrain
+                brain = MarketingBrain(self.db_pool)
+                result = await brain.design_campaign(target)
+                return {"success": True, "type": "campaign_launched", "data": result}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        return {"success": False, "error": f"Unknown campaign action: {action_type}"}
 
     # ── Defense Execution ──
 
@@ -1638,6 +3401,8 @@ class SkyEyeChatService:
                 return {"success": True, "type": "proposal_held",
                         "data": {"id": latest["id"], "title": latest.get("title", ""),
                                  "message": "Proposal deferred — kept in pending queue"}}
+            elif action_type == "reply_to_comment":
+                return await self._exec_marketing(action_type, params)
         except Exception as e:
             return {"success": False, "error": str(e)}
 

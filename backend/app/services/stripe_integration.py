@@ -1,23 +1,27 @@
 """
 LITTLE NATE — Stripe E-Commerce Integration
-Version: 1.0
-Date: January 21, 2026
+Version: 2.0
+Date: March 1, 2026
 
 Complete Stripe integration for:
 - Subscription management (tiers)
-- Family member billing
+- Family member billing (tiered)
 - Coaching session packs
+- Token pack purchases (one-time)
+- DOJO subscriptions
+- Token share fee (GKM donation)
+- Pricing change notification emails
 - Webhook handling
 
 Required env vars:
 - STRIPE_SECRET_KEY
 - STRIPE_WEBHOOK_SECRET
-- STRIPE_PRICE_STANDARD
-- STRIPE_PRICE_TOP_TIER
-- STRIPE_PRICE_FAMILY_MEMBER
-- STRIPE_PRICE_COACHING_SINGLE
-- STRIPE_PRICE_COACHING_4PACK
-- STRIPE_PRICE_COACHING_8PACK
+- STRIPE_PRICE_STANDARD, STRIPE_PRICE_TOP_TIER
+- STRIPE_PRICE_FAMILY_MEMBER, STRIPE_PRICE_FAMILY_TIER_{1-4}
+- STRIPE_PRICE_COACHING_SINGLE, STRIPE_PRICE_COACHING_4PACK, STRIPE_PRICE_COACHING_8PACK
+- STRIPE_PRICE_TOKEN_LIGHT, STRIPE_PRICE_TOKEN_STANDARD, STRIPE_PRICE_TOKEN_POWER, STRIPE_PRICE_TOKEN_ULTIMATE
+- STRIPE_PRICE_TOKEN_SHARE_FEE
+- STRIPE_PRICE_DOJO_{THERAPIST,PROJECT_PM,BUSINESS,CNC,MCAT,TEACHER,JUDGE,COACH_NATE}
 """
 
 import logging
@@ -34,7 +38,7 @@ from pydantic import BaseModel
 import asyncpg
 import json
 
-from app.auth import get_current_user
+from app.auth import get_current_user_id
 
 # =============================================================================
 # CONFIGURATION
@@ -42,6 +46,7 @@ from app.auth import get_current_user
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+STRIPE_METER_EVENT_NAME = os.getenv("STRIPE_METER_EVENT_NAME", "token_usage")
 
 # Stripe Price IDs (set these in your Stripe dashboard)
 PRICES = {
@@ -55,7 +60,107 @@ PRICES = {
     "COACHING_SINGLE": os.getenv("STRIPE_PRICE_COACHING_SINGLE"),  # $175
     "COACHING_4PACK": os.getenv("STRIPE_PRICE_COACHING_4PACK"),    # $600
     "COACHING_8PACK": os.getenv("STRIPE_PRICE_COACHING_8PACK"),    # $1,120
+    "TOKEN_LIGHT": os.getenv("STRIPE_PRICE_TOKEN_LIGHT"),          # $3 / 15k tokens
+    "TOKEN_STANDARD": os.getenv("STRIPE_PRICE_TOKEN_STANDARD"),    # $7 / 50k tokens
+    "TOKEN_POWER": os.getenv("STRIPE_PRICE_TOKEN_POWER"),          # $20 / 150k tokens
+    "TOKEN_ULTIMATE": os.getenv("STRIPE_PRICE_TOKEN_ULTIMATE"),    # $125 / 1M tokens
+    "TOKEN_SHARE_FEE": os.getenv("STRIPE_PRICE_TOKEN_SHARE_FEE"), # $5 per 10k shared
+    # DOJO subscriptions (monthly)
+    "DOJO_THERAPIST": os.getenv("STRIPE_PRICE_DOJO_THERAPIST"),    # $175/mo
+    "DOJO_PROJECT_PM": os.getenv("STRIPE_PRICE_DOJO_PROJECT_PM"),  # $250/mo
+    "DOJO_BUSINESS": os.getenv("STRIPE_PRICE_DOJO_BUSINESS"),      # $325/mo
+    "DOJO_CNC": os.getenv("STRIPE_PRICE_DOJO_CNC"),                # $150/mo
+    "DOJO_MCAT": os.getenv("STRIPE_PRICE_DOJO_MCAT"),              # $500/mo
+    "DOJO_TEACHER": os.getenv("STRIPE_PRICE_DOJO_TEACHER"),        # $225/mo
+    "DOJO_JUDGE": os.getenv("STRIPE_PRICE_DOJO_JUDGE"),            # $2,100/mo
+    "DOJO_COACH_NATE": os.getenv("STRIPE_PRICE_DOJO_COACH_NATE"), # $90/mo
 }
+
+# Canonical pricing reference — source of truth for all product prices.
+# Any change here MUST trigger a pricing change email via notify_pricing_change().
+PRICING_CATALOG = {
+    "Inner Chamber (Standard)":    {"amount_cents": 4900,    "interval": "month", "key": "STANDARD"},
+    "Sovereign Circle (Top Tier)": {"amount_cents": 14900,   "interval": "month", "key": "TOP_TIER"},
+    "Family Member Tier 1":        {"amount_cents": 7500,    "interval": "month", "key": "FAMILY_TIER_1"},
+    "Family Member Tier 2":        {"amount_cents": 6000,    "interval": "month", "key": "FAMILY_TIER_2"},
+    "Family Member Tier 3":        {"amount_cents": 4500,    "interval": "month", "key": "FAMILY_TIER_3"},
+    "Family Member Tier 4+":       {"amount_cents": 3000,    "interval": "month", "key": "FAMILY_TIER_4"},
+    "Live Coaching Session":       {"amount_cents": 17500,   "interval": "one-time", "key": "COACHING_SINGLE"},
+    "Coaching Pack - 4 sessions":  {"amount_cents": 60000,   "interval": "one-time", "key": "COACHING_4PACK"},
+    "Coaching Pack - 8 sessions":  {"amount_cents": 112000,  "interval": "one-time", "key": "COACHING_8PACK"},
+    "Token Pack Light (15k)":      {"amount_cents": 300,     "interval": "one-time", "key": "TOKEN_LIGHT"},
+    "Token Pack Standard (50k)":   {"amount_cents": 700,     "interval": "one-time", "key": "TOKEN_STANDARD"},
+    "Token Pack Power (150k)":     {"amount_cents": 2000,    "interval": "one-time", "key": "TOKEN_POWER"},
+    "Token Pack Ultimate (1M)":    {"amount_cents": 12500,   "interval": "one-time", "key": "TOKEN_ULTIMATE"},
+    "Token Share Fee (GKM)":       {"amount_cents": 500,     "interval": "per-10k", "key": "TOKEN_SHARE_FEE"},
+    "DOJO Therapist":              {"amount_cents": 17500,   "interval": "month", "key": "DOJO_THERAPIST"},
+    "DOJO Project PM":             {"amount_cents": 25000,   "interval": "month", "key": "DOJO_PROJECT_PM"},
+    "DOJO Business":               {"amount_cents": 32500,   "interval": "month", "key": "DOJO_BUSINESS"},
+    "DOJO CNC":                    {"amount_cents": 15000,   "interval": "month", "key": "DOJO_CNC"},
+    "DOJO MCAT":                   {"amount_cents": 50000,   "interval": "month", "key": "DOJO_MCAT"},
+    "DOJO Teacher":                {"amount_cents": 22500,   "interval": "month", "key": "DOJO_TEACHER"},
+    "DOJO Judge (Nate Bar)":       {"amount_cents": 210000,  "interval": "month", "key": "DOJO_JUDGE"},
+    "Coach Nate":                  {"amount_cents": 9000,    "interval": "month", "key": "DOJO_COACH_NATE"},
+}
+
+TOKEN_PACKS = {
+    "light":    {"tokens": 15000,    "price_cents": 300,   "label": "Light Pack"},
+    "standard": {"tokens": 50000,    "price_cents": 700,   "label": "Standard Pack"},
+    "power":    {"tokens": 150000,   "price_cents": 2000,  "label": "Power Pack"},
+    "ultimate": {"tokens": 1000000,  "price_cents": 12500, "label": "Ultimate Pack"},
+}
+
+# =============================================================================
+# CORPORATE TIERS (Hybrid: flat platform fee + employee subsidy)
+# =============================================================================
+CORPORATE_TIERS = {
+    "starter": {
+        "label": "Starter",
+        "platform_fee_cents": 29900,
+        "max_seats": 25,
+        "features": ["dashboard", "analytics", "employee_management"],
+    },
+    "growth": {
+        "label": "Growth",
+        "platform_fee_cents": 79900,
+        "max_seats": 100,
+        "features": ["dashboard", "analytics", "employee_management", "custom_branding", "api_access"],
+    },
+    "enterprise": {
+        "label": "Enterprise",
+        "platform_fee_cents": 199900,
+        "max_seats": 500,
+        "features": ["dashboard", "analytics", "employee_management", "custom_branding", "api_access", "sso", "dedicated_support", "custom_reports"],
+    },
+}
+
+EMPLOYEE_SUBSCRIPTION_PRICES = {
+    "STANDARD": 4900,
+    "TOP_TIER": 14900,
+}
+
+
+def calculate_subsidized_rate(employee_tier: str, subsidy_pct: int) -> dict:
+    """Calculate the subsidized employee subscription rate.
+
+    Args:
+        employee_tier: STANDARD or TOP_TIER
+        subsidy_pct: 25-100, percentage the company pays
+    Returns:
+        dict with company_pays_cents, employee_pays_cents, total_cents
+    """
+    subsidy_pct = max(25, min(100, subsidy_pct))
+    total = EMPLOYEE_SUBSCRIPTION_PRICES.get(employee_tier, 4900)
+    company_pays = int(total * subsidy_pct / 100)
+    employee_pays = total - company_pays
+    return {
+        "total_cents": total,
+        "subsidy_percentage": subsidy_pct,
+        "company_pays_cents": company_pays,
+        "employee_pays_cents": employee_pays,
+        "employee_tier": employee_tier,
+    }
+
 
 # Founding member coupon (configurable via env)
 FOUNDING_COUPON_ID = os.getenv("STRIPE_FOUNDING_COUPON_ID", "FOUNDING_20PCT")
@@ -66,6 +171,181 @@ for key in ["STANDARD", "TOP_TIER"]:
         _logger.warning(
             f"STRIPE_PRICE_{key} not set — subscription checkout will fail for {key} tier"
         )
+
+# =============================================================================
+# USAGE-BASED METERING (Stripe Billing Meters)
+# =============================================================================
+
+import time as _time
+
+async def report_token_usage(
+    stripe_customer_id: str,
+    tokens: int,
+    source: str = "ai_chat",
+) -> bool:
+    """Report token usage to Stripe Meter for usage-based billing.
+
+    Args:
+        stripe_customer_id: Stripe customer ID (cus_...)
+        tokens: Number of tokens consumed
+        source: Consumption source tag (ai_chat, sanctuary_ai, etc.)
+
+    Returns:
+        True if the event was reported, False otherwise.
+    """
+    if not stripe.api_key or not stripe_customer_id or tokens <= 0:
+        return False
+
+    try:
+        stripe.billing.MeterEvent.create(
+            event_name=STRIPE_METER_EVENT_NAME,
+            payload={
+                "stripe_customer_id": stripe_customer_id,
+                "tokens": str(tokens),
+            },
+            timestamp=int(_time.time()),
+        )
+        _logger.debug(
+            "Reported %d tokens to Stripe meter for %s (source=%s)",
+            tokens, stripe_customer_id, source,
+        )
+        return True
+    except Exception as e:
+        _logger.warning("Stripe meter event failed for %s: %s", stripe_customer_id, e)
+        return False
+
+
+async def report_token_usage_by_username(
+    db_pool,
+    username: str,
+    tokens: int,
+    source: str = "ai_chat",
+) -> bool:
+    """Resolve username to Stripe customer ID and report usage."""
+    if not db_pool or not username or tokens <= 0:
+        return False
+
+    try:
+        async with db_pool.acquire() as conn:
+            cid = await conn.fetchval(
+                "SELECT profile_data->>'stripe_customer_id' FROM users WHERE username = $1",
+                username,
+            )
+        if cid:
+            return await report_token_usage(cid, tokens, source)
+    except Exception as e:
+        _logger.warning("Meter usage lookup failed for %s: %s", username, e)
+    return False
+
+
+# =============================================================================
+# PRICING CHANGE NOTIFICATION
+# =============================================================================
+
+PRICING_NOTIFY_EMAIL = "support@sovereignsanctuary.net"
+
+async def notify_pricing_change(
+    changed_items: list,
+    changed_by: str = "system",
+    notification_system=None,
+):
+    """Email support@sovereignsanctuary.net when any product pricing changes.
+
+    Args:
+        changed_items: list of dicts with keys: product, old_cents, new_cents, interval
+        changed_by: who triggered the change (username or "system")
+        notification_system: NotificationSystem instance for sending email
+    """
+    if not changed_items:
+        return
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    rows = ""
+    for item in changed_items:
+        old_price = f"${item['old_cents'] / 100:.2f}"
+        new_price = f"${item['new_cents'] / 100:.2f}"
+        direction = "↑" if item["new_cents"] > item["old_cents"] else "↓"
+        rows += (
+            f"<tr>"
+            f"<td style='padding:8px;border:1px solid #333'>{item['product']}</td>"
+            f"<td style='padding:8px;border:1px solid #333'>{old_price}</td>"
+            f"<td style='padding:8px;border:1px solid #333;font-weight:bold'>{new_price} {direction}</td>"
+            f"<td style='padding:8px;border:1px solid #333'>{item.get('interval', 'month')}</td>"
+            f"</tr>"
+        )
+
+    html = f"""
+    <div style="font-family:DM Sans,sans-serif;background:#0A0A0A;color:#E8D5A3;padding:24px;border-radius:8px;">
+        <h2 style="color:#C9A962;margin-top:0;">Sovereign Sanctuary — Pricing Change Alert</h2>
+        <p><strong>Changed by:</strong> {changed_by}</p>
+        <p><strong>Timestamp:</strong> {now.strftime('%B %d, %Y at %H:%M UTC')}</p>
+        <table style="border-collapse:collapse;width:100%;margin:16px 0;color:#E8D5A3;">
+            <tr style="background:#111;">
+                <th style="padding:8px;border:1px solid #333;text-align:left">Product</th>
+                <th style="padding:8px;border:1px solid #333;text-align:left">Previous</th>
+                <th style="padding:8px;border:1px solid #333;text-align:left">New</th>
+                <th style="padding:8px;border:1px solid #333;text-align:left">Billing</th>
+            </tr>
+            {rows}
+        </table>
+        <p style="color:#888;font-size:12px;">
+            This is an automated notification from the Little Nate billing system.
+            If you did not authorize this change, investigate immediately.
+        </p>
+    </div>
+    """
+
+    subject = f"⚠️ Pricing Change — {len(changed_items)} product(s) updated — {now.strftime('%b %d %Y')}"
+
+    if notification_system:
+        try:
+            await notification_system._send_email(
+                PRICING_NOTIFY_EMAIL, subject, html, "pricing_change"
+            )
+            _logger.info("Pricing change email sent to %s (%d items)", PRICING_NOTIFY_EMAIL, len(changed_items))
+        except Exception as e:
+            _logger.error("Failed to send pricing change email: %s", e)
+    else:
+        _logger.warning("No notification_system available — pricing change email NOT sent for %d items", len(changed_items))
+
+    try:
+        import asyncpg
+        db_pool = getattr(notify_pricing_change, '_db_pool', None)
+        if db_pool:
+            await db_pool.execute(
+                """INSERT INTO skyeye_activity (type, content, platform, created_at)
+                   VALUES ('pricing_change', $1, 'system', NOW())""",
+                json.dumps({
+                    "changed_by": changed_by,
+                    "items": changed_items,
+                    "timestamp": now.isoformat(),
+                }),
+            )
+    except Exception as e:
+        _logger.warning("Failed to log pricing change to skyeye_activity: %s", e)
+
+
+def detect_pricing_drift() -> list:
+    """Compare PRICING_CATALOG against TOKEN_PACKS and FAMILY_TIER_PRICES.
+
+    Returns list of mismatches for admin visibility. Called on startup.
+    """
+    drift = []
+    for pack_id, pack in TOKEN_PACKS.items():
+        catalog_key = f"TOKEN_{pack_id.upper()}"
+        for name, info in PRICING_CATALOG.items():
+            if info["key"] == catalog_key:
+                if info["amount_cents"] != pack["price_cents"]:
+                    drift.append({
+                        "product": name,
+                        "catalog_cents": info["amount_cents"],
+                        "code_cents": pack["price_cents"],
+                        "source": "TOKEN_PACKS",
+                    })
+    return drift
+
 
 # =============================================================================
 # ENUMS & MODELS
@@ -119,6 +399,7 @@ class CreateCheckoutRequest(BaseModel):
     tier: SubscriptionTier
     success_url: str
     cancel_url: str
+    promo_code: Optional[str] = None
 
 class CreateCheckoutResponse(BaseModel):
     checkout_url: str
@@ -166,6 +447,16 @@ class StripeService:
             except Exception:
                 pass
         return self._sovereign_proxy
+
+    async def _notify_bridge_reload(self, username: str):
+        """Publish Redis messages so the bridge reloads this user from PG."""
+        try:
+            from app.services.api_server import _get_auth_redis
+            r = await _get_auth_redis()
+            if r:
+                await r.publish("nate:user_reload", json.dumps({"username": username}))
+        except Exception:
+            pass
     
     # -------------------------------------------------------------------------
     # CUSTOMER MANAGEMENT
@@ -225,7 +516,8 @@ class StripeService:
         name: str,
         tier: SubscriptionTier,
         success_url: str,
-        cancel_url: str
+        cancel_url: str,
+        promo_code: Optional[str] = None
     ) -> CreateCheckoutResponse:
         """Create Stripe checkout session for subscription."""
         
@@ -292,8 +584,13 @@ class StripeService:
             "subscription_data": sub_data,
         }
         if founding_eligible:
-            session_params["allow_promotion_codes"] = True
             session_params["discounts"] = [{"coupon": FOUNDING_COUPON_ID}]
+        elif promo_code:
+            stripe_coupon_id = await self._resolve_promo_coupon(promo_code)
+            if stripe_coupon_id:
+                session_params["discounts"] = [{"coupon": stripe_coupon_id}]
+            else:
+                session_params["allow_promotion_codes"] = True
 
         session = stripe.checkout.Session.create(**session_params)
         
@@ -302,6 +599,50 @@ class StripeService:
             session_id=session.id
         )
     
+    # -------------------------------------------------------------------------
+    # PROMO CODE RESOLUTION
+    # -------------------------------------------------------------------------
+
+    async def _resolve_promo_coupon(self, promo_code: str) -> Optional[str]:
+        """Look up a promo code across all discount tables and return the Stripe coupon ID."""
+        import re
+        cleaned = promo_code.strip().upper()[:40]
+        if not re.match(r'^[A-Z0-9_\-]{2,40}$', cleaned):
+            return None
+        try:
+            row = await self.db.fetchrow("""
+                SELECT stripe_coupon_id FROM promotional_specials
+                WHERE promo_code = $1 AND active = TRUE
+                  AND starts_at <= NOW() AND ends_at > NOW()
+                  AND (max_redemptions IS NULL OR current_redemptions < max_redemptions)
+            """, cleaned)
+            if row and row["stripe_coupon_id"]:
+                await self.db.execute("""
+                    UPDATE promotional_specials
+                    SET current_redemptions = current_redemptions + 1
+                    WHERE promo_code = $1
+                """, cleaned)
+                return row["stripe_coupon_id"]
+
+            row = await self.db.fetchrow("""
+                SELECT stripe_coupon_id FROM school_codes
+                WHERE school_code = $1 AND active = TRUE
+                  AND (max_students IS NULL OR current_students < max_students)
+            """, cleaned)
+            if row and row.get("stripe_coupon_id"):
+                return row["stripe_coupon_id"]
+
+            row = await self.db.fetchrow("""
+                SELECT stripe_coupon_id FROM corporate_sponsors
+                WHERE sponsor_code = $1 AND active = TRUE
+                  AND (max_employees IS NULL OR current_employees < max_employees)
+            """, cleaned)
+            if row and row.get("stripe_coupon_id"):
+                return row["stripe_coupon_id"]
+        except Exception as e:
+            _logger.warning("Promo code resolution failed for %s: %s", cleaned, e)
+        return None
+
     # -------------------------------------------------------------------------
     # FAMILY MANAGEMENT
     # -------------------------------------------------------------------------
@@ -660,6 +1001,105 @@ class StripeService:
             session_id=session.id
         )
     
+    async def purchase_token_pack(
+        self,
+        user_id: str,
+        username: str,
+        email: str,
+        name: str,
+        pack_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CreateCheckoutResponse:
+        """Create Stripe checkout for a token pack purchase."""
+        pack = TOKEN_PACKS.get(pack_id)
+        if not pack:
+            raise HTTPException(400, f"Invalid token pack: {pack_id}")
+
+        price_key = f"TOKEN_{pack_id.upper()}"
+        price_id = PRICES.get(price_key)
+
+        customer_id = await self.get_or_create_customer(user_id, email, name)
+
+        if price_id:
+            line_items = [{"price": price_id, "quantity": 1}]
+        else:
+            line_items = [{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": pack["label"]},
+                    "unit_amount": pack["price_cents"],
+                },
+                "quantity": 1,
+            }]
+
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            mode="payment",
+            payment_method_types=["card"],
+            line_items=line_items,
+            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=cancel_url,
+            metadata={
+                "type": "token_pack",
+                "user_id": user_id,
+                "username": username,
+                "pack_id": pack_id,
+                "tokens": str(pack["tokens"]),
+            },
+        )
+
+        return CreateCheckoutResponse(checkout_url=session.url, session_id=session.id)
+
+    async def charge_token_share_fee(
+        self,
+        user_id: str,
+        email: str,
+        name: str,
+        tokens_shared: int,
+        sharer_username: str,
+        receiver_username: str,
+    ) -> str:
+        """Charge the sharer for BLE/NFC token sharing ($5 per 10k tokens, rounded up)."""
+        import math
+        fee_cents = math.ceil(tokens_shared / 10000) * 500
+
+        customer_id = await self.get_or_create_customer(user_id, email, name)
+
+        customer = stripe.Customer.retrieve(customer_id)
+        default_pm = None
+        if customer.invoice_settings and customer.invoice_settings.default_payment_method:
+            default_pm = customer.invoice_settings.default_payment_method
+        if not default_pm:
+            methods = stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)
+            if methods.data:
+                default_pm = methods.data[0].id
+
+        if not default_pm:
+            raise ValueError("No payment method on file. Please add a card before sharing tokens.")
+
+        intent = stripe.PaymentIntent.create(
+            amount=fee_cents,
+            currency="usd",
+            customer=customer_id,
+            payment_method=default_pm,
+            confirm=True,
+            off_session=True,
+            description=f"Token share: {tokens_shared:,} tokens to {receiver_username}",
+            metadata={
+                "type": "token_share",
+                "sharer_username": sharer_username,
+                "receiver_username": receiver_username,
+                "tokens_shared": str(tokens_shared),
+                "fee_cents": str(fee_cents),
+            },
+        )
+
+        if intent.status not in ("succeeded", "requires_capture"):
+            raise ValueError(f"Payment failed with status: {intent.status}")
+
+        return intent.id
+
     async def book_coaching_session(
         self,
         user_id: str,
@@ -1037,6 +1477,22 @@ class StripeWebhookHandler:
                 tier, user_id
             )
 
+            # Notify bridge to reload this user's cache from PG
+            try:
+                from app.services.api_server import _get_auth_redis
+                r = await _get_auth_redis()
+                if r:
+                    uname = await self.db.fetchval(
+                        "SELECT username FROM users WHERE id = $1", user_id
+                    )
+                    if uname:
+                        await r.publish(
+                            "nate:user_reload",
+                            json.dumps({"username": uname}),
+                        )
+            except Exception:
+                pass
+
             # Founding member: atomically increment counter and mark user (first 100 paying members)
             try:
                 async with self.db.acquire() as conn:
@@ -1065,7 +1521,103 @@ class StripeWebhookHandler:
                 print(f">>> [STRIPE] Founding member update failed: {e}")
         
         elif session['mode'] == 'payment':
-            # One-time payment (coaching pack)
+            checkout_type = metadata.get('type', '')
+            if checkout_type == 'token_pack':
+                pack_id = metadata.get('pack_id', '')
+                tokens = int(metadata.get('tokens', 0))
+                username = metadata.get('username', '')
+                if tokens > 0 and username:
+                    try:
+                        async with self.db.acquire() as conn:
+                            async with conn.transaction():
+                                before = await conn.fetchval(
+                                    "SELECT COALESCE(token_balance, 0) FROM users WHERE username = $1",
+                                    username,
+                                ) or 0
+                                after = before + tokens
+                                await conn.execute("""
+                                    UPDATE users
+                                    SET token_balance = $1,
+                                        profile_data = jsonb_set(
+                                            COALESCE(profile_data, '{}'::jsonb),
+                                            '{token_balance}',
+                                            to_jsonb($1::int)
+                                        )
+                                    WHERE username = $2
+                                """, after, username)
+                                await conn.execute("""
+                                    INSERT INTO token_transactions
+                                        (username, action, amount, balance_before, balance_after,
+                                         reason, source, initiated_by, target_scope)
+                                    VALUES ($1, 'purchase', $2, $3, $4, $5, 'token_pack', 'stripe', 'individual')
+                                """, username, tokens, before, after,
+                                    f"{pack_id} pack ({tokens:,} tokens)")
+                        print(f">>> [STRIPE] Token pack purchased: {username} +{tokens:,} ({pack_id})")
+                        try:
+                            from app.services.api_server import _get_auth_redis
+                            r = await _get_auth_redis()
+                            if r:
+                                await r.publish(
+                                    "nate:balance_sync",
+                                    json.dumps({"username": username, "token_balance": after}),
+                                )
+                                await r.publish(
+                                    "nate:user_reload",
+                                    json.dumps({"username": username}),
+                                )
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f">>> [STRIPE] Token pack credit failed: {e}")
+                return
+
+            if checkout_type == 'dojo_subscription':
+                dojo_key = metadata.get('dojo_key', '')
+                coach_id = metadata.get('coach_id', '')
+                if dojo_key and coach_id:
+                    try:
+                        from datetime import datetime as _dt
+                        now_str = _dt.utcnow().isoformat()
+                        async with self.db.acquire() as conn:
+                            row = await conn.fetchrow(
+                                "SELECT profile_data FROM users WHERE hardware_id = $1",
+                                coach_id,
+                            )
+                            if row:
+                                pd = row["profile_data"]
+                                if isinstance(pd, str):
+                                    pd = json.loads(pd)
+                                pd = pd or {}
+                                dojo_subs = pd.get("dojo_subscriptions", {})
+                                dojo_subs[dojo_key] = {
+                                    "status": "active",
+                                    "started_at": now_str,
+                                    "stripe_subscription_id": session.get("subscription", ""),
+                                }
+                                pd["dojo_subscriptions"] = dojo_subs
+                                await conn.execute(
+                                    "UPDATE users SET profile_data = $1::jsonb WHERE hardware_id = $2",
+                                    json.dumps(pd), coach_id,
+                                )
+                        print(f">>> [STRIPE] DOJO activated: {dojo_key} for coach {coach_id}")
+                        try:
+                            from app.services.api_server import _get_auth_redis
+                            r = await _get_auth_redis()
+                            if r:
+                                uname = await self.db.fetchval(
+                                    "SELECT username FROM users WHERE hardware_id = $1", coach_id
+                                )
+                                if uname:
+                                    await r.publish(
+                                        "nate:user_reload",
+                                        json.dumps({"username": uname}),
+                                    )
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        print(f">>> [STRIPE] DOJO activation failed: {e}")
+                return
+
             pack_type = metadata.get('pack_type')
             if pack_type:
                 config = PACK_CONFIGS[PackType(pack_type)]
@@ -1191,8 +1743,8 @@ class StripeWebhookHandler:
         
         subscription_id = subscription['id']
         
-        # Get tier from metadata or price
         tier = subscription.get('metadata', {}).get('tier', 'STANDARD')
+        new_status = 'ACTIVE' if subscription['status'] == 'active' else subscription['status'].upper()
         
         await self.db.execute(
             """
@@ -1203,19 +1755,30 @@ class StripeWebhookHandler:
                 cancel_at_period_end = $4
             WHERE stripe_subscription_id = $5
             """,
-            tier,
-            'ACTIVE' if subscription['status'] == 'active' else subscription['status'].upper(),
+            tier, new_status,
             subscription['current_period_end'],
             subscription['cancel_at_period_end'],
             subscription_id
         )
+        
+        uname = await self.db.fetchval(
+            """SELECT u.username FROM users u
+               JOIN subscriptions s ON s.user_id = u.id
+               WHERE s.stripe_subscription_id = $1""",
+            subscription_id
+        )
+        if uname:
+            await self.db.execute(
+                "UPDATE users SET tier = $1, subscription_status = $2 WHERE username = $3",
+                tier, new_status, uname
+            )
+            await self._notify_bridge_reload(uname)
     
     async def _handle_subscription_deleted(self, subscription: Dict):
         """Handle subscription cancellation."""
         
         subscription_id = subscription['id']
         
-        # Get user
         user_id = await self.db.fetchval(
             "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = $1",
             subscription_id
@@ -1223,27 +1786,28 @@ class StripeWebhookHandler:
         
         if user_id:
             await self.db.execute(
-                """
-                UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW()
-                WHERE stripe_subscription_id = $1
-                """,
+                "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE stripe_subscription_id = $1",
                 subscription_id
             )
             
-            # Downgrade user
             await self.db.execute(
                 "UPDATE users SET tier = 'TRIAL', subscription_status = 'CANCELLED' WHERE id = $1",
                 user_id
             )
             
-            # Remove family access
             await self.db.execute(
-                """
-                UPDATE users SET tier = 'TRIAL', family_role = NULL 
-                WHERE linked_by = $1
-                """,
+                "UPDATE users SET tier = 'TRIAL', family_role = NULL WHERE linked_by = $1",
                 user_id
             )
+            
+            uname = await self.db.fetchval("SELECT username FROM users WHERE id = $1", user_id)
+            if uname:
+                await self._notify_bridge_reload(uname)
+            family_members = await self.db.fetch(
+                "SELECT username FROM users WHERE linked_by = $1", user_id
+            )
+            for fm in family_members:
+                await self._notify_bridge_reload(fm["username"])
 
 
 # =============================================================================
@@ -1258,34 +1822,35 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
     webhook_handler = StripeWebhookHandler(db_pool)
     
     @router.post("/checkout", response_model=CreateCheckoutResponse)
-    async def create_checkout(request: CreateCheckoutRequest, user_id: str = Depends(get_current_user)):
+    async def create_checkout(request: CreateCheckoutRequest, user_id: str = Depends(get_current_user_id)):
         user = await db_pool.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
         return await service.create_subscription_checkout(
             user_id, user['email'], user['name'],
-            request.tier, request.success_url, request.cancel_url
+            request.tier, request.success_url, request.cancel_url,
+            promo_code=request.promo_code
         )
     
     @router.get("/subscription", response_model=SubscriptionResponse)
-    async def get_subscription(user_id: str = Depends(get_current_user)):
+    async def get_subscription(user_id: str = Depends(get_current_user_id)):
         return await service.get_subscription_status(user_id)
     
     @router.post("/subscription/cancel")
-    async def cancel_subscription(user_id: str = Depends(get_current_user), at_period_end: bool = True):
+    async def cancel_subscription(user_id: str = Depends(get_current_user_id), at_period_end: bool = True):
         return await service.cancel_subscription(user_id, at_period_end)
     
     @router.post("/family/add")
-    async def add_family_member(request: AddFamilyMemberRequest, user_id: str = Depends(get_current_user)):
+    async def add_family_member(request: AddFamilyMemberRequest, user_id: str = Depends(get_current_user_id)):
         return await service.add_family_member(
             user_id, request.email, request.name, 
             request.relationship, request.date_of_birth
         )
     
     @router.delete("/family/{member_id}")
-    async def remove_family_member(member_id: str, user_id: str = Depends(get_current_user)):
+    async def remove_family_member(member_id: str, user_id: str = Depends(get_current_user_id)):
         return await service.remove_family_member(user_id, member_id)
     
     @router.post("/coaching/purchase", response_model=CreateCheckoutResponse)
-    async def purchase_coaching_pack(request: PurchaseCoachingPackRequest, user_id: str = Depends(get_current_user)):
+    async def purchase_coaching_pack(request: PurchaseCoachingPackRequest, user_id: str = Depends(get_current_user_id)):
         user = await db_pool.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
         return await service.purchase_coaching_pack(
             user_id, user['email'], user['name'],
@@ -1293,7 +1858,7 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
         )
     
     @router.post("/coaching/book")
-    async def book_coaching_session(request: BookCoachingSessionRequest, user_id: str = Depends(get_current_user)):
+    async def book_coaching_session(request: BookCoachingSessionRequest, user_id: str = Depends(get_current_user_id)):
         return await service.book_coaching_session(
             user_id, request.coach_id, request.scheduled_at, request.use_pack_id
         )

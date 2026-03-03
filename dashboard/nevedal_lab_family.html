@@ -4,93 +4,158 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nevedal Lab | Family Dynamics</title>
+    <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        :root {
-            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
-            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
-            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
-            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.1);
-            --orange: #FF9500; --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
-            --red-critical: #FF3B3B; --blue: #4A90D9;
-            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        *{margin:0;padding:0;box-sizing:border-box;}
+        :root{
+            --bg-dark:#0A0A0A;--bg-card:#111111;--bg-elevated:#1A1A1A;
+            --purple:#9D4EDD;--purple-dim:rgba(157,78,221,0.15);
+            --cyan:#00D4FF;--cyan-dim:rgba(0,212,255,0.1);
+            --green:#00FF88;--green-dim:rgba(0,255,136,0.1);
+            --orange:#FF9500;--gold:#C9A962;--gold-bright:#E8D5A3;--gold-dim:rgba(201,169,98,0.2);
+            --red:#FF3B3B;--blue:#4A90D9;
+            --text-primary:#FFFFFF;--text-secondary:#888888;--border:#252525;
         }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-dark); color: var(--text-primary); }
-        .header { background: linear-gradient(180deg, #0A0A1A 0%, #0A0A0A 100%); border-bottom: 1px solid var(--purple-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { display: flex; align-items: center; gap: 12px; }
-        .logo-icon { width: 48px; height: 48px; background: linear-gradient(135deg, var(--purple), var(--blue)); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-        .logo-text { display: flex; flex-direction: column; }
-        .logo-title { font-size: 18px; font-weight: 700; color: var(--purple); letter-spacing: 2px; }
-        .logo-subtitle { font-size: 11px; color: var(--text-secondary); }
-        .back-btn { padding: 10px 20px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); text-decoration: none; font-size: 12px; }
-        .sub-nav { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 24px; }
-        .sub-nav-item { padding: 14px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; }
-        .sub-nav-item.active { color: var(--purple); border-bottom-color: var(--purple); }
-        .sub-nav-item:hover { color: var(--purple); }
-        .main-content { padding: 24px; display: grid; grid-template-columns: 300px 1fr 320px; gap: 20px; min-height: calc(100vh - 140px); }
-        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-        .card.research { border-color: var(--purple-dim); }
-        .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .card-title { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; }
-        .card-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-        .icon.purple { background: var(--purple-dim); }
-        .icon.cyan { background: var(--cyan-dim); }
-        .icon.green { background: var(--green-dim); }
-        .icon.gold { background: var(--gold-dim); }
-        .icon.red { background: rgba(255,59,59,0.15); }
-        .icon.orange { background: rgba(255,149,0,0.15); }
-        .card-body { padding: 20px; }
-        .family-card { background: var(--bg-elevated); border-radius: 10px; padding: 16px; margin-bottom: 12px; cursor: pointer; border: 1px solid var(--border); }
-        .family-card.active { border-color: var(--purple); background: var(--purple-dim); }
-        .family-card:hover { border-color: var(--purple); }
-        .family-id { font-size: 11px; color: var(--purple); font-weight: 600; margin-bottom: 6px; }
-        .family-members-list { font-size: 10px; color: var(--text-secondary); }
-        .family-stat { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
-        .matrix-container { background: var(--bg-elevated); border-radius: 10px; padding: 20px; overflow-x: auto; }
-        .matrix-table { width: 100%; border-collapse: collapse; }
-        .matrix-table th { font-size: 11px; font-weight: 600; padding: 10px; text-align: center; }
-        .matrix-table td { font-size: 12px; padding: 12px; text-align: center; border: 1px solid var(--border); }
-        .matrix-score { font-weight: 700; }
-        .matrix-score.high { color: var(--green); }
-        .matrix-score.medium { color: var(--gold); }
-        .matrix-score.low { color: var(--orange); }
-        .matrix-diagonal { background: var(--bg-dark); color: var(--text-secondary); }
-        .network-visual { height: 300px; background: var(--bg-elevated); border-radius: 10px; position: relative; }
-        .network-visual canvas { width: 100%; height: 100%; }
-        .member-score { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; position: relative; }
-        .member-name { font-size: 11px; font-weight: 600; }
-        .member-c-emo { font-size: 14px; font-weight: 700; color: var(--purple); }
-        .wellness-display { text-align: center; padding: 32px; background: linear-gradient(135deg, var(--purple-dim), var(--bg-elevated)); border-radius: 12px; margin-bottom: 20px; }
-        .wellness-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; }
-        .wellness-value { font-size: 52px; font-weight: 700; color: var(--purple); margin: 8px 0; }
-        .wellness-grade { font-size: 14px; font-weight: 600; }
-        .bond-item { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; }
-        .bond-label { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
-        .bond-pair { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
-        .bond-score { font-size: 14px; font-weight: 700; }
-        .bond-item.strongest { border-left: 3px solid var(--green); }
-        .bond-item.weakest { border-left: 3px solid var(--orange); }
-        .cee-collective { padding: 12px; background: var(--bg-elevated); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
-        .cee-time { font-size: 10px; color: var(--text-secondary); }
-        .cee-sync { font-size: 11px; font-weight: 600; margin-top: 4px; }
-        .empty-state { text-align: center; padding: 20px; color: var(--text-secondary); font-size: 11px; }
-        .metric-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
-        .metric-row:last-child { border-bottom: none; }
-        .metric-label { font-size: 10px; color: var(--text-secondary); }
-        .metric-value { font-size: 12px; font-weight: 600; }
-        .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; }
-        .badge-escalation { background: rgba(255,59,59,0.15); color: var(--red-critical); padding: 2px 6px; border-radius: 3px; font-size: 8px; font-weight: 700; margin-left: 8px; }
-        .badge-ventriloquism { background: rgba(255,149,0,0.15); color: var(--orange); padding: 2px 6px; border-radius: 3px; font-size: 8px; font-weight: 700; margin-left: 8px; }
-        .stage-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
-        .eft-stage { background: var(--purple-dim); color: var(--purple); }
-        .schema-card { background: var(--bg-elevated); border-radius: 8px; padding: 10px; margin-bottom: 8px; border-left: 3px solid var(--cyan); }
-        .schema-name { font-size: 11px; font-weight: 600; }
-        .schema-meta { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
-        .alert-item { padding: 10px; background: rgba(255,59,59,0.08); border-radius: 8px; margin-bottom: 8px; border-left: 3px solid var(--red-critical); }
-        .alert-item.ventriloquism { border-left-color: var(--orange); background: rgba(255,149,0,0.08); }
-        .alert-text { font-size: 10px; }
-        .alert-time { font-size: 9px; color: var(--text-secondary); margin-top: 4px; }
+        body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg-dark);color:var(--text-primary);}
+        .header{background:linear-gradient(180deg,#0A0A1A 0%,#0A0A0A 100%);border-bottom:1px solid var(--purple-dim);padding:16px 24px;display:flex;justify-content:space-between;align-items:center;}
+        .logo{display:flex;align-items:center;gap:12px;}
+        .logo-icon{width:48px;height:48px;background:linear-gradient(135deg,var(--purple),var(--blue));border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;}
+        .logo-text{display:flex;flex-direction:column;}
+        .logo-title{font-size:18px;font-weight:700;color:var(--purple);letter-spacing:2px;}
+        .logo-subtitle{font-size:11px;color:var(--text-secondary);}
+        .back-btn{padding:10px 20px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);text-decoration:none;font-size:12px;}
+        .sub-nav{background:var(--bg-card);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:24px;}
+        .sub-nav-item{padding:14px 0;font-size:12px;color:var(--text-secondary);border-bottom:2px solid transparent;cursor:pointer;display:flex;align-items:center;gap:8px;text-decoration:none;}
+        .sub-nav-item.active{color:var(--purple);border-bottom-color:var(--purple);}
+        .sub-nav-item:hover{color:var(--purple);}
+
+        .main-grid{padding:16px;display:grid;grid-template-columns:210px 1fr 270px;gap:14px;min-height:calc(100vh - 130px);}
+        .left-panel{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 140px);overflow-y:auto;}
+        .center-panel{display:flex;flex-direction:column;gap:14px;}
+        .right-panel{display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 140px);overflow-y:auto;}
+
+        .card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+        .card.research{border-color:var(--purple-dim);}
+        .card-header{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+        .card-title{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;}
+        .card-title .icon{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:12px;}
+        .icon.purple{background:var(--purple-dim);}
+        .icon.cyan{background:var(--cyan-dim);}
+        .icon.green{background:var(--green-dim);}
+        .icon.gold{background:var(--gold-dim);}
+        .icon.red{background:rgba(255,59,59,0.15);}
+        .card-body{padding:12px;}
+
+        .type-tabs{display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid var(--border);margin-bottom:10px;}
+        .type-tab{flex:1;padding:6px 4px;text-align:center;font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;cursor:pointer;background:var(--bg-elevated);color:var(--text-secondary);transition:all 0.2s;border-right:1px solid var(--border);}
+        .type-tab:last-child{border-right:none;}
+        .type-tab.active{background:var(--purple-dim);color:var(--purple);}
+        .type-tab:hover{color:var(--purple);}
+
+        .group-card{background:var(--bg-elevated);border-radius:6px;padding:10px;margin-bottom:6px;cursor:pointer;border:1px solid var(--border);transition:border-color 0.2s;}
+        .group-card.active{border-color:var(--purple);background:var(--purple-dim);}
+        .group-card:hover{border-color:var(--purple);}
+        .group-type-badge{display:inline-block;font-size:7px;font-weight:700;padding:2px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:0.3px;}
+        .badge-family{background:var(--purple-dim);color:var(--purple);}
+        .badge-coach{background:var(--cyan-dim);color:var(--cyan);}
+        .badge-company{background:var(--gold-dim);color:var(--gold);}
+        .group-name{font-size:10px;font-weight:600;margin-top:3px;}
+        .group-members-preview{font-size:9px;color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .group-count{font-size:8px;color:var(--text-secondary);margin-top:1px;}
+
+        .member-check{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-elevated);border-radius:6px;margin-bottom:4px;cursor:pointer;border:1px solid transparent;transition:all 0.15s;}
+        .member-check:hover{border-color:var(--purple-dim);}
+        .member-check.checked{border-color:var(--purple);background:rgba(157,78,221,0.08);}
+        .member-check.nate-check.checked{border-color:var(--gold);background:rgba(201,169,98,0.08);}
+        .mc-box{width:14px;height:14px;border-radius:3px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;transition:all 0.15s;}
+        .member-check.checked .mc-box{border-color:var(--purple);background:var(--purple);color:#fff;}
+        .member-check.nate-check.checked .mc-box{border-color:var(--gold);background:var(--gold);color:#000;}
+        .mc-name{font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .mc-role{font-size:7px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.3px;}
+        .sel-actions{display:flex;gap:6px;margin-bottom:8px;}
+        .sel-btn{flex:1;padding:5px;font-size:8px;font-weight:600;text-align:center;border-radius:4px;cursor:pointer;border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-secondary);transition:all 0.15s;}
+        .sel-btn:hover{border-color:var(--purple);color:var(--purple);}
+
+        .info-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+        .wellness-card{text-align:center;padding:16px 10px;background:linear-gradient(135deg,var(--purple-dim),var(--bg-elevated));border-radius:10px;}
+        .wellness-card.nate{background:linear-gradient(135deg,var(--gold-dim),var(--bg-elevated));}
+        .wellness-label{font-size:8px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;}
+        .wellness-value{font-size:32px;font-weight:700;margin:4px 0;}
+        .wellness-value.purple{color:var(--purple);}
+        .wellness-value.gold{color:var(--gold);}
+        .wellness-grade{font-size:10px;font-weight:600;}
+        .delta-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;margin-top:4px;}
+        .delta-positive{background:var(--green-dim);color:var(--green);}
+        .delta-negative{background:rgba(255,59,59,0.15);color:var(--red);}
+        .delta-neutral{background:rgba(136,136,136,0.15);color:var(--text-secondary);}
+
+        .graphs-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+        .graph-label{font-size:9px;color:var(--text-secondary);text-align:center;padding:4px 0;text-transform:uppercase;letter-spacing:1px;}
+        .network-canvas-wrap{height:220px;background:var(--bg-elevated);border-radius:8px;position:relative;overflow:hidden;}
+        .network-canvas-wrap canvas{width:100%;height:100%;}
+
+        .graph-3d-wrap{height:360px;background:var(--bg-elevated);border-radius:8px;position:relative;overflow:hidden;}
+        .graph-3d-controls{position:absolute;top:8px;right:8px;z-index:10;display:flex;flex-direction:column;gap:4px;}
+        .g3d-btn{padding:4px 8px;font-size:8px;background:rgba(10,10,10,0.85);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);cursor:pointer;}
+        .g3d-btn.active{border-color:var(--gold);color:var(--gold);}
+
+        .matrix-container{background:var(--bg-elevated);border-radius:8px;padding:12px;overflow-x:auto;}
+        .matrix-table{width:100%;border-collapse:collapse;}
+        .matrix-table th{font-size:9px;font-weight:600;padding:6px;text-align:center;}
+        .matrix-table th.nate-col{color:var(--gold);}
+        .matrix-table td{font-size:10px;padding:8px;text-align:center;border:1px solid var(--border);}
+        .matrix-score{font-weight:700;}
+        .matrix-score.high{color:var(--green);}
+        .matrix-score.medium{color:var(--gold);}
+        .matrix-score.low{color:var(--orange);}
+        .matrix-diagonal{background:var(--bg-dark);color:var(--text-secondary);}
+        .nate-row td,.nate-col-cell{background:rgba(201,169,98,0.05);}
+        .toggle-row{display:flex;justify-content:flex-end;align-items:center;gap:6px;}
+        .toggle-label{font-size:9px;color:var(--text-secondary);}
+        .toggle-switch{position:relative;width:30px;height:16px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;cursor:pointer;transition:background 0.2s;}
+        .toggle-switch.on{background:var(--gold-dim);border-color:var(--gold);}
+        .toggle-switch::after{content:'';position:absolute;width:10px;height:10px;border-radius:50%;background:var(--text-secondary);top:2px;left:2px;transition:transform 0.2s;}
+        .toggle-switch.on::after{transform:translateX(14px);background:var(--gold);}
+
+        .member-bar{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-elevated);border-radius:5px;margin-bottom:4px;}
+        .member-bar-name{font-size:9px;flex:0 0 60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        .member-bar-track{flex:1;height:5px;background:var(--bg-dark);border-radius:3px;overflow:hidden;}
+        .member-bar-fill{height:100%;border-radius:3px;transition:width 0.4s;}
+        .member-bar-val{font-size:10px;font-weight:700;flex:0 0 32px;text-align:right;}
+        .member-bar-detail{font-size:7px;color:var(--text-secondary);flex:0 0 60px;text-align:right;}
+
+        .decoherence-item{padding:8px;background:rgba(255,59,59,0.06);border-radius:6px;margin-bottom:4px;border-left:3px solid var(--red);display:flex;justify-content:space-between;align-items:center;}
+        .decoherence-item.watch{border-left-color:var(--orange);background:rgba(255,149,0,0.06);}
+        .decoherence-item.stable{border-left-color:var(--green);background:rgba(0,255,136,0.04);}
+        .deco-pair{font-size:10px;font-weight:600;}
+        .deco-risk{font-size:11px;font-weight:700;}
+        .deco-trend{font-size:8px;color:var(--text-secondary);text-transform:uppercase;}
+
+        .empty-state{text-align:center;padding:16px;color:var(--text-secondary);font-size:10px;}
+        .selected-count{font-size:9px;color:var(--text-secondary);margin-bottom:6px;}
+
+        /* Longitudinal Weather */
+        .weather-chart-wrap{height:200px;background:var(--bg-elevated);border-radius:8px;padding:8px;position:relative;}
+        .weather-chart-wrap canvas{width:100%!important;height:100%!important;}
+        .weather-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
+        .weather-stat{text-align:center;padding:10px 6px;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border);}
+        .weather-stat-label{font-size:7px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-secondary);}
+        .weather-stat-value{font-size:22px;font-weight:700;margin-top:2px;}
+        .weather-stat-value.purple{color:var(--purple);}
+        .weather-stat-value.cyan{color:var(--cyan);}
+        .weather-stat-value.green{color:var(--green);}
+        .weather-stat-value.gold{color:var(--gold);}
+        .weather-stat-sub{font-size:8px;color:var(--text-secondary);margin-top:2px;}
+        .session-table{width:100%;border-collapse:collapse;font-size:9px;}
+        .session-table th{font-weight:600;padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;font-size:7px;}
+        .session-table td{padding:6px 8px;border-bottom:1px solid rgba(37,37,37,0.5);}
+        .session-table tr:hover td{background:rgba(157,78,221,0.05);}
+        .trend-badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:7px;font-weight:700;text-transform:uppercase;}
+        .trend-improving{background:var(--green-dim);color:var(--green);}
+        .trend-declining{background:rgba(255,59,59,0.15);color:var(--red);}
+        .trend-stable{background:rgba(136,136,136,0.15);color:var(--text-secondary);}
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="header">
@@ -101,7 +166,7 @@
                 <div class="logo-subtitle">Quantum Emotional Coherence Research</div>
             </div>
         </div>
-        <a href="nevedal_lab_old.html" class="back-btn">+ Back to Lab</a>
+        <a href="nevedal_lab_old.html" class="back-btn">← Back to Lab</a>
     </div>
     <nav class="sub-nav">
         <a href="nevedal_lab_live.html" class="sub-nav-item"><span>📐</span> Live Analysis</a>
@@ -111,438 +176,965 @@
         <a href="nevedal_lab_cohort.html" class="sub-nav-item"><span>🧬</span> Cohort Analysis</a>
     </nav>
 
-    <main class="main-content">
-        <!-- LEFT PANEL -->
-        <aside>
+    <main class="main-grid">
+        <!-- LEFT: Group Selection -->
+        <div class="left-panel">
             <div class="card research">
-                <div class="card-header"><div class="card-title"><div class="icon purple">👨‍👩‍👧</div> Family Selection</div></div>
-                <div class="card-body" id="family-list">
-                    <div class="empty-state">Loading families...</div>
-                </div>
-            </div>
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon cyan">📅</div> Session Info</div></div>
-                <div class="card-body" id="session-info-body">
-                    <div class="empty-state">Select a family</div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- CENTER PANEL -->
-        <section>
-            <div class="card research">
-                <div class="card-header"><div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div></div>
+                <div class="card-header"><div class="card-title"><div class="icon purple">👥</div> Groups</div></div>
                 <div class="card-body">
-                    <div class="matrix-container"><div id="coherence-matrix" class="empty-state">Waiting for family metrics...</div></div>
+                    <div class="type-tabs" id="type-tabs">
+                        <div class="type-tab active" data-filter="all" onclick="filterGroups('all')">All</div>
+                        <div class="type-tab" data-filter="family" onclick="filterGroups('family')">Family</div>
+                        <div class="type-tab" data-filter="coach_team" onclick="filterGroups('coach_team')">Coach</div>
+                        <div class="type-tab" data-filter="company" onclick="filterGroups('company')">Corp</div>
+                    </div>
+                    <div id="group-list"><div class="empty-state">Loading...</div></div>
                 </div>
             </div>
-            <div class="card research" style="margin-top:20px;">
+        </div>
+
+        <!-- CENTER: Visualizations -->
+        <div class="center-panel">
+            <div class="info-row">
+                <div class="wellness-card"><div class="wellness-label">With Little Nate</div><div class="wellness-value purple" id="wi-with">--</div><div class="wellness-grade" id="wg-with">AWAITING</div></div>
+                <div class="wellness-card"><div class="wellness-label">Without Little Nate</div><div class="wellness-value purple" id="wi-without">--</div><div class="wellness-grade" id="wg-without">AWAITING</div></div>
+                <div class="wellness-card nate"><div class="wellness-label">Nate's Contribution</div><div class="wellness-value gold" id="wi-delta">--</div><div id="delta-badge"></div></div>
+            </div>
+            <div class="card research">
                 <div class="card-header"><div class="card-title"><div class="icon cyan">🕸️</div> Coherence Network</div></div>
-                <div class="card-body">
-                    <div class="network-visual"><canvas id="network-canvas"></canvas></div>
-                </div>
-            </div>
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon green">👤</div> Individual C<sub>emo</sub> Scores</div></div>
-                <div class="card-body" id="member-scores"><div class="empty-state">Waiting for member scores...</div></div>
-            </div>
-        </section>
-
-        <!-- RIGHT PANEL -->
-        <aside>
-            <div class="card research">
-                <div class="card-header"><div class="card-title"><div class="icon purple">💚</div> Family Index</div></div>
-                <div class="card-body">
-                    <div class="wellness-display">
-                        <div class="wellness-label">Family Wellness Index</div>
-                        <div class="wellness-value" id="family-index">--</div>
-                        <div class="wellness-grade" id="family-grade">AWAITING</div>
+                <div class="card-body" style="padding:10px;">
+                    <div class="graphs-row">
+                        <div><div class="graph-label">With Little Nate</div><div class="network-canvas-wrap"><canvas id="canvas-with-nate"></canvas></div></div>
+                        <div><div class="graph-label">Without Little Nate</div><div class="network-canvas-wrap"><canvas id="canvas-without-nate"></canvas></div></div>
                     </div>
                 </div>
             </div>
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon green">🔗</div> Bond Analysis</div></div>
-                <div class="card-body">
-                    <div class="bond-item strongest"><div class="bond-label">STRONGEST BOND</div><div class="bond-pair" id="strongest-pair">--</div><div class="bond-score" id="strongest-score" style="color:var(--green);">--</div></div>
-                    <div class="bond-item weakest"><div class="bond-label">DEVELOPING BOND</div><div class="bond-pair" id="weakest-pair">--</div><div class="bond-score" id="weakest-score" style="color:var(--orange);">--</div></div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🌐</div> 3D Coherence Explorer</div></div>
+                <div class="card-body" style="padding:10px;">
+                    <div class="graph-3d-wrap" id="three-container">
+                        <div class="graph-3d-controls">
+                            <button class="g3d-btn active" id="btn-force" onclick="setLayout('force')">Force</button>
+                            <button class="g3d-btn" id="btn-helix" onclick="setLayout('helix')">DNA Helix</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon gold">⭐</div> Collective CEEs</div></div>
-                <div class="card-body" id="collective-cees-body"><div class="empty-state">Awaiting data...</div></div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">🔢</div> Coherence Matrix</div>
+                    <div class="toggle-row"><span class="toggle-label">Show Nate</span><div class="toggle-switch on" id="nate-matrix-toggle" onclick="toggleNateMatrix()"></div></div>
+                </div>
+                <div class="card-body"><div class="matrix-container"><div id="coherence-matrix" class="empty-state">Select members...</div></div></div>
             </div>
-            <!-- Patent 3: EFT Tracker -->
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon cyan">🔄</div> EFT Cycle Tracker</div></div>
-                <div class="card-body" id="eft-tracker-body"><div class="empty-state">No EFT data</div></div>
-            </div>
-            <!-- Patent 3: Reconsolidation Tracker -->
-            <div class="card research" style="margin-top:20px;">
-                <div class="card-header"><div class="card-title"><div class="icon purple">🧠</div> Reconsolidation</div></div>
-                <div class="card-body" id="recon-tracker-body"><div class="empty-state">No reconsolidation data</div></div>
-            </div>
-            <!-- Patent 3: Escalation + Ventriloquism Alerts -->
-            <div class="card research" style="margin-top:20px;">
+
+            <!-- Longitudinal Sanctuary Weather -->
+            <div class="card research" id="weather-section" style="display:none;">
                 <div class="card-header">
-                    <div class="card-title"><div class="icon red">⚠️</div> Alerts</div>
-                    <span id="alert-count" style="font-size:10px;color:var(--red-critical);">0</span>
+                    <div class="card-title"><div class="icon cyan">🌊</div> Sanctuary Emotional Weather — Longitudinal</div>
+                    <span id="weather-trend-badge"></span>
                 </div>
-                <div class="card-body" id="alerts-body"><div class="empty-state">No alerts</div></div>
+                <div class="card-body">
+                    <div class="weather-stats-row">
+                        <div class="weather-stat">
+                            <div class="weather-stat-label">Avg System Coherence</div>
+                            <div class="weather-stat-value purple" id="ws-avg-coh">--</div>
+                            <div class="weather-stat-sub" id="ws-avg-coh-sub"></div>
+                        </div>
+                        <div class="weather-stat">
+                            <div class="weather-stat-label">Sessions</div>
+                            <div class="weather-stat-value cyan" id="ws-sessions">--</div>
+                            <div class="weather-stat-sub" id="ws-sessions-sub"></div>
+                        </div>
+                        <div class="weather-stat">
+                            <div class="weather-stat-label">CEE Windows</div>
+                            <div class="weather-stat-value green" id="ws-cee">--</div>
+                            <div class="weather-stat-sub" id="ws-cee-sub"></div>
+                        </div>
+                        <div class="weather-stat">
+                            <div class="weather-stat-label">Avg Volatility</div>
+                            <div class="weather-stat-value gold" id="ws-vol">--</div>
+                            <div class="weather-stat-sub" id="ws-vol-sub"></div>
+                        </div>
+                    </div>
+                    <div class="graphs-row">
+                        <div>
+                            <div class="graph-label">System Coherence Over Time</div>
+                            <div class="weather-chart-wrap"><canvas id="chart-coherence"></canvas></div>
+                        </div>
+                        <div>
+                            <div class="graph-label">System Volatility Over Time</div>
+                            <div class="weather-chart-wrap"><canvas id="chart-volatility"></canvas></div>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </aside>
+
+            <!-- Session History Table -->
+            <div class="card research" id="session-history-section" style="display:none;">
+                <div class="card-header"><div class="card-title"><div class="icon green">📊</div> Sanctuary Session History</div></div>
+                <div class="card-body">
+                    <div style="overflow-x:auto;" id="session-history-body">
+                        <div class="empty-state">Loading session history...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Member Selection + Metrics -->
+        <div class="right-panel">
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon purple">✓</div> Members</div><div class="selected-count" id="sel-count">0 selected</div></div>
+                <div class="card-body">
+                    <div class="sel-actions">
+                        <div class="sel-btn" onclick="selectAll()">Select All</div>
+                        <div class="sel-btn" onclick="deselectAll()">Deselect All</div>
+                    </div>
+                    <div id="member-list"><div class="empty-state">Select a group</div></div>
+                </div>
+            </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon gold">🤝</div> Nate Bonds</div></div>
+                <div class="card-body" id="nate-bonds-body"><div class="empty-state">Select members</div></div>
+            </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon red">⚠️</div> Decoherence</div><span id="deco-count" style="font-size:9px;color:var(--red);">0</span></div>
+                <div class="card-body" id="deco-alerts-body"><div class="empty-state">No alerts</div></div>
+            </div>
+            <div class="card research">
+                <div class="card-header"><div class="card-title"><div class="icon green">📊</div> Engagement</div></div>
+                <div class="card-body" id="engagement-body"><div class="empty-state">Select members</div></div>
+            </div>
+        </div>
     </main>
 
-    <script>
-
-function _recoverAuth() {
-  function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
-  var hp = new URLSearchParams(location.hash.slice(1));
-  var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
-  if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
-  if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
-  if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
-  if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
-  if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
-  if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
-  if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+<script>
+/* ======================== AUTH ======================== */
+function _recoverAuth(){
+    function _ck(n){var m=document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)'));return m?decodeURIComponent(m[2]):'';}
+    var hp=new URLSearchParams(location.hash.slice(1));
+    var ht=hp.get('t'),hu=hp.get('u'),hpf=hp.get('p');
+    if(ht){try{sessionStorage.setItem('token',decodeURIComponent(ht));}catch(e){}try{localStorage.setItem('sc_token',decodeURIComponent(ht));}catch(e){}}
+    if(hu){try{sessionStorage.setItem('username',decodeURIComponent(hu));}catch(e){}try{localStorage.setItem('sc_username',decodeURIComponent(hu));}catch(e){}}
+    if(hpf){try{sessionStorage.setItem('profile',decodeURIComponent(hpf));}catch(e){}try{localStorage.setItem('sc_profile',decodeURIComponent(hpf));}catch(e){}}
+    if(location.hash)try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+    if(!sessionStorage.getItem('token')){var ct=_ck('sc_token')||localStorage.getItem('sc_token');if(ct){try{sessionStorage.setItem('token',ct);}catch(e){}}}
+    if(!sessionStorage.getItem('username')){var cu=_ck('sc_username')||localStorage.getItem('sc_username');if(cu){try{sessionStorage.setItem('username',cu);}catch(e){}}}
+    if(!sessionStorage.getItem('profile')){var cp=_ck('sc_profile')||localStorage.getItem('sc_profile');if(cp){try{sessionStorage.setItem('profile',cp);}catch(e){}}}
 }
 _recoverAuth();
-        const username = (sessionStorage.getItem("username") || localStorage.getItem("sc_username"));
-        const token = (sessionStorage.getItem("token") || localStorage.getItem("sc_token"));
-        const profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
-        if (!username) window.location.href = "index.html";
+var username=sessionStorage.getItem("username")||localStorage.getItem("sc_username");
+var token=sessionStorage.getItem("token")||localStorage.getItem("sc_token");
+var profile=JSON.parse((sessionStorage.getItem("profile")||localStorage.getItem("sc_profile"))||"{}");
+if(!username)window.location.href="index.html";
 
-        let ws = null, authenticated = false;
-        let currentFamily = profile.family_id || "";
-        let refreshTimer = null;
+/* ======================== STATE ======================== */
+var ws=null,authenticated=false,refreshTimer=null;
+var allGroups=[];
+var currentGroupId="",currentGroupType="family";
+var currentFilter="all";
+var lastData=null;
+var allMembers=[];
+var selectedMembers={};
+var includeNate=true;
+var showNateInMatrix=true;
+var layoutMode="force";
+var _selectionChanged=false;
+var lastRemovalData=null;
+var removalMode=false;
 
-        function escapeHtml(s) { return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c]); }
-        function formatPair(pair) { return Array.isArray(pair) && pair.length >= 2 ? pair[0] + " &#x27F7; " + pair[1] : "--"; }
+function esc(s){return String(s||"").replace(/[&<>"']/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"})[c];});}
 
-        function getWsUrl() {
-            var h = location.hostname;
-            if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
-            if (h.includes("sovereignsanctuary")) return "wss://" + h + "/ws";
-            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+/* ======================== WEBSOCKET ======================== */
+function getWsUrl(){
+    var h=location.hostname;
+    if(!h||h==="localhost"||h==="127.0.0.1"||location.protocol==="file:")return "wss://api.sovereignsanctuary.net/ws";
+    if(h.includes("sovereignsanctuary"))return "wss://"+h+"/ws";
+    return(location.protocol==="https:"?"wss":"ws")+"://"+h+":8765";
+}
+function connectWebSocket(){
+    ws=new WebSocket(getWsUrl());
+    ws.onopen=function(){ws.send(JSON.stringify({type:"auth",token:token,hardware_id:profile.hardware_id||"WEB_ADMIN"}));};
+    ws.onmessage=function(event){
+        var data;try{data=JSON.parse(event.data);}catch(e){return;}
+        if(data.type==="login_success"||data.type==="auth_success"){
+            authenticated=true;
+            ws.send(JSON.stringify({type:"admin_get_all_groups"}));
+            ws.send(JSON.stringify({type:"admin_get_families"}));
+            if(currentGroupId)requestGroupCoherence();
+            if(refreshTimer)clearInterval(refreshTimer);
+            refreshTimer=setInterval(function(){if(currentGroupId&&getSelectedIds().length>0)requestGroupCoherence();},30000);
         }
-
-        function connectWebSocket() {
-            ws = new WebSocket(getWsUrl());
-            ws.onopen = function() {
-                ws.send(JSON.stringify({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" }));
-            };
-            ws.onmessage = function(event) {
-                var data;
-                try { data = JSON.parse(event.data); } catch(e) { console.error("[Family] Bad JSON:", e); return; }
-                console.log("[Family] WS msg:", data.type, data.error || "");
-                if (data.type === "login_success" || data.type === "auth_success") {
-                    authenticated = true;
-                    console.log("[Family] Authenticated. Requesting families...");
-                    // Request families list
-                    ws.send(JSON.stringify({ type: "admin_get_families" }));
-                    // Also try admin_get_users as fallback
-                    ws.send(JSON.stringify({ type: "admin_get_users" }));
-                    if (currentFamily) requestFamilyMetrics();
-                    if (refreshTimer) clearInterval(refreshTimer);
-                    refreshTimer = setInterval(function() { if (currentFamily) requestFamilyMetrics(); }, 4000);
-                }
-                if (data.type === "families_list" || data.type === "admin_families_list") {
-                    console.log("[Family] Got families:", (data.families || []).length);
-                    buildFamilyList(data.families || []);
-                }
-                if ((data.type === "admin_users" || data.type === "admin_users_list") && data.users && !currentFamily) buildFamilyListFromUsers(data.users);
-                if (data.type === "family_metrics") {
-                    console.log("[Family] Got family_metrics for:", data.family_id, "members:", (data.members || []).length, "error:", data.error || "none");
-                    displayFamilyMetrics(data);
-                }
-                if (data.type === "error") { console.warn("[Family] Server error:", data.message); }
-            };
-            ws.onclose = function() { authenticated = false; if (refreshTimer) clearInterval(refreshTimer); setTimeout(connectWebSocket, 1200); };
-        }
-
-        function buildFamilyList(families) {
-            var el = document.getElementById("family-list");
-            if (!families.length) { el.innerHTML = '<div class="empty-state">No families registered</div>'; return; }
-            el.innerHTML = families.map(function(f) {
-                var members = (f.members || []).map(function(m) { return escapeHtml(m.name || m.id || "?"); }).join(", ");
-                return '<div class="family-card" data-fid="' + escapeHtml(f.family_id || f.id) + '">' +
-                    '<div class="family-id">' + escapeHtml(f.family_id || f.id) + '</div>' +
-                    '<div class="family-members-list">' + (members || "Members pending") + '</div>' +
-                    '<div class="family-stat">' + (f.session_count || 0) + ' sessions &bull; Index: ' + (f.wellness_index ? f.wellness_index.toFixed(2) : "--") + '</div></div>';
-            }).join('');
-            wireFamily();
-            if (families.length > 0 && !currentFamily) {
-                currentFamily = families[0].family_id || families[0].id;
-                el.querySelector(".family-card").classList.add("active");
-                requestFamilyMetrics();
+        if(data.type==="all_groups_list"){allGroups=data.groups||[];renderGroupList();}
+        if(data.type==="families_list"||data.type==="admin_families_list"){
+            if(allGroups.length===0){
+                allGroups=(data.families||[]).map(function(f){
+                    return{group_type:"family",group_id:f.family_id||f.id,group_name:"Family "+(f.family_id||f.id).substring(0,12),member_count:(f.members||[]).length,members:f.members||[]};
+                });
+                renderGroupList();
             }
         }
+        if(data.type==="group_coherence_metrics"){
+            var isFirstLoad=!lastData;
+            lastData=data;allMembers=data.members||[];
+            if(isFirstLoad)buildMemberCheckboxes();
+            renderAll(data);
+        }
+        if(data.type==="member_removal_scenario"){
+            lastRemovalData=data;removalMode=true;
+            renderRemovalScenario(data);
+        }
+        if(data.type==="family_metrics"&&!lastData){convertFamilyMetrics(data);}
+    };
+    ws.onclose=function(){authenticated=false;if(refreshTimer)clearInterval(refreshTimer);setTimeout(connectWebSocket,1500);};
+}
 
-        function buildFamilyListFromUsers(users) {
-            // Group by family_id
-            var fams = {};
-            users.forEach(function(u) {
-                var fid = u.family_id;
-                if (!fid) return;
-                if (!fams[fid]) fams[fid] = { family_id: fid, members: [], session_count: 0 };
-                fams[fid].members.push({ name: u.name || u.username, id: u.user_id || u.hardware_id });
+function convertFamilyMetrics(data){
+    var members=data.members||[];
+    var fakeData={type:"group_coherence_metrics",group_id:data.family_id,group_type:"family",members:members,
+        nate_node:{nate_coherence_per_member:{},nate_wellness_contribution:0,engagement_breakdown:{}},
+        with_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:{},network_bonds:[]},
+        without_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:data.coherence_matrix||{},network_bonds:[]},
+        decoherence_signals:{}};
+    members.forEach(function(m){fakeData.nate_node.nate_coherence_per_member[m.id]=0.5;});
+    lastData=fakeData;allMembers=members;buildMemberCheckboxes();renderAll(fakeData);
+}
+
+/* ======================== SELECTION HELPERS ======================== */
+function getSelectedIds(){
+    var ids=[];
+    Object.keys(selectedMembers).forEach(function(k){if(selectedMembers[k])ids.push(k);});
+    return ids;
+}
+function getSelectedData(){
+    if(!lastData)return[];
+    var sel=getSelectedIds();
+    if(sel.length===0)return[];
+    return(lastData.members||[]).filter(function(m){return sel.indexOf(m.id)>=0;});
+}
+
+function requestGroupCoherence(){
+    if(!ws||ws.readyState!==1||!authenticated||!currentGroupId)return;
+    var sel=getSelectedIds();
+    ws.send(JSON.stringify({type:"admin_get_group_coherence",group_id:currentGroupId,group_type:currentGroupType,selected_members:sel.length>0?sel:null}));
+    ws.send(JSON.stringify({type:"admin_get_family_metrics",family_id:currentGroupId}));
+}
+
+/* ======================== GROUP TYPE FILTER ======================== */
+function filterGroups(filter){
+    currentFilter=filter;
+    document.querySelectorAll(".type-tab").forEach(function(t){t.classList.toggle("active",t.dataset.filter===filter);});
+    renderGroupList();
+}
+
+/* ======================== GROUP LIST ======================== */
+function renderGroupList(){
+    var el=document.getElementById("group-list");
+    var filtered=currentFilter==="all"?allGroups:allGroups.filter(function(g){return g.group_type===currentFilter;});
+    if(!filtered.length){el.innerHTML='<div class="empty-state">No groups found</div>';return;}
+    filtered.sort(function(a,b){var o={family:0,coach_team:1,company:2};return(o[a.group_type]||9)-(o[b.group_type]||9);});
+    el.innerHTML=filtered.map(function(g){
+        var badgeCls=g.group_type==="family"?"badge-family":g.group_type==="coach_team"?"badge-coach":"badge-company";
+        var label=g.group_type==="family"?"FAMILY":g.group_type==="coach_team"?"COACH TEAM":"COMPANY";
+        var names=(g.members||[]).slice(0,4).map(function(m){return esc((m.name||"?").split(" ")[0]);}).join(", ");
+        if((g.members||[]).length>4)names+=" +"+((g.members||[]).length-4);
+        var isActive=currentGroupId===g.group_id;
+        return '<div class="group-card'+(isActive?' active':'')+'" data-gid="'+esc(g.group_id)+'" data-gtype="'+esc(g.group_type)+'">'+
+            '<span class="group-type-badge '+badgeCls+'">'+label+'</span>'+
+            '<div class="group-name">'+esc(g.group_name||g.group_id)+'</div>'+
+            '<div class="group-members-preview">'+names+'</div>'+
+            '<div class="group-count">'+(g.members||[]).length+' members</div></div>';
+    }).join('');
+    wireGroups();
+}
+
+function wireGroups(){
+    document.querySelectorAll(".group-card").forEach(function(card){
+        card.addEventListener("click",function(){
+            document.querySelectorAll(".group-card").forEach(function(c){c.classList.remove("active");});
+            this.classList.add("active");
+            currentGroupId=this.dataset.gid;currentGroupType=this.dataset.gtype;
+            lastData=null;selectedMembers={};includeNate=true;allMembers=[];_selectionChanged=true;
+            removalMode=false;lastRemovalData=null;hideNateAssessmentPanel();
+            document.getElementById("member-list").innerHTML='<div class="empty-state">Loading...</div>';
+            requestGroupCoherence();
+            if(currentGroupType==="family")loadWeatherData(currentGroupId);
+            else{document.getElementById("weather-section").style.display="none";document.getElementById("session-history-section").style.display="none";}
+        });
+    });
+}
+
+/* ======================== MEMBER CHECKBOXES (RIGHT SIDEBAR) ======================== */
+function buildMemberCheckboxes(){
+    var el=document.getElementById("member-list");
+    if(allMembers.length===0){el.innerHTML='<div class="empty-state">No members</div>';return;}
+    var isFirstLoad=Object.keys(selectedMembers).length===0;
+    if(isFirstLoad){allMembers.forEach(function(m){selectedMembers[m.id]=true;});}
+    var html='<div class="member-check nate-check'+(includeNate?" checked":"")+'" data-mid="__nate__" onclick="toggleMember(this)">'+
+        '<div class="mc-box">'+(includeNate?"✓":"")+'</div><div class="mc-name" style="color:var(--gold);">Little Nate</div><div class="mc-role">AI</div></div>';
+    allMembers.forEach(function(m){
+        var on=selectedMembers[m.id]!==false;
+        html+='<div class="member-check'+(on?" checked":"")+'" data-mid="'+esc(m.id)+'" onclick="toggleMember(this)">'+
+            '<div class="mc-box">'+(on?"✓":"")+'</div><div class="mc-name">'+esc(m.name||"?")+'</div><div class="mc-role">'+(m.role||"")+'</div></div>';
+    });
+    el.innerHTML=html;
+    updateSelCount();
+}
+
+function toggleMember(el){
+    var mid=el.dataset.mid;
+    if(mid==="__nate__"){
+        includeNate=!includeNate;
+        el.classList.toggle("checked",includeNate);
+        el.querySelector(".mc-box").textContent=includeNate?"✓":"";
+        _selectionChanged=true;
+        updateSelCount();
+        if(removalMode&&lastRemovalData)renderRemovalScenario(lastRemovalData);
+        else if(lastData)renderAll(lastData);
+        return;
+    }
+    selectedMembers[mid]=!selectedMembers[mid];
+    el.classList.toggle("checked",selectedMembers[mid]);
+    el.querySelector(".mc-box").textContent=selectedMembers[mid]?"✓":"";
+    _selectionChanged=true;
+    updateSelCount();
+    var allOn=allMembers.every(function(m){return selectedMembers[m.id]!==false;});
+    if(allOn){
+        removalMode=false;lastRemovalData=null;
+        hideNateAssessmentPanel();
+        if(lastData)renderAll(lastData);
+        return;
+    }
+    var removedIds=[],remainingIds=[];
+    allMembers.forEach(function(m){
+        if(selectedMembers[m.id]===false)removedIds.push(m.id);
+        else remainingIds.push(m.id);
+    });
+    if(removedIds.length>0&&remainingIds.length>0&&ws&&ws.readyState===1&&authenticated){
+        ws.send(JSON.stringify({
+            type:"admin_member_removal_scenario",
+            group_id:currentGroupId,group_type:currentGroupType,
+            removed_member_ids:removedIds,remaining_member_ids:remainingIds
+        }));
+    }else{
+        removalMode=false;lastRemovalData=null;
+        hideNateAssessmentPanel();
+        if(lastData)renderAll(lastData);
+    }
+}
+
+function selectAll(){
+    allMembers.forEach(function(m){selectedMembers[m.id]=true;});
+    includeNate=true;_selectionChanged=true;
+    removalMode=false;lastRemovalData=null;hideNateAssessmentPanel();
+    buildMemberCheckboxes();
+    if(lastData)renderAll(lastData);
+}
+function deselectAll(){
+    allMembers.forEach(function(m){selectedMembers[m.id]=false;});
+    includeNate=false;_selectionChanged=true;
+    removalMode=false;lastRemovalData=null;hideNateAssessmentPanel();
+    buildMemberCheckboxes();
+    if(lastData)renderAll(lastData);
+}
+function updateSelCount(){
+    var cnt=getSelectedIds().length+(includeNate?1:0);
+    document.getElementById("sel-count").textContent=cnt+" selected";
+}
+
+/* ======================== RENDER ALL ======================== */
+function renderAll(data){
+    var selected=getSelectedData();
+    renderWellnessSummary(data,selected);
+    draw2DNetwork(document.getElementById("canvas-with-nate"),selected,data,true);
+    draw2DNetwork(document.getElementById("canvas-without-nate"),selected,data,false);
+    renderMatrix(selected,data);
+    renderNateBonds(selected,data.nate_node||{});
+    renderDecoherence(data.decoherence_signals||{},selected);
+    renderEngagement(selected,data.nate_node||{});
+    if(_selectionChanged||!renderer){render3DGraph(data,selected);_selectionChanged=false;}
+}
+
+/* ======================== REMOVAL SCENARIO ======================== */
+function renderRemovalScenario(data){
+    var baseline=data.baseline||{};
+    var reduced=data.reduced||{};
+    var removedMembers=data.removed_members||[];
+    var remainingMembers=data.remaining_members||[];
+    var sepDeco=data.separation_decoherence||{};
+    var assessments=data.nate_assessments||[];
+
+    // Stat cards show BASELINE (full group) values with label
+    var bWith=(baseline.with_nate||{}).wellness_index||0;
+    var bWithout=(baseline.without_nate||{}).wellness_index||0;
+    var bDelta=baseline.nate_contribution!=null?baseline.nate_contribution:(bWith-bWithout);
+    document.getElementById("wi-with").textContent=bWith.toFixed(2);
+    document.getElementById("wi-without").textContent=bWithout.toFixed(2);
+    document.getElementById("wi-delta").textContent=(bDelta>=0?"+":"")+bDelta.toFixed(3);
+    setGrade("wg-with",bWith);setGrade("wg-without",bWithout);
+    var db=document.getElementById("delta-badge");
+    db.innerHTML='<span class="delta-badge delta-neutral" style="font-size:8px;">Baseline (full group)</span>';
+
+    // Ghost IDs for network drawing
+    var ghostIds=new Set(removedMembers.map(function(m){return m.id;}));
+    var ghostData={};
+    removedMembers.forEach(function(rm){
+        var orig=(lastData&&lastData.members||[]).find(function(m){return m.id===rm.id;});
+        ghostData[rm.id]={name:rm.name||(orig?orig.name:"?"),c_emo_avg:orig?orig.c_emo_avg:0.5};
+    });
+
+    draw2DNetwork(document.getElementById("canvas-with-nate"),remainingMembers,reduced,true,ghostIds,ghostData,sepDeco);
+    draw2DNetwork(document.getElementById("canvas-without-nate"),remainingMembers,reduced,false,ghostIds,ghostData,sepDeco);
+    renderSeparationDecoherence(sepDeco);
+    renderNateAssessmentPanel(assessments);
+    renderNateBonds(remainingMembers,(reduced.nate_coherence_per_member?{nate_coherence_per_member:reduced.nate_coherence_per_member,engagement_breakdown:{}}:lastData.nate_node||{}));
+    renderEngagement(remainingMembers,{engagement_breakdown:{}});
+}
+
+/* ======================== WELLNESS SUMMARY ======================== */
+function renderWellnessSummary(data,selected){
+    if(selected.length<2){
+        document.getElementById("wi-with").textContent="--";document.getElementById("wi-without").textContent="--";document.getElementById("wi-delta").textContent="--";
+        setGrade("wg-with",null);setGrade("wg-without",null);document.getElementById("delta-badge").innerHTML='';return;
+    }
+    var wW=(data.with_nate||{}).wellness_index;
+    var woW=(data.without_nate||{}).wellness_index;
+    if(wW==null||woW==null){wW=0;woW=0;}
+    var delta=(data.nate_node||{}).nate_wellness_contribution;
+    if(delta==null)delta=wW-woW;
+    document.getElementById("wi-with").textContent=wW.toFixed(2);
+    document.getElementById("wi-without").textContent=woW.toFixed(2);
+    document.getElementById("wi-delta").textContent=(delta>=0?"+":"")+delta.toFixed(3);
+    setGrade("wg-with",wW);setGrade("wg-without",woW);
+    var db=document.getElementById("delta-badge");
+    if(delta>0.01)db.innerHTML='<span class="delta-badge delta-positive">↑ Nate lifts coherence</span>';
+    else if(delta<-0.01)db.innerHTML='<span class="delta-badge delta-negative">↓ Below baseline</span>';
+    else db.innerHTML='<span class="delta-badge delta-neutral">≈ Neutral</span>';
+}
+function setGrade(id,val){
+    var el=document.getElementById(id);
+    if(val==null){el.textContent="AWAITING";el.style.color="var(--text-secondary)";return;}
+    if(val>=0.8){el.textContent="EXCELLENT";el.style.color="var(--green)";}
+    else if(val>=0.65){el.textContent="GOOD";el.style.color="var(--cyan)";}
+    else if(val>=0.5){el.textContent="MODERATE";el.style.color="var(--gold)";}
+    else{el.textContent="DEVELOPING";el.style.color="var(--orange)";}
+}
+
+/* ======================== 2D NETWORK ======================== */
+function draw2DNetwork(canvas,selected,data,withNate,ghostIds,ghostData,sepDeco){
+    var ctx=canvas.getContext("2d");
+    var rect=canvas.parentElement.getBoundingClientRect();
+    canvas.width=rect.width;canvas.height=rect.height;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(selected.length===0&&!(ghostIds&&ghostIds.size)){ctx.fillStyle="#555";ctx.font="11px sans-serif";ctx.textAlign="center";ctx.fillText("Select members",canvas.width/2,canvas.height/2);return;}
+    var nateMap=((data||{}).nate_node||{}).nate_coherence_per_member||data.nate_coherence_per_member||{};
+    var nodes=selected.map(function(m){return{id:m.id,name:(m.name||"?").split(" ")[0],c_emo:m.c_emo_avg||0.5,isNate:false,isGhost:false};});
+    if(ghostIds&&ghostIds.size){
+        ghostIds.forEach(function(gid){
+            var gd=ghostData&&ghostData[gid]?ghostData[gid]:{};
+            nodes.push({id:gid,name:(gd.name||"?").split(" ")[0],c_emo:gd.c_emo_avg||0.5,isNate:false,isGhost:true});
+        });
+    }
+    if(withNate&&includeNate)nodes.push({id:"nate",name:"Nate",c_emo:0.85,isNate:true,isGhost:false});
+    if(nodes.length===0)return;
+    var cx=canvas.width/2,cy=canvas.height/2,radius=Math.min(cx,cy)*0.55,n=nodes.length,positions=[];
+    for(var i=0;i<n;i++){var angle=(2*Math.PI*i/n)-Math.PI/2;positions.push({x:cx+radius*Math.cos(angle),y:cy+radius*Math.sin(angle)});}
+    var nodeMap={};nodes.forEach(function(nd,i){nodeMap[nd.id]=i;});
+    // Draw bonds
+    for(var i=0;i<n;i++)for(var j=i+1;j<n;j++){
+        var a=nodes[i],b=nodes[j];
+        var hasGhost=a.isGhost||b.isGhost;
+        var bond;
+        if(a.isNate)bond=nateMap[b.id]||0.5;
+        else if(b.isNate)bond=nateMap[a.id]||0.5;
+        else bond=Math.max(0,1-Math.abs(a.c_emo-b.c_emo));
+        if(hasGhost){
+            var pairKey=a.id+":"+b.id,pairKeyR=b.id+":"+a.id;
+            var sepSig=(sepDeco||{})[pairKey]||(sepDeco||{})[pairKeyR];
+            var sepRisk=sepSig?sepSig.risk:0.3;
+            var dashColor=sepRisk>0.55?"239,68,68":sepRisk>0.30?"255,165,0":"150,150,150";
+            ctx.save();ctx.setLineDash([4,4]);
+            ctx.beginPath();ctx.moveTo(positions[i].x,positions[i].y);ctx.lineTo(positions[j].x,positions[j].y);
+            ctx.strokeStyle="rgba("+dashColor+",0.45)";ctx.lineWidth=1.5;ctx.stroke();
+            ctx.restore();
+        }else{
+            var lw=1+bond*3,alpha=0.15+bond*0.6;
+            var isNB=a.isNate||b.isNate;
+            var color=isNB?"201,169,98":bond>=0.85?"0,212,255":bond>=0.7?"157,78,221":"239,68,68";
+            ctx.beginPath();ctx.moveTo(positions[i].x,positions[i].y);ctx.lineTo(positions[j].x,positions[j].y);
+            ctx.strokeStyle="rgba("+color+","+alpha+")";ctx.lineWidth=lw;ctx.stroke();
+        }
+    }
+    // Draw nodes
+    for(var i=0;i<n;i++){
+        var nd=nodes[i],nodeR=nd.isNate?22:(nd.isGhost?14:16);
+        ctx.save();
+        if(nd.isGhost)ctx.globalAlpha=0.25;
+        ctx.beginPath();ctx.arc(positions[i].x,positions[i].y,nodeR,0,2*Math.PI);
+        if(nd.isNate){ctx.fillStyle="rgba(201,169,98,0.25)";ctx.fill();ctx.strokeStyle="#C9A962";ctx.lineWidth=2;ctx.stroke();}
+        else if(nd.isGhost){
+            ctx.fillStyle="rgba(100,100,100,0.15)";ctx.fill();
+            ctx.setLineDash([3,3]);ctx.strokeStyle="#888";ctx.lineWidth=1;ctx.stroke();ctx.setLineDash([]);
+        }
+        else{var c=nd.c_emo;ctx.fillStyle=c>=0.7?"rgba(0,255,136,0.2)":c>=0.5?"rgba(255,215,0,0.2)":"rgba(255,59,59,0.2)";ctx.fill();ctx.strokeStyle=c>=0.7?"#00FF88":c>=0.5?"#FFD700":"#FF3B3B";ctx.lineWidth=1.5;ctx.stroke();}
+        ctx.fillStyle=nd.isNate?"#C9A962":(nd.isGhost?"#666":"#fff");ctx.font="bold 8px sans-serif";ctx.textAlign="center";ctx.fillText(nd.name,positions[i].x,positions[i].y-2);
+        ctx.fillStyle=nd.isNate?"#E8D5A3":(nd.isGhost?"#555":"#9D4EDD");ctx.font="bold 9px sans-serif";ctx.fillText(nd.c_emo.toFixed(2),positions[i].x,positions[i].y+9);
+        ctx.restore();
+    }
+}
+
+/* ======================== MATRIX ======================== */
+function toggleNateMatrix(){showNateInMatrix=!showNateInMatrix;document.getElementById("nate-matrix-toggle").classList.toggle("on",showNateInMatrix);if(lastData)renderMatrix(getSelectedData(),lastData);}
+function renderMatrix(selected,data){
+    var el=document.getElementById("coherence-matrix");
+    if(selected.length<2){el.innerHTML='<div class="empty-state">Select 2+ members</div>';return;}
+    var nodes=selected.slice();
+    if(showNateInMatrix&&includeNate)nodes.push({id:"nate",name:"Little Nate",c_emo_avg:0.85,isNate:true});
+    var nateMap=((data||{}).nate_node||{}).nate_coherence_per_member||{};
+    var html='<table class="matrix-table"><thead><tr><th></th>';
+    nodes.forEach(function(nd){html+='<th'+(nd.isNate?' class="nate-col"':'')+'>'+esc((nd.name||"?").split(" ")[0])+'</th>';});
+    html+='</tr></thead><tbody>';
+    for(var i=0;i<nodes.length;i++){
+        html+='<tr'+(nodes[i].isNate?' class="nate-row"':'')+'><th'+(nodes[i].isNate?' class="nate-col"':'')+'>'+esc((nodes[i].name||"?").split(" ")[0])+'</th>';
+        for(var j=0;j<nodes.length;j++){
+            if(i===j){html+='<td class="matrix-diagonal">—</td>';}
+            else{
+                var score;
+                if(nodes[i].isNate)score=nateMap[nodes[j].id]||0.5;
+                else if(nodes[j].isNate)score=nateMap[nodes[i].id]||0.5;
+                else score=Math.max(0,Math.min(1,1-Math.abs((nodes[i].c_emo_avg||0.5)-(nodes[j].c_emo_avg||0.5))));
+                var cls=score>=0.85?"high":score>=0.70?"medium":"low";
+                html+='<td'+(nodes[i].isNate||nodes[j].isNate?' class="nate-col-cell"':'')+'><span class="matrix-score '+cls+'">'+score.toFixed(2)+'</span></td>';
+            }
+        }
+        html+='</tr>';
+    }
+    html+='</tbody></table>';el.innerHTML=html;
+}
+
+/* ======================== NATE BONDS (RIGHT) ======================== */
+function renderNateBonds(selected,nateNode){
+    var el=document.getElementById("nate-bonds-body");
+    var perMember=nateNode.nate_coherence_per_member||{};
+    var engagement=nateNode.engagement_breakdown||{};
+    if(selected.length===0){el.innerHTML='<div class="empty-state">Select members</div>';return;}
+    el.innerHTML=selected.map(function(m){
+        var bond=perMember[m.id]||0;
+        var eng=engagement[m.id]||{};
+        var color=bond>=0.7?"var(--green)":bond>=0.4?"var(--gold)":"var(--orange)";
+        var detail=(eng.sessions||0)+"s "+(eng.messages||0)+"m";
+        return '<div class="member-bar"><span class="member-bar-name">'+esc((m.name||"?").split(" ")[0])+'</span>'+
+            '<div class="member-bar-track"><div class="member-bar-fill" style="width:'+(bond*100)+'%;background:'+color+';"></div></div>'+
+            '<span class="member-bar-val" style="color:'+color+';">'+bond.toFixed(2)+'</span>'+
+            '<span class="member-bar-detail">'+detail+'</span></div>';
+    }).join('');
+}
+
+/* ======================== DECOHERENCE (RIGHT) ======================== */
+function renderDecoherence(signals,selected){
+    var el=document.getElementById("deco-alerts-body");
+    var selIds=new Set(selected.map(function(m){return m.id;}));
+    var entries=Object.entries(signals||{}).filter(function(e){
+        var pair=e[0].split(":");
+        return selIds.has(pair[0])&&selIds.has(pair[1]);
+    });
+    var count=entries.filter(function(e){return e[1].trend!=="stable";}).length;
+    document.getElementById("deco-count").textContent=count;
+    if(entries.length===0){el.innerHTML='<div class="empty-state">No signals</div>';return;}
+    entries.sort(function(a,b){return b[1].risk-a[1].risk;});
+    el.innerHTML=entries.map(function(e){
+        var sig=e[1],names=sig.names||e[0].split(":");
+        var cls=sig.trend==="diverging"?"":sig.trend==="watch"?"watch":"stable";
+        var riskColor=sig.risk>=0.4?"var(--red)":sig.risk>=0.2?"var(--orange)":"var(--green)";
+        var shameFactor=sig.shame_factor!=null?sig.shame_factor:0;
+        var distressFactor=sig.distress_factor!=null?sig.distress_factor:0;
+        var factors='';
+        if(shameFactor>0||distressFactor>0){
+            factors='<div style="font-size:7px;color:var(--text-secondary);margin-top:2px;">'+
+                (shameFactor>0?'shame:'+shameFactor.toFixed(2)+' ':'')+(distressFactor>0?'distress:'+distressFactor.toFixed(2):'')+'</div>';
+        }
+        return '<div class="decoherence-item '+cls+'"><div><div class="deco-pair">'+esc((names[0]||"").split(" ")[0])+' ↔ '+esc((names[1]||"").split(" ")[0])+'</div><div class="deco-trend">'+sig.trend+'</div>'+factors+'</div>'+
+            '<div class="deco-risk" style="color:'+riskColor+';">'+sig.risk.toFixed(2)+'</div></div>';
+    }).join('');
+}
+
+/* ======================== SEPARATION DECOHERENCE (COUNTERFACTUAL) ======================== */
+function renderSeparationDecoherence(sepDeco){
+    var el=document.getElementById("deco-alerts-body");
+    var entries=Object.entries(sepDeco||{});
+    var count=entries.filter(function(e){return e[1].trend!=="moderate";}).length;
+    document.getElementById("deco-count").textContent=count;
+    if(entries.length===0){el.innerHTML='<div class="empty-state">No separation signals</div>';return;}
+    entries.sort(function(a,b){return b[1].risk-a[1].risk;});
+    el.innerHTML=entries.map(function(e){
+        var sig=e[1],names=sig.names||e[0].split(":");
+        var riskColor=sig.risk>=0.55?"var(--red)":sig.risk>=0.30?"var(--orange)":"var(--green)";
+        var trendCls=sig.trend==="critical"?"":sig.trend==="significant"?"watch":"stable";
+        var trendBadge='<span style="display:inline-block;padding:1px 5px;border-radius:3px;font-size:7px;font-weight:700;'+
+            (sig.trend==="critical"?'background:rgba(239,68,68,0.2);color:#EF4444;':sig.trend==="significant"?'background:rgba(255,165,0,0.2);color:#FFA500;':'background:rgba(0,212,255,0.2);color:#00D4FF;')+
+            '">'+sig.trend.toUpperCase()+'</span>';
+        var subMetrics='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:4px;">'+
+            '<div style="text-align:center;padding:2px;background:var(--bg-dark);border-radius:3px;">'+
+            '<div style="font-size:6px;color:var(--text-secondary);text-transform:uppercase;">Entanglement</div>'+
+            '<div style="font-size:9px;font-weight:700;color:var(--cyan);">'+sig.entanglement_strength.toFixed(3)+'</div></div>'+
+            '<div style="text-align:center;padding:2px;background:var(--bg-dark);border-radius:3px;">'+
+            '<div style="font-size:6px;color:var(--text-secondary);text-transform:uppercase;">Tunnelling</div>'+
+            '<div style="font-size:9px;font-weight:700;color:var(--purple);">'+sig.tunnelling_factor.toFixed(3)+'</div></div>'+
+            '<div style="text-align:center;padding:2px;background:var(--bg-dark);border-radius:3px;">'+
+            '<div style="font-size:6px;color:var(--text-secondary);text-transform:uppercase;">Quak</div>'+
+            '<div style="font-size:9px;font-weight:700;color:var(--orange);">'+sig.quak_adjustment.toFixed(3)+'</div></div></div>';
+        return '<div class="decoherence-item '+trendCls+'" style="flex-direction:column;align-items:stretch;">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+            '<div><div class="deco-pair">'+esc((names[0]||"").split(" ")[0])+' ↔ '+esc((names[1]||"").split(" ")[0])+' <span style="font-size:7px;color:var(--text-secondary);">(Separation)</span></div>'+
+            '<div style="margin-top:2px;">'+trendBadge+'</div></div>'+
+            '<div class="deco-risk" style="color:'+riskColor+';font-size:14px;">'+sig.risk.toFixed(3)+'</div></div>'+
+            subMetrics+'</div>';
+    }).join('');
+}
+
+/* ======================== NATE ASSESSMENT PANEL ======================== */
+function renderNateAssessmentPanel(assessments){
+    var container=document.getElementById("nate-assessment-panel");
+    if(!container){
+        container=document.createElement("div");
+        container.id="nate-assessment-panel";
+        container.style.cssText="margin-top:8px;";
+        var decoCard=document.getElementById("deco-alerts-body").closest(".card");
+        if(decoCard)decoCard.parentElement.insertBefore(container,decoCard.nextSibling);
+        else document.querySelector(".right-sidebar").appendChild(container);
+    }
+    if(!assessments||assessments.length===0){container.innerHTML='';return;}
+    var html='<div class="card research"><div class="card-header" style="cursor:pointer;" onclick="var b=this.nextElementSibling;b.style.display=b.style.display===\'none\'?\'block\':\'none\';this.querySelector(\'.toggle-icon\').textContent=b.style.display===\'none\'?\'▶\':\'▼\';">'+
+        '<div class="card-title"><div class="icon gold">🧠</div> Nate Assessment</div><span class="toggle-icon" style="font-size:10px;color:var(--gold);">▼</span></div>'+
+        '<div class="card-body">';
+    assessments.forEach(function(a){
+        var riskColor=a.separation_risk==="high"?"var(--red)":a.separation_risk==="moderate"?"var(--orange)":"var(--green)";
+        var patterns=a.transgenerational_patterns||[];
+        var preds=a.behavioral_predictions||[];
+        html+='<div style="background:var(--bg-elevated);border-radius:5px;padding:8px;margin-bottom:6px;border-left:3px solid '+riskColor+';">'+
+            '<div style="font-size:10px;font-weight:700;margin-bottom:4px;">'+esc(a.removed_member)+'</div>'+
+            '<div style="display:flex;gap:6px;margin-bottom:5px;">'+
+            '<span style="font-size:8px;padding:2px 6px;border-radius:3px;background:rgba('+(a.separation_risk==="high"?"239,68,68":a.separation_risk==="moderate"?"255,165,0":"0,212,255")+',0.15);color:'+riskColor+';font-weight:700;">'+a.separation_risk.toUpperCase()+' RISK</span>'+
+            '<span style="font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(157,78,221,0.15);color:var(--purple);">'+esc(a.crisis_perception_type)+'</span></div>';
+        if(patterns.length){
+            html+='<div style="font-size:7px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:2px;">Transgenerational Patterns</div>'+
+                '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:5px;">';
+            patterns.forEach(function(p){
+                html+='<span style="font-size:7px;padding:1px 5px;border-radius:3px;background:rgba(201,169,98,0.15);color:var(--gold);">'+esc(String(p).replace(/_/g," "))+'</span>';
             });
-            var arr = Object.values(fams);
-            if (arr.length > 0) buildFamilyList(arr);
+            html+='</div>';
         }
-
-        function wireFamily() {
-            document.querySelectorAll(".family-card").forEach(function(card) {
-                card.addEventListener("click", function() {
-                    document.querySelectorAll(".family-card").forEach(function(c) { c.classList.remove("active"); });
-                    this.classList.add("active");
-                    currentFamily = this.dataset.fid;
-                    requestFamilyMetrics();
-                });
+        if(preds.length){
+            html+='<div style="font-size:7px;color:var(--text-secondary);text-transform:uppercase;margin-bottom:2px;">Behavioral Predictions</div>';
+            preds.forEach(function(pr){
+                var conf=pr.confidence!=null?pr.confidence:0;
+                html+='<div style="font-size:8px;margin-bottom:2px;color:var(--text-primary);">'+esc(pr.description||pr.category||"")+'<span style="color:var(--text-secondary);margin-left:4px;">('+Math.round(conf*100)+'%)</span></div>';
             });
         }
+        html+='<div style="font-size:7px;margin-top:4px;display:flex;gap:10px;color:var(--text-secondary);">'+
+            '<span>Recon: '+((a.reconsolidation_readiness||0)*100).toFixed(0)+'%</span>'+
+            '<span>C_emo trend: '+(a.c_emo_trend||0).toFixed(2)+'</span>'+
+            '<span>Engagement: '+(a.engagement||0).toFixed(2)+'</span></div>'+
+            '<div style="font-size:8px;margin-top:5px;padding:5px;background:var(--bg-dark);border-radius:4px;color:var(--gold);font-style:italic;">'+
+            '💡 '+esc(a.nate_recommendation||"")+'</div></div>';
+    });
+    html+='</div></div>';
+    container.innerHTML=html;
+}
+function hideNateAssessmentPanel(){
+    var el=document.getElementById("nate-assessment-panel");
+    if(el)el.innerHTML='';
+}
 
-        function requestFamilyMetrics() {
-            if (ws && ws.readyState === 1 && authenticated && currentFamily) {
-                ws.send(JSON.stringify({ type: "admin_get_family_metrics", family_id: currentFamily }));
-            }
+/* ======================== ENGAGEMENT (RIGHT) ======================== */
+function renderEngagement(selected,nateNode){
+    var el=document.getElementById("engagement-body");
+    var engagement=nateNode.engagement_breakdown||{};
+    if(selected.length===0){el.innerHTML='<div class="empty-state">Select members</div>';return;}
+    var html='';
+    selected.forEach(function(m){
+        var eng=engagement[m.id]||{};
+        var coh=eng.coherence!=null?eng.coherence:m.c_emo_avg||0;
+        var gap=eng.gap!=null?eng.gap:0;
+        var quant=eng.quantum!=null?eng.quantum:0;
+        var anx=eng.anxiety!=null?eng.anxiety:0;
+        var str=eng.stress!=null?eng.stress:0;
+        var engage=eng.engage!=null?eng.engage:0;
+        function statColor(v,invert){if(invert)return v<=0.2?"var(--green)":v<=0.5?"var(--gold)":"var(--red)";return v>=0.7?"var(--green)":v>=0.4?"var(--gold)":"var(--orange)";}
+        html+='<div style="background:var(--bg-elevated);border-radius:5px;padding:7px 8px;margin-bottom:6px;">'+
+            '<div style="font-size:9px;font-weight:600;margin-bottom:4px;">'+esc((m.name||"?").split(" ")[0])+'</div>'+
+            '<div style="display:flex;gap:8px;font-size:7px;color:var(--text-secondary);margin-bottom:3px;">'+
+            '<span>📊 '+(eng.sessions||0)+'s</span><span>💬 '+(eng.messages||0)+'m</span><span>🪙 '+(eng.tokens||0).toLocaleString()+'t</span></div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;">'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Coherence</div><div style="font-size:10px;font-weight:700;color:'+statColor(coh,false)+';">'+coh.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">GAP</div><div style="font-size:10px;font-weight:700;color:'+statColor(gap,false)+';">'+gap.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Quantum</div><div style="font-size:10px;font-weight:700;color:'+statColor(quant,false)+';">'+quant.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Anxiety</div><div style="font-size:10px;font-weight:700;color:'+statColor(anx,true)+';">'+anx.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Stress</div><div style="font-size:10px;font-weight:700;color:'+statColor(str,true)+';">'+str.toFixed(2)+'</div></div>'+
+            '<div style="text-align:center;padding:3px;background:var(--bg-dark);border-radius:3px;"><div style="font-size:6px;text-transform:uppercase;color:var(--text-secondary);">Engage</div><div style="font-size:10px;font-weight:700;color:'+statColor(engage,false)+';">'+engage.toFixed(2)+'</div></div>'+
+            '</div></div>';
+    });
+    el.innerHTML=html;
+}
+
+/* ======================== 3D GRAPH with click-to-toggle ======================== */
+var scene,camera,renderer,controls,animId,_THREE=null,_raycaster=null,_mouse=null;
+var _clickableMeshes=[];
+var _savedCamPos=null,_savedCamTarget=null,_OrbitMod=null;
+function setLayout(mode){layoutMode=mode;_savedCamPos=null;_savedCamTarget=null;document.getElementById("btn-force").classList.toggle("active",mode==="force");document.getElementById("btn-helix").classList.toggle("active",mode==="helix");if(lastData)render3DGraph(lastData,getSelectedData());}
+
+function _onGraphClick(event){
+    if(!_THREE||!_raycaster||!renderer||!camera||_clickableMeshes.length===0)return;
+    var rect=renderer.domElement.getBoundingClientRect();
+    _mouse.x=((event.clientX-rect.left)/rect.width)*2-1;
+    _mouse.y=-((event.clientY-rect.top)/rect.height)*2+1;
+    _raycaster.setFromCamera(_mouse,camera);
+    var intersects=_raycaster.intersectObjects(_clickableMeshes);
+    if(intersects.length>0){
+        var hit=intersects[0].object;
+        var mid=hit.userData.memberId;
+        if(!mid)return;
+        if(mid==="__nate__"){
+            includeNate=!includeNate;
+        }else{
+            selectedMembers[mid]=!selectedMembers[mid];
         }
+        buildMemberCheckboxes();
+        _selectionChanged=true;
+        if(lastData)renderAll(lastData);
+    }
+}
 
-        // ==================== NETWORK VISUALIZATION ====================
-        function drawNetwork(members) {
-            var canvas = document.getElementById("network-canvas");
-            var ctx = canvas.getContext("2d");
-            var rect = canvas.parentElement.getBoundingClientRect();
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (!members || members.length === 0) return;
+async function render3DGraph(data,selected){
+    var container=document.getElementById("three-container");
+    if(!_THREE){try{_THREE=await import("three");}catch(e){container.innerHTML='<div class="empty-state" style="padding-top:150px;">Three.js loading failed</div>';return;}}
+    var THREE=_THREE;
+    if(!_raycaster){_raycaster=new THREE.Raycaster();_mouse=new THREE.Vector2();}
+    if(!_OrbitMod){try{_OrbitMod=await import("three/addons/controls/OrbitControls.js");}catch(e){}}
+    if(renderer){
+        if(animId)cancelAnimationFrame(animId);
+        renderer.domElement.removeEventListener("click",_onGraphClick);
+        renderer.dispose();var oldCanvas=container.querySelector("canvas");if(oldCanvas)oldCanvas.remove();
+    }
+    _clickableMeshes=[];
+    scene=new THREE.Scene();scene.background=new THREE.Color(0x1A1A1A);
+    var w=container.clientWidth,h=container.clientHeight;
+    camera=new THREE.PerspectiveCamera(55,w/h,0.1,1000);
+    camera.position.set(0,2,6);
+    renderer=new THREE.WebGLRenderer({antialias:true});renderer.setSize(w,h);renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    container.insertBefore(renderer.domElement,container.firstChild);
+    renderer.domElement.addEventListener("click",_onGraphClick);
+    renderer.domElement.style.cursor="pointer";
+    if(_OrbitMod){controls=new _OrbitMod.OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=0.08;}
+    if(_savedCamPos&&controls){
+        camera.position.set(_savedCamPos.x,_savedCamPos.y,_savedCamPos.z);
+        if(_savedCamTarget)controls.target.set(_savedCamTarget.x,_savedCamTarget.y,_savedCamTarget.z);
+        controls.update();
+    }
+    scene.add(new THREE.AmbientLight(0xffffff,0.4));
+    var dirLight=new THREE.DirectionalLight(0xffffff,0.8);dirLight.position.set(5,5,5);scene.add(dirLight);
 
-            var cx = canvas.width / 2, cy = canvas.height / 2;
-            var radius = Math.min(cx, cy) * 0.55;
-            var n = members.length;
-            var positions = [];
-            for (var i = 0; i < n; i++) {
-                var angle = (2 * Math.PI * i / n) - Math.PI / 2;
-                positions.push({ x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) });
-            }
-            // Draw edges (bond lines)
-            for (var i = 0; i < n; i++) {
-                for (var j = i + 1; j < n; j++) {
-                    var cemoI = members[i].c_emo_avg || 0.5;
-                    var cemoJ = members[j].c_emo_avg || 0.5;
-                    var bond = Math.max(0, Math.min(1, 1 - Math.abs(cemoI - cemoJ)));
-                    var lineWidth = 1 + bond * 5;
-                    var alpha = 0.2 + bond * 0.6;
-                    ctx.beginPath();
-                    ctx.moveTo(positions[i].x, positions[i].y);
-                    ctx.lineTo(positions[j].x, positions[j].y);
-                    ctx.strokeStyle = "rgba(157,78,221," + alpha + ")";
-                    ctx.lineWidth = lineWidth;
-                    ctx.stroke();
-                    // Bond score at midpoint
-                    var mx = (positions[i].x + positions[j].x) / 2;
-                    var my = (positions[i].y + positions[j].y) / 2;
-                    ctx.fillStyle = "#888";
-                    ctx.font = "9px sans-serif";
-                    ctx.textAlign = "center";
-                    ctx.fillText(bond.toFixed(2), mx, my - 4);
-                }
-            }
-            // Draw nodes
-            for (var i = 0; i < n; i++) {
-                var m = members[i];
-                var cemo = m.c_emo_avg || 0.5;
-                var nodeR = 22;
-                ctx.beginPath();
-                ctx.arc(positions[i].x, positions[i].y, nodeR, 0, 2 * Math.PI);
-                var hue = cemo >= 0.7 ? "rgba(0,255,136,0.2)" : cemo >= 0.5 ? "rgba(255,215,0,0.2)" : "rgba(255,59,59,0.2)";
-                ctx.fillStyle = hue;
-                ctx.fill();
-                ctx.strokeStyle = cemo >= 0.7 ? "#00FF88" : cemo >= 0.5 ? "#FFD700" : "#FF3B3B";
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                // Name
-                ctx.fillStyle = "#fff";
-                ctx.font = "bold 10px sans-serif";
-                ctx.textAlign = "center";
-                ctx.fillText((m.name || m.id || "?").split(" ")[0], positions[i].x, positions[i].y - 4);
-                // Score
-                ctx.fillStyle = "#9D4EDD";
-                ctx.font = "bold 11px sans-serif";
-                ctx.fillText(cemo.toFixed(2), positions[i].x, positions[i].y + 10);
-            }
+    var allMembersForGraph=(lastData||{}).members||[];
+    if(allMembersForGraph.length===0){
+        var geo=new THREE.SphereGeometry(0.15,16,16);scene.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0x555555})));
+        function animEmpty(){animId=requestAnimationFrame(animEmpty);if(controls)controls.update();renderer.render(scene,camera);}animEmpty();return;
+    }
+    var natePerMember=((data||{}).nate_node||{}).nate_coherence_per_member||{};
+    var selIds=new Set(getSelectedIds());
+    var nodes=allMembersForGraph.map(function(m){return{id:m.id,name:(m.name||"?").split(" ")[0],c_emo:m.c_emo_avg||0.5,isNate:false,active:selIds.has(m.id)};});
+    nodes.push({id:"nate",name:"Nate",c_emo:0.85,isNate:true,active:includeNate});
+    var n=nodes.length;if(n===0)return;
+    var positions3d=[];
+    if(layoutMode==="helix"){
+        var turns=1.5,heightRange=3;
+        for(var i=0;i<n;i++){var nd=nodes[i];if(nd.isNate){positions3d.push(new THREE.Vector3(0,0,0));}else{var t=i/((n-1)||1);var angle=t*turns*2*Math.PI;positions3d.push(new THREE.Vector3(1.8*Math.cos(angle),-heightRange/2+t*heightRange,1.8*Math.sin(angle)));}}
+    }else{
+        var humanCount=nodes.filter(function(nd){return!nd.isNate;}).length;var hIdx=0;
+        for(var i=0;i<n;i++){
+            if(nodes[i].isNate){positions3d.push(new THREE.Vector3(0,0,0));}
+            else{var angle=(2*Math.PI*hIdx/(humanCount||1))-Math.PI/2;positions3d.push(new THREE.Vector3(2.5*Math.cos(angle),0,2.5*Math.sin(angle)));hIdx++;}
         }
-
-        // ==================== DISPLAY ====================
-        function displayFamilyMetrics(data) {
-            var members = Array.isArray(data.members) ? data.members : [];
-
-            // Family Wellness Index
-            if (data.family_wellness_index !== undefined) {
-                var idx = data.family_wellness_index;
-                document.getElementById("family-index").textContent = idx.toFixed(2);
-                var g = document.getElementById("family-grade");
-                if (idx >= 0.8) { g.textContent = "EXCELLENT"; g.style.color = "var(--green)"; }
-                else if (idx >= 0.65) { g.textContent = "GOOD"; g.style.color = "var(--cyan)"; }
-                else if (idx >= 0.5) { g.textContent = "MODERATE"; g.style.color = "var(--gold)"; }
-                else { g.textContent = "DEVELOPING"; g.style.color = "var(--orange)"; }
-            }
-
-            // Member scores with escalation badges
-            var scoresEl = document.getElementById("member-scores");
-            if (members.length === 0) { scoresEl.innerHTML = '<div class="empty-state">No members in this family</div>'; }
-            else {
-                var escalations = data.escalation_events || {};
-                var ventriloquisms = data.ventriloquism_events || {};
-                scoresEl.innerHTML = members.map(function(m) {
-                    var name = m.name || m.id || "Unknown";
-                    var c = (m.c_emo_avg || 0.5).toFixed(2);
-                    var escBadge = (escalations[name] || escalations[m.id]) ? '<span class="badge-escalation">ESCALATION</span>' : '';
-                    var ventBadge = (ventriloquisms[name] || ventriloquisms[m.id]) ? '<span class="badge-ventriloquism">PROXY SPEECH</span>' : '';
-                    return '<div class="member-score"><span class="member-name">' + escapeHtml(name) + escBadge + ventBadge + '</span><span class="member-c-emo">' + c + '</span></div>';
-                }).join('');
-            }
-
-            // Coherence Matrix
-            var matrixEl = document.getElementById("coherence-matrix");
-            if (members.length < 2) { matrixEl.innerHTML = '<div class="empty-state">Need 2+ members for matrix</div>'; }
-            else { matrixEl.innerHTML = buildMatrixTable(members); }
-
-            // Network Visualization
-            drawNetwork(members);
-
-            // Bonds
-            var s = data.strongest_bond || {};
-            var w = data.weakest_bond || {};
-            document.getElementById("strongest-pair").innerHTML = formatPair(s.pair);
-            document.getElementById("strongest-score").textContent = s.score != null ? Number(s.score).toFixed(2) : "--";
-            document.getElementById("weakest-pair").innerHTML = formatPair(w.pair);
-            document.getElementById("weakest-score").textContent = w.score != null ? Number(w.score).toFixed(2) : "--";
-
-            // Collective CEEs
-            var cees = Array.isArray(data.collective_cees) ? data.collective_cees : [];
-            var ceesEl = document.getElementById("collective-cees-body");
-            if (cees.length === 0) {
-                ceesEl.innerHTML = '<div class="empty-state">No collective CEE events detected</div>';
-            } else {
-                ceesEl.innerHTML = cees.map(function(e) {
-                    return '<div class="cee-collective"><div class="cee-time">' + escapeHtml(e.timestamp || "--") + '</div><div class="cee-sync">All members synced (C<sub>emo</sub> &gt; 0.75)</div></div>';
-                }).join('');
-            }
-
-            // Session Info
-            var siEl = document.getElementById("session-info-body");
-            if (data.session_date || data.duration || members.length) {
-                siEl.innerHTML = '<div style="font-size:11px;margin-bottom:8px;"><strong>Family Therapy Session</strong></div>' +
-                    (data.session_date ? '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">Session: ' + escapeHtml(data.session_date) + '</div>' : '') +
-                    (data.duration ? '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:4px;">Duration: ' + data.duration + ' min</div>' : '') +
-                    '<div style="font-size:10px;color:var(--text-secondary);">' + members.length + ' member(s) present</div>';
-            }
-
-            // ==================== PATENT 3: EFT TRACKER ====================
-            var eftEl = document.getElementById("eft-tracker-body");
-            if (data.eft_tracker) {
-                var eft = data.eft_tracker;
-                var stageLabels = {
-                    "CYCLE_IDENTIFICATION": "Cycle Identification",
-                    "ACCESSING_UNDERLYING_EMOTIONS": "Accessing Underlying Emotions",
-                    "RESTRUCTURING_INTERACTIONS": "Restructuring Interactions",
-                    "CONSOLIDATION": "Consolidation"
-                };
-                var stage = eft.session_stage || "UNKNOWN";
-                eftEl.innerHTML =
-                    '<div style="text-align:center;margin-bottom:12px;"><span class="stage-badge eft-stage">' + escapeHtml(stageLabels[stage] || stage) + '</span></div>' +
-                    (eft.negative_cycle ? '<div class="metric-row"><span class="metric-label">Negative Cycle</span><span class="metric-value">' + escapeHtml(eft.negative_cycle) + '</span></div>' : '') +
-                    (eft.member_longings && Object.keys(eft.member_longings).length > 0 ?
-                        '<div style="margin-top:10px;font-size:10px;color:var(--text-secondary);">Member Longings:</div>' +
-                        Object.entries(eft.member_longings).map(function(e) {
-                            return '<div class="metric-row"><span class="metric-label">' + escapeHtml(e[0]) + '</span><span class="metric-value">' + escapeHtml(Array.isArray(e[1]) ? e[1].join(", ") : e[1]) + '</span></div>';
-                        }).join('') : '') +
-                    (eft.corrective_moments ?
-                        '<div class="metric-row"><span class="metric-label">Corrective Moments</span><span class="metric-value" style="color:var(--green);">' + eft.corrective_moments + '</span></div>' : '');
-            } else {
-                eftEl.innerHTML = '<div class="empty-state">No EFT tracker data for this family</div>';
-            }
-
-            // ==================== PATENT 3: RECONSOLIDATION TRACKER ====================
-            var reconEl = document.getElementById("recon-tracker-body");
-            if (data.reconsolidation_tracker) {
-                var rt = data.reconsolidation_tracker;
-                var schemas = rt.active_schemas || rt.schemas || [];
-                if (schemas.length > 0) {
-                    reconEl.innerHTML = schemas.map(function(s) {
-                        return '<div class="schema-card"><div class="schema-name">' + escapeHtml(s.name || s.schema || "Unknown Schema") + '</div>' +
-                            '<div class="schema-meta">Activations: ' + (s.activation_count || 0) + ' | Mismatches: ' + (s.mismatch_count || 0) + ' | Reconsolidated: ' + (s.reconsolidated ? "Yes" : "No") + '</div></div>';
-                    }).join('') +
-                    (rt.active_windows ? '<div class="metric-row"><span class="metric-label">Active Windows</span><span class="metric-value" style="color:var(--cyan);">' + rt.active_windows + '</span></div>' : '') +
-                    (rt.verified_reconsolidations !== undefined ? '<div class="metric-row"><span class="metric-label">Verified</span><span class="metric-value" style="color:var(--green);">' + rt.verified_reconsolidations + '</span></div>' : '');
-                } else {
-                    reconEl.innerHTML = '<div class="empty-state">No active schemas tracked</div>';
-                }
-            } else {
-                reconEl.innerHTML = '<div class="empty-state">No reconsolidation data</div>';
-            }
-
-            // ==================== ALERTS: ESCALATION + VENTRILOQUISM ====================
-            var alertsEl = document.getElementById("alerts-body");
-            var alerts = [];
-            // Escalation events
-            if (data.escalation_events) {
-                Object.entries(data.escalation_events).forEach(function(e) {
-                    var member = e[0];
-                    var events = Array.isArray(e[1]) ? e[1] : [e[1]];
-                    events.forEach(function(ev) {
-                        alerts.push({ type: "escalation", member: member, text: ev.description || ev.text || "Escalation detected", time: ev.timestamp || "" });
-                    });
-                });
-            }
-            // Ventriloquism events
-            if (data.ventriloquism_events) {
-                Object.entries(data.ventriloquism_events).forEach(function(e) {
-                    var member = e[0];
-                    var events = Array.isArray(e[1]) ? e[1] : [e[1]];
-                    events.forEach(function(ev) {
-                        alerts.push({ type: "ventriloquism", member: member, text: ev.description || ev.phrase || "Proxy speech: speaking for another member", time: ev.timestamp || "" });
-                    });
-                });
-            }
-            document.getElementById("alert-count").textContent = alerts.length;
-            if (alerts.length > 0) {
-                alertsEl.innerHTML = alerts.map(function(a) {
-                    var cls = a.type === "ventriloquism" ? "ventriloquism" : "";
-                    return '<div class="alert-item ' + cls + '"><div class="alert-text">' +
-                        '<strong>' + escapeHtml(a.member) + ':</strong> ' + escapeHtml(a.text) + '</div>' +
-                        (a.time ? '<div class="alert-time">' + escapeHtml(a.time) + '</div>' : '') + '</div>';
-                }).join('');
-            } else {
-                alertsEl.innerHTML = '<div class="empty-state">No escalation or ventriloquism alerts</div>';
-            }
+    }
+    for(var i=0;i<n;i++){
+        var nd=nodes[i],sz=nd.isNate?0.22:0.12+nd.c_emo*0.1;
+        var activeAlpha=nd.active?1.0:0.25;
+        var baseColor=nd.isNate?0xC9A962:nd.c_emo>=0.7?0x00FF88:nd.c_emo>=0.5?0xFFD700:0xFF3B3B;
+        var mesh=new THREE.Mesh(new THREE.SphereGeometry(sz,24,24),new THREE.MeshStandardMaterial({color:baseColor,emissive:baseColor,emissiveIntensity:nd.active?0.3:0.05,metalness:0.3,roughness:0.6,transparent:true,opacity:activeAlpha}));
+        mesh.position.copy(positions3d[i]);mesh.userData.memberId=nd.isNate?"__nate__":nd.id;
+        scene.add(mesh);_clickableMeshes.push(mesh);
+        var c2d=document.createElement("canvas");c2d.width=160;c2d.height=40;var c2=c2d.getContext("2d");
+        c2.globalAlpha=nd.active?1.0:0.3;
+        c2.fillStyle=nd.isNate?"#C9A962":"#ffffff";c2.font="bold 18px sans-serif";c2.textAlign="center";c2.fillText(nd.name,80,18);
+        c2.fillStyle=nd.active?"#9D4EDD":"#555";c2.font="bold 14px sans-serif";c2.fillText(nd.c_emo.toFixed(2),80,34);
+        var sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c2d),transparent:true}));sprite.scale.set(1.0,0.25,1);sprite.position.copy(positions3d[i]);sprite.position.y+=sz+0.18;scene.add(sprite);
+    }
+    for(var i=0;i<n;i++)for(var j=i+1;j<n;j++){
+        var a=nodes[i],b=nodes[j];
+        if(!a.active&&!b.active)continue;
+        var bond;
+        if(a.isNate)bond=natePerMember[b.id]||0.5;
+        else if(b.isNate)bond=natePerMember[a.id]||0.5;
+        else bond=Math.max(0,1-Math.abs(a.c_emo-b.c_emo));
+        var bothActive=a.active&&b.active;
+        var isNB=a.isNate||b.isNate;
+        var col=isNB?0xC9A962:bond>=0.85?0x4ECDC4:bond>=0.7?0x9D4EDD:0xEF4444;
+        var line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([positions3d[i],positions3d[j]]),new THREE.LineBasicMaterial({color:col,transparent:true,opacity:bothActive?(0.2+bond*0.6):0.08}));
+        scene.add(line);
+    }
+    function animate(){
+        animId=requestAnimationFrame(animate);
+        if(controls)controls.update();
+        if(camera&&controls){
+            _savedCamPos={x:camera.position.x,y:camera.position.y,z:camera.position.z};
+            _savedCamTarget={x:controls.target.x,y:controls.target.y,z:controls.target.z};
         }
+        renderer.render(scene,camera);
+    }
+    animate();
+}
 
-        function buildMatrixTable(members) {
-            var names = members.map(function(m) { return escapeHtml(m.name || m.id || "?"); });
-            var cemos = members.map(function(m) { return Number(m.c_emo_avg || 0.5); });
-            var html = '<table class="matrix-table"><thead><tr><th></th>';
-            names.forEach(function(n) { html += '<th>' + n + '</th>'; });
-            html += '</tr></thead><tbody>';
-            for (var i = 0; i < members.length; i++) {
-                html += '<tr><th>' + names[i] + '</th>';
-                for (var j = 0; j < members.length; j++) {
-                    if (i === j) { html += '<td class="matrix-diagonal">--</td>'; }
-                    else {
-                        var score = Math.max(0, Math.min(1, 1 - Math.abs(cemos[i] - cemos[j])));
-                        var cls = score >= 0.85 ? "high" : score >= 0.70 ? "medium" : "low";
-                        html += '<td><span class="matrix-score ' + cls + '">' + score.toFixed(2) + '</span></td>';
-                    }
-                }
-                html += '</tr>';
-            }
-            html += '</tbody></table>';
-            return html;
+/* ======================== LONGITUDINAL WEATHER (REST API) ======================== */
+var API=location.protocol+"//"+location.hostname+(location.port?":"+location.port:"");
+if(location.hostname.includes("sovereignsanctuary"))API="https://api.sovereignsanctuary.net";
+else if(!location.hostname||location.hostname==="localhost")API="https://api.sovereignsanctuary.net";
+
+function _authHeaders(ct){
+    var h={"Authorization":"Bearer "+(token||"")};
+    if(ct)h["Content-Type"]=ct;
+    return h;
+}
+
+var _cohChart=null,_volChart=null;
+var _weatherFamilyId=null;
+
+async function loadWeatherData(familyId){
+    if(!familyId||!token){
+        document.getElementById("weather-section").style.display="none";
+        document.getElementById("session-history-section").style.display="none";
+        return;
+    }
+    _weatherFamilyId=familyId;
+    try{
+        var resp=await fetch(API+"/api/coherence/weather/family/"+encodeURIComponent(familyId)+"?days=90",{headers:_authHeaders()});
+        if(resp.status===401){console.warn("Weather: auth issue");return;}
+        if(!resp.ok){document.getElementById("weather-section").style.display="none";return;}
+        var data=await resp.json();
+        if(!data||data.total_snapshots===0){
+            document.getElementById("weather-section").style.display="none";
+            document.getElementById("session-history-section").style.display="none";
+            return;
         }
+        document.getElementById("weather-section").style.display="";
+        document.getElementById("session-history-section").style.display="";
+        renderWeatherStats(data);
+        renderWeatherCharts(data);
+        renderSessionHistory(data);
+    }catch(e){
+        console.warn("Weather load error:",e);
+    }
+}
 
-        connectWebSocket();
-    </script>
+function renderWeatherStats(data){
+    var ts=data.time_series||{};
+    var cohVals=ts.system_coherence||[];
+    var avgCoh=cohVals.length>0?(cohVals.reduce(function(a,b){return a+b;},0)/cohVals.length):0;
+    var volVals=ts.system_volatility||[];
+    var avgVol=volVals.length>0?(volVals.reduce(function(a,b){return a+b;},0)/volVals.length):0;
+    var ceeCount=(ts.cee_windows||[]).filter(Boolean).length;
+
+    document.getElementById("ws-avg-coh").textContent=avgCoh.toFixed(2);
+    document.getElementById("ws-avg-coh-sub").textContent=data.total_snapshots+" snapshots";
+    document.getElementById("ws-sessions").textContent=data.total_sessions;
+    document.getElementById("ws-sessions-sub").textContent="last 90 days";
+    document.getElementById("ws-cee").textContent=ceeCount;
+    document.getElementById("ws-cee-sub").textContent=cohVals.length>0?((ceeCount/cohVals.length*100).toFixed(1)+"% of samples"):"";
+    document.getElementById("ws-vol").textContent=avgVol.toFixed(3);
+    document.getElementById("ws-vol-sub").textContent=avgVol<0.1?"stable":avgVol<0.25?"moderate":"elevated";
+
+    var trendEl=document.getElementById("weather-trend-badge");
+    var t=data.trend||"not_enough_data";
+    if(t==="improving")trendEl.innerHTML='<span class="trend-badge trend-improving">↑ Improving</span>';
+    else if(t==="declining")trendEl.innerHTML='<span class="trend-badge trend-declining">↓ Declining</span>';
+    else if(t==="stable")trendEl.innerHTML='<span class="trend-badge trend-stable">→ Stable</span>';
+    else trendEl.innerHTML='<span class="trend-badge trend-stable">Gathering Data</span>';
+}
+
+function renderWeatherCharts(data){
+    var ts=data.time_series||{};
+    var timestamps=(ts.timestamps||[]).map(function(t){
+        var d=new Date(t);
+        return(d.getMonth()+1)+"/"+d.getDate()+" "+d.getHours()+":"+("0"+d.getMinutes()).slice(-2);
+    });
+    var cohVals=ts.system_coherence||[];
+    var volVals=ts.system_volatility||[];
+    var ceeWindows=ts.cee_windows||[];
+
+    var maxPts=200;
+    var step=Math.max(1,Math.floor(timestamps.length/maxPts));
+    var sampledTs=[],sampledCoh=[],sampledVol=[],sampledCee=[];
+    for(var i=0;i<timestamps.length;i+=step){
+        sampledTs.push(timestamps[i]);
+        sampledCoh.push(cohVals[i]||0);
+        sampledVol.push(volVals[i]||0);
+        sampledCee.push(ceeWindows[i]?cohVals[i]:null);
+    }
+
+    var chartOpts={
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:true,labels:{color:"#888",font:{size:9}}},tooltip:{mode:"index",intersect:false}},
+        scales:{x:{display:true,ticks:{color:"#555",font:{size:7},maxTicksLimit:8,maxRotation:0},grid:{color:"rgba(37,37,37,0.5)"}},y:{min:0,max:1,ticks:{color:"#555",font:{size:8},stepSize:0.2},grid:{color:"rgba(37,37,37,0.5)"}}}
+    };
+
+    if(_cohChart){_cohChart.destroy();_cohChart=null;}
+    var cohCtx=document.getElementById("chart-coherence").getContext("2d");
+    _cohChart=new Chart(cohCtx,{type:"line",data:{
+        labels:sampledTs,
+        datasets:[
+            {label:"System Coherence",data:sampledCoh,borderColor:"#9D4EDD",backgroundColor:"rgba(157,78,221,0.1)",fill:true,pointRadius:0,borderWidth:1.5,tension:0.3},
+            {label:"CEE Window",data:sampledCee,borderColor:"#00FF88",backgroundColor:"rgba(0,255,136,0.3)",fill:false,pointRadius:3,pointBackgroundColor:"#00FF88",borderWidth:0,showLine:false}
+        ]
+    },options:chartOpts});
+
+    if(_volChart){_volChart.destroy();_volChart=null;}
+    var volCtx=document.getElementById("chart-volatility").getContext("2d");
+    var volOpts=JSON.parse(JSON.stringify(chartOpts));
+    volOpts.scales.y.max=0.5;volOpts.scales.y.ticks.stepSize=0.1;
+    _volChart=new Chart(volCtx,{type:"line",data:{
+        labels:sampledTs,
+        datasets:[{label:"System Volatility",data:sampledVol,borderColor:"#C9A962",backgroundColor:"rgba(201,169,98,0.1)",fill:true,pointRadius:0,borderWidth:1.5,tension:0.3}]
+    },options:volOpts});
+}
+
+function renderSessionHistory(data){
+    var sessions=data.session_summaries||[];
+    var el=document.getElementById("session-history-body");
+    if(sessions.length===0){el.innerHTML='<div class="empty-state">No Sanctuary sessions recorded yet</div>';return;}
+    sessions.sort(function(a,b){return(b.last_snapshot||"").localeCompare(a.last_snapshot||"");});
+    var html='<table class="session-table"><thead><tr>'+
+        '<th>Session</th><th>Date</th><th>Snapshots</th><th>Avg Coherence</th><th>Peak</th><th>Volatility</th><th>CEE Windows</th><th>Bridge</th><th>Isolated</th>'+
+        '</tr></thead><tbody>';
+    sessions.forEach(function(s,idx){
+        var d=new Date(s.first_snapshot||"");
+        var dateStr=(d.getMonth()+1)+"/"+d.getDate()+"/"+d.getFullYear();
+        var cohColor=s.avg_coherence>=0.7?"var(--green)":s.avg_coherence>=0.5?"var(--gold)":"var(--orange)";
+        var volColor=s.avg_volatility<0.1?"var(--green)":s.avg_volatility<0.25?"var(--gold)":"var(--red)";
+        html+='<tr>'+
+            '<td style="color:var(--purple);font-weight:600;">#'+(sessions.length-idx)+'</td>'+
+            '<td>'+esc(dateStr)+'</td>'+
+            '<td>'+s.snapshot_count+'</td>'+
+            '<td style="color:'+cohColor+';font-weight:700;">'+s.avg_coherence.toFixed(3)+'</td>'+
+            '<td style="color:var(--cyan);">'+s.peak_coherence.toFixed(3)+'</td>'+
+            '<td style="color:'+volColor+';">'+s.avg_volatility.toFixed(3)+'</td>'+
+            '<td>'+(s.cee_window_count>0?'<span style="color:var(--green);font-weight:700;">'+s.cee_window_count+'</span>':'0')+'</td>'+
+            '<td style="font-size:8px;">'+(s.primary_bridge?esc(s.primary_bridge.split(" ")[0]):'-')+'</td>'+
+            '<td style="font-size:8px;">'+(s.primary_isolated?esc(s.primary_isolated.split(" ")[0]):'-')+'</td>'+
+            '</tr>';
+    });
+    html+='</tbody></table>';
+    el.innerHTML=html;
+}
+
+/* ======================== INIT ======================== */
+connectWebSocket();
+</script>
 </body>
 </html>

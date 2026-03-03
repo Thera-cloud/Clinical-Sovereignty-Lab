@@ -1,0 +1,49 @@
+Full Backup — 2026-02-22 (Post Phase 1-2-3 Cleanup)
+====================================================
+
+This backup contains the FINISHED state of all files modified during
+the old-code hygiene cleanup session. These are the CURRENT working
+versions after all changes were applied and verified.
+
+Changes Applied
+---------------
+Phase 1A: Created backend/.dockerignore
+Phase 1B: Moved 9 stale files to archive/websocket-backups/
+Phase 2A: load_dotenv(override=True) → override=False in bridge_server.py, azure_bridge.py
+Phase 2B: Deleted backend/app/websocket/.env (stale LAN IPs)
+Phase 2C: Added safety comments to docker-compose.prod.yml
+Phase 3:  Renamed app.auth.get_current_user → get_current_user_id (11 files)
+
+New Rules Created
+-----------------
+rules/trust-100-percent.mdc   — 246/246 trust sustainment protocol
+rules/old-code-hygiene.mdc    — Prevents reintroduction of fixed issues
+
+Pre-Phase-3 Backup (BEFORE the rename)
+--------------------------------------
+archive/pre-phase3-auth-backup/ contains the originals of all 13 auth
+files as they were BEFORE the get_current_user rename, in case rollback
+is needed.
+
+File Inventory (20 files)
+-------------------------
+.dockerignore                    — NEW: excludes stale files from Docker images
+auth.py                          — MODIFIED: get_current_user → get_current_user_id
+api_server.py                    — UNCHANGED: keeps get_current_user (Dict variant)
+azure_bridge.py                  — MODIFIED: load_dotenv(override=False)
+bridge_server.py                 — MODIFIED: load_dotenv(override=False)
+docker-compose.prod.yml          — MODIFIED: added safety comments
+main.py                          — UNCHANGED: reference copy
+routers/ai_modes_api.py          — MODIFIED: import + Depends updated
+routers/billing.py               — MODIFIED: import + Depends updated
+routers/coach.py                 — MODIFIED: import + Depends updated
+routers/coherence_api.py         — MODIFIED: import + Depends updated
+routers/legacy_vault_api.py      — MODIFIED: import + Depends updated
+routers/me2me.py                 — MODIFIED: import + Depends updated
+routers/nevedal_reports_api.py   — MODIFIED: import + Depends updated
+routers/scholarship_api.py       — MODIFIED: import + Depends updated
+routers/sessions.py              — MODIFIED: import + Depends updated
+routers/vault_api.py             — MODIFIED: import + Depends updated
+services/stripe_integration.py   — MODIFIED: import + Depends updated
+rules/old-code-hygiene.mdc       — NEW: prevents reintroduction of issues
+rules/trust-100-percent.mdc      — NEW: 246/246 trust sustainment

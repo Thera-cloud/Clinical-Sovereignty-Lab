@@ -81,6 +81,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro
+      - ./data/bridge:/app/data:ro
       - backend_logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

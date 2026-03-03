@@ -1036,17 +1036,35 @@ class NevedalEngine:
         """Persist a CEE event to the database."""
         try:
             async with self.db_pool.acquire() as conn:
-                # Check if we already have a metric row for this session at
-                # approximately this timestamp, and update it with CEE data.
-                # Otherwise insert a standalone CEE record.
+                hw_id = self.current_state.user_id if self.current_state else None
+                if not hw_id:
+                    return
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                    hw_id,
+                )
+                if not user_uuid:
+                    return
+
+                session_uuid = None
+                if event.session_id and event.session_id != "unknown":
+                    try:
+                        import uuid as _uuid_mod
+                        parsed = _uuid_mod.UUID(str(event.session_id))
+                        exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", parsed)
+                        if exists:
+                            session_uuid = parsed
+                    except (ValueError, AttributeError):
+                        pass
+
                 await conn.execute("""
                     INSERT INTO nevedal_metrics
                         (session_id, user_id, recorded_at, c_emo, cee_window,
                          cee_duration_seconds, biometrics)
                     VALUES ($1, $2, $3, $4, TRUE, $5, $6)
                 """,
-                    event.session_id if event.session_id != "unknown" else None,
-                    self.current_state.user_id if self.current_state else None,
+                    session_uuid,
+                    user_uuid,
                     event.end_time,
                     round(event.peak_c_emo, 5),
                     event.duration_seconds,

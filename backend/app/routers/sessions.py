@@ -3,7 +3,9 @@ Scheduling & Session Management API Routes
 Handles appointment booking, calendar management, and session tracking
 """
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, UploadFile, File, Form
+
+from app.services.api_server import get_current_user as _require_auth
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -11,13 +13,16 @@ import os
 import json
 import secrets
 import asyncio
+import logging
 from pathlib import Path
 import httpx
 
 from app.config import settings
-from app.auth import get_current_user
+from app.auth import get_current_user_id
 from app.services.zoom_client import ZoomClient
 from app.services.blob_storage import upload_bytes
+
+_logger = logging.getLogger("sessions")
 
 # Import classroom analyzer for automatic analysis after archive
 try:
@@ -32,11 +37,16 @@ except ImportError:
     CLASSROOM_AVAILABLE = False
     ClassroomAnalyzer = None
 
-router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(_require_auth)])
 
 from app.config import settings as _settings
 DATA_DIR = Path(_settings.DATA_DIR)
 WORKBOOKS_DIR = Path(_settings.WORKBOOKS_DIR)
+
+from app.services.pg_data_helpers import (
+    load_sessions_pg, upsert_session_pg, delete_session_pg,
+    load_registry_pg, find_user_pg,
+)
 
 # Initialize classroom analyzer for auto-analysis
 _classroom_analyzer = None
@@ -70,22 +80,17 @@ async def auto_analyze_transcript(
         coach_id = session_data.get("coach_id", "")
         family_id = session_data.get("family_id", "")
         
-        # Try to get coach name and family_id from registry
         coach_name = "Coach"
         try:
             registry_path = DATA_DIR / "registry.json"
             if registry_path.exists():
                 with open(registry_path, 'r') as f:
                     registry = json.load(f)
-                
-                # Get coach name
                 for _, v in registry.items():
                     p = v.get("profile", {})
                     if p.get("hardware_id") == coach_id:
                         coach_name = p.get("name", "Coach")
                         break
-                
-                # Get family_id if not in session
                 if not family_id and client_id:
                     for _, v in registry.items():
                         p = v.get("profile", {})
@@ -95,7 +100,7 @@ async def auto_analyze_transcript(
                                 client_name = p.get("name", "")
                             break
         except Exception as e:
-            print(f"[AutoAnalysis] Registry lookup error: {e}")
+            _logger.warning("AutoAnalysis: Registry lookup error: %s", e)
         
         # Run metrics analysis (synchronous part)
         analysis = _classroom_analyzer.analyze_transcript(
@@ -147,7 +152,7 @@ class ScheduleSessionRequest(BaseModel):
     client_name: Optional[str] = ""  # optional display label
     scheduled_start: str  # ISO format
     scheduled_end: str
-    session_type: str = "COACH"  # COACH, FAMILY, GROUP
+    session_type: str = "COACH"  # COACH, FAMILY, GROUP, MASTER_CONSULTATION
     notes: Optional[str] = ""
     zoom_link: Optional[str] = ""
     disable_recording: Optional[bool] = False  # Coach can opt-out of auto-recording
@@ -178,16 +183,16 @@ def load_json(filepath: Path, default=None):
     if not filepath.exists(): return default
     try:
         raw = filepath.read_bytes()
-        # Try decrypting if it looks like an encrypted payload (starts with gAAAAA)
         fernet = _get_fernet()
         if fernet and raw and not raw.startswith(b'[') and not raw.startswith(b'{'):
             try:
                 decrypted = fernet.decrypt(raw)
                 return json.loads(decrypted)
             except Exception:
-                pass  # Not encrypted, try plain JSON
+                pass
         return json.loads(raw)
-    except Exception:
+    except Exception as e:
+        _logger.warning("load_json: failed to read %s: %s", filepath, e)
         return default
 
 def save_json(filepath: Path, data):
@@ -207,6 +212,35 @@ def save_json(filepath: Path, data):
 
 def generate_session_id():
     return f"SES_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(6).upper()}"
+
+
+def _get_db(request: Request):
+    return getattr(request.app.state, "db_pool", None)
+
+
+async def _load_sessions_pf(request: Request) -> list:
+    """PG-first session loader. Falls back to JSON."""
+    db = _get_db(request)
+    if db:
+        try:
+            pg_sessions = await load_sessions_pg(db)
+            if pg_sessions:
+                return pg_sessions
+        except Exception as e:
+            _logger.warning("_load_sessions_pf: PG read failed, falling back to JSON: %s", e)
+    return load_json(DATA_DIR / "sessions.json", [])
+
+
+async def _save_session_dual(request: Request, session: dict, all_sessions: list = None):
+    """Dual-write: upsert to PG + save full list to JSON backup."""
+    db = _get_db(request)
+    if db:
+        try:
+            await upsert_session_pg(db, session)
+        except Exception as e:
+            _logger.warning("_save_session_dual: PG upsert failed: %s", e)
+    if all_sessions is not None:
+        save_json(DATA_DIR / "sessions.json", all_sessions)
 
 # Zoom meeting map (meeting_id -> internal session metadata)
 ZOOM_MEETING_MAP_FILE = DATA_DIR / "zoom_meeting_map.json"
@@ -281,11 +315,13 @@ def _make_zoom_client() -> ZoomClient:
 # Endpoints
 
 @router.post("/schedule")
-async def schedule_session(req: ScheduleSessionRequest):
+async def schedule_session(req: ScheduleSessionRequest, request: Request):
     """Schedule a new session"""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     
-    # Check for conflicts
+    # Check for conflicts — skip sessions whose scheduled_end is in the past
+    # (stale "scheduled" sessions that were never started/completed/cancelled)
+    now = datetime.now(timezone.utc)
     for s in sessions:
         if s.get("coach_id") == req.coach_id and s.get("status") in ["scheduled", "active"]:
             existing_start = _parse_iso_dt(s.get("scheduled_start", ""))
@@ -294,11 +330,15 @@ async def schedule_session(req: ScheduleSessionRequest):
             new_end = _parse_iso_dt(req.scheduled_end)
             if not (existing_start and existing_end and new_start and new_end):
                 continue
-            
+            if existing_end < now and s.get("status") == "scheduled":
+                continue
             if (new_start < existing_end and new_end > existing_start):
                 raise HTTPException(409, "Time slot conflict with existing session")
     
     session_id = generate_session_id()
+
+    _is_consultation = req.session_type == "MASTER_CONSULTATION"
+
     session = {
         "session_id": session_id,
         "client_id": req.client_id,
@@ -322,7 +362,9 @@ async def schedule_session(req: ScheduleSessionRequest):
         "mood_at_end": "",
         "nate_summary": "",
         "recording_url": "",
-        "created_at": str(datetime.now())
+        "created_at": str(datetime.now()),
+        "price_cents": 0 if _is_consultation else None,
+        "payment_status": "waived" if _is_consultation else "pending",
     }
 
     # Optional: auto-create Zoom meeting if enabled and no link provided.
@@ -387,7 +429,7 @@ async def schedule_session(req: ScheduleSessionRequest):
         print(f">>> [ZOOM] Auto-create failed for session {session_id}: {zoom_error}")
     
     sessions.append(session)
-    save_json(DATA_DIR / "sessions.json", sessions)
+    await _save_session_dual(request, session, sessions)
     
     resp = {"session": session}
     if zoom_error:
@@ -395,12 +437,12 @@ async def schedule_session(req: ScheduleSessionRequest):
     return resp
 
 @router.get("/client/{client_id}")
-async def get_client_sessions(client_id: str, current_user: str = Depends(get_current_user), status: str = None, limit: int = 20):
-    """Get sessions for a client. Requires authentication; user must be the client or their coach."""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+async def get_client_sessions(request: Request, client_id: str, current_user: str = Depends(get_current_user_id), status: str = None, limit: int = 20):
+    """Get sessions for a client. Requires authentication; user must be the client, their coach, or admin."""
+    sessions = await _load_sessions_pf(request)
     client_sessions = [s for s in sessions if s.get("client_id") == client_id]
-    # Ownership check: user must be the client, or a coach assigned to one of their sessions
-    if current_user != client_id:
+    user_role = getattr(request.state, "user_role", "")
+    if current_user != client_id and user_role != "ADMIN":
         is_assigned_coach = any(s.get("coach_id") == current_user for s in client_sessions)
         if not is_assigned_coach:
             raise HTTPException(403, "Access denied: you are not this client or their assigned coach")
@@ -412,11 +454,12 @@ async def get_client_sessions(client_id: str, current_user: str = Depends(get_cu
     return {"sessions": client_sessions[:limit]}
 
 @router.get("/coach/{coach_id}")
-async def get_coach_sessions(coach_id: str, current_user: str = Depends(get_current_user), status: str = None, limit: int = 50):
-    """Get sessions for a coach. Requires authentication; user must be the coach."""
-    if current_user != coach_id:
+async def get_coach_sessions(request: Request, coach_id: str, current_user: str = Depends(get_current_user_id), status: str = None, limit: int = 50):
+    """Get sessions for a coach. Requires authentication; user must be the coach or admin."""
+    user_role = getattr(request.state, "user_role", "")
+    if current_user != coach_id and user_role != "ADMIN":
         raise HTTPException(403, "Access denied: you can only view your own sessions")
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
     
     if status:
@@ -426,11 +469,12 @@ async def get_coach_sessions(coach_id: str, current_user: str = Depends(get_curr
     return {"sessions": coach_sessions[:limit]}
 
 @router.get("/upcoming/{user_id}")
-async def get_upcoming_sessions(user_id: str, current_user: str = Depends(get_current_user), days: int = 7):
+async def get_upcoming_sessions(request: Request, user_id: str, current_user: str = Depends(get_current_user_id), days: int = 7):
     """Get upcoming sessions for a user (as client or coach). Requires authentication."""
-    if current_user != user_id:
+    user_role = getattr(request.state, "user_role", "")
+    if current_user != user_id and user_role != "ADMIN":
         raise HTTPException(403, "Access denied: you can only view your own upcoming sessions")
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     now = datetime.now(timezone.utc)
     cutoff = now + timedelta(days=days)
     
@@ -450,10 +494,31 @@ async def get_upcoming_sessions(user_id: str, current_user: str = Depends(get_cu
     upcoming.sort(key=lambda x: x.get("scheduled_start", ""))
     return {"sessions": upcoming}
 
+
+@router.post("/expire-stale")
+async def expire_stale_sessions(request: Request):
+    """Auto-expire scheduled sessions whose scheduled_end is in the past."""
+    db = _get_db(request)
+    expired_count = 0
+    if db:
+        try:
+            async with db.acquire() as conn:
+                result = await conn.execute(
+                    """UPDATE coaching_sessions
+                       SET status = 'no_show', updated_at = NOW()
+                       WHERE status = 'scheduled'
+                         AND scheduled_end < NOW() - INTERVAL '30 minutes'""",
+                )
+                expired_count = int(result.split()[-1]) if result else 0
+        except Exception as e:
+            _logger.warning("expire_stale_sessions: %s", e)
+    return {"expired": expired_count}
+
+
 @router.get("/{session_id}")
-async def get_session(session_id: str, current_user: str = Depends(get_current_user)):
+async def get_session(request: Request, session_id: str, current_user: str = Depends(get_current_user_id)):
     """Get session details. Requires authentication; user must be the client or coach for this session."""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     for s in sessions:
         if s.get("session_id") == session_id:
             if current_user not in (s.get("client_id"), s.get("coach_id")):
@@ -462,9 +527,9 @@ async def get_session(session_id: str, current_user: str = Depends(get_current_u
     raise HTTPException(404, "Session not found")
 
 @router.post("/start/{session_id}")
-async def start_session(session_id: str, current_user: str = Depends(get_current_user)):
+async def start_session(request: Request, session_id: str, current_user: str = Depends(get_current_user_id)):
     """Mark session as started. Requires authentication; user must be the coach."""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     
     for s in sessions:
         if s.get("session_id") == session_id:
@@ -472,15 +537,15 @@ async def start_session(session_id: str, current_user: str = Depends(get_current
                 raise HTTPException(403, "Access denied: you are not a participant in this session")
             s["status"] = "active"
             s["actual_start"] = str(datetime.now())
-            save_json(DATA_DIR / "sessions.json", sessions)
+            await _save_session_dual(request, s, sessions)
             return {"session": s}
     
     raise HTTPException(404, "Session not found")
 
 @router.post("/end/{session_id}")
-async def end_session(session_id: str, current_user: str = Depends(get_current_user), mood_at_end: str = "", summary: str = ""):
+async def end_session(request: Request, session_id: str, current_user: str = Depends(get_current_user_id), mood_at_end: str = "", summary: str = ""):
     """Mark session as ended. Requires authentication; user must be a participant."""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     
     for s in sessions:
         if s.get("session_id") == session_id:
@@ -491,24 +556,37 @@ async def end_session(session_id: str, current_user: str = Depends(get_current_u
             s["mood_at_end"] = mood_at_end
             s["nate_summary"] = summary
             
-            # Calculate duration
             if s.get("actual_start"):
                 try:
                     start = datetime.fromisoformat(s["actual_start"])
                     end = datetime.now()
                     s["duration_minutes"] = int((end - start).total_seconds() / 60)
-                except:
+                except Exception:
                     pass
             
-            save_json(DATA_DIR / "sessions.json", sessions)
+            await _save_session_dual(request, s, sessions)
             
-            # Update client's session count
-            registry = load_json(DATA_DIR / "user_registry.json")
-            for k, v in registry.items():
-                if v.get("profile", {}).get("hardware_id") == s.get("client_id"):
-                    v["profile"]["total_sessions_count"] = v["profile"].get("total_sessions_count", 0) + 1
-                    save_json(DATA_DIR / "user_registry.json", registry)
-                    break
+            db = _get_db(request)
+            if db:
+                try:
+                    async with db.acquire() as conn:
+                        await conn.execute(
+                            """UPDATE users SET profile_data = jsonb_set(
+                                   COALESCE(profile_data, '{}'::jsonb),
+                                   '{total_sessions_count}',
+                                   (COALESCE((profile_data->>'total_sessions_count')::int, 0) + 1)::text::jsonb
+                               ) WHERE hardware_id = $1""",
+                            s.get("client_id", ""),
+                        )
+                except Exception as e:
+                    _logger.warning("end_session: PG session count update failed: %s", e)
+            else:
+                registry = load_json(DATA_DIR / "user_registry.json")
+                for k, v in registry.items():
+                    if v.get("profile", {}).get("hardware_id") == s.get("client_id"):
+                        v["profile"]["total_sessions_count"] = v["profile"].get("total_sessions_count", 0) + 1
+                        save_json(DATA_DIR / "user_registry.json", registry)
+                        break
             
             return {"session": s}
     
@@ -516,17 +594,16 @@ async def end_session(session_id: str, current_user: str = Depends(get_current_u
 
 
 @router.post("/{session_id}/zoom/delete")
-async def delete_zoom_meeting(session_id: str):
+async def delete_zoom_meeting(session_id: str, request: Request):
     """
     Delete the Zoom meeting associated with a scheduled session.
     This helps avoid wasted Zoom storage and reduces long-term clutter.
     """
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     if not isinstance(sessions, list):
         sessions = []
 
     for s in sessions:
-        if s.get("session_id") == session_id:
             meeting_id = (s.get("zoom_meeting_id") or "").strip()
             if not meeting_id:
                 return {"ok": True, "message": "No zoom_meeting_id on session", "session": s}
@@ -551,18 +628,17 @@ async def delete_zoom_meeting(session_id: str):
             except Exception as e:
                 raise HTTPException(status_code=500, detail={"error": "zoom_delete_failed", "message": str(e)})
 
-            # Clean session fields (retain historical info in notes)
             s["zoom_meeting_deleted_at"] = str(datetime.now())
             s["zoom_meeting_id"] = ""
             s["zoom_link"] = ""
-            save_json(DATA_DIR / "sessions.json", sessions)
+            await _save_session_dual(request, s, sessions)
             return {"ok": True, "message": "Zoom meeting deleted", "session": s}
 
     raise HTTPException(404, "Session not found")
 
 
 @router.get("/{session_id}/zoom/recording_status")
-async def get_recording_status(session_id: str):
+async def get_recording_status(session_id: str, request: Request):
     """
     Check if Zoom recording is ready for archiving.
     
@@ -576,11 +652,11 @@ async def get_recording_status(session_id: str):
     """
     if not settings.ENABLE_ZOOM:
         raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
-    
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+
+    sessions = await _load_sessions_pf(request)
     if not isinstance(sessions, list):
         sessions = []
-    
+
     target = None
     for s in sessions:
         if s.get("session_id") == session_id:
@@ -685,6 +761,7 @@ async def get_recording_status(session_id: str):
 @router.post("/{session_id}/zoom/archive_transcript")
 async def archive_zoom_transcript(
     session_id: str,
+    request: Request,
     delete_recordings: bool = True,
     delete_meeting: bool = False,
     background_tasks: BackgroundTasks = None,
@@ -701,7 +778,7 @@ async def archive_zoom_transcript(
     if not settings.ENABLE_ZOOM:
         raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
 
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     if not isinstance(sessions, list):
         sessions = []
 
@@ -869,26 +946,46 @@ async def archive_zoom_transcript(
             coach_id = target.get("coach_id", "")
             family_id = target.get("family_id", "")
             
-            # Try to get coach name from registry
             coach_name = "Coach"
-            try:
-                registry_path = DATA_DIR / "registry.json"
-                if not registry_path.exists():
-                    registry_path = DATA_DIR / "user_registry.json"
-                if registry_path.exists():
-                    with open(registry_path, 'r') as f:
-                        registry = json.load(f)
-                    for _, v in registry.items():
-                        p = v.get("profile", {})
-                        if p.get("hardware_id") == coach_id:
-                            coach_name = p.get("name", "Coach")
-                            break
-                        if not family_id and p.get("hardware_id") == client_id:
-                            family_id = p.get("family_id", "")
+            db = _get_db(request)
+            if db:
+                try:
+                    cp = await find_user_pg(db, hardware_id=coach_id)
+                    if cp:
+                        cpd = cp.get("profile_data") or {}
+                        if isinstance(cpd, str):
+                            cpd = json.loads(cpd) if cpd else {}
+                        coach_name = cpd.get("name", "Coach")
+                    if not family_id and client_id:
+                        clp = await find_user_pg(db, hardware_id=client_id)
+                        if clp:
+                            cld = clp.get("profile_data") or {}
+                            if isinstance(cld, str):
+                                cld = json.loads(cld) if cld else {}
+                            family_id = cld.get("family_id", "")
                             if not client_name:
-                                client_name = p.get("name", "")
-            except Exception as e:
-                print(f"[Archive] Registry lookup warning: {e}")
+                                client_name = cld.get("name", "")
+                except Exception as e:
+                    _logger.warning("archive_zoom_transcript: PG registry lookup failed: %s", e)
+            if coach_name == "Coach":
+                try:
+                    registry_path = DATA_DIR / "registry.json"
+                    if not registry_path.exists():
+                        registry_path = DATA_DIR / "user_registry.json"
+                    if registry_path.exists():
+                        with open(registry_path, 'r') as f:
+                            registry = json.load(f)
+                        for _, v in registry.items():
+                            p = v.get("profile", {})
+                            if p.get("hardware_id") == coach_id:
+                                coach_name = p.get("name", "Coach")
+                                break
+                            if not family_id and p.get("hardware_id") == client_id:
+                                family_id = p.get("family_id", "")
+                                if not client_name:
+                                    client_name = p.get("name", "")
+                except Exception as e:
+                    _logger.warning("archive_zoom_transcript: JSON registry lookup failed: %s", e)
             
             # Run metrics analysis (synchronous)
             analysis_result = _classroom_analyzer.analyze_transcript(
@@ -972,8 +1069,8 @@ async def archive_zoom_transcript(
         except Exception as e:
             target["zoom_meeting_delete_error"] = str(e)
 
-    save_json(DATA_DIR / "sessions.json", sessions)
-    
+    await _save_session_dual(request, target, sessions)
+
     return {
         "ok": True,
         "session": target,
@@ -988,10 +1085,10 @@ async def archive_zoom_transcript(
     }
 
 @router.put("/{session_id}")
-async def update_session(session_id: str, req: UpdateSessionRequest, current_user: str = Depends(get_current_user)):
+async def update_session(session_id: str, req: UpdateSessionRequest, request: Request, current_user: str = Depends(get_current_user_id)):
     """Update session details. Requires authentication; user must be the coach."""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
-    
+    sessions = await _load_sessions_pf(request)
+
     for s in sessions:
         if s.get("session_id") == session_id:
             if current_user != s.get("coach_id"):
@@ -1001,39 +1098,43 @@ async def update_session(session_id: str, req: UpdateSessionRequest, current_use
             if req.topics_covered: s["topics_covered"] = req.topics_covered
             if req.homework_assigned: s["homework_assigned"] = req.homework_assigned
             s["updated_at"] = str(datetime.now())
-            save_json(DATA_DIR / "sessions.json", sessions)
+            await _save_session_dual(request, s, sessions)
             return {"session": s}
-    
+
     raise HTTPException(404, "Session not found")
 
 @router.delete("/{session_id}")
-async def cancel_session(session_id: str, current_user: str = Depends(get_current_user), reason: str = "", hard_delete: bool = False):
+async def cancel_session(session_id: str, request: Request, current_user: str = Depends(get_current_user_id), reason: str = "", hard_delete: bool = False):
     """Cancel or delete a session. Requires authentication; user must be a participant.
-    
+
     Args:
         session_id: The session ID to cancel/delete
         reason: Optional cancellation reason
         hard_delete: If True, permanently removes the session. If False, just marks as cancelled.
     """
-    sessions = load_json(DATA_DIR / "sessions.json", [])
-    
+    sessions = await _load_sessions_pf(request)
+
     for i, s in enumerate(sessions):
         if s.get("session_id") == session_id:
             if current_user not in (s.get("client_id"), s.get("coach_id")):
                 raise HTTPException(403, "Access denied: you are not a participant in this session")
             if hard_delete:
-                # Permanently remove the session
                 deleted_session = sessions.pop(i)
+                db = _get_db(request)
+                if db:
+                    try:
+                        await delete_session_pg(db, session_id)
+                    except Exception as e:
+                        _logger.warning("cancel_session: PG delete failed: %s", e)
                 save_json(DATA_DIR / "sessions.json", sessions)
                 return {"message": "Session permanently deleted", "session": deleted_session}
             else:
-                # Just mark as cancelled
                 s["status"] = "cancelled"
                 s["cancellation_reason"] = reason
                 s["cancelled_at"] = str(datetime.now())
-                save_json(DATA_DIR / "sessions.json", sessions)
+                await _save_session_dual(request, s, sessions)
                 return {"message": "Session cancelled", "session": s}
-    
+
     raise HTTPException(404, "Session not found")
 
 # Coach Availability
@@ -1062,14 +1163,12 @@ async def get_coach_availability(coach_id: str):
     return {"availability": availability}
 
 @router.get("/available-slots/{coach_id}")
-async def get_available_slots(coach_id: str, date: str):
+async def get_available_slots(coach_id: str, date: str, request: Request):
     """Get available time slots for a specific date"""
-    # Load availability
     availability_file = DATA_DIR / "Vaults" / "Coaches" / coach_id / "availability.json"
     availability = load_json(availability_file, {"slots": []})
-    
-    # Load existing sessions
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+
+    sessions = await _load_sessions_pf(request)
     
     # Parse date
     try:
@@ -1129,9 +1228,9 @@ async def get_available_slots(coach_id: str, date: str):
 # Analytics
 
 @router.get("/stats/coach/{coach_id}")
-async def get_coach_stats(coach_id: str):
+async def get_coach_stats(coach_id: str, request: Request):
     """Get session statistics for a coach"""
-    sessions = load_json(DATA_DIR / "sessions.json", [])
+    sessions = await _load_sessions_pf(request)
     coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
     
     completed = [s for s in coach_sessions if s.get("status") == "completed"]
@@ -1229,4 +1328,100 @@ async def upload_classroom_video(
         "filename": file.filename,
         "file_size": len(content),
         "message": "Video uploaded successfully. Ready for analysis.",
+    }
+
+
+@router.post("/api/classroom/auto-upload")
+async def auto_upload_recording(
+    request: Request,
+    session_id: str = Form(""),
+    coach_id: str = Form(""),
+    client_id: str = Form(""),
+    recording_url: str = Form(""),
+):
+    """Little Nate auto-uploads a session recording for Classroom analysis."""
+    db = getattr(request.app.state, "db_pool", None)
+
+    video_id = f"AUTO_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(4).upper()}"
+
+    classroom_sessions_file = DATA_DIR / "classroom_sessions.json"
+    sessions = load_json(classroom_sessions_file, [])
+
+    auto_session = {
+        "session_id": video_id,
+        "coach_id": coach_id,
+        "client_id": client_id,
+        "source": "auto_recording",
+        "recording_url": recording_url,
+        "status": "processing",
+        "created_at": str(datetime.now()),
+    }
+
+    sessions.append(auto_session)
+    save_json(classroom_sessions_file, sessions)
+
+    if db:
+        try:
+            async with db.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO coach_folder_files (folder_id, filename, file_type, storage_url, uploaded_by, metadata)
+                       SELECT id, $2, 'recording', $3, $4, $5::jsonb
+                       FROM coach_folders WHERE coach_id = $4 AND entity_id = $6 AND folder_type = 'client'
+                       LIMIT 1""",
+                    video_id, f"Session Recording {video_id}", recording_url, coach_id,
+                    json.dumps({"auto_uploaded": True, "session_id": session_id}),
+                    client_id,
+                )
+        except Exception as e:
+            _logger.warning("auto_upload_recording: folder file insert failed: %s", e)
+
+    return {"video_id": video_id, "status": "processing"}
+
+
+@router.get("/api/classroom/session/{session_id}/dojo-feedback")
+async def get_dojo_feedback(session_id: str, request: Request):
+    """Get DOJO-specific feedback for a classroom session recording."""
+    db = getattr(request.app.state, "db_pool", None)
+
+    classroom_sessions_file = DATA_DIR / "classroom_sessions.json"
+    sessions = load_json(classroom_sessions_file, [])
+
+    session_data = None
+    for s in sessions:
+        if s.get("session_id") == session_id:
+            session_data = s
+            break
+
+    if not session_data:
+        raise HTTPException(404, "Session not found")
+
+    coach_id = session_data.get("coach_id", "")
+    dojo_feedback = []
+
+    if db and coach_id:
+        try:
+            async with db.acquire() as conn:
+                coach_row = await conn.fetchrow(
+                    "SELECT profile_data FROM users WHERE hardware_id = $1 AND role = 'COACH'", coach_id
+                )
+                if coach_row:
+                    profile = coach_row["profile_data"]
+                    if isinstance(profile, str):
+                        profile = json.loads(profile)
+                    subs = profile.get("dojo_subscriptions", {})
+                    for dojo_key, sub in subs.items():
+                        if isinstance(sub, dict) and sub.get("status") == "active":
+                            dojo_feedback.append({
+                                "dojo": dojo_key,
+                                "status": "pending_analysis",
+                                "feedback": None,
+                                "rubric_dimensions": [],
+                            })
+        except Exception as e:
+            _logger.warning("get_dojo_feedback: profile query failed: %s", e)
+
+    return {
+        "session_id": session_id,
+        "dojo_feedback": dojo_feedback,
+        "status": session_data.get("status", "unknown"),
     }

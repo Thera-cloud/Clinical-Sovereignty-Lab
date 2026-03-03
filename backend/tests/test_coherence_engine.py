@@ -68,18 +68,18 @@ class TestCoherenceEngineInit:
 
 class TestMeasureIndividual:
     @pytest.mark.asyncio
-    async def test_no_data_returns_low_score(self):
-        """With no metrics, quiz, or sessions, score should be baseline."""
+    async def test_no_data_raises_insufficient(self):
+        """With no metrics, quiz, or sessions, engine raises InsufficientDataException."""
+        from app.services.exceptions import InsufficientDataException
         pool = FakePool(FakeConnection(fetch_results=[]))
         engine = CoherenceEngine(db_pool=pool)
 
         user_id = uuid4()
-        measurement = await engine.measure_individual(user_id)
+        with pytest.raises(InsufficientDataException) as exc_info:
+            await engine.measure_individual(user_id)
 
-        assert isinstance(measurement, CoherenceMeasurement)
-        assert measurement.layer == CoherenceLayer.INDIVIDUAL
-        assert 0.0 <= measurement.score <= 1.0
-        assert measurement.sample_size == 0
+        assert exc_info.value.details["layer"] == "individual"
+        assert exc_info.value.details["available"] == 0
 
     @pytest.mark.asyncio
     async def test_with_metrics_data(self):

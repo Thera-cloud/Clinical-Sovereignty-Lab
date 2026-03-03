@@ -375,6 +375,15 @@ class DetonationChamber:
             for tld in BLOCKED_TLDS:
                 if domain.endswith(tld):
                     return True
+            if domain in ("localhost", "127.0.0.1", "0.0.0.0", "::1", ""):
+                return True
+            import ipaddress
+            try:
+                addr = ipaddress.ip_address(domain)
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                    return True
+            except ValueError:
+                pass
         except Exception:
             pass
         return False

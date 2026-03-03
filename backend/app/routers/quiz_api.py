@@ -1,15 +1,50 @@
 """
 LITTLE NATE — Quiz API
 CRUD operations for quizzes and quiz questions.
+Client-facing quiz submission and completion tracking.
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.services.api_server import get_current_user as _require_auth
 from pydantic import BaseModel
 from typing import Optional, List, Any
 from datetime import datetime
 import json
+import logging
+import uuid as _uuid
 
-router = APIRouter(prefix="/api/quizzes", tags=["quizzes"])
+_log = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/quizzes", tags=["quizzes"], dependencies=[Depends(_require_auth)])
+
+_CLIENT_SUBMISSIONS_TABLE_ENSURED = False
+
+async def _ensure_submissions_table(pool):
+    global _CLIENT_SUBMISSIONS_TABLE_ENSURED
+    if _CLIENT_SUBMISSIONS_TABLE_ENSURED:
+        return
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS quiz_client_submissions (
+                    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    user_id TEXT NOT NULL,
+                    quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+                    answers JSONB NOT NULL DEFAULT '{}',
+                    score NUMERIC,
+                    insights TEXT,
+                    completed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (user_id, quiz_id)
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_quiz_client_sub_user
+                ON quiz_client_submissions(user_id, completed_at DESC)
+            """)
+        _CLIENT_SUBMISSIONS_TABLE_ENSURED = True
+    except Exception as e:
+        _log.warning("quiz_client_submissions table ensure failed: %s", e)
 
 
 # =============================================================================
@@ -74,6 +109,106 @@ async def list_quizzes(request: Request):
                ORDER BY q.quiz_order"""
         )
         return [dict(r) for r in rows]
+
+
+@router.get("/health")
+async def quiz_health(request: Request):
+    """Health check for quiz subsystem."""
+    pool = request.app.state.db_pool
+    try:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM quizzes")
+        return {"status": "ok", "quiz_count": count}
+    except Exception as e:
+        _log.warning("quiz_health: %s", e)
+        return {"status": "degraded", "error": str(e)}
+
+
+@router.get("/completions/{user_id}")
+async def get_completions(request: Request, user_id: str):
+    """Return list of quiz IDs this user has completed with dimension scores."""
+    pool = request.app.state.db_pool
+    await _ensure_submissions_table(pool)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT s.quiz_id::text, s.score, s.insights, s.answers, s.completed_at,
+                      q.title as quiz_title, q.dimension
+               FROM quiz_client_submissions s
+               JOIN quizzes q ON q.id = s.quiz_id
+               WHERE s.user_id = $1 ORDER BY s.completed_at DESC""",
+            user_id,
+        )
+    results = []
+    for r in rows:
+        answers = r["answers"]
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except Exception:
+                answers = {}
+        dim_scores = answers.get("_dimension_scores", {}) if isinstance(answers, dict) else {}
+        results.append({
+            "quiz_id": r["quiz_id"],
+            "quiz_title": r["quiz_title"],
+            "dimension": r["dimension"],
+            "score": float(r["score"]) if r["score"] is not None else None,
+            "dimension_scores": dim_scores,
+            "insights": r["insights"],
+            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
+        })
+    return results
+
+
+@router.get("/assessment-context/{user_id}")
+async def get_assessment_context(request: Request, user_id: str):
+    """Return assessment summary for AI conversation context injection."""
+    pool = request.app.state.db_pool
+    await _ensure_submissions_table(pool)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT s.score, s.insights, s.answers, s.completed_at,
+                      q.title as quiz_title, q.dimension
+               FROM quiz_client_submissions s
+               JOIN quizzes q ON q.id = s.quiz_id
+               WHERE s.user_id = $1 ORDER BY s.completed_at DESC
+               LIMIT 10""",
+            user_id,
+        )
+
+    if not rows:
+        return {"has_assessments": False, "context": ""}
+
+    parts = []
+    for r in rows:
+        answers = r["answers"]
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except Exception:
+                answers = {}
+        dim_scores = answers.get("_dimension_scores", {}) if isinstance(answers, dict) else {}
+        score = float(r["score"]) if r["score"] is not None else None
+        title = r["quiz_title"] or "Assessment"
+        completed = r["completed_at"].strftime("%b %d, %Y") if r["completed_at"] else "Unknown date"
+
+        dim_parts = []
+        for dim, val in dim_scores.items():
+            dim_parts.append(f"{dim.replace('_', ' ').title()}: {val}%")
+
+        line = f"- {title} (completed {completed}): Overall {score}%"
+        if dim_parts:
+            line += f" | Dimensions: {', '.join(dim_parts)}"
+        if r["insights"]:
+            line += f" | Insights: {r['insights']}"
+        parts.append(line)
+
+    return {
+        "has_assessments": True,
+        "assessment_count": len(rows),
+        "context": "\n".join(parts),
+    }
 
 
 @router.get("/{quiz_id}")
@@ -156,6 +291,125 @@ async def delete_quiz(request: Request, quiz_id: str):
         if result == "DELETE 0":
             raise HTTPException(status_code=404, detail="Quiz not found")
         return {"status": "deleted", "id": quiz_id}
+
+
+# =============================================================================
+# CLIENT QUIZ SUBMISSION & COMPLETION
+# =============================================================================
+
+class QuizSubmitBody(BaseModel):
+    quiz_id: str
+    user_id: str
+    answers: dict
+
+
+@router.post("/{quiz_id}/submit")
+async def submit_quiz(request: Request, quiz_id: str, body: QuizSubmitBody):
+    """Submit client answers for a quiz and receive dimension-based scores."""
+    pool = request.app.state.db_pool
+    await _ensure_submissions_table(pool)
+
+    async with pool.acquire() as conn:
+        quiz = await conn.fetchrow("SELECT id, title, dimension FROM quizzes WHERE id = $1", quiz_id)
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+
+        questions = await conn.fetch(
+            """SELECT id::text, question_order, question_type, dimension_tag,
+                      scale_min, scale_max, options
+               FROM quiz_questions WHERE quiz_id = $1 ORDER BY question_order""",
+            quiz_id,
+        )
+
+        q_count = len(questions)
+        answered = len(body.answers)
+        dimension_scores: dict[str, list[float]] = {}
+        q_map = {str(q["question_order"]): q for q in questions}
+
+        for key, answer in body.answers.items():
+            q = q_map.get(str(key))
+            if not q:
+                continue
+            dim = q["dimension_tag"] or "general"
+            qtype = q["question_type"] or "scale"
+
+            if qtype == "scale" and answer is not None:
+                try:
+                    val = float(answer)
+                    lo = q["scale_min"] or 1
+                    hi = q["scale_max"] or 10
+                    normalized = round(((val - lo) / max(hi - lo, 1)) * 100)
+                    dimension_scores.setdefault(dim, []).append(normalized)
+                except (ValueError, TypeError):
+                    pass
+            elif qtype in ("multiple_choice", "multi_select") and answer is not None:
+                opts = q["options"]
+                if isinstance(opts, str):
+                    try:
+                        opts = json.loads(opts)
+                    except Exception:
+                        opts = []
+                if isinstance(opts, list) and opts:
+                    n = len(opts)
+                    ans_val = str(answer)
+                    for idx, opt in enumerate(opts):
+                        opt_key = str(opt.get("value") or opt.get("id") or opt.get("text") or "")
+                        if opt_key == ans_val:
+                            normalized = round(((idx + 1) / n) * 100)
+                            dimension_scores.setdefault(dim, []).append(normalized)
+                            break
+
+        dim_averages = {}
+        for dim, vals in dimension_scores.items():
+            dim_averages[dim] = round(sum(vals) / len(vals)) if vals else 0
+
+        overall_score = round(sum(dim_averages.values()) / max(len(dim_averages), 1)) if dim_averages else 0
+
+        insight_parts = []
+        for dim, avg in sorted(dim_averages.items(), key=lambda x: x[1]):
+            label = dim.replace("_", " ").title()
+            if avg >= 70:
+                insight_parts.append(f"{label}: strong ({avg}%)")
+            elif avg >= 40:
+                insight_parts.append(f"{label}: developing ({avg}%)")
+            else:
+                insight_parts.append(f"{label}: area for growth ({avg}%)")
+        insights_text = "; ".join(insight_parts) if insight_parts else f"Completed {answered}/{q_count} questions."
+
+        sub_id = _uuid.uuid4()
+        submission_data = json.dumps({
+            **body.answers,
+            "_dimension_scores": dim_averages,
+            "_overall_score": overall_score,
+        })
+        await conn.execute(
+            """INSERT INTO quiz_client_submissions (id, user_id, quiz_id, answers, score, insights)
+               VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+               ON CONFLICT (user_id, quiz_id) DO UPDATE
+               SET answers = EXCLUDED.answers, score = EXCLUDED.score,
+                   insights = EXCLUDED.insights, completed_at = NOW()""",
+            sub_id, body.user_id, quiz_id,
+            submission_data, overall_score, insights_text,
+        )
+
+        try:
+            await conn.execute(
+                """INSERT INTO skyeye_activity (platform, type, content, severity, created_at)
+                   VALUES ('assessment', 'assessment_completion', $1, 'info', NOW())""",
+                f"Assessment: {quiz['title']} by {body.user_id} — score {overall_score}% ({answered}/{q_count} answered)",
+            )
+        except Exception:
+            pass
+
+    return {
+        "status": "submitted",
+        "score": overall_score,
+        "dimension_scores": dim_averages,
+        "insights": insights_text,
+        "quiz_id": quiz_id,
+        "answered": answered,
+        "total_questions": q_count,
+    }
 
 
 # =============================================================================

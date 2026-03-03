@@ -11,15 +11,48 @@ from __future__ import annotations
 from typing import Optional
 from uuid import UUID
 
+import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user
+from app.auth import get_current_user_id
 from app.services.legacy_vault import LegacyVault
 from app.services.exceptions import ConsentWithdrawnException, LegacyVaultException
 
+logger = logging.getLogger("routers.legacy_vault")
 
 router = APIRouter(prefix="/api/legacy-vault", tags=["Legacy Vault"])
+
+_VAULT_TIERS = {"TOP_TIER", "SOVEREIGN_CIRCLE", "STANDARD", "INNER_CHAMBER"}
+
+
+async def _require_vault_tier(
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> str:
+    """Legacy Vault requires Inner Chamber (STANDARD) or higher."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if pool:
+        try:
+            row = await pool.fetchrow(
+                "SELECT tier, profile_data->>'subscription_plan' AS plan "
+                "FROM users WHERE hardware_id = $1 AND deleted_at IS NULL LIMIT 1",
+                user_id,
+            )
+            if row:
+                tier = (row["tier"] or row["plan"] or "").upper()
+                if tier in _VAULT_TIERS:
+                    return user_id
+                raise HTTPException(
+                    403,
+                    f"Legacy Vault requires Inner Chamber or higher. Current: {tier or 'TRIAL'}",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("_require_vault_tier PG check failed: %s", e)
+    return user_id
 
 
 # =============================================================================
@@ -74,7 +107,7 @@ async def _verify_family_membership(request: Request, family_id: UUID, current_u
 async def check_consent_status(
     request: Request,
     family_id: UUID,
-    current_user: str = Depends(get_current_user),
+    current_user: str = Depends(_require_vault_tier),
 ) -> dict:
     """
     Check consent status for a family.
@@ -94,7 +127,7 @@ async def grant_consent(
     request: Request,
     family_id: UUID,
     body: ConsentUserIdBody,
-    current_user: str = Depends(get_current_user),
+    current_user: str = Depends(_require_vault_tier),
 ) -> dict:
     """
     Grant consent for transgenerational analysis.
@@ -118,7 +151,7 @@ async def withdraw_consent(
     request: Request,
     family_id: UUID,
     body: ConsentUserIdBody,
-    current_user: str = Depends(get_current_user),
+    current_user: str = Depends(_require_vault_tier),
 ) -> dict:
     """
     Withdraw consent for transgenerational analysis.
@@ -142,7 +175,7 @@ async def withdraw_consent(
 async def list_vault_entries(
     request: Request,
     family_id: UUID,
-    current_user: str = Depends(get_current_user),
+    current_user: str = Depends(_require_vault_tier),
     entry_type: Optional[str] = None,
 ) -> list:
     """
@@ -164,7 +197,7 @@ async def list_vault_entries(
 async def get_inheritance_map(
     request: Request,
     family_id: UUID,
-    current_user: str = Depends(get_current_user),
+    current_user: str = Depends(_require_vault_tier),
 ) -> dict:
     """
     Get or create the emotional inheritance map for a family.

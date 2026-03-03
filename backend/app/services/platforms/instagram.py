@@ -8,7 +8,7 @@ Auth: OAuth 2.0 via Facebook Login (shared with Facebook adapter)
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import httpx
@@ -23,9 +23,10 @@ from app.services.skyeye_platform_base import (
 
 logger = logging.getLogger("skyeye.platforms.instagram")
 
-META_AUTH_URL = "https://www.facebook.com/v19.0/dialog/oauth"
-META_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token"
-GRAPH_API_BASE = "https://graph.facebook.com/v19.0"
+META_API_VERSION = "v21.0"
+META_AUTH_URL = f"https://www.facebook.com/{META_API_VERSION}/dialog/oauth"
+META_TOKEN_URL = f"https://graph.facebook.com/{META_API_VERSION}/oauth/access_token"
+GRAPH_API_BASE = f"https://graph.facebook.com/{META_API_VERSION}"
 
 
 class InstagramAdapter(SocialPlatformAdapter):
@@ -89,7 +90,9 @@ class InstagramAdapter(SocialPlatformAdapter):
             return False
 
     async def refresh_token(self) -> bool:
-        """Refresh the long-lived Instagram token."""
+        """Refresh the long-lived Instagram token via fb_exchange_token.
+        This requires the CURRENT token to still be valid; if it's already
+        dead the exchange is futile and we skip straight to re-auth required."""
         if not self._access_token:
             tokens = await self._load_tokens()
             if tokens:
@@ -99,6 +102,22 @@ class InstagramAdapter(SocialPlatformAdapter):
             self._connected = False
             await self._update_token_status("expired", "No token to refresh")
             return False
+
+        # fb_exchange_token requires a valid token — verify first
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as probe:
+                check = await probe.get(
+                    f"{GRAPH_API_BASE}/me",
+                    params={"fields": "id", "access_token": self._access_token},
+                )
+                if check.status_code in (400, 401, 403):
+                    self._last_error = "Token invalid — full re-authorization required"
+                    self._connected = False
+                    await self._update_token_status("expired", self._last_error)
+                    logger.warning("Instagram: Token is dead, fb_exchange_token would fail — skipping")
+                    return False
+        except Exception:
+            pass  # network hiccup — still attempt the exchange
 
         try:
             async with httpx.AsyncClient() as client:
@@ -115,7 +134,7 @@ class InstagramAdapter(SocialPlatformAdapter):
 
                 if resp.status_code == 200 and "access_token" in data:
                     self._access_token = data["access_token"]
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 5184000)  # ~60 days
                     )
                     await self._save_tokens(
@@ -138,14 +157,15 @@ class InstagramAdapter(SocialPlatformAdapter):
             return False
 
     async def get_oauth_url(self, redirect_uri: str) -> str:
-        """Generate Meta OAuth URL for Instagram access."""
+        """Generate Meta OAuth URL for Instagram access via Facebook Login for Business."""
         import urllib.parse
         params = {
             "client_id": self.app_id,
             "redirect_uri": redirect_uri,
-            "scope": "instagram_basic,instagram_content_publish,instagram_manage_comments,instagram_manage_insights,pages_show_list,pages_read_engagement",
+            "config_id": "1458216979214040",
             "response_type": "code",
             "state": "skyeye_instagram",
+            "override_default_response_type": "true",
         }
         return f"{META_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
@@ -206,7 +226,7 @@ class InstagramAdapter(SocialPlatformAdapter):
                         ig_user_id = ig_biz.get("id")
                         break
 
-                expiry = datetime.utcnow() + timedelta(
+                expiry = datetime.now(timezone.utc) + timedelta(
                     seconds=ll_data.get("expires_in", 5184000)
                 )
                 await self._save_tokens(
@@ -534,6 +554,27 @@ class InstagramAdapter(SocialPlatformAdapter):
                     )
         except Exception as e:
             return ModerateResult(success=False, error=str(e), action=ActionResult.FAILED)
+
+    # ── Notification / Engagement Discovery ────────────────────────
+
+    async def get_follower_count(self) -> int:
+        """Get current follower count for delta tracking."""
+        if not self._connected or not self._ig_user_id:
+            return 0
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{GRAPH_API_BASE}/{self._ig_user_id}",
+                    params={
+                        "fields": "followers_count",
+                        "access_token": self._access_token,
+                    }
+                )
+                if resp.status_code == 200:
+                    return resp.json().get("followers_count", 0)
+        except Exception as e:
+            logger.error(f"Instagram get_follower_count error: {e}")
+        return 0
 
     # ── Analytics ───────────────────────────────────────────────────
 

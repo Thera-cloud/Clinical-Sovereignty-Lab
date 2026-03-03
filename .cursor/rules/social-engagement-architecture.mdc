@@ -1,0 +1,116 @@
+---
+description: Architecture for Little Nate's social media engagement pipeline — notification detection, reaction processing, funnel routing, and marketing agents.
+alwaysApply: true
+---
+
+# Social Engagement Architecture
+
+## Overview
+
+Little Nate's social engagement operates as a two-layer system:
+
+1. **Notification Observer** (background agent, every 30min) — Polls platform APIs for likes, reposts, new followers, and reactions. Stores discoveries in `skyeye_notifications`. Captures per-post analytics in `skyeye_post_analytics`. Resolves numeric user IDs to @usernames.
+
+2. **Session Engine React Phase** (runs during SkyEye sessions) — Processes unprocessed notifications: thanks new followers via DM, reciprocal-likes high-value engagers, and upserts all actors into `skyeye_social_memory` so the Funnel Router can score and route them.
+
+## Pipeline Flow
+
+```
+Notification Observer (30min poll)
+    ↓ stores to
+skyeye_notifications + skyeye_post_analytics
+    ↓ consumed by
+Session Engine: Browse → Sync → Observe → React → Engage → Outreach → Route → Create → Post → Strategize
+    ↓ scores via
+FunnelRouter.score_engagement (notification_count weight = 0.15)
+    ↓ routes to
+funnel_routing_log → Quiz → Drip → Golden Ticket → Conversion
+```
+
+## Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `skyeye_notifications` | Engagement events detected by observer (likes, reposts, follows, reactions) |
+| `skyeye_follower_snapshots` | Follower count over time for delta detection |
+| `skyeye_post_analytics` | Per-post metrics (likes, reposts, comments, impressions) per day |
+| `skyeye_social_memory` | Per-user engagement history (interaction_count, interests, tone_notes) |
+| `skyeye_social_interactions` | Individual interaction log (replies, DMs, follows) |
+| `funnel_routing_log` | Funnel progression per social user |
+
+## Platform Adapter Methods
+
+### X/Twitter (`x_twitter.py`)
+
+| Method | API Endpoint | Used By |
+|--------|-------------|---------|
+| `get_liking_users(tweet_id)` | `GET /2/tweets/{id}/liking_users` | Notification Observer |
+| `get_retweeted_by(tweet_id)` | `GET /2/tweets/{id}/retweeted_by` | Notification Observer |
+| `get_new_followers(limit)` | `GET /2/users/{id}/followers` | Notification Observer |
+| `resolve_user_id(user_id)` | `GET /2/users/{id}` | Notification Observer |
+| `get_mentions(since)` | `GET /2/users/{id}/mentions` (with user expansion) | Session Engine Observe |
+
+### LinkedIn (`linkedin.py`)
+
+| Method | API Endpoint | Used By |
+|--------|-------------|---------|
+| `get_post_reactions(post_id)` | `GET /rest/socialActions/{id}/likes` | Notification Observer |
+| `get_follower_count()` | `GET /rest/networkSizes/{urn}` | Notification Observer |
+
+### Instagram (`instagram.py`)
+
+| Method | API Endpoint | Used By |
+|--------|-------------|---------|
+| `get_follower_count()` | `GET /{ig_user_id}?fields=followers_count` | Notification Observer |
+| `get_comments(post_id)` | (inherited from base) | Notification Observer |
+
+### Facebook (`facebook.py`)
+
+| Method | API Endpoint | Used By |
+|--------|-------------|---------|
+| `get_follower_count()` | `GET /{page_id}?fields=followers_count,fan_count` | Notification Observer |
+| `get_post_reactions(post_id)` | `GET /{post_id}/reactions` | Notification Observer |
+
+### YouTube (`youtube.py`)
+
+| Method | API Endpoint | Used By |
+|--------|-------------|---------|
+| `get_follower_count()` | `GET /channels?part=statistics&id={channel_id}` | Notification Observer |
+| `get_comments(video_id)` | `GET /commentThreads` | Notification Observer |
+
+## Big Nate Chat Modes
+
+### Marketing Mode (enhanced)
+
+New action patterns: `post_analytics`, `engagement_summary`, `optimal_posting_time`, `top_engaged`, `platform_comparison`. All are read-only (no confirmation required).
+
+### Campaign Manager Mode (new)
+
+Triggered by: "campaign status", "campaign report", "episode performance", "pause campaign", "extend campaign".
+
+Actions: `campaign_status`, `campaign_report`, `pause_campaign`, `extend_campaign`, `launch_campaign`.
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/marketing/post-analytics?days=7&platform=x` | GET | Per-post performance metrics |
+| `/api/marketing/notifications?limit=50&processed=all` | GET | Engagement notifications feed |
+
+## Rules
+
+1. **Never remove methods from platform adapters** that the Notification Observer depends on. If a platform API changes, update the method — don't delete it.
+
+2. **Deduplication is critical** — `skyeye_notifications` has a unique constraint on `(platform, notification_type, COALESCE(post_id, ''), actor_handle)`. All inserts must use `ON CONFLICT DO NOTHING`.
+
+3. **React phase rate limits are sacred** — Max 5 DMs and 10 reciprocal likes per session per platform. These prevent Little Nate from appearing spammy.
+
+4. **Every notification must update social memory** — The React phase upserts `skyeye_social_memory` for every notification, not just the ones it acts on. This feeds the funnel.
+
+5. **Username resolution** — X mentions now include `expansions=author_id&user.fields=username` so `Mention.author_handle` contains the @username, not a numeric ID. The observer also resolves stale numeric IDs in social memory.
+
+6. **Follower delta tracking** — LinkedIn doesn't expose a "new followers" list. The observer stores `skyeye_follower_snapshots` and logs when count increases. X returns followers sorted newest-first, so the observer diffs against known handles.
+
+7. **Post analytics are daily snapshots** — The unique index on `(platform, post_id, captured_at::date)` means each post gets one row per day. Updates within the same day use `ON CONFLICT DO UPDATE`.
+
+8. **Migration 060** must be applied — Tables `skyeye_notifications`, `skyeye_follower_snapshots`, and `skyeye_post_analytics` are created by `backend/migrations/060_social_engagement.sql`.

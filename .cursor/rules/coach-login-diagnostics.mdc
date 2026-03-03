@@ -1,0 +1,39 @@
+---
+description: Coach login diagnostic checklist and dual-account awareness
+alwaysApply: true
+---
+
+# Coach Login Diagnostics
+
+When a coach reports "can't log in," follow this checklist **in order**. Each step rules out a layer before moving deeper.
+
+## Diagnostic Checklist
+
+| Step | Check | Command | Healthy |
+|---|---|---|---|
+| 1 | WebSocket bridge reachable? | `tail /var/log/nginx/error.log \| grep 8765` | No recent `Connection refused` |
+| 2 | Login attempt reached bridge? | `docker logs nate_bridge --since 10m \| grep login_request` | At least 1 `login_request` |
+| 3 | GUEST closes without login? | `docker logs nate_bridge --since 10m \| grep 'GUEST'` | If yes → stale cache (Safari issue) |
+| 4 | Password hash valid? | `SELECT username, length(password_hash), password_hash LIKE '%:%' FROM users WHERE username = $1` | 97 chars, contains `:` |
+| 5 | Account blocking status? | `SELECT subscription_status, profile_data->>'force_password_reset', profile_data->>'account_status' FROM users WHERE username = $1` | ACTIVE, no force_reset, no FROZEN |
+| 6 | Consent version current? | `SELECT profile_data->>'consent_version' FROM users WHERE username = $1` | Must match `REQUIRED_CONSENT_VERSION` (v13.0_2026) |
+| 7 | Dual accounts? | `SELECT username, role FROM users WHERE LOWER(username) = LOWER($1)` | If >1 row, `expected_role` routing matters |
+| 8 | Device/browser? | Ask the user | Chrome works; Safari may need cache clear |
+
+## Dual CLIENT+COACH Accounts
+
+Three users have both CLIENT and COACH entries with **different passwords**:
+
+- `freeindeed` (COACH) / `Freeindeed` (CLIENT)
+- `Wilsnaw` (COACH) / `wilsnaw` (CLIENT)
+- `sweet2noend` (COACH) / `sweet2noend@yahoo.com` (CLIENT)
+
+The `authenticate_user` function handles these correctly via the `expected_role` parameter — it prefers the entry whose role matches. Any new auth code (login dialogs, consent screens, password reset) **must always pass `expected_role`** or the wrong account may be selected.
+
+## ReConsentScreen
+
+The `ReConsentScreen._send()` must include `expected_role` derived from `widget.profile['role']`. Without it, dual-account users get routed to the wrong entry. After consent acceptance, navigate directly to the correct dashboard — never send the user back to the lobby for a redundant re-login.
+
+## Bridge Restart Blackout
+
+`docker restart nate_bridge` causes a 15–30s WebSocket blackout. During this window, all connections get `Connection refused` (nginx error log). The Flutter app retries with exponential backoff (max 5 attempts). Avoid restarting during peak usage hours. After restart, verify zero new `Connection refused` entries in `/var/log/nginx/error.log`.

@@ -1,280 +1,352 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Privacy Policy — Sovereign Sanctuary</title>
-  <style>
-    * {
-      box-sizing: border-box;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      background: #050505;
-      color: #F5F5F5;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 16px;
-      line-height: 1.6;
-    }
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 24px 20px;
-    }
-    header {
-      text-align: center;
-      margin-bottom: 32px;
-      padding-bottom: 24px;
-      border-bottom: 1px solid #1A1A1A;
-    }
-    .logo {
-      font-family: Georgia, serif;
-      font-size: 14px;
-      letter-spacing: 4px;
-      color: #C9A962;
-      text-transform: uppercase;
-      margin-bottom: 0;
-    }
-    h1 {
-      font-family: Georgia, serif;
-      font-size: 2rem;
-      font-weight: 400;
-      color: #F5F5F5;
-      margin: 32px 0 12px;
-    }
-    .subtitle {
-      font-size: 14px;
-      color: #9A9A9A;
-      margin: 0;
-    }
-    .card {
-      background: #111111;
-      border: 1px solid #1A1A1A;
-      border-radius: 8px;
-      padding: 32px;
-      margin-bottom: 24px;
-    }
-    .card:last-of-type {
-      margin-bottom: 0;
-    }
-    h2 {
-      font-family: Georgia, serif;
-      font-size: 1.5rem;
-      font-weight: 400;
-      color: #E8D5A3;
-      margin: 0 0 24px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #1A1A1A;
-    }
-    h2:not(:first-child) {
-      margin-top: 32px;
-    }
-    h3 {
-      font-family: Georgia, serif;
-      font-size: 1.125rem;
-      font-weight: 500;
-      color: #F5F5F5;
-      margin: 24px 0 12px;
-    }
-    h3:first-of-type {
-      margin-top: 0;
-    }
-    p {
-      margin: 0 0 12px;
-      color: #F5F5F5;
-    }
-    p:last-child {
-      margin-bottom: 0;
-    }
-    ul {
-      margin: 0 0 12px;
-      padding-left: 24px;
-    }
-    li {
-      margin-bottom: 6px;
-      color: #F5F5F5;
-    }
-    strong {
-      color: #E8D5A3;
-      font-weight: 600;
-    }
-    a {
-      color: #C9A962;
-      text-decoration: none;
-    }
-    a:hover {
-      color: #E8D5A3;
-      text-decoration: underline;
-    }
-    footer {
-      margin-top: 48px;
-      padding-top: 24px;
-      border-top: 1px solid #1A1A1A;
-      text-align: center;
-      font-size: 14px;
-      color: #9A9A9A;
-    }
-    footer a {
-      color: #C9A962;
-    }
-    @media (max-width: 640px) {
-      .container {
-        padding: 16px;
-      }
-      .card {
-        padding: 20px;
-      }
-      h1 {
-        font-size: 1.5rem;
-        margin-top: 24px;
-      }
-      .logo {
-        font-size: 12px;
-        letter-spacing: 3px;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy | Sovereign Sanctuary</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-void: #050505;
+            --bg-chamber: #0A0A0A;
+            --gold: #C9A962;
+            --gold-bright: #E8D5A3;
+            --gold-dim: rgba(201, 169, 98, 0.15);
+            --text-body: #CCCCCC;
+            --text-muted: #888888;
+            --font-heading: 'Cormorant Garamond', Georgia, serif;
+            --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            --crisis-red: #EF4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-void);
+            color: var(--text-body);
+            line-height: 1.7;
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 780px;
+            margin: 0 auto;
+            padding: 24px 20px 64px;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            padding: 48px 0 40px;
+            border-bottom: 1px solid var(--gold-dim);
+        }
+
+        .brand {
+            font-family: var(--font-heading);
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: 0.2em;
+            color: var(--gold);
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .page-title {
+            font-family: var(--font-heading);
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--gold-bright);
+        }
+
+        .consent-version {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--gold);
+            margin-top: 12px;
+        }
+
+        /* Content sections */
+        .content-block {
+            background: var(--bg-chamber);
+            border-radius: 8px;
+            padding: 28px 32px;
+            margin-bottom: 24px;
+            border: 1px solid rgba(201, 169, 98, 0.08);
+        }
+
+        h2 {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--gold);
+            margin-bottom: 20px;
+            letter-spacing: 0.05em;
+        }
+
+        h3 {
+            font-family: var(--font-body);
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-body);
+            margin: 20px 0 10px;
+        }
+
+        h3:first-of-type { margin-top: 0; }
+
+        p, li {
+            margin-bottom: 12px;
+            font-size: 0.9375rem;
+        }
+
+        .section-number {
+            display: inline-block;
+            min-width: 2.5em;
+            color: var(--gold-dim);
+        }
+
+        .highlight-box {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+            color: var(--crisis-red);
+            padding: 20px 24px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 500;
+        }
+
+        .highlight-box strong { display: block; margin-bottom: 8px; }
+
+        .contact-box {
+            background: var(--gold-dim);
+            border: 1px solid rgba(201, 169, 98, 0.3);
+            color: var(--gold);
+            padding: 24px 28px;
+            border-radius: 8px;
+            margin-top: 32px;
+            text-align: center;
+        }
+
+        .contact-box a {
+            color: var(--gold-bright);
+            text-decoration: none;
+        }
+
+        .contact-box a:hover { text-decoration: underline; }
+
+        .last-updated {
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            margin-top: 32px;
+            text-align: center;
+        }
+
+        /* Links */
+        a { color: var(--gold-bright); }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .container { padding: 16px 16px 48px; }
+            .content-block { padding: 20px 18px; }
+            .brand { font-size: 1.4rem; letter-spacing: 0.12em; }
+            .page-title { font-size: 1.5rem; }
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <p class="logo">SANCTUARY</p>
-      <h1>Privacy Policy</h1>
-      <p class="subtitle">Effective Date: February 10, 2026 | Consent Version: v13.0_2026</p>
-    </header>
+    <div class="container">
+        <header>
+            <div class="brand">SOVEREIGN SANCTUARY</div>
+            <div class="subtitle">Terms of Use, Privacy Policy, and Therapeutic Waiver</div>
+            <h1 class="page-title">Privacy Policy</h1>
+            <div class="consent-version">Consent Version: v13.0_2026</div>
+        </header>
 
-    <main class="card">
-      <h2>PART II — PRIVACY POLICY</h2>
+        <main>
+            <!-- PART I — TERMS OF USE -->
+            <section class="content-block">
+                <h2>PART I — TERMS OF USE</h2>
 
-      <h3>12. DATA WE COLLECT</h3>
-      <p>Sovereign Sanctuary collects and processes the following categories of data:</p>
+                <h3><span class="section-number">1.</span> Private Membership Association (1st Amendment)</h3>
+                <p>You acknowledge that Sovereign Sanctuary operates as a Private Membership Association under the protections of the First Amendment to the United States Constitution. All interactions within this platform — between you and Little Nate (the AI companion), between you and your assigned coach, and between family members in the Family Sanctuary — are private exercises of speech and association.</p>
 
-      <p><strong>a) Account Information</strong></p>
-      <ul>
-        <li>Name, email address, phone number, date of birth</li>
-        <li>Username and encrypted password</li>
-        <li>Emergency contact information</li>
-        <li>Timezone preference</li>
-        <li>Profile photograph (if provided)</li>
-      </ul>
+                <h3><span class="section-number">2.</span> AI Identity and Licensing Disclosure (CA AB 489)</h3>
+                <p>"Little Nate" is an artificial intelligence system. Little Nate is NOT a human being, NOT a licensed therapist, NOT a licensed psychologist, and NOT a licensed medical professional of any kind. Neither the AI nor the Sovereign Sanctuary application holds a medical license, therapy license, or counseling credential in any jurisdiction. Little Nate is designed to provide emotional support, self-awareness tools, and coaching companionship — NOT medical advice, clinical diagnoses, treatment plans, or prescriptions.</p>
 
-      <p><strong>b) Voice Biometric Data</strong></p>
-      <ul>
-        <li>Pitch mean and variance</li>
-        <li>Vocal energy levels</li>
-        <li>Speech rate (words per minute)</li>
-        <li>Pause ratio and silence patterns</li>
-        <li>Voiceprint characteristics for emotional state analysis</li>
-      </ul>
+                <h3><span class="section-number">3.</span> Automated Profiling Consent</h3>
+                <p>This platform utilizes "Automated Profiling" as defined under various state data protection laws. The core function of Sovereign Sanctuary is the continuous analysis of your emotional state through text analysis, voice biometrics, and (where applicable) facial geometry. By proceeding, you explicitly and voluntarily WAIVE any state-level rights to "opt-out" of automated profiling.</p>
 
-      <p><strong>c) Facial Geometry Data (Sovereign Circle tier only)</strong></p>
-      <ul>
-        <li>Facial expression analysis via video during Avatar Mode sessions</li>
-        <li>Micro-expression detection for emotional coherence measurement</li>
-        <li>This data is processed in real-time and is NOT stored as raw video</li>
-      </ul>
+                <h3><span class="section-number">4.</span> Age Verification and Family Accounts (CA SB 243)</h3>
+                <p>You affirm that you are at least eighteen (18) years of age. Minors (persons under 18) are strictly prohibited from creating primary accounts. Parents or legal guardians may create a family account and add minors as dependents under the Family Sanctuary feature.</p>
 
-      <p><strong>d) Text and Conversation Data</strong></p>
-      <ul>
-        <li>All messages exchanged with Little Nate</li>
-        <li>Session transcripts from coaching sessions</li>
-        <li>Family Sanctuary group session content</li>
-        <li>Homework assignments and journal entries</li>
-      </ul>
+                <h3><span class="section-number">5.</span> Texas TRAIGA Disclosure</h3>
+                <p>Pursuant to Texas law: This practitioner uses Generative Artificial Intelligence in the formulation of guidance plans, session summaries, coaching briefs, emotional coherence assessments, and all analytical outputs.</p>
 
-      <p><strong>e) Emotional and Analytical Data</strong></p>
-      <ul>
-        <li>Emotional coherence scores (C_emo values)</li>
-        <li>CEE Window detection events</li>
-        <li>Crisis risk assessments</li>
-        <li>Predictability Model of Behavior profiles</li>
-        <li>Mood tracking and longitudinal emotional trajectories</li>
-        <li>Night School training data and AI improvement metrics</li>
-      </ul>
+                <h3><span class="section-number">6.</span> Crisis Protocol</h3>
+                <div class="highlight-box">
+                    <strong>STOP. If you are in crisis, experiencing suicidal ideation, or in immediate danger:</strong>
+                    <ul style="margin: 12px 0 0 20px; padding: 0;">
+                        <li>Call 988 (Suicide &amp; Crisis Lifeline) — available 24/7</li>
+                        <li>Call 911 for immediate emergencies</li>
+                        <li>Go to your nearest Emergency Room</li>
+                    </ul>
+                    <p style="margin: 12px 0 0;">Sovereign Sanctuary is NOT an emergency service.</p>
+                </div>
 
-      <p><strong>f) Technical and Usage Data</strong></p>
-      <ul>
-        <li>Device identifiers (hardware_id)</li>
-        <li>IP addresses (for consent verification)</li>
-        <li>Session timestamps and duration</li>
-        <li>Token usage and billing records</li>
-        <li>Login history and feature usage patterns</li>
-      </ul>
+                <h3><span class="section-number">7.</span> Zero Tolerance Policy</h3>
+                <p>Immediate and permanent account termination without refund for: Pornography, Solicitation, Illegal activity, Threats of violence, or Attempts to manipulate the AI system.</p>
 
-      <h3>13. HOW WE PROCESS YOUR DATA</h3>
-      <p>Your data is processed using the following third-party services:</p>
-      <ul>
-        <li><strong>Azure OpenAI (Microsoft):</strong> Text analysis, voice processing, and AI conversation generation. Data is encrypted in transit (TLS 1.2+) and processed under Microsoft's enterprise data protection agreements. Your data is NOT used to train OpenAI's general models.</li>
-        <li><strong>Stripe:</strong> Payment processing for subscriptions and coaching fees. Sovereign Sanctuary does not store credit card numbers directly.</li>
-        <li><strong>PostgreSQL Database:</strong> Account data, session metadata, and analytical scores are stored in encrypted databases hosted on secured infrastructure.</li>
-        <li><strong>Redis:</strong> Temporary session caching for real-time features.</li>
-      </ul>
-      <p>All data is encrypted in transit and at rest. Voice biometric data is processed in real-time and stored only as extracted feature vectors, not as raw audio recordings (unless you explicitly opt in to session recording for coaching review purposes).</p>
+                <h3><span class="section-number">8.</span> Platform Immunity</h3>
+                <p>Sovereign Sanctuary is a Technology Provider, NOT a clinic. Coaches are Independent Practitioners. For claims arising from live coaching sessions, you look solely to the individual Coach.</p>
 
-      <h3>14. DATA RETENTION</h3>
-      <ul>
-        <li><strong>Active accounts:</strong> Data is retained for the duration of your membership</li>
-        <li><strong>Deleted accounts:</strong> Upon account deletion request, your data is held for thirty (30) days in a recoverable state. If you do not reactivate within 30 days, all personally identifiable data is permanently purged</li>
-        <li><strong>Anonymized aggregate data:</strong> De-identified, aggregate analytical data may be retained indefinitely for research purposes. This data cannot be traced back to any individual user</li>
-        <li><strong>Legal holds:</strong> Data subject to legal proceedings or regulatory requirements may be retained beyond the standard retention period as required by law</li>
-        <li><strong>Coaching records:</strong> Coaches' session notes may be retained separately under their professional record-keeping obligations</li>
-      </ul>
+                <h3><span class="section-number">9.</span> Intellectual Property and Proprietary Technology</h3>
+                <p>The platform incorporates proprietary algorithms subject to pending US provisional patent applications, including: the Nevedal Formula for Quantum Emotional Coherence, Voice Biometric Extraction, Predictability Model of Behavior, Family System Dynamics analysis, Night School AI training, and CEE Window detection. All algorithmic outputs are proprietary. You may not reproduce, reverse-engineer, or create derivative works from any algorithmic output.</p>
 
-      <h3>15. DATA SHARING</h3>
-      <p>Your data is NEVER sold. We share data only in the following limited circumstances:</p>
-      <ul>
-        <li><strong>Your assigned Coach:</strong> Session summaries, emotional state trends, crisis alerts, and pre-session briefs are shared with your assigned coach to support your coaching relationship</li>
-        <li><strong>Head of Household:</strong> In family accounts, the Head of Household may view aggregate family wellness metrics. Individual session content is NOT shared with other family members</li>
-        <li><strong>Law enforcement:</strong> Only when legally compelled by valid court order, subpoena, or other mandatory legal process</li>
-        <li><strong>Research publication:</strong> Anonymized, aggregate data may be used in published research. No individual user is ever identifiable in published research</li>
-      </ul>
+                <h3><span class="section-number">10.</span> Acceptable Use Policy</h3>
+                <p>You agree to use Sovereign Sanctuary solely for its intended purpose: personal emotional growth, coaching support, and family wellness.</p>
 
-      <h3>16. YOUR PRIVACY RIGHTS</h3>
-      <p><strong>a) California Residents (CCPA/CPRA)</strong><br>
-      You have the right to know what personal information we collect, request deletion of your data, opt out of the sale of personal information (we do not sell data), and not be discriminated against for exercising your rights. To exercise these rights, use the "Delete My Account" feature in Settings or contact support.</p>
-      <p><strong>b) Illinois Residents (BIPA)</strong><br>
-      We collect voice biometric data as described in Section 12(b). By accepting this agreement, you provide written consent to the collection, use, and storage of your voiceprint data for the purpose of emotional state analysis. This data is retained only for the duration of your active account plus the 30-day deletion grace period.</p>
-      <p><strong>c) Texas Residents (CUBI)</strong><br>
-      You are notified that we collect biometric identifiers including voiceprint and (for eligible tiers) facial geometry data. This data is used solely for the purposes described in this agreement and is not sold or disclosed to third parties except as described in Section 15.</p>
-      <p><strong>d) Virginia (VCDPA), Colorado (CPA), Connecticut (CTDPA), Indiana, Kentucky, Rhode Island</strong><br>
-      You may have rights to access, correct, delete, or port your data, and to opt out of certain processing activities. As described in Section 3, the automated profiling conducted by this platform is integral to the service and cannot be opted out of without terminating your membership.</p>
-      <p><strong>e) Right to Delete</strong><br>
-      You may request deletion of your account and all associated data at any time through the Settings screen. See Section 14 for the 30-day retention and purge process.</p>
-      <p><strong>f) Right to Data Export (Portability)</strong><br>
-      You may request an export of your personal data, including conversation transcripts and account information. Analytical overlays and proprietary algorithmic outputs are not included in data exports as they are platform-owned intellectual property.</p>
+                <h3><span class="section-number">11.</span> Service Availability</h3>
+                <p>Sovereign Sanctuary is provided on an "as-is" and "as-available" basis. We do not guarantee uptime or uninterrupted service.</p>
+            </section>
 
-      <h3>17. CHILDREN'S PRIVACY (COPPA COMPLIANCE)</h3>
-      <p>Sovereign Sanctuary does not knowingly collect personal information from children under 13. Children aged 13-17 may only access the platform as dependents on a parent/guardian's family account, subject to parental consent and supervision. If we learn that we have collected information from a child under 13 without parental consent, we will delete that information promptly.</p>
+            <!-- PART II — PRIVACY POLICY -->
+            <section class="content-block">
+                <h2>PART II — PRIVACY POLICY</h2>
 
-      <h2>PART III — THERAPEUTIC SETTING WAIVER</h2>
+                <h3>Information We Collect</h3>
+                <h3><span class="section-number">12.</span> Data We Collect</h3>
+                <p>We collect: account information (name, email, phone, date of birth), voice biometric data (pitch, energy, speech rate, pause ratio), facial geometry data (Sovereign Circle tier only — processed in real-time, not stored as raw video), text and conversation data, emotional and analytical data (C_emo scores, CEE events, crisis assessments, PMB profiles), and technical/usage data.</p>
 
-      <h3>18. NATURE OF THE SERVICE</h3>
-      <p>Sovereign Sanctuary operates in a space adjacent to — but distinct from — licensed mental health care. It is essential that you understand the following:</p>
-      <ul>
-        <li>The platform is NOT a licensed mental health provider in any jurisdiction</li>
-        <li>Little Nate is NOT a therapist. Little Nate is an AI companion designed to support emotional exploration and self-awareness. Interactions with Little Nate do not constitute therapy, counseling, or medical treatment</li>
-        <li>Coaches are independent practitioners. Some coaches on the platform may hold professional licenses (LMFT, LCSW, LPC, etc.), but their use of the Sovereign Sanctuary platform does not automatically establish a formal therapeutic relationship governed by their licensing board's standards of care</li>
-        <li>No doctor-patient or therapist-client privilege applies to your interactions with Little Nate</li>
-      </ul>
+                <h3>How We Use Your Information</h3>
+                <h3><span class="section-number">13.</span> How We Process Your Data</h3>
+                <p>Data is processed via Azure OpenAI (Microsoft) under enterprise data protection agreements — your data is NOT used to train OpenAI's general models. Payments are processed via Stripe. All data is encrypted in transit and at rest.</p>
 
-      <h3>19. INFORMED CONSENT FOR EXPERIMENTAL METHODOLOGY</h3>
-      <p>The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool approved by the FDA, APA, or any regulatory body.</p>
-      <p>You understand and acknowledge that:</p>
-      <ul>
-        <li>Emotional coherence scores (C_emo) are algorithmic estimates, not clinical measurements</li>
-        <li>The Predictability Model of Behavior (PMB) is a pattern-recognition tool, not a psychological assessment instrument</li>
-        <li>CEE Window detection is based on statistical thresholds, not clinical criteria</li>
-        <li>Crisis detection algorithms may produce false positives or false negatives</li>
-        <li>Biometric analysis (voice and facial) provides indicators of emotional states but should not be relied upon as medical or psychiatric evidence</li>
-      </ul>
-      <p><strong>Contact:</strong> <a href="mailto:support@sovereignsanctuary.net">support@sovereignsanctuary.net</a> | <strong>Crisis:</strong> Call 988 or 911 immediately</p>
-    </main>
+                <h3><span class="section-number">13a.</span> Third-Party AI Service Disclosure</h3>
+                <p>Sovereign Sanctuary uses <strong>Microsoft Azure OpenAI Service</strong> as a third-party AI provider. The following data is transmitted to this service during your use of the AI companion (Little Nate):</p>
+                <ul style="margin: 12px 0 12px 20px;">
+                    <li><strong>Text messages:</strong> Your typed or voice-transcribed messages are sent to Azure OpenAI to generate Little Nate's conversational responses.</li>
+                    <li><strong>Conversation context:</strong> Recent conversation history (within the current session) is included for contextual relevance.</li>
+                    <li><strong>Voice biometric features:</strong> Extracted voice characteristics (pitch mean, pitch variance, energy level, speech rate, and pause ratio) are processed server-side for emotional coherence analysis. Raw audio is NOT transmitted to Azure OpenAI.</li>
+                    <li><strong>Session metadata:</strong> Anonymized emotional state indicators (mood scores, coherence metrics) may be included in AI prompts to personalize responses.</li>
+                </ul>
+                <p><strong>Data NOT sent to the third-party AI service:</strong></p>
+                <ul style="margin: 12px 0 12px 20px;">
+                    <li>Your name, email address, phone number, or other personally identifiable information (PII) is stripped before transmission</li>
+                    <li>Raw audio or video recordings</li>
+                    <li>Payment information (handled exclusively by Stripe)</li>
+                    <li>Passwords or authentication credentials</li>
+                </ul>
+                <p><strong>Protections provided by Microsoft Azure OpenAI:</strong></p>
+                <ul style="margin: 12px 0 12px 20px;">
+                    <li>Your data is NOT used to train, retrain, or improve Azure OpenAI foundation models</li>
+                    <li>Your prompts and completions are NOT available to other customers or to OpenAI</li>
+                    <li>Data is processed within Microsoft Azure's SOC 2 Type II and ISO 27001 certified infrastructure</li>
+                    <li>Enterprise-level data processing agreements (DPA) are in place</li>
+                </ul>
+                <p><strong>Your consent:</strong> Before your first AI chat interaction, the app presents an explicit consent dialog explaining what data is sent, who it is sent to, and your rights. You may decline, in which case AI chat functionality will be unavailable. You can revoke consent at any time via Settings &gt; Privacy &gt; AI Data Consent, which will disable AI chat features.</p>
 
-    <footer>
-      <p><a href="https://app.sovereignsanctuary.net/">Return to Sovereign Sanctuary</a></p>
-      <p>support@sovereignsanctuary.net</p>
-    </footer>
-  </div>
+                <h3><span class="section-number">14.</span> Data Retention</h3>
+                <p>Active accounts: data retained for the duration of membership. Deleted accounts: held 30 days then permanently purged. Anonymized aggregate data may be retained indefinitely for research purposes.</p>
+
+                <h3><span class="section-number">14a.</span> User Responsibility for Personal Records</h3>
+                <p><strong>Sovereign Sanctuary is not the custodian of your life story.</strong> The platform — including Little Nate, coaching sessions, and all associated features — is a tool for emotional growth and self-awareness. It is NOT a permanent archive, journal, or record-keeping service for your personal experiences.</p>
+                <p>Conversation history and session data that Little Nate uses to remember context and maintain continuity has a <strong>limited time frame of existence</strong>. This data may be summarized, aged out, or removed as part of normal platform operation, account changes, or data retention policies.</p>
+                <p><strong>You are responsible for maintaining your own records.</strong> If any insight, reflection, memory, or information that emerges during your interactions with Little Nate or your coach is important to you, it is your responsibility to save, store, and preserve it outside the platform by your own means (personal journal, notes, screenshots, data export, etc.).</p>
+                <p>Sovereign Sanctuary makes no guarantee that any specific conversation, session summary, emotional metric, or AI-generated insight will remain available indefinitely. The <strong>Data Export</strong> feature (available in Settings) allows you to download your conversation transcripts at any time — we encourage regular use of this feature.</p>
+
+                <h3>Data Storage and Security (HIPAA Compliance)</h3>
+                <p>Sovereign Sanctuary employs industry-standard security measures to protect your sensitive health and emotional data. Our infrastructure is designed with privacy and security as foundational principles:</p>
+                <ul style="margin: 12px 0 12px 20px;">
+                    <li><strong>Encryption in transit:</strong> All data transmitted between your device and our servers uses TLS 1.2 or higher.</li>
+                    <li><strong>Encryption at rest:</strong> Stored data is encrypted using AES-256 or equivalent industry standards.</li>
+                    <li><strong>Enterprise agreements:</strong> We use Microsoft Azure OpenAI under enterprise data protection terms that prohibit use of your data for model training.</li>
+                    <li><strong>Access controls:</strong> Role-based access ensures only authorized personnel and your assigned coach (where applicable) can access your session data.</li>
+                    <li><strong>Audit trails:</strong> System access and data operations are logged for security and compliance review.</li>
+                </ul>
+                <p>While Sovereign Sanctuary is a technology platform and not a Covered Entity under HIPAA, we apply security practices aligned with healthcare data protection standards. Coaches who are licensed providers remain responsible for their own HIPAA obligations in connection with their practice.</p>
+
+                <h3><span class="section-number">15.</span> Data Sharing</h3>
+                <p>Your data is NEVER sold. It is shared only with: <strong>Microsoft Azure OpenAI</strong> (conversation text for AI response generation, under enterprise data protection — see Section 13a), your assigned Coach (session summaries), Head of Household (aggregate family metrics, not individual content), and law enforcement (only when legally compelled). All third-party recipients provide the same or greater level of data protection as described in this policy.</p>
+
+                <h3>Your Rights</h3>
+                <h3><span class="section-number">16.</span> Your Privacy Rights</h3>
+                <p><strong>California (CCPA/CPRA):</strong> Right to know, delete, and opt out of sale. <strong>Illinois (BIPA):</strong> Biometric consent provided herein. <strong>Texas (CUBI):</strong> Biometric notification provided. <strong>Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island:</strong> Right to access, correct, delete, and port your data.</p>
+                <p>You have a <strong>Right to Delete</strong> your account and data via Settings. You have a <strong>Right to Data Export</strong> — transcripts are available for export; analytical overlays are excluded as platform intellectual property.</p>
+
+                <h3><span class="section-number">17.</span> Children's Privacy (COPPA)</h3>
+                <p>We do not knowingly collect information from children under 13. Children ages 13–17 may only access the platform via a parent or guardian family account.</p>
+            </section>
+
+            <!-- PART III — THERAPEUTIC SETTING WAIVER -->
+            <section class="content-block">
+                <h2>PART III — THERAPEUTIC SETTING WAIVER</h2>
+
+                <h3><span class="section-number">18.</span> Nature of the Service</h3>
+                <p>The platform is NOT a licensed mental health provider. Little Nate is NOT a therapist. Coaches are independent practitioners. No doctor-patient or therapist-client privilege applies to AI interactions.</p>
+
+                <h3><span class="section-number">19.</span> Informed Consent for Experimental Methodology</h3>
+                <p>The Nevedal Quantum Emotional Coherence framework is a research model and proprietary analytical methodology. It is NOT a clinically validated diagnostic tool. Terms like "quantum" and "coherence" are metaphorical frameworks for organizing biometric data. C_emo scores are algorithmic estimates, not clinical measurements.</p>
+
+                <h3><span class="section-number">20.</span> Assumption of Emotional Risk</h3>
+                <p>Emotional exploration carries inherent risk. Deep self-reflection, trauma processing, and confrontation of emotional patterns may cause temporary distress. You voluntarily assume this risk.</p>
+
+                <h3><span class="section-number">21.</span> Coach Relationship Boundaries</h3>
+                <p>If your coach holds a professional license, their obligations are governed by their licensing board, not this platform. Mandatory reporting requirements apply to licensed coaches.</p>
+            </section>
+
+            <!-- PART IV — PATENT AND PROPRIETARY TECHNOLOGY NOTICE -->
+            <section class="content-block">
+                <h2>PART IV — PATENT AND PROPRIETARY TECHNOLOGY NOTICE</h2>
+
+                <h3><span class="section-number">22.</span> Patent Pending Technology</h3>
+                <p>Technology covered by provisional patent applications includes: The Nevedal Formula (C_emo calculation), multi-modal biometric extraction, real-time emotional coherence scoring, CEE Window detection, crisis perception modeling, reactivity signature classification, family system dynamics, ventriloquism detection, Night School AI learning, and Judge Nate adversarial testing.</p>
+
+                <h3><span class="section-number">23.</span> Restrictions</h3>
+                <p>Unauthorized use, reproduction, or reverse-engineering of patented technology may result in civil and criminal penalties.</p>
+
+                <h3><span class="section-number">24.</span> Research Participation</h3>
+                <p>You consent to the use of your de-identified, anonymized data in aggregate research, including academic publications and patent prosecution materials. Your identity will never be disclosed.</p>
+            </section>
+
+            <!-- PART V — WAIVERS AND DISPUTE RESOLUTION -->
+            <section class="content-block">
+                <h2>PART V — WAIVERS AND DISPUTE RESOLUTION</h2>
+
+                <h3><span class="section-number">25.</span> Hold Harmless and Limitation of Liability</h3>
+                <p>You agree to hold Sovereign Sanctuary harmless from all claims arising from data breaches, coach interactions, AI outputs, emotional distress, technical failures, or inaccurate outputs. Liability is capped at subscription fees paid in the prior 12 months.</p>
+
+                <h3><span class="section-number">26.</span> Indemnification</h3>
+                <p>You agree to indemnify Sovereign Sanctuary against third-party claims arising from your use of the platform.</p>
+
+                <h3><span class="section-number">27.</span> Binding Arbitration and Class Action Waiver</h3>
+                <div class="highlight-box">
+                    <p>All disputes are resolved by binding individual arbitration (AAA, California). A 30-day informal resolution period is required first. You WAIVE your right to class action and jury trial.</p>
+                </div>
+
+                <h3><span class="section-number">28–31.</span> Additional Provisions</h3>
+                <p><strong>Force Majeure:</strong> Not liable for causes beyond reasonable control. <strong>Severability:</strong> Invalid provisions enforced to maximum extent. <strong>Governing Law:</strong> State of California. <strong>Entire Agreement:</strong> This agreement constitutes the complete agreement.</p>
+            </section>
+
+            <!-- Contact & Last Updated -->
+            <section class="content-block">
+                <div class="contact-box">
+                    <p><strong>Contact</strong></p>
+                    <p><a href="mailto:support@sovereignsanctuary.net">support@sovereignsanctuary.net</a></p>
+                    <p style="margin-top: 16px;"><strong>Crisis:</strong> Call 988 or 911 immediately</p>
+                </div>
+                <p class="last-updated">Last Updated: March 2026</p>
+            </section>
+        </main>
+    </div>
 </body>
 </html>

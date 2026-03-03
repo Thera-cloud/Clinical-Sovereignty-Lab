@@ -365,6 +365,12 @@ async def require_admin(user: Dict = Depends(get_current_user)) -> Dict:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
+async def require_corp_admin(user: Dict = Depends(get_current_user)) -> Dict:
+    """Require corporate admin or full admin role"""
+    if user.get('role') not in ['CORP_ADMIN', 'ADMIN']:
+        raise HTTPException(status_code=403, detail="Corporate admin access required")
+    return user
+
 async def require_coach(user: Dict = Depends(get_current_user)) -> Dict:
     """Require coach or admin role"""
     if user.get('role') not in ['COACH', 'ADMIN']:
@@ -1083,21 +1089,42 @@ async def compute_nevedal(
         "cee_window": cee_window
     }
     
-    # Store in database
+    # Store in database — resolve hardware_id to UUID for FK columns
     if db.pool:
         async with db.pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO nevedal_metrics (
-                    user_id, session_id, dyad_partner_id,
-                    c_emo, p_ent, t_tunnel, gamma_env, e_g_joint,
-                    cee_window, biometrics
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            """,
-                user_id, session_id, dyad_partner_id,
-                result['c_emo'], result['p_ent'], result['t_tunnel'],
-                result['gamma_env'], result['e_g_joint'],
-                cee_window, json.dumps(biometrics)
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                user_id,
             )
+            if user_uuid:
+                import uuid as _uuid_mod
+                session_uuid = None
+                if session_id:
+                    try:
+                        parsed = _uuid_mod.UUID(str(session_id))
+                        exists = await conn.fetchval("SELECT 1 FROM sessions WHERE id = $1", parsed)
+                        if exists:
+                            session_uuid = parsed
+                    except (ValueError, AttributeError):
+                        pass
+                dyad_uuid = None
+                if dyad_partner_id:
+                    dyad_uuid = await conn.fetchval(
+                        "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                        dyad_partner_id,
+                    )
+                await conn.execute("""
+                    INSERT INTO nevedal_metrics (
+                        user_id, session_id, dyad_partner_id,
+                        c_emo, p_ent, t_tunnel, gamma_env, e_g_joint,
+                        cee_window, biometrics
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                    user_uuid, session_uuid, dyad_uuid,
+                    result['c_emo'], result['p_ent'], result['t_tunnel'],
+                    result['gamma_env'], result['e_g_joint'],
+                    cee_window, json.dumps(biometrics)
+                )
     
     return result
 
@@ -1110,12 +1137,18 @@ async def get_nevedal_history(
     """Get historical Nevedal metrics for a user"""
     if db.pool:
         async with db.pool.acquire() as conn:
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                user_id,
+            )
+            if not user_uuid:
+                return []
             rows = await conn.fetch("""
                 SELECT * FROM nevedal_metrics
                 WHERE user_id = $1
                 ORDER BY recorded_at DESC
                 LIMIT $2
-            """, user_id, limit)
+            """, user_uuid, limit)
             return [dict(row) for row in rows]
     
     return []

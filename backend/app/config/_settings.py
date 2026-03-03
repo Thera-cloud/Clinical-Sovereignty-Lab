@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     STRIPE_PRICE_COACHING_SINGLE: str = ""
     STRIPE_PRICE_COACHING_4PACK: str = ""
     STRIPE_PRICE_COACHING_8PACK: str = ""
+    STRIPE_PRICE_TOKEN_LIGHT: str = ""
+    STRIPE_PRICE_TOKEN_STANDARD: str = ""
+    STRIPE_PRICE_TOKEN_POWER: str = ""
+    STRIPE_PRICE_TOKEN_ULTIMATE: str = ""
+    STRIPE_PRICE_TOKEN_SHARE_FEE: str = ""
+    STRIPE_PRICE_DOJO_THERAPIST: str = ""
+    STRIPE_PRICE_DOJO_PROJECT_PM: str = ""
+    STRIPE_PRICE_DOJO_BUSINESS: str = ""
+    STRIPE_PRICE_DOJO_CNC: str = ""
+    STRIPE_PRICE_DOJO_MCAT: str = ""
+    STRIPE_PRICE_DOJO_TEACHER: str = ""
+    STRIPE_PRICE_DOJO_JUDGE: str = ""
+    STRIPE_PRICE_DOJO_COACH_NATE: str = ""
     
     # -------------------------------------------------------------------------
     # Email
@@ -216,9 +229,12 @@ class Settings(BaseSettings):
     REDDIT_USERNAME: str = ""
     REDDIT_PASSWORD: str = ""
 
-    # LinkedIn
+    # LinkedIn — Share on LinkedIn (posting)
     LINKEDIN_CLIENT_ID: str = ""
     LINKEDIN_CLIENT_SECRET: str = ""
+    # LinkedIn — Community Management API (comments/reactions)
+    LINKEDIN_COMMUNITY_CLIENT_ID: str = ""
+    LINKEDIN_COMMUNITY_CLIENT_SECRET: str = ""
 
     # X (Twitter) — OAuth 2.0 with PKCE
     X_CLIENT_ID: str = ""

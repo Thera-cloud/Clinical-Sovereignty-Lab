@@ -1,0 +1,106 @@
+---
+description: Prevents reintroduction of env var clobbering, auth confusion, stale files in Docker images, and other legacy code hazards.
+alwaysApply: true
+---
+
+# Old Code Hygiene
+
+These rules exist because each issue below has caused a production incident or silent failure. Do not weaken or remove them.
+
+## 1. Never Use `load_dotenv(override=True)`
+
+`override=True` overwrites environment variables that Docker Compose injects at container start (e.g., `REDIS_HOST=redis`, `DATABASE_URL=postgresql://...@postgres:5432/...`) with stale values from `.env` files (e.g., `REDIS_HOST=10.0.0.81` — a LAN IP unreachable from inside Docker's bridge network).
+
+- Always use `load_dotenv(override=False)` or bare `load_dotenv()` (default is `override=False`)
+- If a module needs an env var, capture it at module scope **before** any cross-module imports: `_VAR = os.getenv("VAR")`
+- `main.py` already does this with `_REDIS_URL_EARLY`, `_REDIS_PW_EARLY`, `_REDIS_HOST_EARLY`
+
+## 2. Two Auth Functions — Distinct Names, Distinct Return Types
+
+There are two `get_current_user` functions. They return **different types** and must never be confused:
+
+| Function | Module | Returns | Used by |
+|----------|--------|---------|---------|
+| `get_current_user_id` | `app.auth` | `str` (user ID) | Routers that only need the caller's identity |
+| `get_current_user` | `app.services.api_server` | `Dict` (full profile) | `require_admin`, `require_coach`, and routers that need role/tier info |
+
+### Rules
+
+- **Never recreate `get_current_user` in `app.auth`** — that name is retired from that module to prevent ambiguity
+- **Always type-annotate** the dependency: `current_user: str = Depends(get_current_user_id)` or `user: Dict = Depends(get_current_user)`
+- **New routers** that need role checking should use `require_admin` or `require_coach` from `api_server` (which chains through the Dict variant)
+- **New routers** that only need user identity should import from `app.auth`
+
+### If you see an `ImportError` mentioning `get_current_user` from `app.auth`
+
+The function was renamed to `get_current_user_id`. Update the import:
+
+```python
+# OLD (will crash):
+from app.auth import get_current_user
+
+# NEW (correct):
+from app.auth import get_current_user_id
+```
+
+## 3. No `.env` Files Inside `backend/app/`
+
+`.env` files belong at the **project root** only (`/opt/clinical-sovereignty-lab/.env` on the server, `./.env` locally).
+
+- Never create `.env` files in `backend/app/`, `backend/app/websocket/`, or `backend/app/services/`
+- `COPY app/ ./app/` in Dockerfiles copies everything — including `.env` files — into the image layer
+- Even with `.dockerignore`, bind mounts (`./backend/app:/app/app:ro`) bypass it and expose host files to the container
+- The root `.env` is loaded via Docker Compose's `env_file:` directive — that's the single source of truth
+
+## 4. Backup Files Don't Belong in `backend/app/`
+
+Manual snapshots (`.backup`, `.backup_jan29`, `.bak`, `.old`, etc.) must go in `archive/`, not alongside production code.
+
+- `COPY app/ ./app/` and bind mounts expose them inside containers
+- They bloat Docker images unnecessarily
+- They can confuse directory-scanning tools or wildcard imports
+- The `.dockerignore` excludes `*.backup*` as a safety net, but prevention is better than filtering
+
+## 5. Docker Compose `environment:` Overrides Are Sacred
+
+In `docker-compose.prod.yml`, the `environment:` block on `backend` and `bridge` services intentionally overrides `.env` values with Docker-internal hostnames:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql://...@postgres:5432/...   # "postgres" = Docker service name
+  - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379   # "redis" = Docker service name
+  - REDIS_HOST=redis
+  - POSTGRES_HOST=postgres      # bridge needs this — .env has "localhost" which fails inside Docker
+  - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+```
+
+### Rules
+
+- **Never remove these overrides** — they are not redundant with `.env`
+- The root `.env` contains `REDIS_HOST=10.0.0.81` and `POSTGRES_HOST=localhost` (LAN values for local dev). Inside Docker, the correct hosts are `redis` and `postgres` (service names on `nate_network`)
+- Docker Compose `environment:` takes precedence over `env_file:` — this is the designed behavior
+- If adding a new connection string that differs between host and container, add it to **both** `.env` (for local dev) and `environment:` (for Docker)
+- **Both backend and bridge** need these overrides. A missing `POSTGRES_HOST=postgres` on the bridge caused a multi-week outage where the bridge silently fell back to JSON auth (Feb 2026).
+- **`ENVIRONMENT=production` must be set on BOTH backend AND bridge.** The `.env` has `ENVIRONMENT=development` (for local dev). A missing override on the bridge caused it to store Redis auth tokens under `nate:development:auth:*` while the backend looked for `nate:production:auth:*` — making every REST API call return 401 for every user (Mar 2026).
+
+## 6. After Any Change to These Areas, Verify
+
+```bash
+# Inside the backend container, confirm Docker values survived:
+docker exec nate_backend printenv | grep -E "REDIS_HOST|REDIS_URL|DATABASE_URL|POSTGRES_HOST|ENVIRONMENT"
+# Expected: REDIS_HOST=redis, POSTGRES_HOST=postgres, ENVIRONMENT=production, REDIS_URL=redis://..., DATABASE_URL=postgresql://...@postgres:5432/...
+
+# Inside the bridge container, confirm POSTGRES_HOST and ENVIRONMENT are correct:
+docker exec nate_bridge printenv POSTGRES_HOST
+# Expected: postgres (NOT localhost)
+docker exec nate_bridge printenv ENVIRONMENT
+# Expected: production (NOT development — must match backend)
+
+# Confirm no stale .env inside the container:
+docker exec nate_backend ls /app/app/websocket/.env 2>&1
+# Expected: "No such file or directory"
+
+# Confirm health:
+curl -s http://localhost:8000/health
+# Expected: {"status": "healthy"}
+```

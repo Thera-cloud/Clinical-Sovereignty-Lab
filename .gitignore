@@ -87,6 +87,11 @@ android/**/GeneratedPluginRegistrant.java
 *.apk
 *.aab
 
+# Android signing (NEVER COMMIT)
+key.properties
+*.jks
+*.keystore
+
 # -----------------------------------------------------------------------------
 # IDEs
 # -----------------------------------------------------------------------------
@@ -154,3 +159,7 @@ scripts/reauth_nathan.py
 
 # WireGuard secrets
 wireguard/*/privatekey
+
+# Mobile development backup files
+mobile/lib/*.backup*
+mobile/lib/**/*.backup*

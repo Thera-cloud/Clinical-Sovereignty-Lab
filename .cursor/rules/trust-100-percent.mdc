@@ -1,0 +1,194 @@
+---
+description: Rules for sustaining 493/493 TRUSTED (100%) GREEN across all 26 auditors and 5 pre-flight checks.
+alwaysApply: true
+---
+
+# Trust 100% Sustainment Protocol
+
+The Trust Enforcer reports `493/493 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
+
+## Trust Architecture
+
+```
+Trust Enforcer (meta-agent)
+├── Pre-flight Checks (5)
+│   ├── Audit Token — SKYEYE_AUDIT_TOKEN exists in env AND Redis
+│   ├── Test Accounts — audit_client + audit_coach in users table
+│   ├── Admin MFA — DrNevedal1 has TOTP + SMS + WebAuthn + 2 YubiKeys
+│   ├── Azure Env — 5 Azure vars set (ENDPOINT, API_KEY, CHAT_DEPLOYMENT, DEPLOYMENT, MINI_TTS_DEPLOYMENT)
+│   └── Redis — responds to PING
+│
+└── 26 Auditors (493 total checks)
+    ├── SkyEye Dashboard ........... 58 endpoints
+    ├── Sovereign Command .......... 25 endpoints
+    ├── The Eye ..................... 21 endpoints
+    ├── Nevedal Research Lab ........ 30 checks (24 REST + 6 DB pipeline)
+    ├── Billing Pipeline ........... 32 endpoints
+    ├── Coach & DOJO ............... 55 endpoints
+    ├── Client App ................. 23 endpoints
+    ├── System Integrity ........... 18 checks
+    ├── Tier Gating ................ 12 tests
+    ├── WebSocket Flows ............ 10 tests
+    ├── Defense Health .............. 8 checks
+    ├── Hardware Security ........... 11 checks
+    ├── AI Pipeline ................. 6 checks
+    ├── Login Tests ................. 2 tests
+    ├── DOJO & Zoom Sessions ....... 29 endpoints
+    ├── Wisdom Pipeline ............ 12 checks
+    ├── Settings Tab ............... 15 checks
+    ├── Coach Hierarchy & Mesh ..... 20 checks
+    ├── Liminal Presence ........... 3 checks
+    ├── PMB Command Center ........ 13 checks
+    ├── Data Uniformity ........... 21 checks
+    ├── Token Lab ................. 15 checks
+    ├── GKM Ministry .............. 11 checks
+    ├── Nate Check-In ............. 8 checks
+    ├── QuickBooks Sync ........... 10 checks
+    └── Corporate Command ........ 25 checks
+```
+
+## Timing Discipline
+
+All auditors fire at the **top** of audit hours (5:00, 17:00, 23:00 UTC) with stagger delays (100–290s). The Trust Enforcer fires at **minute >= 10** of the same hours to guarantee it reads **fresh** results from the current window.
+
+| Component | Fires at | Stagger |
+|-----------|----------|---------|
+| Auditors | HH:00 | 120–290s startup delay |
+| Trust Enforcer | HH:10+ | Reads auditor results from DB |
+
+**Rule**: Never change the Trust Enforcer to fire at minute < 10. This causes it to read stale results from the previous audit window and report phantom failures.
+
+## What Breaks 100% — Known Failure Modes
+
+### 1. Assessment Endpoint Catch-All Collision
+
+`/api/assessments/{assessment_id}` is a catch-all GET route. Any new route under `/api/assessments/` (like `/health`) must be defined **before** the catch-all, otherwise it matches `{assessment_id}` and crashes with a type error.
+
+**Rule**: Always define specific routes before parameterized catch-all routes in FastAPI routers.
+
+### 2. Hive Defense Schema Drift
+
+Hive Defense workers (27 services) query database tables with column names that may not exist yet. When a worker is updated to query a new column but no migration adds it, the worker logs `column "X" does not exist` errors every 30 seconds.
+
+**Rule**: When adding or modifying any Hive worker SQL query, verify every column in the query exists in the target table. Run the migration **before** deploying the code change. Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` for safety.
+
+**Common drift patterns** (all resolved in migration 059):
+- Worker code uses a different column name than the table has (e.g., `deployment_id` vs `id`, `combined_magnitude` vs `combined_mag`)
+- Worker INSERT expects columns the table was never created with (e.g., `sweep_number`, `duration_minutes`, `energy_amount`)
+- Worker queries a table that doesn't exist (e.g., `onboarding_initiations`)
+
+### 3. Token Resolution Failure
+
+Auditors resolve auth tokens via: (1) constructor arg, (2) `SKYEYE_AUDIT_TOKEN` env var, (3) Redis scan for ADMIN token. If all three fail, endpoint checks return 401 → WARNING → not TRUSTED.
+
+**Rule**: `SKYEYE_AUDIT_TOKEN` must always be set in `.env` and the token must exist in Redis. After any token cleanup or Redis flush, verify the audit token still resolves:
+```bash
+docker exec nate_redis redis-cli --no-auth-warning -a $REDIS_PASSWORD EXISTS "nate:development:auth:$SKYEYE_AUDIT_TOKEN"
+```
+
+### 4. Empty Payload = WARNING
+
+The Coach & DOJO auditor (and others) classify a `200` response with an empty dict `{}` as WARNING, not TRUSTED. This means endpoints that return `{}` when no data exists will fail the audit.
+
+**Rule**: API endpoints must return structurally non-empty responses. For empty collections, return `[]` (list) not `{}` (empty dict). For status endpoints, always include at least one key (e.g., `{"status": "ok"}`).
+
+### 5. Trust Baseline Count Mismatch
+
+The `trust_baseline` table records expected endpoint counts per auditor. If you add a new endpoint to an auditor but don't update the baseline, the enforcer logs a `DATA_PIPELINE` action.
+
+**Rule**: When adding endpoints to any auditor's check list, also update the corresponding row in `trust_baseline`:
+```sql
+UPDATE trust_baseline SET parameter_value = jsonb_set(parameter_value, '{expected}', 'NEW_COUNT')
+WHERE parameter_key = '<auditor>_endpoint_count';
+```
+Or use the proposal flow: `POST /api/trust-enforcer/propose-change`.
+
+### 6. Pre-flight Admin MFA Degradation
+
+The pre-flight check verifies DrNevedal1 has `totp_enabled`, `sms_verified`, `webauthn_enabled` all set to `true`, plus `webauthn_credentials` array length >= 2.
+
+**Rule**: Never modify, remove, or reset MFA fields on the DrNevedal1 profile without immediately re-establishing them. A missing YubiKey, disabled TOTP, or unverified SMS drops pre-flight from 5/5 to 4/5 and turns the report RED.
+
+### 7. Sentinel Freeze Breaks Hardware Security Trust
+
+The Hardware Security Auditor checks `sentinel_frozen` in the DrNevedal1 `profile_data`. If `true`, the `sentinel_clear` check fails → 7/8 TRUSTED → trust drops below 100%.
+
+**How a freeze happens**: The Sentinel (on `nate_bridge`) accumulates anomaly points per admin action. When the cumulative score exceeds the freeze threshold (150 for YubiKey, 120 for TOTP, 80 for password), the bridge writes `sentinel_frozen: true` to the DB and locks the session.
+
+**Common triggers**: Registering YubiKeys (+60 raw per action), configuring TOTP (+60), unusual login hour (+20), unknown IP (+40). A setup session that touches multiple credential actions can hit 150 even with the 0.3x YubiKey multiplier.
+
+**How to unfreeze**: Tap YubiKey on the Hardware Security tab → red "Unfreeze Session" button → tap key → `webauthn/auth-verify` sets `sentinel_frozen: false` in DB and clears in-memory state.
+
+**Rules**:
+- Never remove `sentinel_frozen: false` from the `webauthn/auth-verify` response in `admin.py` — it's the only REST API path that clears the freeze
+- Never remove the `sentinel_clear` check from `hardware_security_auditor.py` — it's what makes freezes visible to the trust system
+- If a freeze happens during an audit window, unfreeze via YubiKey tap before the next audit run (or within 10 minutes of the freeze to catch the same window)
+- Backend or bridge restarts clear the in-memory `_frozen_sessions` set but do NOT clear `sentinel_frozen` in the DB — only the `auth-verify` endpoint or manual SQL does
+
+### 8. Azure Environment Variable Completeness
+
+Pre-flight checks all 5 Azure vars. The AI Pipeline auditor checks 3 Azure-dependent services (Chat, Realtime WS, TTS).
+
+**Required vars**:
+- `AZURE_OPENAI_ENDPOINT` — hostname only, no protocol (e.g., `nathanlhr-0393-resource.cognitiveservices.azure.com`)
+- `AZURE_API_KEY`
+- `AZURE_OPENAI_CHAT_DEPLOYMENT` (e.g., `gpt-5.2-chat`)
+- `AZURE_OPENAI_DEPLOYMENT` (e.g., `gpt-4o-realtime-preview`)
+- `AZURE_OPENAI_MINI_TTS_DEPLOYMENT` (e.g., `gpt-4o-mini-tts`)
+
+**Rule**: After any `.env` change involving Azure vars, use `docker compose up -d` (not `docker restart`) to pick up the new values. Verify with `docker exec nate_backend printenv | grep AZURE`.
+
+### 9. Backend Restart During Audit Window
+
+If the backend restarts within 10 minutes before an audit hour (e.g., at 4:55 AM), auditors may not have completed their stagger delays when the enforcer fires. This causes phantom failures.
+
+**Rule**: Avoid restarting the backend between HH:50 and HH:10 of audit hours (4:50–5:10, 16:50–17:10, 22:50–23:10 UTC). If you must restart during this window, manually trigger the enforcer after all auditors have completed:
+```bash
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:8000/api/trust-enforcer/trigger
+```
+
+## Verification After Any Change
+
+After deploying any backend, database, or infrastructure change:
+
+1. **Check health**: `curl http://localhost:8000/health` → `{"status": "healthy"}`
+2. **Check containers**: all 5 must show `(healthy)` or `Up`
+3. **Check for schema errors**: `docker logs nate_backend --since 2m 2>&1 | grep "does not exist"` → empty
+4. **Trigger fresh audit** (optional):
+   ```bash
+   curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/skyeye-audit/send
+   # Wait 60s for auditors to finish
+   curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/trust-enforcer/trigger
+   ```
+5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `493/493 TRUSTED (100%) — GREEN — 0 actions`
+
+## Current Trust Baseline (493 Total — 26 Active Auditors)
+
+| Auditor | Expected | Baseline Key |
+|---------|----------|-------------|
+| SkyEye | 58 | `skyeye_endpoint_count` |
+| Sovereign Command | 25 | `command_endpoint_count` |
+| The Eye | 21 | `eye_endpoint_count` |
+| Nevedal Lab | 30 | `nevedal_lab_endpoint_count` |
+| Billing | 32 | `billing_endpoint_count` |
+| Coach & DOJO | 55 | `coach_dojo_endpoint_count` |
+| System Integrity | 18 | `system_integrity_check_count` |
+| Client App | 23 | `client_app_endpoint_count` |
+| Tier Gating | 12 | `tier_gate_test_count` |
+| WS Flows | 10 | `ws_flow_test_count` |
+| Defense | 8 | `defense_subsystem_count` |
+| Hardware Security | 11 | `hardware_security_check_count` |
+| AI Pipeline | 6 | `ai_pipeline_check_count` |
+| Login | 2 | `login_test_accounts` |
+| DOJO & Zoom Sessions | 29 | `dojo_session_endpoint_count` |
+| Wisdom Pipeline | 12 | `wisdom_pipeline_check_count` |
+| Settings Tab | 15 | `settings_tab_check_count` |
+| Coach Hierarchy & Mesh | 20 | `coach_hierarchy_check_count` |
+| Liminal Presence | 3 | `liminal_presence_check_count` |
+| PMB Command Center | 13 | `pmb_command_center_check_count` |
+| Data Uniformity | 21 | `data_uniformity_check_count` |
+| Token Lab | 15 | `token_lab_check_count` |
+| GKM Ministry | 11 | `gkm_check_count` |
+| Nate Check-In | 8 | `nate_checkin_check_count` |
+| QuickBooks Sync | 10 | `quickbooks_check_count` |
+| Corporate Command | 25 | `corporate_command_check_count` |

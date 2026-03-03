@@ -22,10 +22,30 @@ Before running any deployment command:
 4. **No backend restart needed** for static HTML/CSS/JS changes (dashboard files served directly by nginx)
 5. **Flutter `updated_screens.dart` changes** require a `flutter build web` + rsync (without --delete) to go live
 
+## Dashboard deploy targets — THREE directories
+
+Dashboard HTML files must be copied to **all three** locations:
+
+| Directory | Purpose |
+|-----------|---------|
+| `/opt/clinical-sovereignty-lab/dashboard/` | Source / Docker bind mount |
+| `/var/www/sovereignsanctuary-web/` | app.sovereignsanctuary.net (client gateway) |
+| `/var/www/sovereign-command/` | command.sovereignsanctuary.net (admin portal — **this is the one nginx actually serves for SkyEye, command.html, etc.**) |
+
+Missing `/var/www/sovereign-command/` causes the admin to see stale/old versions even after deployment.
+
+## NEVER deploy old file versions
+
+When deploying files, **always deploy from the current local workspace**. Never copy files between server directories as a substitute for deploying the latest code — this risks propagating stale versions. The local workspace is the single source of truth.
+
+- Before any `scp` or `rsync`, verify the local file contains the expected changes (e.g., `grep` for a known new string)
+- After deploying, verify the target file on the server contains the changes
+- If a file exists in multiple server directories, deploy to **all** of them in the same command
+
 ## Deploy script review
 
 If modifying `deploy.sh`, always double-check:
 - No `--delete` flag on rsync commands
 - No `rm` commands that could remove server files
-- Dashboard HTML is copied to **both** `/opt/clinical-sovereignty-lab/dashboard/` and `/var/www/sovereignsanctuary-web/`
+- Dashboard HTML is copied to **all three** directories listed above
 - `index.html` from Flutter build is never overwritten by dashboard `index.html`

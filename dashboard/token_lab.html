@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Lab — Sovereign Command</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+:root {
+    --bg-void: #050505;
+    --bg-dark: #0A0A0A;
+    --bg-card: #111111;
+    --bg-elevated: #1A1A1A;
+    --border: #252525;
+    --border-active: #333333;
+    --gold: #FFD700;
+    --gold-dim: rgba(255, 215, 0, 0.2);
+    --gold-text: #C9A962;
+    --cyan: #00D4FF;
+    --cyan-dim: rgba(0, 212, 255, 0.1);
+    --red: #FF3B3B;
+    --red-dim: rgba(255, 59, 59, 0.15);
+    --green: #00FF88;
+    --green-dim: rgba(0, 255, 136, 0.1);
+    --orange: #FF9500;
+    --purple: #9D4EDD;
+    --text-primary: #FFFFFF;
+    --text-secondary: #888888;
+    --text-muted: #555555;
+    --font-body: 'DM Sans', -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: var(--font-body);
+    background: var(--bg-void);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 200;
+    background: rgba(10, 10, 10, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--gold-dim);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.back-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 18px;
+    cursor: pointer;
+    transition: .2s;
+}
+.back-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border-color: var(--border-active);
+}
+
+.topbar-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.topbar-title span { color: var(--gold); }
+
+.main-content {
+    padding: 24px;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+}
+
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.card.full-width {
+    grid-column: 1 / -1;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.card-body {
+    padding: 20px;
+}
+
+.card-action {
+    padding: 6px 14px;
+    background: rgba(255, 215, 0, 0.1);
+    border: 1px solid rgba(255, 215, 0, 0.2);
+    border-radius: 6px;
+    color: var(--gold);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: .2s;
+}
+.card-action:hover {
+    background: rgba(255, 215, 0, 0.2);
+    border-color: rgba(255, 215, 0, 0.3);
+}
+
+.icon {
+    font-size: 18px;
+}
+.icon.gold { color: var(--gold); }
+.icon.cyan { color: var(--cyan); }
+.icon.green { color: var(--green); }
+
+.stat-box {
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+.stat-value.gold { color: var(--gold); }
+.stat-value.cyan { color: var(--cyan); }
+.stat-value.green { color: var(--green); }
+
+.stat-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+    .dashboard-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+    <div class="topbar-left">
+        <a class="back-btn" id="backBtn" title="Back to Command">&#8592;</a>
+        <div class="topbar-title"><span>🪙</span> Token Lab</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);" id="tl-status">Loading...</div>
+</div>
+
+<!-- CONTENT -->
+<div class="main-content">
+    <div class="dashboard-grid">
+
+        <!-- OVERVIEW STATS -->
+        <div class="card full-width">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">🪙</div> Token Command Center</div>
+                <button class="card-action" onclick="tlRefresh()">Refresh</button>
+            </div>
+            <div class="card-body" style="display:flex;gap:20px;flex-wrap:wrap;">
+                <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value gold" id="tl-totalCirc">—</div><div class="stat-label">Total in Circulation</div></div>
+                <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value cyan" id="tl-avgBal">—</div><div class="stat-label">Avg Balance</div></div>
+                <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value green" id="tl-totalUsers">—</div><div class="stat-label">Total Users</div></div>
+                <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value" style="color:var(--orange);" id="tl-zeroBal">—</div><div class="stat-label">Zero Balance</div></div>
+                <div class="stat-box" style="flex:1;min-width:120px;"><div class="stat-value" style="color:#EF4444;" id="tl-negBal">—</div><div class="stat-label">Negative</div></div>
+            </div>
+        </div>
+
+        <!-- CHARTS -->
+        <div class="card" style="grid-column: span 2;">
+            <div class="card-header"><div class="card-title"><div class="icon cyan">📈</div> Token Activity (30 Days)</div></div>
+            <div class="card-body"><canvas id="tl-activityChart" height="200"></canvas></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon green">📊</div> Tokens by Role</div></div>
+            <div class="card-body"><canvas id="tl-roleChart" height="200"></canvas></div>
+        </div>
+
+        <!-- TOKEN USAGE MAP -->
+        <div class="card" style="grid-column: span 2;">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">🗺️</div> Token Usage Map</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="tl-usageFilter" onchange="tlLoadUsageMap()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                        <option value="">All Users</option>
+                    </select>
+                    <select id="tl-usageDays" onchange="tlLoadUsageMap()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                        <option value="7">7 Days</option>
+                        <option value="30" selected>30 Days</option>
+                        <option value="90">90 Days</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="tl-usageMapChart" height="180"></canvas>
+                <div id="tl-usageMapDrill" style="margin-top:12px;display:none;">
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px;">Top Users for: <strong id="tl-drillSource"></strong></div>
+                    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                        <thead><tr style="border-bottom:1px solid var(--border);"><th style="padding:6px;text-align:left;">Username</th><th style="padding:6px;text-align:right;">Tokens</th></tr></thead>
+                        <tbody id="tl-drillBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon cyan">📋</div> Usage Summary</div></div>
+            <div class="card-body" id="tl-usageSummaryBody" style="font-size:12px;color:var(--text-secondary);">Loading...</div>
+        </div>
+
+        <!-- BALANCES TABLE -->
+        <div class="card full-width">
+            <div class="card-header">
+                <div class="card-title"><div class="icon gold">👥</div> All Balances</div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="tl-roleFilter" onchange="tlFilterBalances()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;">
+                        <option value="all">All Roles</option>
+                        <option value="CLIENT">Clients</option>
+                        <option value="COACH">Coaches</option>
+                        <option value="ADMIN">Admin</option>
+                    </select>
+                    <input type="text" id="tl-search" placeholder="Search..." onkeyup="tlFilterBalances()" style="padding:6px 10px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:160px;">
+                </div>
+            </div>
+            <div class="card-body" style="max-height:400px;overflow-y:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;" id="tl-balTable">
+                    <thead><tr style="border-bottom:1px solid var(--border);text-align:left;">
+                        <th style="padding:8px;"><input type="checkbox" id="tl-selectAll" onchange="tlToggleAll(this)"></th>
+                        <th style="padding:8px;">Username</th>
+                        <th style="padding:8px;">Name</th>
+                        <th style="padding:8px;">Role</th>
+                        <th style="padding:8px;">Tier</th>
+                        <th style="padding:8px;text-align:right;">Balance</th>
+                        <th style="padding:8px;text-align:right;">Usage (Mo)</th>
+                        <th style="padding:8px;text-align:right;">Purchased</th>
+                        <th style="padding:8px;">Family</th>
+                        <th style="padding:8px;">Actions</th>
+                    </tr></thead>
+                    <tbody id="tl-balBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ACTIONS PANEL -->
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon gold">⚡</div> Quick Adjust</div></div>
+            <div class="card-body">
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Username</label>
+                    <input type="text" id="tl-adjUser" placeholder="username" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Amount (+/-)</label>
+                    <input type="number" id="tl-adjAmount" placeholder="5000" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Reason</label>
+                    <input type="text" id="tl-adjReason" placeholder="Adjustment reason" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <button onclick="tlAdjust()" style="width:100%;padding:10px;background:var(--gold);color:#000;border:none;border-radius:6px;font-weight:600;cursor:pointer;">Adjust Balance</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon green">🎁</div> Reward Bonus</div></div>
+            <div class="card-body">
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Username</label>
+                    <input type="text" id="tl-rwdUser" placeholder="username" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Bonus Tokens</label>
+                    <input type="number" id="tl-rwdAmount" placeholder="10000" min="1" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Reason</label>
+                    <input type="text" id="tl-rwdReason" placeholder="Bonus reward" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <button onclick="tlReward()" style="width:100%;padding:10px;background:#22C55E;color:#000;border:none;border-radius:6px;font-weight:600;cursor:pointer;">Grant Reward</button>
+            </div>
+        </div>
+
+        <!-- MASS DROP -->
+        <div class="card full-width">
+            <div class="card-header"><div class="card-title"><div class="icon" style="color:var(--orange);">💧</div> Mass Token Drop</div></div>
+            <div class="card-body">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+                    <div style="flex:1;min-width:140px;">
+                        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Scope</label>
+                        <select id="tl-dropScope" onchange="tlDropScopeChanged()" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                            <option value="selected">Selected Users (checked above)</option>
+                            <option value="family">Family</option>
+                            <option value="group">Group / Company</option>
+                            <option value="network">Entire Network</option>
+                        </select>
+                    </div>
+                    <div id="tl-dropRefBox" style="flex:1;min-width:140px;display:none;">
+                        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Family / Group ID</label>
+                        <input type="text" id="tl-dropRef" placeholder="FAM_XXXX or company_id" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                    </div>
+                    <div style="flex:1;min-width:120px;">
+                        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Set Balance To</label>
+                        <input type="number" id="tl-dropAmount" placeholder="50000" min="0" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                    </div>
+                    <div style="flex:1;min-width:140px;">
+                        <label style="font-size:11px;color:var(--text-secondary);display:block;margin-bottom:4px;">Reason</label>
+                        <input type="text" id="tl-dropReason" placeholder="Mass token drop" style="width:100%;padding:8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;">
+                    </div>
+                    <button onclick="tlMassDrop()" style="padding:10px 24px;background:var(--orange);color:#000;border:none;border-radius:6px;font-weight:600;cursor:pointer;white-space:nowrap;">Execute Drop</button>
+                </div>
+                <div id="tl-dropResult" style="margin-top:12px;font-size:12px;color:var(--text-secondary);"></div>
+            </div>
+        </div>
+
+        <!-- COST / PROFIT ANALYSIS -->
+        <div class="card" style="grid-column: span 2;">
+            <div class="card-header"><div class="card-title"><div class="icon" style="color:#9D4EDD;">💰</div> Cost & Profit Analysis</div></div>
+            <div class="card-body">
+                <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;">
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value gold" id="tl-costPerTk">—</div><div class="stat-label">Cost / Token</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value cyan" id="tl-pricePerTk">—</div><div class="stat-label">Price / Token</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value green" id="tl-margin">—</div><div class="stat-label">Margin %</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value" style="color:var(--orange);" id="tl-totalCost">—</div><div class="stat-label">Period Cost</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value green" id="tl-totalRev">—</div><div class="stat-label">Period Revenue</div></div>
+                    <div class="stat-box" style="flex:1;min-width:100px;"><div class="stat-value green" id="tl-totalProfit">—</div><div class="stat-label">Period Profit</div></div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <div class="stat-box"><div class="stat-value" style="color:#EF4444;" id="tl-liability">—</div><div class="stat-label">Outstanding Token Liability (if all consumed)</div></div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                    <label style="font-size:11px;color:var(--text-secondary);">Update Economics:</label>
+                    <input type="number" id="tl-newCost" placeholder="Cost/token" step="0.0001" style="padding:6px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:110px;">
+                    <input type="number" id="tl-newPrice" placeholder="Price/token" step="0.0001" style="padding:6px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:110px;">
+                    <button onclick="tlUpdateCost()" style="padding:6px 14px;background:var(--gold);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Update</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRANSACTION LOG -->
+        <div class="card">
+            <div class="card-header"><div class="card-title"><div class="icon gold">📜</div> Recent Transactions</div></div>
+            <div class="card-body" style="max-height:400px;overflow-y:auto;">
+                <div id="tl-txLog" style="font-size:11px;"></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+// Auth recovery (same 4-layer fallback as other sub-pages)
+function _recoverAuth() {
+    function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+    var hp = new URLSearchParams(location.hash.slice(1));
+    var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+    if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+    if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+    if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+    if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+    if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
+    if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
+    if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+}
+_recoverAuth();
+
+var API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000' : '';
+
+function _authHeaders(ct) {
+    var h = {};
+    var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+    if (t) h['Authorization'] = 'Bearer ' + t;
+    if (ct) h['Content-Type'] = ct;
+    return h;
+}
+
+function navTo(page) {
+    var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+    var u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+    var p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || '';
+    window.location.href = page + '#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u) + '&p=' + encodeURIComponent(p);
+}
+
+document.getElementById('backBtn').addEventListener('click', function(e) {
+    e.preventDefault();
+    navTo('command.html');
+});
+
+async function _tlFetch(path, opts) {
+    try {
+        var resp = await fetch(API + path, { headers: _authHeaders('application/json'), ...opts });
+        if (resp.status === 401) {
+            console.warn('TL auth issue', path, '— token may still be propagating');
+            return null;
+        }
+        if (!resp.ok) { var e = await resp.text(); console.warn('TL error', path, e); return null; }
+        return await resp.json();
+    } catch (e) { console.warn('TL fetch error', path, e); return null; }
+}
+
+var _tlBalances = [];
+var _tlActivityChart = null;
+var _tlRoleChart = null;
+
+async function tlRefresh() {
+    document.getElementById('tl-status').textContent = 'Refreshing...';
+    await Promise.all([tlLoadBalances(), tlLoadStats(), tlLoadCostAnalysis(), tlLoadTransactions()]);
+    document.getElementById('tl-status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+}
+
+async function tlLoadBalances() {
+    var data = await _tlFetch('/api/token-lab/balances');
+    if (!data) return;
+    _tlBalances = data;
+    tlFilterBalances();
+}
+
+function tlFilterBalances() {
+    var role = document.getElementById('tl-roleFilter').value;
+    var q = (document.getElementById('tl-search').value || '').toLowerCase();
+    var tbody = document.getElementById('tl-balBody');
+    var html = '';
+    var filtered = _tlBalances.filter(function(u) {
+        if (role !== 'all' && u.role !== role) return false;
+        if (q && !(u.username || '').toLowerCase().includes(q) && !(u.name || '').toLowerCase().includes(q)) return false;
+        return true;
+    });
+    filtered.forEach(function(u) {
+        var bal = (u.token_balance || 0);
+        var balColor = bal < 0 ? '#EF4444' : bal === 0 ? 'var(--text-secondary)' : '#C9A962';
+        html += '<tr style="border-bottom:1px solid var(--border);">';
+        html += '<td style="padding:6px 8px;"><input type="checkbox" class="tl-cb" data-username="' + u.username + '"></td>';
+        html += '<td style="padding:6px 8px;font-weight:600;color:var(--gold);">' + u.username + '</td>';
+        html += '<td style="padding:6px 8px;color:var(--text-secondary);">' + (u.name || '—') + '</td>';
+        html += '<td style="padding:6px 8px;"><span style="color:' + (u.role === 'ADMIN' ? '#EF4444' : u.role === 'COACH' ? '#4ECDC4' : '#C9A962') + ';font-size:10px;font-weight:600;">' + u.role + '</span></td>';
+        html += '<td style="padding:6px 8px;font-size:11px;color:var(--text-secondary);">' + (u.tier || '—') + '</td>';
+        html += '<td style="padding:6px 8px;text-align:right;font-weight:700;color:' + balColor + ';">' + bal.toLocaleString() + '</td>';
+        var usageMo = parseInt(u.usage_month) || 0;
+        html += '<td style="padding:6px 8px;text-align:right;color:' + (usageMo > 0 ? '#4ECDC4' : 'var(--text-secondary)') + ';">' + usageMo.toLocaleString() + '</td>';
+        var purchased = parseInt(u.tokens_purchased) || 0;
+        html += '<td style="padding:6px 8px;text-align:right;font-weight:600;color:' + (purchased > 0 ? '#22C55E' : 'var(--text-secondary)') + ';">' + purchased.toLocaleString() + '</td>';
+        html += '<td style="padding:6px 8px;font-size:10px;color:var(--text-secondary);">' + (u.family_id || '—') + '</td>';
+        html += '<td style="padding:6px 8px;"><button onclick="tlQuickAdjust(\'' + u.username + '\',' + bal + ')" style="padding:3px 8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--gold);font-size:10px;cursor:pointer;">Edit</button></td>';
+        html += '</tr>';
+    });
+    tbody.innerHTML = html || '<tr><td colspan="10" style="padding:20px;text-align:center;color:var(--text-secondary);">No users found</td></tr>';
+}
+
+function tlToggleAll(cb) {
+    document.querySelectorAll('.tl-cb').forEach(function(c) { c.checked = cb.checked; });
+}
+
+function tlGetSelected() {
+    return Array.from(document.querySelectorAll('.tl-cb:checked')).map(function(c) { return c.dataset.username; });
+}
+
+function tlQuickAdjust(username, currentBal) {
+    document.getElementById('tl-adjUser').value = username;
+    document.getElementById('tl-adjAmount').value = '';
+    document.getElementById('tl-adjAmount').focus();
+    document.getElementById('tl-adjUser').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function tlLoadStats() {
+    var data = await _tlFetch('/api/token-lab/stats?days=30');
+    if (!data) return;
+    var t = data.totals || {};
+    document.getElementById('tl-totalCirc').textContent = (t.total_tokens_in_circulation || 0).toLocaleString();
+    document.getElementById('tl-avgBal').textContent = (t.avg_balance || 0).toLocaleString();
+    document.getElementById('tl-totalUsers').textContent = t.total_users || 0;
+    document.getElementById('tl-zeroBal').textContent = t.zero_balance_count || 0;
+    document.getElementById('tl-negBal').textContent = t.negative_balance_count || 0;
+
+    var daily = data.daily_activity || [];
+    if (daily.length > 0 && typeof Chart !== 'undefined') {
+        var labels = daily.map(function(d) { return d.day.substring(5); });
+        var added = daily.map(function(d) { return d.tokens_added || 0; });
+        var deducted = daily.map(function(d) { return d.tokens_deducted || 0; });
+        if (_tlActivityChart) _tlActivityChart.destroy();
+        _tlActivityChart = new Chart(document.getElementById('tl-activityChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: 'Added', data: added, backgroundColor: 'rgba(34,197,94,0.7)' },
+                    { label: 'Deducted', data: deducted, backgroundColor: 'rgba(239,68,68,0.7)' }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: '#94a3b8' } } },
+                scales: {
+                    x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                }
+            }
+        });
+    }
+
+    var roles = data.by_role || [];
+    if (roles.length > 0 && typeof Chart !== 'undefined') {
+        var roleColors = { CLIENT: '#C9A962', COACH: '#4ECDC4', ADMIN: '#EF4444' };
+        if (_tlRoleChart) _tlRoleChart.destroy();
+        _tlRoleChart = new Chart(document.getElementById('tl-roleChart'), {
+            type: 'doughnut',
+            data: {
+                labels: roles.map(function(r) { return r.role; }),
+                datasets: [{
+                    data: roles.map(function(r) { return r.total_tokens || 0; }),
+                    backgroundColor: roles.map(function(r) { return roleColors[r.role] || '#64748b'; })
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { labels: { color: '#94a3b8' } } }
+            }
+        });
+    }
+}
+
+async function tlLoadCostAnalysis() {
+    var data = await _tlFetch('/api/token-lab/cost-analysis?days=30');
+    if (!data) return;
+    document.getElementById('tl-costPerTk').textContent = '$' + data.cost_per_token;
+    document.getElementById('tl-pricePerTk').textContent = '$' + data.price_per_token;
+    document.getElementById('tl-margin').textContent = data.margin + '%';
+    var s = data.period_summary || {};
+    document.getElementById('tl-totalCost').textContent = '$' + (s.total_cost || 0).toFixed(2);
+    document.getElementById('tl-totalRev').textContent = '$' + (s.total_revenue || 0).toFixed(2);
+    document.getElementById('tl-totalProfit').textContent = '$' + (s.total_profit || 0).toFixed(2);
+    var l = data.outstanding_liability || {};
+    document.getElementById('tl-liability').textContent = (l.total_tokens || 0).toLocaleString() + ' tokens ($' + (l.total_cost_if_consumed || 0).toFixed(2) + ')';
+}
+
+async function tlLoadTransactions() {
+    var data = await _tlFetch('/api/token-lab/transactions?limit=50');
+    if (!data || !data.length) { document.getElementById('tl-txLog').innerHTML = '<div style="color:var(--text-secondary);text-align:center;padding:20px;">No transactions yet</div>'; return; }
+    var html = '';
+    data.forEach(function(tx) {
+        var amtColor = tx.amount > 0 ? '#22C55E' : tx.amount < 0 ? '#EF4444' : 'var(--text-secondary)';
+        var sign = tx.amount > 0 ? '+' : '';
+        html += '<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:6px;align-items:center;">';
+        html += '<span style="min-width:100px;color:var(--text-secondary);font-size:10px;">' + (tx.created_at || '').substring(0, 16).replace('T', ' ') + '</span>';
+        html += '<span style="min-width:60px;color:var(--gold);font-weight:600;">' + tx.username + '</span>';
+        html += '<span style="min-width:70px;font-size:10px;color:var(--text-secondary);">' + tx.action + '</span>';
+        html += '<span style="min-width:80px;font-weight:700;color:' + amtColor + ';">' + sign + (tx.amount || 0).toLocaleString() + '</span>';
+        html += '<span style="color:var(--text-secondary);font-size:10px;">' + (tx.reason || '') + '</span>';
+        html += '</div>';
+    });
+    document.getElementById('tl-txLog').innerHTML = html;
+}
+
+async function tlAdjust() {
+    var username = document.getElementById('tl-adjUser').value.trim();
+    var amount = parseInt(document.getElementById('tl-adjAmount').value);
+    var reason = document.getElementById('tl-adjReason').value.trim();
+    if (!username || isNaN(amount)) return alert('Enter username and amount');
+    var idempotencyKey = crypto.randomUUID();
+    var r = await _tlFetch('/api/token-lab/adjust', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, amount: amount, reason: reason || null, idempotency_key: idempotencyKey })
+    });
+    if (r) {
+        var msg = username + ': ' + r.before.toLocaleString() + ' \u2192 ' + r.after.toLocaleString();
+        if (r.deduplicated) msg += ' (duplicate — no change)';
+        alert(msg);
+        tlRefresh();
+    }
+}
+
+async function tlReward() {
+    var username = document.getElementById('tl-rwdUser').value.trim();
+    var amount = parseInt(document.getElementById('tl-rwdAmount').value);
+    var reason = document.getElementById('tl-rwdReason').value.trim();
+    if (!username || isNaN(amount) || amount < 1) return alert('Enter username and positive amount');
+    var r = await _tlFetch('/api/token-lab/reward', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, amount: amount, reason: reason || 'Bonus reward' })
+    });
+    if (r) {
+        alert('Rewarded ' + username + ' with ' + r.reward.toLocaleString() + ' tokens!');
+        tlRefresh();
+    }
+}
+
+function tlDropScopeChanged() {
+    var scope = document.getElementById('tl-dropScope').value;
+    document.getElementById('tl-dropRefBox').style.display = (scope === 'family' || scope === 'group') ? 'block' : 'none';
+}
+
+async function tlMassDrop() {
+    var scope = document.getElementById('tl-dropScope').value;
+    var amount = parseInt(document.getElementById('tl-dropAmount').value);
+    var reason = document.getElementById('tl-dropReason').value.trim();
+    var ref = document.getElementById('tl-dropRef').value.trim();
+    if (isNaN(amount) || amount < 0) return alert('Enter a valid amount');
+
+    var body = { scope: scope, amount: amount, reason: reason || null };
+    if (scope === 'selected') {
+        var sel = tlGetSelected();
+        if (sel.length === 0) return alert('Select users from the table above');
+        body.usernames = sel;
+        if (!confirm('Set ' + sel.length + ' users to ' + amount.toLocaleString() + ' tokens?')) return;
+    } else if (scope === 'family' || scope === 'group') {
+        if (!ref) return alert('Enter the family or group ID');
+        body.target_ref = ref;
+        if (!confirm('Set all ' + scope + ' members (' + ref + ') to ' + amount.toLocaleString() + ' tokens?')) return;
+    } else if (scope === 'network') {
+        if (!confirm('SET ALL USERS IN THE ENTIRE NETWORK to ' + amount.toLocaleString() + ' tokens? This cannot be undone.')) return;
+        if (!confirm('FINAL CONFIRMATION: This affects every user. Proceed?')) return;
+    }
+
+    var r = await _tlFetch('/api/token-lab/mass-drop', {
+        method: 'POST',
+        body: JSON.stringify(body)
+    });
+    if (r) {
+        document.getElementById('tl-dropResult').innerHTML =
+            '<span style="color:#22C55E;">\u2713 ' + r.users_affected + ' users updated to ' + r.amount_set.toLocaleString() + ' tokens (batch: ' + r.batch_id.substring(0, 8) + ')</span>';
+        tlRefresh();
+    }
+}
+
+async function tlUpdateCost() {
+    var cost = parseFloat(document.getElementById('tl-newCost').value);
+    var price = parseFloat(document.getElementById('tl-newPrice').value);
+    if (isNaN(cost) || isNaN(price)) return alert('Enter both cost and price per token');
+    var r = await _tlFetch('/api/token-lab/cost-config', {
+        method: 'POST',
+        body: JSON.stringify({ cost_per_token: cost, price_per_token: price })
+    });
+    if (r) { alert('Token economics updated'); tlLoadCostAnalysis(); }
+}
+
+// ── Token Usage Map ──
+var _tlUsageMapChart = null;
+var _tlUsageMapData = [];
+
+var _sourceLabels = {
+    'ai_chat': 'AI Chat',
+    'sanctuary_ai': 'Sanctuary AI Response',
+    'group_coaching': 'Group Coaching',
+    'private_coaching': 'Private Coaching',
+    'admin_adjust': 'Admin Grants',
+    'token_share': 'Token Sharing',
+    'unknown': 'Other'
+};
+var _sourceColors = {
+    'ai_chat': '#C9A962',
+    'sanctuary_ai': '#4ECDC4',
+    'group_coaching': '#9D4EDD',
+    'private_coaching': '#22C55E',
+    'admin_adjust': '#EAB308',
+    'token_share': '#EC4899',
+    'unknown': '#64748b'
+};
+
+async function tlLoadUsageMap() {
+    var days = document.getElementById('tl-usageDays').value || 30;
+    var filter = document.getElementById('tl-usageFilter').value || '';
+    var qs = '?days=' + days;
+    if (filter) qs += '&username=' + encodeURIComponent(filter);
+    var raw = await _tlFetch('/api/token-lab/usage-by-source' + qs);
+    if (!raw) { document.getElementById('tl-usageSummaryBody').textContent = 'No data'; return; }
+
+    var data = Array.isArray(raw) ? raw : (raw.sources || []);
+    _tlUsageMapData = data;
+    var labels = data.map(function(d) { return _sourceLabels[d.source] || d.source; });
+    var values = data.map(function(d) { return d.total_tokens || 0; });
+    var colors = data.map(function(d) { return _sourceColors[d.source] || '#64748b'; });
+
+    if (typeof Chart !== 'undefined') {
+        if (_tlUsageMapChart) _tlUsageMapChart.destroy();
+        _tlUsageMapChart = new Chart(document.getElementById('tl-usageMapChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Tokens Consumed',
+                    data: values,
+                    backgroundColor: colors,
+                    borderRadius: 4
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                onClick: function(evt, elements) {
+                    if (elements.length > 0) {
+                        var idx = elements[0].index;
+                        tlShowUsageDrill(_tlUsageMapData[idx]);
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) { return ctx.raw.toLocaleString() + ' tokens'; }
+                        }
+                    }
+                },
+                scales: {
+                    x: { ticks: { color: '#64748b', callback: function(v) { return v >= 1000 ? (v / 1000) + 'k' : v; } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                    y: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    var total = values.reduce(function(a, b) { return a + b; }, 0);
+    var summaryHtml = '<div style="margin-bottom:8px;"><strong style="color:var(--gold);">' + total.toLocaleString() + '</strong> total tokens consumed</div>';
+    data.forEach(function(d) {
+        var pct = total > 0 ? ((d.total_tokens / total) * 100).toFixed(1) : 0;
+        var color = _sourceColors[d.source] || '#64748b';
+        summaryHtml += '<div style="display:flex;justify-content:space-between;padding:3px 0;">';
+        summaryHtml += '<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:6px;"></span>' + (_sourceLabels[d.source] || d.source) + '</span>';
+        summaryHtml += '<span>' + pct + '%</span>';
+        summaryHtml += '</div>';
+    });
+    document.getElementById('tl-usageSummaryBody').innerHTML = summaryHtml;
+
+    document.getElementById('tl-usageMapDrill').style.display = 'none';
+}
+
+function tlShowUsageDrill(sourceData) {
+    document.getElementById('tl-drillSource').textContent = _sourceLabels[sourceData.source] || sourceData.source;
+    var tbody = document.getElementById('tl-drillBody');
+    var html = '';
+    (sourceData.top_users || []).forEach(function(u) {
+        html += '<tr><td style="padding:4px 6px;">' + u.username + '</td><td style="padding:4px 6px;text-align:right;color:var(--gold);">' + (u.tokens || 0).toLocaleString() + '</td></tr>';
+    });
+    tbody.innerHTML = html || '<tr><td colspan="2" style="padding:8px;color:var(--text-secondary);">No usage data</td></tr>';
+    document.getElementById('tl-usageMapDrill').style.display = 'block';
+}
+
+async function tlPopulateUsageFilter() {
+    var balances = await _tlFetch('/api/token-lab/balances');
+    if (!balances) return;
+    var sel = document.getElementById('tl-usageFilter');
+    balances.forEach(function(b) {
+        var opt = document.createElement('option');
+        opt.value = b.username;
+        opt.textContent = (b.name || b.username) + ' (' + b.role + ')';
+        sel.appendChild(opt);
+    });
+}
+
+tlPopulateUsageFilter();
+tlLoadUsageMap();
+tlRefresh();
+</script>
+</body>
+</html>

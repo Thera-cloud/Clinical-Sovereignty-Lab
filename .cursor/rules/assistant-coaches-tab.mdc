@@ -1,0 +1,139 @@
+# Assistant Coaches Tab (Master Coach Only)
+
+## Overview
+
+The "ASSISTANTS" tab (index 9) in Coach Command provides master coaches with metrics on their assistant coaches, their clients, and a dedicated Little Nate chat for asking about assistant performance.
+
+## Visibility
+
+The tab is always present in the tab bar but gates content: non-master coaches see a placeholder. A coach is considered a "master" if `_assistantMetrics` is non-empty (i.e., they have at least one assistant in `coach_hierarchy`).
+
+Data loads lazily when the tab is first selected (via `TabController.addListener` on index 9).
+
+## Data Sources
+
+| Data | Endpoint | Method |
+|---|---|---|
+| Assistant overview metrics | `GET /api/coach/hierarchy/assistant-metrics?days=30` | REST |
+| Assistant's client roster | `GET /api/coach/hierarchy/assistant-clients/{username}` | REST |
+| Little Nate assistant chat | `POST /api/coach/nate-chat` (mode: `assistant_inquiry`) | REST |
+
+## REST Endpoints
+
+### `GET /api/coach/hierarchy/assistant-metrics`
+
+Returns aggregated metrics for all assistants under the calling master coach:
+
+```json
+{
+  "assistants": [
+    {
+      "assistant_id": "HW_ID",
+      "username": "CoachHope",
+      "display_name": "Hope Smith",
+      "status": "active",
+      "accepted_at": "2026-02-15T...",
+      "client_count": 5,
+      "sessions": {"total": 12, "completed": 10, "avg_coherence": 0.234},
+      "supervised_hours": 4.5,
+      "attested_sessions": 3
+    }
+  ],
+  "total": 1
+}
+```
+
+### `GET /api/coach/hierarchy/assistant-clients/{coach_username}`
+
+Returns all clients assigned to a specific assistant (requires hierarchy relationship or ADMIN role):
+
+```json
+{
+  "clients": [
+    {
+      "username": "client1",
+      "hardware_id": "HW_ID",
+      "name": "John Doe",
+      "tier": "STANDARD",
+      "risk": "normal",
+      "last_session": "2026-02-28"
+    }
+  ],
+  "total": 5
+}
+```
+
+## Little Nate Chat (Assistant Inquiry Mode)
+
+The chat uses `mode: 'assistant_inquiry'` and injects rich context:
+
+| Context Key | Content |
+|---|---|
+| `coach_role` | `'MASTER_COACH'` |
+| `is_master_coach` | `true` |
+| `total_assistants` | Count of assistants |
+| `assistant_details` | Per-assistant: name, username, client_count, sessions, coherence, hours |
+| `focused_assistant` | Username of currently expanded assistant (if any) |
+| `focused_assistant_clients` | Client list with name, tier, risk for the focused assistant |
+
+The backend (`skyeye_chat.py` → `send_coach_message`) builds a `[COACH HIERARCHY]` context block with per-assistant metrics and a `[FOCUSED ASSISTANT]` block when one is expanded.
+
+## UI Architecture (Flutter)
+
+### State Variables
+
+| Variable | Type | Purpose |
+|---|---|---|
+| `_assistantMetrics` | `List<Map>` | Cached assistant overview data |
+| `_assistantsTabLoading` | `bool` | Loading state for metrics fetch |
+| `_expandedAssistant` | `String?` | Username of currently expanded card |
+| `_expandedAssistantClients` | `List<Map>` | Clients for the expanded assistant |
+| `_expandedClientsLoading` | `bool` | Loading state for client fetch |
+| `_assistantChatMessages` | `List<Map<String, String>>` | Chat history |
+| `_assistantChatController` | `TextEditingController` | Chat input |
+| `_assistantChatLoading` | `bool` | Chat response loading |
+
+### Layout
+
+```
+┌─────────────────────────────────────────┐
+│ ASSISTANT COACHES          [refresh]     │
+│ N assistants under your supervision      │
+├──────────────────────┬──────────────────┤
+│ LITTLE NATE          │ OVERVIEW         │
+│ (assistant chat,     │ Total Assistants │
+│  purple #9D4EDD)     │ Total Clients    │
+│                      │ Sessions (30d)   │
+│                      │ Avg Coherence    │
+├──────────────────────┴──────────────────┤
+│ [Assistant Card 1 - expandable]          │
+│   Name, @username, status               │
+│   Clients | Sessions | Avg CEE | Hours  │
+│   ┌─ ASSIGNED CLIENTS (expanded) ──┐    │
+│   │ Client Name  RISK  TIER        │    │
+│   └─────────────────────────────────┘    │
+│ [Assistant Card 2 - collapsed]           │
+└─────────────────────────────────────────┘
+```
+
+### Color Theme
+
+The tab uses purple (`#9D4EDD`) to distinguish it from the cyan Insights chat. This aligns with the research/hierarchy color in the design system.
+
+## Auditor Coverage
+
+The 2 new endpoints are covered by the Coach Hierarchy & Mesh auditor (`coach_hierarchy_auditor.py`), tab 7 "Assistant Oversight":
+
+| Endpoint | Method | Expected |
+|---|---|---|
+| `/api/coach/hierarchy/assistant-metrics?days=30` | GET | 200 |
+| `/api/coach/hierarchy/assistant-clients/{username}` | GET | 200/404 |
+
+## Rules
+
+1. **The tab must always be present** in the tab bar (index 9). Never conditionally remove it — use content gating instead. Changing `TabController(length)` dynamically causes Flutter rebuild issues.
+2. **Data loads lazily** — `_loadAssistantMetrics()` only fires when the tab is first selected. Never load assistant data on dashboard init (wastes resources for non-master coaches).
+3. **Hierarchy relationship is enforced server-side** — `assistant-clients/{username}` returns 403 if the caller is not the assistant's master coach (or ADMIN). The Flutter client should handle 403 gracefully.
+4. **Chat context includes focused assistant** — When an assistant card is expanded, the chat context includes that assistant's client details, enabling questions like "How is this coach handling client X?"
+5. **Dispose controllers** — `_assistantChatController` and `_assistantChatScrollController` must be disposed in `dispose()` to prevent memory leaks.
+6. **Three coach assignment fields** — The `assistant-clients` endpoint checks all 3 fields (`coach_id`, `assigned_coach_id`, `assigned_coach`) per `coach-client-assignment-fields.mdc`.

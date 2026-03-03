@@ -8,7 +8,7 @@ Auth: OAuth 2.0 (Meta / Facebook Login) — shared credentials with Instagram
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import httpx
@@ -82,7 +82,9 @@ class FacebookAdapter(SocialPlatformAdapter):
             return False
 
     async def refresh_token(self) -> bool:
-        """Facebook page tokens are long-lived by default; attempt exchange."""
+        """Facebook page tokens are long-lived by default; attempt exchange.
+        fb_exchange_token requires the current token to be valid; if it's
+        already dead the exchange is futile and we skip to re-auth required."""
         if not self._access_token:
             tokens = await self._load_tokens()
             self._access_token = tokens.get("access_token") if tokens else None
@@ -90,6 +92,22 @@ class FacebookAdapter(SocialPlatformAdapter):
         if not self._access_token:
             self._connected = False
             return False
+
+        # fb_exchange_token requires a valid token — verify first
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as probe:
+                check = await probe.get(
+                    f"{GRAPH_API_BASE}/me",
+                    params={"fields": "id", "access_token": self._access_token},
+                )
+                if check.status_code in (400, 401, 403):
+                    self._last_error = "Token invalid — full re-authorization required"
+                    self._connected = False
+                    await self._update_token_status("expired", self._last_error)
+                    logger.warning("Facebook: Token is dead, fb_exchange_token would fail — skipping")
+                    return False
+        except Exception:
+            pass  # network hiccup — still attempt the exchange
 
         try:
             async with httpx.AsyncClient() as client:
@@ -106,7 +124,7 @@ class FacebookAdapter(SocialPlatformAdapter):
 
                 if "access_token" in data:
                     self._access_token = data["access_token"]
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 5184000)
                     )
                     await self._save_tokens(
@@ -182,7 +200,7 @@ class FacebookAdapter(SocialPlatformAdapter):
                 page_id = page.get("id")
                 page_name = page.get("name")
 
-                expiry = datetime.utcnow() + timedelta(days=60)
+                expiry = datetime.now(timezone.utc) + timedelta(days=60)
                 await self._save_tokens(
                     access_token=page_token,
                     token_expiry=expiry,
@@ -477,6 +495,59 @@ class FacebookAdapter(SocialPlatformAdapter):
                     )
         except Exception as e:
             return ModerateResult(success=False, error=str(e), action=ActionResult.FAILED)
+
+    # ── Notification / Engagement Discovery ────────────────────────
+
+    async def get_follower_count(self) -> int:
+        """Get current follower/fan count for delta tracking."""
+        if not self._connected:
+            return 0
+        target_id = self._page_id or "me"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{GRAPH_API_BASE}/{target_id}",
+                    params={
+                        "fields": "followers_count,fan_count",
+                        "access_token": self._access_token,
+                    }
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data.get("followers_count", data.get("fan_count", 0))
+        except Exception as e:
+            logger.error(f"Facebook get_follower_count error: {e}")
+        return 0
+
+    @retry_on_failure(max_retries=2)
+    async def get_post_reactions(self, post_id: str, limit: int = 100) -> List[Dict]:
+        """Get reactions (likes, love, etc.) on a Facebook post."""
+        self._ensure_connected()
+        await self.rate_limiter.acquire()
+        reactions: List[Dict] = []
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{GRAPH_API_BASE}/{post_id}/reactions",
+                    params={
+                        "limit": min(limit, 100),
+                        "access_token": self._access_token,
+                    }
+                )
+                if resp.status_code == 200:
+                    for r in resp.json().get("data", []):
+                        reactions.append({
+                            "actor": r.get("name", ""),
+                            "actor_id": r.get("id", ""),
+                            "type": r.get("type", "LIKE"),
+                        })
+                elif resp.status_code == 401:
+                    raise PlatformAuthError("facebook")
+        except (PlatformAuthError, PlatformRateLimitError):
+            raise
+        except Exception as e:
+            logger.error(f"Facebook get_post_reactions error: {e}")
+        return reactions
 
     # ── Analytics ───────────────────────────────────────────────────
 

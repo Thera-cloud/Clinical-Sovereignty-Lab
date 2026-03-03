@@ -65,19 +65,47 @@
         <a href="command.html" class="back-btn">← Back to Dashboard</a>
     </header>
     <div class="content">
-        <div class="content-header">
-            <div class="content-title">Coach Applications</div>
-            <div class="content-subtitle">Review and approve new coach applications</div>
+        <div class="tabs" style="margin-bottom:8px">
+            <div class="tab active" onclick="switchSection('applications', this)">Coach Applications</div>
+            <div class="tab" onclick="switchSection('master', this)">Master Coach Requests</div>
+            <div class="tab" onclick="switchSection('invitations', this)">Assistant Invitations</div>
         </div>
-        <div class="tabs">
-            <div class="tab active" onclick="filterApprovals('pending')">Pending</div>
-            <div class="tab" onclick="filterApprovals('approved')">Approved</div>
-            <div class="tab" onclick="filterApprovals('rejected')">Rejected</div>
+
+        <!-- Section 1: Coach Applications (existing) -->
+        <div id="sectionApplications">
+            <div class="content-header">
+                <div class="content-title">Coach Applications</div>
+                <div class="content-subtitle">Review and approve new coach certification requests</div>
+            </div>
+            <div class="tabs" id="appSubTabs">
+                <div class="tab active" onclick="filterApprovals('pending')">Pending</div>
+                <div class="tab" onclick="filterApprovals('approved')">Approved</div>
+                <div class="tab" onclick="filterApprovals('rejected')">Rejected</div>
+            </div>
+            <div id="approvalsList">
+                <div class="empty-state"><div class="icon">⏳</div><div>Loading...</div></div>
+            </div>
         </div>
-        <div id="approvalsList">
-            <div class="empty-state">
-                <div class="icon">⏳</div>
-                <div>Loading...</div>
+
+        <!-- Section 2: Master Coach Requests -->
+        <div id="sectionMaster" style="display:none">
+            <div class="content-header">
+                <div class="content-title">Master Coach Requests</div>
+                <div class="content-subtitle">Coaches requesting master coach status to manage assistants</div>
+            </div>
+            <div id="masterRequestsList">
+                <div class="empty-state"><div class="icon">⏳</div><div>Loading...</div></div>
+            </div>
+        </div>
+
+        <!-- Section 3: Assistant Invitations -->
+        <div id="sectionInvitations" style="display:none">
+            <div class="content-header">
+                <div class="content-title">Assistant Invitations</div>
+                <div class="content-subtitle">Master coach invitations to assistants pending admin approval</div>
+            </div>
+            <div id="invitationsList">
+                <div class="empty-state"><div class="icon">⏳</div><div>Loading...</div></div>
             </div>
         </div>
     </div>
@@ -103,8 +131,38 @@ _recoverAuth();
         }
         var SERVER_URL = getWsUrl();
         var socket = null;
+        var _wsRetry = 0;
         var allApprovals = [];
         var currentFilter = "pending";
+        var currentSection = "applications";
+        var masterRequests = [];
+        var hierarchyInvitations = [];
+
+        function _getApiBase() {
+            var h = location.hostname;
+            if (h.includes('sovereignsanctuary')) return 'https://api.sovereignsanctuary.net';
+            return location.protocol + '//' + h + ':8000';
+        }
+        var API_BASE = _getApiBase();
+
+        function _authHeaders(ct) {
+            var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            var h = { 'Authorization': 'Bearer ' + t };
+            if (ct) h['Content-Type'] = ct;
+            return h;
+        }
+
+        function switchSection(section, elem) {
+            currentSection = section;
+            document.getElementById('sectionApplications').style.display = section === 'applications' ? '' : 'none';
+            document.getElementById('sectionMaster').style.display = section === 'master' ? '' : 'none';
+            document.getElementById('sectionInvitations').style.display = section === 'invitations' ? '' : 'none';
+            var topTabs = elem.parentElement.querySelectorAll('.tab');
+            for (var i = 0; i < topTabs.length; i++) topTabs[i].classList.remove('active');
+            elem.classList.add('active');
+            if (section === 'master') loadMasterRequests();
+            if (section === 'invitations') loadInvitations();
+        }
 
         function init() {
             var uname = (sessionStorage.getItem("username") || localStorage.getItem("sc_username"));
@@ -116,6 +174,7 @@ _recoverAuth();
         function connect() {
             socket = new WebSocket(SERVER_URL);
             socket.onopen = function() {
+                _wsRetry = 0;
                 var profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
                 socket.send(JSON.stringify({
                     type: "auth",
@@ -124,7 +183,8 @@ _recoverAuth();
                 }));
             };
             socket.onmessage = handleMessage;
-            socket.onclose = function() { setTimeout(connect, 3000); };
+            socket.onerror = function(e) { console.warn('WS error:', e); };
+            socket.onclose = function() { var a = Math.min(_wsRetry, 10); var b = Math.min(1000 * Math.pow(2, a), 30000); _wsRetry++; setTimeout(connect, b + Math.floor(b * 0.2 * Math.random())); };
         }
 
         function handleMessage(event) {
@@ -250,6 +310,127 @@ _recoverAuth();
             }
             details += "Hardware ID: " + (coach.hardware_id || "N/A");
             alert(details);
+        }
+
+        // ── Master Coach Requests ──
+        function loadMasterRequests() {
+            fetch(API_BASE + '/api/admin/pending-master-requests', { headers: _authHeaders() })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    masterRequests = data || [];
+                    renderMasterRequests();
+                })
+                .catch(function(e) { console.error('Master requests load error:', e); });
+        }
+
+        function renderMasterRequests() {
+            var list = document.getElementById('masterRequestsList');
+            if (masterRequests.length === 0) {
+                list.innerHTML = '<div class="empty-state"><div class="icon">✅</div><h3>No pending master coach requests</h3><div>All caught up!</div></div>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < masterRequests.length; i++) {
+                var m = masterRequests[i];
+                var initials = getInitials(m.name);
+                html += '<div class="approval-card">';
+                html += '<div class="approval-header">';
+                html += '<div class="approval-avatar" style="border-color:#9D4EDD;background:rgba(157,78,221,0.2)">' + initials + '</div>';
+                html += '<div class="approval-info">';
+                html += '<div class="approval-name">' + (m.name || m.username) + '</div>';
+                html += '<div class="approval-meta">@' + m.username + ' · ' + (m.email || 'No email') + '</div>';
+                html += '</div>';
+                html += '<span class="approval-status pending">REQUESTING</span>';
+                html += '</div>';
+                html += '<div class="approval-details">';
+                html += '<div class="detail-item"><div class="detail-label">Verified</div><div class="detail-value">' + (m.coach_verified ? '✓ Yes' : 'No') + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">Specializations</div><div class="detail-value">' + (m.specializations || 'General') + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">Hardware ID</div><div class="detail-value" style="font-size:10px;word-break:break-all">' + (m.hardware_id || 'N/A') + '</div></div>';
+                html += '</div>';
+                html += '<div class="approval-actions">';
+                html += '<button class="action-btn approve" onclick="approveMaster(\'' + m.hardware_id + '\')">✓ Approve Master</button>';
+                html += '<button class="action-btn reject" onclick="rejectMaster(\'' + m.hardware_id + '\')">✗ Reject</button>';
+                html += '</div></div>';
+            }
+            list.innerHTML = html;
+        }
+
+        function approveMaster(hwId) {
+            if (!confirm('Approve this coach as a Master Coach?')) return;
+            fetch(API_BASE + '/api/admin/approve-master-coach', {
+                method: 'POST', headers: _authHeaders('application/json'),
+                body: JSON.stringify({ hardware_id: hwId })
+            }).then(function(r) { return r.json(); }).then(function() { loadMasterRequests(); })
+            .catch(function(e) { alert('Error: ' + e); });
+        }
+
+        function rejectMaster(hwId) {
+            if (!confirm('Reject this master coach request?')) return;
+            fetch(API_BASE + '/api/admin/reject-master-coach', {
+                method: 'POST', headers: _authHeaders('application/json'),
+                body: JSON.stringify({ hardware_id: hwId })
+            }).then(function(r) { return r.json(); }).then(function() { loadMasterRequests(); })
+            .catch(function(e) { alert('Error: ' + e); });
+        }
+
+        // ── Hierarchy Invitations ──
+        function loadInvitations() {
+            fetch(API_BASE + '/api/admin/pending-hierarchy-invitations', { headers: _authHeaders() })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    hierarchyInvitations = data || [];
+                    renderInvitations();
+                })
+                .catch(function(e) { console.error('Invitations load error:', e); });
+        }
+
+        function renderInvitations() {
+            var list = document.getElementById('invitationsList');
+            if (hierarchyInvitations.length === 0) {
+                list.innerHTML = '<div class="empty-state"><div class="icon">✅</div><h3>No pending assistant invitations</h3><div>All caught up!</div></div>';
+                return;
+            }
+            var html = '';
+            for (var i = 0; i < hierarchyInvitations.length; i++) {
+                var inv = hierarchyInvitations[i];
+                html += '<div class="approval-card">';
+                html += '<div class="approval-header">';
+                html += '<div class="approval-avatar" style="border-color:#4ECDC4;background:rgba(78,205,196,0.2)">↔</div>';
+                html += '<div class="approval-info">';
+                html += '<div class="approval-name">' + (inv.master_name || inv.master_username) + ' → ' + (inv.assistant_name || inv.assistant_username) + '</div>';
+                html += '<div class="approval-meta">Master invites assistant · ' + (inv.invited_at ? inv.invited_at.slice(0, 10) : 'Recently') + '</div>';
+                html += '</div>';
+                html += '<span class="approval-status pending">AWAITING</span>';
+                html += '</div>';
+                html += '<div class="approval-details">';
+                html += '<div class="detail-item"><div class="detail-label">Master Coach</div><div class="detail-value" style="color:#9D4EDD">' + (inv.master_name || inv.master_username || 'Unknown') + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">Assistant</div><div class="detail-value" style="color:#4ECDC4">' + (inv.assistant_name || inv.assistant_username || 'Unknown') + '</div></div>';
+                html += '<div class="detail-item"><div class="detail-label">Invited</div><div class="detail-value">' + (inv.invited_at ? inv.invited_at.slice(0, 10) : 'N/A') + '</div></div>';
+                html += '</div>';
+                html += '<div class="approval-actions">';
+                html += '<button class="action-btn approve" onclick="approveInvitation(\'' + inv.id + '\')">✓ Approve</button>';
+                html += '<button class="action-btn reject" onclick="rejectInvitation(\'' + inv.id + '\')">✗ Reject</button>';
+                html += '</div></div>';
+            }
+            list.innerHTML = html;
+        }
+
+        function approveInvitation(id) {
+            if (!confirm('Approve this assistant invitation?')) return;
+            fetch(API_BASE + '/api/admin/approve-hierarchy-invitation', {
+                method: 'POST', headers: _authHeaders('application/json'),
+                body: JSON.stringify({ hierarchy_id: id })
+            }).then(function(r) { return r.json(); }).then(function() { loadInvitations(); })
+            .catch(function(e) { alert('Error: ' + e); });
+        }
+
+        function rejectInvitation(id) {
+            if (!confirm('Reject this assistant invitation?')) return;
+            fetch(API_BASE + '/api/admin/reject-hierarchy-invitation', {
+                method: 'POST', headers: _authHeaders('application/json'),
+                body: JSON.stringify({ hierarchy_id: id })
+            }).then(function(r) { return r.json(); }).then(function() { loadInvitations(); })
+            .catch(function(e) { alert('Error: ' + e); });
         }
 
         window.onload = init;

@@ -684,9 +684,10 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
   List<Map<String, dynamic>> _members = [];
   bool _loading = true;
   String? _error;
-  final _inviteEmailCtrl = TextEditingController();
+  final _inviteContactCtrl = TextEditingController();
   final _inviteNameCtrl = TextEditingController();
   String _inviteRelationship = 'SPOUSE';
+  String _inviteMethod = 'email';
 
   String get _familyId =>
       widget.currentUserProfile['family_id']?.toString() ?? '';
@@ -705,7 +706,7 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
 
   @override
   void dispose() {
-    _inviteEmailCtrl.dispose();
+    _inviteContactCtrl.dispose();
     _inviteNameCtrl.dispose();
     super.dispose();
   }
@@ -756,9 +757,10 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
   }
 
   void _showInviteDialog() {
-    _inviteEmailCtrl.clear();
+    _inviteContactCtrl.clear();
     _inviteNameCtrl.clear();
     _inviteRelationship = 'SPOUSE';
+    _inviteMethod = 'email';
 
     showDialog(
       context: context,
@@ -785,12 +787,75 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setDialogState(() {
+                        _inviteMethod = 'email';
+                        _inviteContactCtrl.clear();
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _inviteMethod == 'email'
+                              ? _D.gold.withOpacity(0.2)
+                              : _D.bgElevated,
+                          borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                          border: Border.all(
+                            color: _inviteMethod == 'email' ? _D.gold : _D.border,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text('Email',
+                              style: TextStyle(
+                                color: _inviteMethod == 'email' ? _D.gold : _D.textSecondary,
+                                fontWeight: FontWeight.w600, fontSize: 13,
+                              )),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setDialogState(() {
+                        _inviteMethod = 'sms';
+                        _inviteContactCtrl.clear();
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _inviteMethod == 'sms'
+                              ? _D.gold.withOpacity(0.2)
+                              : _D.bgElevated,
+                          borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                          border: Border.all(
+                            color: _inviteMethod == 'sms' ? _D.gold : _D.border,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text('SMS',
+                              style: TextStyle(
+                                color: _inviteMethod == 'sms' ? _D.gold : _D.textSecondary,
+                                fontWeight: FontWeight.w600, fontSize: 13,
+                              )),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               TextField(
-                controller: _inviteEmailCtrl,
+                controller: _inviteContactCtrl,
                 style: const TextStyle(color: _D.textPrimary),
-                keyboardType: TextInputType.emailAddress,
+                keyboardType: _inviteMethod == 'email'
+                    ? TextInputType.emailAddress
+                    : TextInputType.phone,
                 decoration: InputDecoration(
-                  labelText: 'Email',
+                  labelText: _inviteMethod == 'email' ? 'Email Address' : 'Phone Number',
+                  hintText: _inviteMethod == 'email' ? 'name@example.com' : '+1 (555) 123-4567',
+                  hintStyle: TextStyle(color: _D.textSecondary.withOpacity(0.4)),
                   labelStyle: const TextStyle(color: _D.textSecondary),
                   enabledBorder: OutlineInputBorder(
                     borderSide: BorderSide(color: _D.border),
@@ -833,20 +898,25 @@ class _FamilyManagementScreenState extends State<FamilyManagementScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: _D.gold),
               onPressed: () {
                 final name = _inviteNameCtrl.text.trim();
-                final email = _inviteEmailCtrl.text.trim();
-                if (name.isEmpty || email.isEmpty) return;
+                final contact = _inviteContactCtrl.text.trim();
+                if (name.isEmpty || contact.isEmpty) return;
 
-                _sendWs({
+                final payload = <String, dynamic>{
                   'type': 'family_invite',
                   'family_id': _familyId,
                   'name': name,
-                  'email': email,
                   'relationship': _inviteRelationship,
-                });
+                };
+                if (_inviteMethod == 'email') {
+                  payload['email'] = contact;
+                } else {
+                  payload['phone'] = contact;
+                }
+                _sendWs(payload);
 
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Invitation sent'),
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('Invitation sent via ${_inviteMethod == 'email' ? 'email' : 'SMS'}'),
                   backgroundColor: _D.bgElevated,
                 ));
                 Future.delayed(
@@ -1544,10 +1614,12 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
 
 class PaymentMethodsScreen extends StatefulWidget {
   final Map<String, dynamic> currentUserProfile;
+  final int initialTab;
 
   const PaymentMethodsScreen({
     super.key,
     required this.currentUserProfile,
+    this.initialTab = 0,
   });
 
   @override
@@ -1559,8 +1631,18 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   late TabController _tabCtrl;
   List<Map<String, dynamic>> _methods = [];
   List<Map<String, dynamic>> _invoices = [];
+  List<Map<String, dynamic>> _scholarships = [];
   bool _loadingMethods = true;
   bool _loadingInvoices = true;
+  bool _loadingScholarships = true;
+  bool _addingCard = false;
+  bool _addingBank = false;
+  String? _appliedSchoolName;
+  String? _appliedCompanyName;
+  String? _discountCodeError;
+  String? _discountCodeSuccess;
+  final _schoolCodeCtrl = TextEditingController();
+  final _corporateCodeCtrl = TextEditingController();
 
   String get _userId =>
       widget.currentUserProfile['hardware_id']?.toString() ?? '';
@@ -1568,14 +1650,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 4, vsync: this, initialIndex: widget.initialTab);
     _loadPaymentMethods();
     _loadInvoices();
+    _loadScholarships();
   }
 
   @override
   void dispose() {
     _tabCtrl.dispose();
+    _schoolCodeCtrl.dispose();
+    _corporateCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -1647,6 +1732,233 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     }
   }
 
+  Future<void> _loadScholarships() async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/scholarship/user/$_userId'),
+        headers: _authHeaders(_userId),
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (mounted) {
+          setState(() {
+            _scholarships = List<Map<String, dynamic>>.from(data['scholarships'] ?? []);
+            _loadingScholarships = false;
+          });
+        }
+        return;
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loadingScholarships = false);
+  }
+
+  Future<void> _setDefaultPaymentMethod(String pmId) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/payment-method/default'),
+        headers: _authHeaders(_userId, json: true),
+        body: jsonEncode({'user_id': _userId, 'payment_method_id': pmId}),
+      );
+      if (resp.statusCode == 200) {
+        setState(() {
+          for (var m in _methods) {
+            m['is_default'] = m['id'] == pmId;
+          }
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Default payment method updated'), backgroundColor: _D.bgElevated),
+          );
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _applySchoolCode(String code) async {
+    setState(() { _discountCodeError = null; _discountCodeSuccess = null; });
+    try {
+      final verifyResp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/verify-school-code/${Uri.encodeComponent(code)}'),
+        headers: _authHeaders(_userId),
+      );
+      if (verifyResp.statusCode != 200) {
+        final err = jsonDecode(verifyResp.body);
+        setState(() => _discountCodeError = err['detail'] ?? 'Invalid code');
+        return;
+      }
+      final applyResp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/apply-school-code'),
+        headers: _authHeaders(_userId, json: true),
+        body: jsonEncode({'user_id': _userId, 'school_code': code}),
+      );
+      if (applyResp.statusCode == 200) {
+        final data = jsonDecode(applyResp.body);
+        setState(() {
+          _appliedSchoolName = data['school_name'];
+          _discountCodeSuccess = '${data["discount_percent"]}% student discount applied!';
+        });
+      } else {
+        final err = jsonDecode(applyResp.body);
+        setState(() => _discountCodeError = err['detail'] ?? 'Failed to apply');
+      }
+    } catch (e) {
+      setState(() => _discountCodeError = 'Connection error');
+    }
+  }
+
+  Future<void> _applyCorporateCode(String code) async {
+    setState(() { _discountCodeError = null; _discountCodeSuccess = null; });
+    try {
+      final verifyResp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/verify-corporate-code/${Uri.encodeComponent(code)}'),
+        headers: _authHeaders(_userId),
+      );
+      if (verifyResp.statusCode != 200) {
+        final err = jsonDecode(verifyResp.body);
+        setState(() => _discountCodeError = err['detail'] ?? 'Invalid code');
+        return;
+      }
+      final applyResp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/apply-corporate-code'),
+        headers: _authHeaders(_userId, json: true),
+        body: jsonEncode({'user_id': _userId, 'sponsor_code': code}),
+      );
+      if (applyResp.statusCode == 200) {
+        final data = jsonDecode(applyResp.body);
+        setState(() {
+          _appliedCompanyName = data['company_name'];
+          _discountCodeSuccess = data['pays_full'] == true
+              ? 'Fully sponsored by ${data["company_name"]}!'
+              : 'Corporate discount applied!';
+        });
+      } else {
+        final err = jsonDecode(applyResp.body);
+        setState(() => _discountCodeError = err['detail'] ?? 'Failed to apply');
+      }
+    } catch (e) {
+      setState(() => _discountCodeError = 'Connection error');
+    }
+  }
+
+  Future<void> _downloadSuperbill({String? month}) async {
+    final m = month ?? DateTime.now().toString().substring(0, 7);
+    try {
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/billing/superbill/$_userId?month=$m'),
+        headers: _authHeaders(_userId),
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        final sb = data['superbill'] ?? {};
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: _D.bgCard,
+            title: const Text('Superbill', style: TextStyle(color: _D.gold)),
+            content: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Billing Period: ${sb["billing_period"] ?? m}',
+                      style: const TextStyle(color: _D.textSecondary, fontSize: 12)),
+                  Text('Client: ${sb["client"]?["name"] ?? ""}',
+                      style: const TextStyle(color: _D.textPrimary, fontSize: 13)),
+                  const SizedBox(height: 10),
+                  ...(sb['services'] as List? ?? []).map((s) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(
+                          '${s["date"]} — ${s["cpt_code"]}',
+                          style: const TextStyle(color: _D.textPrimary, fontSize: 12),
+                        )),
+                        Text('\$${((s["amount_cents"] ?? 0) / 100).toStringAsFixed(2)}',
+                            style: const TextStyle(color: _D.gold, fontSize: 12)),
+                      ],
+                    ),
+                  )),
+                  const Divider(color: _D.border),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total', style: TextStyle(color: _D.textPrimary, fontWeight: FontWeight.bold)),
+                      Text(sb['total_formatted'] ?? '\$0.00',
+                          style: const TextStyle(color: _D.gold, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(sb['disclaimer'] ?? '', style: const TextStyle(color: _D.textSecondary, fontSize: 10)),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close', style: TextStyle(color: _D.gold)),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load superbill'), backgroundColor: _D.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _addPaymentMethod(String type) async {
+    if (type == 'card' && _addingCard) return;
+    if (type == 'bank' && _addingBank) return;
+    setState(() {
+      if (type == 'card') _addingCard = true;
+      if (type == 'bank') _addingBank = true;
+    });
+    try {
+      final resp = await http.post(
+        Uri.parse('$defaultApiBaseUrl/api/billing/payment-method/add-checkout'),
+        headers: _authHeaders(_userId, json: true),
+        body: jsonEncode({'user_id': _userId, 'method_type': type}),
+      );
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final url = data['checkout_url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      } else {
+        final err = jsonDecode(resp.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(err['detail']?.toString() ?? 'Failed to start setup'),
+            backgroundColor: _D.red,
+          ));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Connection error: $e'),
+          backgroundColor: _D.red,
+        ));
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _addingCard = false;
+        _addingBank = false;
+      });
+      _loadPaymentMethods();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1666,9 +1978,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
           indicatorColor: _D.gold,
           labelColor: _D.gold,
           unselectedLabelColor: _D.textSecondary,
+          isScrollable: true,
           tabs: const [
-            Tab(text: 'Payment Methods'),
+            Tab(text: 'Methods'),
             Tab(text: 'Invoices'),
+            Tab(text: 'Discounts'),
+            Tab(text: 'Scholarships'),
           ],
         ),
       ),
@@ -1717,6 +2032,30 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                     ),
                     const SizedBox(height: 16),
 
+                    // Add Payment Method buttons
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _AddPaymentButton(
+                            icon: Icons.credit_card,
+                            label: 'Add Card',
+                            loading: _addingCard,
+                            onTap: () => _addPaymentMethod('card'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _AddPaymentButton(
+                            icon: Icons.account_balance,
+                            label: 'Add Bank Account',
+                            loading: _addingBank,
+                            onTap: () => _addPaymentMethod('bank'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
                     if (_methods.isEmpty)
                       Container(
                         padding: const EdgeInsets.all(20),
@@ -1732,24 +2071,25 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                         ),
                       )
                     else
-                      ..._methods.map((m) => Container(
+                      ..._methods.map((m) {
+                        final isBank = m['type'] == 'us_bank_account';
+                        final isDefault = m['is_default'] == true;
+                        return Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
                               color: _D.bgCard,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: m['is_default'] == true
+                                color: isDefault
                                     ? _D.gold.withOpacity(0.5)
                                     : _D.border,
                               ),
                             ),
                             child: Row(children: [
                               Icon(
-                                Icons.credit_card,
-                                color: m['is_default'] == true
-                                    ? _D.gold
-                                    : _D.textSecondary,
+                                isBank ? Icons.account_balance : Icons.credit_card,
+                                color: isDefault ? _D.gold : _D.textSecondary,
                                 size: 24,
                               ),
                               const SizedBox(width: 12),
@@ -1759,14 +2099,18 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                       CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      '${(m['brand'] ?? 'Card').toString().toUpperCase()} •••• ${m['last4'] ?? '????'}',
+                                      isBank
+                                          ? '${(m['bank_name'] ?? 'Bank').toString()} •••• ${m['last4'] ?? '????'}'
+                                          : '${(m['brand'] ?? 'Card').toString().toUpperCase()} •••• ${m['last4'] ?? '????'}',
                                       style: const TextStyle(
                                           color: _D.textPrimary,
                                           fontSize: 14,
                                           fontWeight: FontWeight.w500),
                                     ),
                                     Text(
-                                      'Exp ${m['exp_month'] ?? '??'}/${m['exp_year'] ?? '??'}${m['is_default'] == true ? ' · Default' : ''}',
+                                      isBank
+                                          ? 'ACH Direct Debit${isDefault ? ' · Default' : ''}'
+                                          : 'Exp ${m['exp_month'] ?? '??'}/${m['exp_year'] ?? '??'}${isDefault ? ' · Default' : ''}',
                                       style: const TextStyle(
                                           color: _D.textSecondary,
                                           fontSize: 11),
@@ -1774,13 +2118,21 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                   ],
                                 ),
                               ),
+                              if (!isDefault)
+                                IconButton(
+                                  onPressed: () => _setDefaultPaymentMethod(m['id'] ?? ''),
+                                  icon: const Icon(Icons.star_border,
+                                      color: _D.textSecondary, size: 18),
+                                  tooltip: 'Set as default',
+                                ),
                               IconButton(
                                 onPressed: () => _deleteMethod(m['id'] ?? ''),
                                 icon: const Icon(Icons.delete_outline,
                                     color: _D.red, size: 18),
                               ),
                             ]),
-                          )),
+                          );
+                      }),
                   ],
                 ),
 
@@ -1860,8 +2212,257 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                                 ),
                             ]),
                           )),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _D.bgCard,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _D.border),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.medical_services_outlined, color: _D.cyan, size: 20),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('HSA/FSA Superbill', style: TextStyle(color: _D.textPrimary, fontSize: 13, fontWeight: FontWeight.w500)),
+                                Text('Download for insurance reimbursement', style: TextStyle(color: _D.textSecondary, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => _downloadSuperbill(),
+                            child: const Text('Download', style: TextStyle(color: _D.gold, fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
+
+          // Discounts tab
+          ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (_appliedSchoolName != null)
+                _discountBadge(Icons.school, 'Student Discount', _appliedSchoolName!),
+              if (_appliedCompanyName != null)
+                _discountBadge(Icons.business, 'Corporate Plan', _appliedCompanyName!),
+              if (_discountCodeSuccess != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _D.green.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _D.green.withOpacity(0.3)),
+                  ),
+                  child: Text(_discountCodeSuccess!, style: const TextStyle(color: _D.green, fontSize: 13)),
+                ),
+              ],
+              if (_discountCodeError != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: _D.red.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _D.red.withOpacity(0.3)),
+                  ),
+                  child: Text(_discountCodeError!, style: const TextStyle(color: _D.red, fontSize: 13)),
+                ),
+              ],
+              _discountCodeSection(
+                icon: Icons.school,
+                title: 'Student Discount',
+                subtitle: 'Enter your school code for a student discount',
+                hintText: 'School code (e.g. STANFORD2026)',
+                controller: _schoolCodeCtrl,
+                onApply: _applySchoolCode,
+              ),
+              const SizedBox(height: 12),
+              _discountCodeSection(
+                icon: Icons.business,
+                title: 'Corporate Sponsor',
+                subtitle: 'Enter your employer code for corporate benefits',
+                hintText: 'Corporate code (e.g. ACME100)',
+                controller: _corporateCodeCtrl,
+                onApply: _applyCorporateCode,
+              ),
+            ],
+          ),
+
+          // Scholarships tab
+          _loadingScholarships
+              ? const Center(child: CircularProgressIndicator(color: _D.gold))
+              : ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (_scholarships.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: _D.bgCard,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _D.border),
+                        ),
+                        child: const Column(
+                          children: [
+                            Icon(Icons.volunteer_activism, color: _D.textSecondary, size: 36),
+                            SizedBox(height: 10),
+                            Text('No active scholarships',
+                                style: TextStyle(color: _D.textSecondary, fontSize: 14)),
+                            SizedBox(height: 4),
+                            Text('Scholarships cover service costs before your card is charged.',
+                                style: TextStyle(color: _D.textSecondary, fontSize: 11),
+                                textAlign: TextAlign.center),
+                          ],
+                        ),
+                      )
+                    else
+                      ..._scholarships.map((s) => Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: _D.bgCard,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _D.purple.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              const Icon(Icons.volunteer_activism, color: _D.purple, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(child: Text(
+                                s['fund_name']?.toString() ?? 'Scholarship',
+                                style: const TextStyle(color: _D.textPrimary, fontSize: 14, fontWeight: FontWeight.w600),
+                              )),
+                            ]),
+                            const SizedBox(height: 6),
+                            if (s['sponsor_name'] != null)
+                              Text('Sponsored by ${s["sponsor_name"]}',
+                                  style: const TextStyle(color: _D.purple, fontSize: 12)),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Fund balance: \$${((s["fund_balance_cents"] ?? 0) / 100).toStringAsFixed(2)}',
+                                  style: const TextStyle(color: _D.gold, fontSize: 12),
+                                ),
+                                if (s['monthly_limit_cents'] != null)
+                                  Text(
+                                    'Monthly limit: \$${((s["monthly_limit_cents"] ?? 0) / 100).toStringAsFixed(2)}',
+                                    style: const TextStyle(color: _D.textSecondary, fontSize: 11),
+                                  ),
+                              ],
+                            ),
+                            if (s['monthly_limit_cents'] != null) ...[
+                              const SizedBox(height: 4),
+                              LinearProgressIndicator(
+                                value: (s['monthly_limit_cents'] ?? 1) > 0
+                                    ? (s['used_this_month'] ?? 0) / (s['monthly_limit_cents'] ?? 1)
+                                    : 0,
+                                backgroundColor: _D.border,
+                                valueColor: const AlwaysStoppedAnimation<Color>(_D.purple),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Used this month: \$${((s["used_this_month"] ?? 0) / 100).toStringAsFixed(2)}',
+                                style: const TextStyle(color: _D.textSecondary, fontSize: 10),
+                              ),
+                            ],
+                          ],
+                        ),
+                      )),
+                  ],
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _discountBadge(IconData icon, String label, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _D.bgCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _D.gold.withOpacity(0.3)),
+      ),
+      child: Row(children: [
+        Icon(icon, color: _D.gold, size: 20),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(color: _D.gold, fontSize: 12, fontWeight: FontWeight.w600)),
+            Text(value, style: const TextStyle(color: _D.textPrimary, fontSize: 13)),
+          ],
+        )),
+        const Icon(Icons.check_circle, color: _D.green, size: 18),
+      ]),
+    );
+  }
+
+  Widget _discountCodeSection({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String hintText,
+    required TextEditingController controller,
+    required Future<void> Function(String) onApply,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _D.bgCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _D.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(icon, color: _D.textSecondary, size: 20),
+            const SizedBox(width: 8),
+            Text(title, style: const TextStyle(color: _D.textPrimary, fontSize: 14, fontWeight: FontWeight.w500)),
+          ]),
+          const SizedBox(height: 4),
+          Text(subtitle, style: const TextStyle(color: _D.textSecondary, fontSize: 11)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: controller,
+                style: const TextStyle(color: _D.textPrimary, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: hintText,
+                  hintStyle: const TextStyle(color: _D.textSecondary, fontSize: 12),
+                  filled: true,
+                  fillColor: _D.bgElevated,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () {
+                if (controller.text.trim().isNotEmpty) onApply(controller.text.trim());
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: _D.bgElevated),
+              child: const Text('Apply', style: TextStyle(color: _D.gold, fontSize: 12)),
+            ),
+          ]),
         ],
       ),
     );
@@ -2062,6 +2663,47 @@ class _TrialExpiredBanner extends StatelessWidget {
           Text(price,
               style: const TextStyle(color: _D.textSecondary, fontSize: 10)),
         ]),
+      ),
+    );
+  }
+}
+
+
+class _AddPaymentButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool loading;
+  final VoidCallback onTap;
+
+  const _AddPaymentButton({
+    required this.icon,
+    required this.label,
+    required this.loading,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: loading ? null : onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: _D.bgCard,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _D.gold.withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: loading
+              ? [const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: _D.gold))]
+              : [
+                  Icon(icon, color: _D.gold, size: 18),
+                  const SizedBox(width: 8),
+                  Text(label, style: const TextStyle(color: _D.gold, fontSize: 13, fontWeight: FontWeight.w600)),
+                ],
+        ),
       ),
     );
   }

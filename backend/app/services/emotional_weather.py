@@ -7,6 +7,7 @@ Applied Solution S2: Family Sanctuary Emotional Weather System.
 """
 
 import asyncio
+import json
 import logging
 import math
 from datetime import datetime
@@ -28,12 +29,16 @@ class EmotionalWeatherService:
     """
     Computes real-time emotional topology for Family Sanctuary sessions.
     Updates every 5 seconds with fresh Nevedal data per member.
+    Persists snapshots to emotional_weather_snapshots for longitudinal analysis.
     """
 
-    def __init__(self, nevedal_engine=None, sovereign_mind=None):
+    def __init__(self, nevedal_engine=None, sovereign_mind=None, db_pool=None):
         self._nevedal = nevedal_engine
         self._sovereign_mind = sovereign_mind
         self._active_maps: Dict[str, EmotionalWeatherMap] = {}
+        self._db_pool = db_pool
+        self._snapshot_counter: Dict[str, int] = {}
+        self._SNAPSHOT_INTERVAL = 6  # persist every 6th update (~30s at 5s cycle)
 
     # -------------------------------------------------------------------------
     # MAP LIFECYCLE
@@ -55,7 +60,9 @@ class EmotionalWeatherService:
         return weather
 
     async def end_session_weather(self, sanctuary_id: str) -> Optional[EmotionalWeatherMap]:
-        """End and return the final weather map for a session."""
+        """End and return the final weather map for a session. Persists final snapshot."""
+        await self.persist_snapshot(sanctuary_id)
+        self._snapshot_counter.pop(sanctuary_id, None)
         return self._active_maps.pop(sanctuary_id, None)
 
     # -------------------------------------------------------------------------
@@ -119,6 +126,10 @@ class EmotionalWeatherService:
         self._compute_influence_map(weather)
 
         weather.timestamp = datetime.utcnow()
+
+        # Persist snapshot periodically for longitudinal analysis
+        await self._maybe_persist(sanctuary_id)
+
         return weather
 
     # -------------------------------------------------------------------------
@@ -345,6 +356,80 @@ class EmotionalWeatherService:
             if influence[weather.bridge_member] - influence[weather.isolated_member] < 0.1:
                 weather.bridge_member = None
                 weather.isolated_member = None
+
+    # -------------------------------------------------------------------------
+    # PERSISTENCE — emotional_weather_snapshots (longitudinal data)
+    # -------------------------------------------------------------------------
+
+    async def persist_snapshot(self, sanctuary_id: str) -> bool:
+        """Write current weather map to emotional_weather_snapshots for longitudinal analysis."""
+        if not self._db_pool:
+            return False
+
+        weather = self._active_maps.get(sanctuary_id)
+        if not weather:
+            return False
+
+        member_states_json = {}
+        for mid, state in weather.member_states.items():
+            member_states_json[mid] = {
+                "member_id": state.member_id,
+                "member_name": state.member_name,
+                "role_in_family": state.role_in_family,
+                "current_c_emo": round(state.current_c_emo, 5),
+                "c_emo_velocity": round(state.c_emo_velocity, 5),
+                "decoherence_gamma": round(state.decoherence_gamma, 5),
+                "tunneling_t": round(state.tunneling_t, 5),
+                "attachment_activation": state.attachment_activation.value if hasattr(state.attachment_activation, 'value') else str(state.attachment_activation),
+                "communication_mode": state.communication_mode.value if hasattr(state.communication_mode, 'value') else str(state.communication_mode),
+                "message_count": state.message_count,
+                "silence_duration": round(state.silence_duration, 2),
+            }
+
+        dyad_json = {}
+        for key, dyad in weather.dyad_coherence.items():
+            dyad_json[key] = {
+                "member_a": dyad.member_a,
+                "member_b": dyad.member_b,
+                "coherence_score": round(dyad.coherence_score, 5),
+                "entanglement": round(dyad.entanglement, 5),
+                "tunneling": round(dyad.tunneling, 5),
+                "repair_attempts": dyad.repair_attempts,
+                "repair_success_rate": round(dyad.repair_success_rate, 3),
+                "a_decoherence_when_b_speaks": round(dyad.a_decoherence_when_b_speaks, 5),
+                "b_decoherence_when_a_speaks": round(dyad.b_decoherence_when_a_speaks, 5),
+            }
+
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO emotional_weather_snapshots
+                    (sanctuary_id, family_id, member_states, dyad_coherence,
+                     system_coherence, system_volatility, cee_window_open,
+                     bridge_member, isolated_member)
+                    VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8, $9)
+                """,
+                    weather.sanctuary_id,
+                    weather.family_id,
+                    json.dumps(member_states_json),
+                    json.dumps(dyad_json),
+                    weather.system_coherence,
+                    weather.system_volatility,
+                    weather.cee_window_open,
+                    weather.bridge_member,
+                    weather.isolated_member,
+                )
+            return True
+        except Exception as e:
+            logger.warning("EmotionalWeather: snapshot persist failed: %s", e)
+            return False
+
+    async def _maybe_persist(self, sanctuary_id: str) -> None:
+        """Persist a snapshot every N updates (~30s) to avoid flooding the DB."""
+        count = self._snapshot_counter.get(sanctuary_id, 0) + 1
+        self._snapshot_counter[sanctuary_id] = count
+        if count % self._SNAPSHOT_INTERVAL == 0:
+            await self.persist_snapshot(sanctuary_id)
 
     # -------------------------------------------------------------------------
     # ACCESSORS
