@@ -1,0 +1,88 @@
+---
+description: Voice call pipeline architecture — Twilio + Grok + Azure TTS
+alwaysApply: true
+---
+
+# Voice Call Pipeline Architecture
+
+## Pipeline Flow (Locked)
+
+```
+Twilio answers → Polly <Say> greeting → <Connect><Stream> opens → Grok Realtime session
+→ Caller speaks → Grok VAD detects end-of-speech → Grok generates text
+→ Azure TTS synthesizes → μ-law audio → Twilio stream → Caller hears Little Nate
+```
+
+## Core Files
+
+| File | Role |
+|---|---|
+| `backend/app/routers/voice_billing_api.py` | TwiML routing, Polly greeting, call billing |
+| `backend/app/services/twilio_grok_xtts_pipeline.py` | Main pipeline: Grok ↔ Azure TTS ↔ Twilio stream |
+| `backend/app/services/backchannel_engine.py` | Backchannel clips (currently DISABLED) |
+
+## Grok Event Routing (Critical — Do Not Change)
+
+| Event | Action | Why |
+|---|---|---|
+| `response.output_audio.delta` | **SKIP** | Grok's native voice — not Little Nate's |
+| `response.output_audio_transcript.delta` | **SKIP** | Partial streaming text — wait for `.done` |
+| `response.output_audio_transcript.done` | **EXTRACT TEXT** → Azure TTS | This is the ONLY text channel from Grok |
+| `response.output_text.done` | Extract (dedup) | Backup text channel, deduped by `_spoken_response_ids` |
+| `response.done` | **SKIP** (dedup) | `resp_id` already captured from `transcript.done` |
+
+Grok's `modalities: ["text"]` setting is ignored by the API — it always sends audio events. Never assume text-only output.
+
+## Audio Gating (Prevents Double-Talk)
+
+`_nate_speaking` flag controls caller audio forwarding to Grok:
+
+- **True** (Nate speaking): Caller mic audio is NOT sent to Grok. Prevents Grok's VAD from hearing silence during playback and generating extra responses.
+- **False** (Nate silent): Caller audio flows to Grok normally.
+
+**Never remove audio gating.** Without it, Grok generates 2-4 responses per user turn because its VAD triggers on silence gaps between Azure TTS chunks.
+
+## Greeting Architecture
+
+The Polly TwiML `<Say>` plays BEFORE the WebSocket stream connects. There is NO Grok greeting prompt. This separation guarantees zero collision:
+
+1. Twilio answers → Polly says the greeting (configurable in `voice_billing_api.py`)
+2. Stream connects → Grok session opens
+3. Grok listens passively until the caller speaks
+
+**Never add a Grok greeting prompt** (`conversation.item.create` + `response.create` at session start). This caused triple audio collision: Polly greeting + Grok native audio + Azure TTS of Grok text, all playing simultaneously.
+
+## Backchannel Engine — DISABLED
+
+The `BackchannelEngine` is set to `None` in the pipeline. Backchannel clips ("mmmhmmm", "right", "yeah") caused persistent double-talk collisions with Grok's responses. Do not re-enable without solving the timing collision between clip injection and Azure TTS playback.
+
+## Deduplication
+
+`_spoken_response_ids` (set of response IDs) prevents the same Grok response from being spoken twice. Grok sends the same text in multiple event types (`response.output_audio_transcript.done` and `response.done`). The first event adds the `resp_id` to the set; subsequent events with the same ID are skipped. The set is cleared at session start.
+
+## Tuned Parameters
+
+| Parameter | Value | Location | Impact |
+|---|---|---|---|
+| VAD `silence_duration_ms` | 700 | `_open_grok_session()` | End-of-speech detection speed |
+| VAD `threshold` | 0.5 | `_open_grok_session()` | Speech vs noise sensitivity |
+| VAD `prefix_padding_ms` | 300 | `_open_grok_session()` | Audio captured before speech start |
+| `_FILLER_TIMEOUT_S` | 1.5 | Module constant | Filler phrase plays if TTS exceeds this |
+| Recovery delay | 3.0s | `_delayed_recovery()` | Wait before speaking recovery on Grok error |
+| Energy threshold | 45 | Media chunk handler | `is_speech` detection for turn detector |
+
+## Recovery on Grok Errors
+
+When Grok returns `UNAVAILABLE`, a `_delayed_recovery` task waits 3 seconds. If Grok recovers and sends text within that window, the recovery is cancelled. If not, Little Nate says a recovery message. Never make this instant — it collides with Grok's retry.
+
+## Rules
+
+1. **Never re-add a Grok greeting prompt.** Polly handles the greeting. Grok listens.
+2. **Never remove `_nate_speaking` audio gating.** It prevents runaway multi-response generation.
+3. **Never block `response.output_audio_transcript.done` in `_extract_assistant_text`.** This is the only reliable text channel from Grok's API.
+4. **Never re-enable BackchannelEngine** without a proven solution for clip/TTS collision timing.
+5. **`_spoken_response_ids` must be cleared at session start** — stale IDs from prior calls cause text suppression.
+6. **User identification** uses `ctx.get("username") or ctx.get("user_id") or ctx.get("voice_billing_user_id")` — all three must be checked.
+7. **After any voice pipeline change**, test with a live call before considering the deploy complete.
+8. **VAD silence_duration_ms must stay between 500-900ms.** Below 500 causes mid-sentence interruptions. Above 900 adds perceptible lag.
+9. **Recovery delay must stay between 2-4 seconds.** Below 2 collides with Grok retries. Above 4 feels like dead air.

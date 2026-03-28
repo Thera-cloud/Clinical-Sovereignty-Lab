@@ -1,0 +1,127 @@
+# Vectorize Semantic Search Architecture
+
+## Overview
+
+Six Cloudflare Vectorize indexes provide semantic (conceptual) search across all user content. Embeddings are generated via Workers AI (`@cf/baai/bge-small-en-v1.5`, 384-dim, free with Workers Paid $5/mo). Write-path embedding happens fire-and-forget on every content insertion. Read-path queries support both backend-side (Python → REST API) and edge-side (Worker → Vectorize binding).
+
+## Recall Optimizations
+
+### BGE Query Instruction Prefix (Free +1-2% nDCG)
+
+All query-time embedding calls prepend `"Represent this sentence for searching relevant passages: "` to the search query. This is the BGE model's designed asymmetric behavior — documents are embedded without prefix, queries WITH prefix. Applied in `semantic_search()`, `semantic_search_family()`, `semantic_search_group()`, and the edge Worker's `handleSemanticSearch()`.
+
+### Structured Clinical Photo Annotations
+
+Photo analysis uses `CLINICAL_PHOTO_PROMPT` in `vectorize_service.py` with structured headers (PEOPLE, EMOTIONS, SETTING, OBJECTS, DYNAMICS, THERAPEUTIC THEMES, COLORS & ATMOSPHERE). Each section is independently searchable via its embedding. Used by both unified search auto-analysis and vault photo analysis.
+
+### Image-to-Image Search via Vision LLM
+
+`image_to_image_search()` uses Workers AI `llama-3.2-11b-vision-instruct` to describe a query image, then embeds that description for semantic search against `nate-annotations`. No CLIP or new infrastructure needed.
+
+### Granular Metadata Filtering
+
+All write paths inject `family_id`, `group_id`, `company_id`, `tier` from the user's profile. Queries use these for scoped searches (family, group, company). At 1M users, this reduces index scan from billions to thousands of vectors per query.
+
+## Indexes (all 384-dim, cosine similarity)
+
+| Index Name | Content Source | Metadata Filters | Write Path |
+|---|---|---|---|
+| `nate-memory-search` | `conversation_history` | `user_id`, `session_id`, `family_id`, `group_id`, `tier`, `company_id` | `bridge_server.py` → `_memorize_pg()` |
+| `nate-vault-search` | `vault_items` | `user_id`, `item_id`, `family_id`, `group_id`, `tier` | `vault_operations.py` → `add_item()` |
+| `nate-wisdom` | `wisdom_extractions` | `user_id`, `family_id`, `group_id`, `company_id`, `tier`, `insight_type` | `lived_wisdom.py` → `store_extraction()` |
+| `nate-me2me` | `me2me_imprint_entries` | `user_id`, `entry_id`, `family_id`, `group_id`, `tier` | `imprint_accumulator.py` → `flush()` |
+| `nate-sessions` | Session memory index files | `coach_id`, `client_id`, `family_id`, `group_id`, `company_id` | `session_memory_store.py` → `store_session()` |
+| `nate-annotations` | `vault_item_annotations` | `user_id`, `vault_item_id`, `family_id`, `group_id` | `bridge_server.py` (photo analysis handlers) |
+
+## Backend Service
+
+`backend/app/services/vectorize_service.py` provides:
+
+- `generate_embeddings(texts)` — Workers AI REST API for batch embedding
+- `upsert_vectors(index, vectors)` — Vectorize REST API for upserting
+- `query_vectors(index, vector, top_k, filter)` — Vectorize REST API query
+- `index_conversation/vault_item/wisdom/me2me_entry/session/annotation()` — High-level embed+upsert per content type (with scope metadata)
+- `semantic_search(query, index, user_id)` — Embed query (with BGE prefix) + query single index
+- `semantic_search_family(query, family_id)` — Family-scoped search across wisdom, sessions, me2me
+- `semantic_search_group(query, group_id)` — Community group-scoped search across all indexes
+- `semantic_search_all(query, user_id)` — Concurrent query across all 6 indexes
+- `vision_describe_image(image_bytes)` — Workers AI Vision LLM description
+- `image_to_image_search(image_bytes, user_id)` — Describe-then-embed image search
+- `verify_push_pipeline(user_id)` — End-to-end push integrity test (embed → upsert → query → delete)
+- `verify_retrieval_quality(user_id)` — Per-index reachability + metadata validation
+- `batch_embed_and_upsert(index, items)` — Bulk backfill helper
+- `CLINICAL_PHOTO_PROMPT` — Structured clinical annotation prompt for photo analysis
+
+## Trust Auditor
+
+`backend/app/services/vectorize_pipeline_auditor.py` — 30th trust auditor, 13 checks, 3x daily at stagger 65s.
+
+| Tab | Checks | What It Tests |
+|---|---|---|
+| Embedding Health | 2 | Workers AI reachability + 384-dim validation |
+| Push Pipeline | 3 | End-to-end embed → upsert → query-back → cleanup |
+| Retrieval Quality | 6 | Each Vectorize index reachability |
+| Data Integrity | 1 | Metadata schema validation (user_id present) |
+
+Registered in Trust Enforcer as `vectorize_pipeline_audit_sent` with baseline key `vectorize_pipeline_check_count` = 13.
+
+## Edge Worker
+
+`cloudflare/workers/nate-edge-cache.js` handles:
+
+- `POST /api/edge/semantic-search` — Embed at edge via `env.AI` (with BGE prefix), query Vectorize via bindings
+- `GET /api/edge/vectorize/health` — Edge-level pipeline health: Workers AI + all 6 index reachability
+- All existing edge cache rules unchanged
+
+Worker bindings in `wrangler.toml`: `AI`, `MEMORY_INDEX`, `VAULT_INDEX`, `WISDOM_INDEX`, `ME2ME_INDEX`, `SESSION_INDEX`, `ANNOTATION_INDEX`, `VAULT_BUCKET`
+
+## Search Endpoints
+
+| Endpoint | Type | Description |
+|---|---|---|
+| `GET /api/client/memory/search/{hw_id}?q=...` | Hybrid | FTS + Vectorize semantic (merged, deduplicated) |
+| `GET /api/client/memory/semantic-search/{hw_id}?q=...&index=all` | Pure semantic | Vectorize-only across specified indexes |
+| `POST /api/client/memory/image-search/{hw_id}` | Image semantic | Vision LLM describe → embed → search annotations |
+| `GET /api/client/vectorize/health` | Health | Push + retrieval pipeline integrity |
+| `POST /api/edge/semantic-search` | Edge semantic | Zero-origin, runs entirely at Cloudflare edge |
+| `GET /api/edge/vectorize/health` | Edge health | Workers AI + index reachability from edge |
+
+## Env Vars
+
+| Variable | Purpose |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Required for Workers AI + Vectorize REST APIs |
+| `CLOUDFLARE_API_TOKEN` | API token with Workers AI + Vectorize permissions |
+
+## Backfill
+
+`backend/scripts/backfill_vectorize.py` indexes existing DB data:
+
+```bash
+python3 backend/scripts/backfill_vectorize.py --index all
+python3 backend/scripts/backfill_vectorize.py --index conversation --limit 1000
+```
+
+## Rules
+
+1. **Every content insertion must fire-and-forget embed+upsert** — the `asyncio.create_task()` pattern ensures no latency impact on the write path.
+2. **Vectorize is supplementary, not replacing FTS** — if Vectorize is unavailable, the existing FTS queries still work. Semantic results are merged and deduplicated.
+3. **All metadata must include `user_id`** — this is the primary filter for user-scoped queries. Vectorize metadata filtering enforces data isolation.
+4. **All write paths must include scope metadata** — `family_id`, `group_id`, `company_id`, `tier` from the user's profile. These enable scoped searches without full-index scans.
+5. **BGE query instruction prefix is mandatory** — all search functions prepend `_BGE_QUERY_PREFIX`. Never embed a query without it. Documents are embedded WITHOUT the prefix (asymmetric design).
+6. **Photo analysis uses `CLINICAL_PHOTO_PROMPT`** — never use generic "describe this photo" prompts. The structured format ensures searchability across clinical dimensions.
+7. **Vector IDs are deterministic** — SHA256 of `source:record_id`, truncated to 32 chars. This makes upserts idempotent.
+8. **Text is truncated to 2000 chars** before embedding — the model handles up to 512 tokens, and longer text is silently truncated by Workers AI.
+9. **Batch size is 100** for backfill — Workers AI and Vectorize REST APIs have per-request limits.
+10. **The Vectorize Pipeline Auditor verifies both push and retrieval** — it inserts a probe vector, queries it back, validates metadata, and deletes it. This is the only auditor that performs write operations.
+11. **Image-to-image search does NOT use CLIP** — Workers AI has no CLIP model. We use llama-3.2-11b-vision-instruct to describe, then embed the description.
+
+## Cost at Scale (1M users)
+
+| Component | Monthly Cost |
+|---|---|
+| Workers AI embeddings | $0 (included in Workers Paid $5/mo) |
+| Vectorize stored dimensions (50M vectors × 384 dims) | ~$256 |
+| Vectorize queries (100M/month) | ~$100 |
+| Workers requests (100M/month) | ~$45 |
+| **Total** | **~$406/month for 1M users** |

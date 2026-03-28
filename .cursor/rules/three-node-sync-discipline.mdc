@@ -1,0 +1,52 @@
+---
+description: Enforces manual sync awareness across BLUE (Mac), GREEN (production VPS), and ORANGE (Hetzner VPS) — no auto-sync exists
+alwaysApply: true
+---
+
+# Three-Node Sync Discipline
+
+Code changes are **local to the node where they are made**. There is no auto-sync between nodes.
+
+## Node Map
+
+| Color | Node | IP | Role |
+|---|---|---|---|
+| BLUE | Mac (Cursor workspace) | local | Development — where all code is edited |
+| GREEN | DigitalOcean VPS | 68.183.168.75 | Production — Docker containers run here |
+| ORANGE | Hetzner VPS | 37.27.244.80 | Sovereign inference — Ollama + XTTS |
+
+## The Rule
+
+**After editing any file on BLUE, it does NOT exist on GREEN until explicitly pushed.**
+
+Docker builds on GREEN use the files **on GREEN's filesystem** (`/opt/clinical-sovereignty-lab/`), not BLUE's. A `docker compose build` after editing locally builds the OLD code unless the file was pushed first.
+
+## Sync Decision Matrix
+
+After modifying a file, determine if sync is needed:
+
+| File location | Used by | Sync needed? | Command |
+|---|---|---|---|
+| `backend/app/**` | GREEN Docker containers | YES — `scp` to GREEN then rebuild/restart | `scp FILE root@68.183.168.75:/opt/clinical-sovereignty-lab/FILE` |
+| `dashboard/*.html` | GREEN nginx (3 dirs) | YES — `scp` to all 3 dashboard dirs | See `deployment-safety.mdc` |
+| `mobile/lib/**` | GREEN (after `flutter build`) | YES — build on BLUE, rsync `build/web/` to GREEN | See `flutter-build-verification.mdc` |
+| `cloudflare/workers/**` | Cloudflare edge (not GREEN) | NO sync to GREEN — deploy via `wrangler deploy` | `npx wrangler deploy` |
+| `backend/migrations/**` | GREEN PostgreSQL | YES — `scp` then `psql -f` on GREEN | `scp` + `docker exec nate_postgres psql ...` |
+| Files for ORANGE | ORANGE `/opt/sandbox/` or `/opt/xtts-*` | YES — `scp` through jump host | `scp -o ProxyJump=root@68.183.168.75 FILE root@10.13.13.4:/opt/sandbox/FILE` |
+
+## Required Workflow
+
+1. **Edit** on BLUE (Cursor)
+2. **Push** changed files to GREEN via `scp` (never `rsync --delete`)
+3. **Then** rebuild/restart Docker: `docker compose -f docker-compose.prod.yml up -d <service>`
+4. **Verify** the deployed file matches: `ssh root@68.183.168.75 "head -5 /opt/clinical-sovereignty-lab/FILE"`
+
+## Common Mistakes
+
+- Running `docker compose build` on GREEN after editing on BLUE without `scp` — builds stale code
+- Editing a file on GREEN directly via `ssh` + `vim` without pulling back to BLUE — BLUE becomes stale, next `scp` overwrites the GREEN edit
+- Forgetting that ORANGE is isolated — it has no Docker, no git pull, no shared filesystem with GREEN or BLUE
+
+## When to Flag Sync
+
+When a task involves modifying files that run on GREEN or ORANGE, **always include the sync step in the plan**. If the conversation ends with "changes made" but no `scp`/deploy command was run, flag it: "These changes are local to BLUE — they need to be pushed to GREEN before they take effect."

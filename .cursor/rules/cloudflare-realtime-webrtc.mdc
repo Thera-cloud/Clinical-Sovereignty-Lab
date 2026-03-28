@@ -1,0 +1,310 @@
+# Cloudflare Realtime — TURN + Serverless SFU + MoQ Relay
+
+## Overview
+
+Three Cloudflare Realtime services replace Zoom, Twilio Media Streams, and third-party WebRTC infrastructure with zero-cost, globally distributed media routing.
+
+| Service | Purpose | Free Tier |
+|---|---|---|
+| **TURN Server** | NAT traversal relay for peers behind firewalls | 1 TB/month |
+| **Serverless SFU** | Multi-party audio/video track routing (no transcoding) | Unlimited sessions |
+| **MoQ Relay** | Publish/subscribe live media over QUIC — one publish, infinite subscribers | 302 global edge locations |
+
+## Credentials
+
+### TURN Server
+
+| Property | Value |
+|---|---|
+| App Name | `restless-math-4d7b` |
+| Turn Token ID | `17704023fbb65016f12abb900048b359` |
+| API Token | Stored in `CLOUDFLARE_TURN_API_TOKEN` env var |
+| STUN endpoint | `stun:stun.cloudflare.com:3478` |
+| TURN endpoints | `turn:turn.cloudflare.com:3478` (UDP+TCP), `turns:turn.cloudflare.com:5349` (TCP) |
+| Credential API | `POST https://rtc.live.cloudflare.com/v1/turn/keys/{tokenId}/credentials/generate` |
+| Credential TTL | 86400s (24h) — short-lived, generated per session |
+
+### Serverless SFU
+
+| Property | Value |
+|---|---|
+| App Name | `aged-block-6976` |
+| App ID | `8d23ce5179380706d203fd16e1b88a1a` |
+| API Token | Stored in `CLOUDFLARE_SFU_API_TOKEN` env var |
+| Base URL | `https://rtc.live.cloudflare.com/v1/apps/{appId}` |
+| Session API | `POST /sessions/new` — create session from SDP offer |
+| Track API | `POST /sessions/{sessionId}/tracks/new` — publish/subscribe tracks |
+| Renegotiate | `PUT /sessions/{sessionId}/renegotiate` — update SDP |
+
+### MoQ Relay (Media over QUIC)
+
+| Property | Value |
+|---|---|
+| Protocol | IETF MoQ (Media over QUIC) |
+| Draft 07 endpoint | `draft-07.cloudflare.mediaoverquic.com` |
+| Draft 14 endpoint (recommended) | `draft-14.cloudflare.mediaoverquic.com` |
+| Active relay locations | 302 globally |
+| Test stream | Namespace `bbb`, Codec H.264 (avc1.42C01F), CMAF packaging |
+| Supported messages (Draft 14) | SUBSCRIBE, PUBLISH_NAMESPACE, PUBLISH_OK, TRACK_STATUS, SETUP_MESSAGES + more |
+
+## Architecture — Three-Layer Media Plane
+
+```
+  Dad         Mom         Teen        Coach
+  (Flutter)   (Flutter)   (Flutter)   (Flutter)
+   │           │           │           │
+   │ WebRTC    │ WebRTC    │ WebRTC    │ WebRTC
+   │           │           │           │
+   ▼           ▼           ▼           ▼
+ ┌───────────────────────────────────────────────┐
+ │  Layer 1: Cloudflare SFU                      │
+ │  Peer-to-peer audio forwarding                │
+ │  (family members hear each other)             │
+ │  TURN relay when direct connection fails      │
+ └──────────────────┬────────────────────────────┘
+                    │ PCM stream per speaker
+                    ▼
+ ┌───────────────────────────────────────────────┐
+ │  Layer 2: VPS Session Orchestrator            │
+ │  Per-member pipeline:                         │
+ │    STT → ODPE L0/L1/L2 → Memory recall       │
+ │    → Cycle detection → C_emo compute          │
+ │    → PMB/transgenerational cross-ref          │
+ │    → Personalized response generation         │
+ │    → XTTS voice clone (Mac via tunnel)        │
+ └──────────────────┬────────────────────────────┘
+                    │ PUBLISH per member
+                    ▼
+ ┌───────────────────────────────────────────────┐
+ │  Layer 3: MoQ Relay                           │
+ │  PUBLISH_NAMESPACE: sanctuary/{session}/      │
+ │    nate-voice-dad     → Dad subscribes        │
+ │    nate-voice-mom     → Mom subscribes        │
+ │    nate-voice-teen    → Teen subscribes       │
+ │    nate-voice-coach   → Coach subscribes      │
+ │  Edge delivers independently to each          │
+ │  302 locations · sub-100ms · zero VPS load    │
+ └───────────────────────────────────────────────┘
+```
+
+### Role Separation
+
+| Layer | Handles | Does NOT Handle |
+|---|---|---|
+| **SFU** | Peer audio/video between family members | Nate's voice delivery |
+| **MoQ Relay** | Nate's personalized voice delivery (one publish, many subscribe) | Peer audio |
+| **TURN** | NAT traversal for SFU connections | Media routing |
+| **VPS** | Intelligence (ODPE, C_emo, cycles, memory, TTS generation) | Media distribution |
+
+## SFU Session Lifecycle
+
+1. **Backend generates session** — `POST /sessions/new` with SDP offer. Returns `sessionId` + answer SDP.
+2. **Client publishes tracks** — `POST /sessions/{id}/tracks/new` with `location: "local"`, ties `mid` to `trackName`.
+3. **Other clients subscribe** — same endpoint with `location: "remote"`, referencing publisher's `sessionId` + `trackName`.
+4. **SFU selectively forwards** — no transcoding, sub-100ms latency globally.
+5. **Renegotiation** — `PUT /sessions/{id}/renegotiate` when tracks change.
+
+## TURN Credential Generation (Server-Side Only)
+
+TURN credentials are short-lived and must be generated server-side:
+
+```python
+async def generate_turn_credentials(ttl: int = 86400) -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"https://rtc.live.cloudflare.com/v1/turn/keys/"
+            f"{os.getenv('CLOUDFLARE_TURN_TOKEN_ID')}/credentials/generate",
+            headers={
+                "Authorization": f"Bearer {os.getenv('CLOUDFLARE_TURN_API_TOKEN')}",
+                "Content-Type": "application/json",
+            },
+            json={"ttl": ttl},
+        )
+        return resp.json()  # Returns {"iceServers": [...]}
+```
+
+The response provides `iceServers` with STUN + TURN URLs and short-lived `username`/`credential` pairs for `RTCPeerConnection`.
+
+## SFU API Calls (Server-Side Only)
+
+All SFU API calls must be proxied through the backend. The API token must NEVER appear in client-side code.
+
+```python
+SFU_BASE = "https://rtc.live.cloudflare.com/v1/apps"
+SFU_APP_ID = os.getenv("CLOUDFLARE_SFU_APP_ID")
+SFU_TOKEN = os.getenv("CLOUDFLARE_SFU_API_TOKEN")
+
+async def sfu_new_session(offer_sdp: str) -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{SFU_BASE}/{SFU_APP_ID}/sessions/new",
+            headers={
+                "Authorization": f"Bearer {SFU_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"sessionDescription": {"type": "offer", "sdp": offer_sdp}},
+        )
+        return resp.json()  # Returns {sessionId, sessionDescription}
+
+async def sfu_new_tracks(session_id: str, tracks: list, offer_sdp: str = None) -> dict:
+    body = {"tracks": tracks}
+    if offer_sdp:
+        body["sessionDescription"] = {"type": "offer", "sdp": offer_sdp}
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{SFU_BASE}/{SFU_APP_ID}/sessions/{session_id}/tracks/new",
+            headers={
+                "Authorization": f"Bearer {SFU_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        return resp.json()
+```
+
+## Migration Targets — What SFU + TURN Replaces
+
+| Current System | Current Provider | Migration Target | Cost Saving |
+|---|---|---|---|
+| DOJO Mentor video sessions | Zoom API (`dojo_mentor_zoom.py`) | SFU multi-party + TURN | Zoom license eliminated |
+| Live call coaching audio | Twilio Media Streams (`call_coaching_engine.py`) | SFU audio-only + TURN | Twilio per-minute eliminated |
+| Community Mesh group audio | BLE discovery only (`community_mesh_ble.dart`) | BLE discovery → SFU group audio | New capability |
+| Coaching Mesh training | Text-over-WebSocket (`coaching_mesh_screen.dart`) | SFU audio/video + TURN | New capability |
+| Classroom video sessions | File upload only (`sessions.py`) | SFU live + R2 recording | New capability |
+| LittleNate Realtime voice | Raw WebSocket + base64 PCM (`littlenate_realtime.py`) | WebRTC + SFU + TURN | Better codec (Opus), adaptive bitrate |
+
+## Integration Points
+
+| Component | How It Uses SFU/TURN |
+|---|---|
+| `nate-voice-edge` Worker | Proxies TURN credential generation at the edge |
+| `nate-summon-worker` Worker | Can create SFU sessions for real-time summon interactions |
+| VPS Backend (`voice_edge_api.py`) | Proxies SFU API calls, manages session lifecycle |
+| Flutter Client | `RTCPeerConnection` with TURN iceServers, publishes/subscribes via backend proxy |
+| Bridge (`bridge_server.py`) | WebSocket signaling for SFU session coordination between peers |
+
+## Audio Capture for AI Processing
+
+The SFU handles media routing, but Little Nate still needs audio for:
+- Voice biometric extraction (pitch, energy, speech rate)
+- Nevedal C_emo computation
+- Coaching card generation
+- Wisdom extraction from sessions
+
+Pattern: Client captures audio via `MediaStream` → `AudioContext` → extracts PCM samples → sends to bridge via existing WebSocket alongside the SFU media path. The SFU carries the real-time audio between peers; the WebSocket carries the AI analysis stream to the backend.
+
+## Bandwidth Budget (1 TB/month TURN)
+
+| Use Case | Per-Session | Monthly (est.) | % of 1TB |
+|---|---|---|---|
+| Community Mesh audio (8 users, 1hr) | ~50 MB | ~5 GB (100 sessions) | 0.5% |
+| DOJO Mentor video (2 users, 30min) | ~150 MB | ~15 GB (100 sessions) | 1.5% |
+| Coaching Mesh audio (5 users, 1hr) | ~30 MB | ~3 GB (100 sessions) | 0.3% |
+| Client therapy voice (1:1, 30min) | ~10 MB | ~10 GB (1000 sessions) | 1% |
+| Live call coaching (1:1, 20min) | ~8 MB | ~4 GB (500 calls) | 0.4% |
+| Classroom live video (10 users, 1hr) | ~300 MB | ~30 GB (100 sessions) | 3% |
+
+**Total estimated: ~67 GB/month** — ~6.7% of free tier. TURN is only used when direct connections fail (~20% of attempts), so actual relay usage is ~13 GB/month.
+
+## MoQ Namespace Hierarchy
+
+MoQ uses hierarchical publish/subscribe namespaces. Little Nate publishes personalized voice tracks; each member subscribes only to theirs.
+
+### Individual Session
+
+```
+sanctuary/{sessionId}/
+  nate-voice-{userId}          ← Personalized Nate voice for this member
+  coherence-signal             ← Real-time C_emo for dashboard overlay
+  escalation-alert             ← Crisis detection stream (coach/admin only)
+```
+
+### Family Session
+
+```
+sanctuary/{sessionId}/
+  nate-voice-dad               ← ODPE-personalized for Dad
+  nate-voice-mom               ← ODPE-personalized for Mom
+  nate-voice-teen              ← ODPE-personalized for Teen
+  nate-voice-coach             ← Coaching overlay with cycle/PMB data
+  family-coherence             ← Aggregate family C_emo
+```
+
+### Group / Corporate / Community
+
+```
+corporate/{companyId}/{groupId}/{sessionId}/
+  nate-voice-{userId}          ← Per-employee personalized voice
+  group-coherence              ← Aggregate group C_emo
+
+community/{meshId}/{sessionId}/
+  nate-voice-{userId}          ← Per-member (anonymous handle)
+  mesh-wisdom                  ← Shared wisdom stream (PII-stripped)
+```
+
+### Global Intelligence Layer
+
+```
+global/
+  coherence-aggregate          ← Weighted average C_emo across all active sessions
+  cycle-signals                ← Population-level cycle detection (anonymized)
+  wisdom-stream                ← Crystals synthesized from session insights
+  trauma-atlas                 ← Transgenerational pattern frequency map
+```
+
+## MoQ + ODPE Integration — Per-Member Pipeline
+
+Each family member's audio gets an independent ODPE evaluation. The signal determines voice depth and routing:
+
+| Member State | ODPE Signal | Processing Path | MoQ Track |
+|---|---|---|---|
+| Open, coherent | LOCKED | Workers AI ($0) → Edge TTS | `nate-voice-{id}` |
+| Progressing | PROMOTED | Workers AI ($0) → Edge TTS | `nate-voice-{id}` |
+| Defensive, closed | TENSION | Mac 70B via tunnel → XTTS clone | `nate-voice-{id}` |
+| Silent, withdrawn | DEEP_TENSION | Mac 70B + L2 24M faces → XTTS + escalation | `nate-voice-{id}` + `escalation-alert` |
+| Noise/irrelevant | NOISE | Skip LLM, no voice response | — |
+
+The VPS generates each voice response, publishes ONCE to MoQ. The 302-location relay network handles delivery. The VPS never touches distribution.
+
+## MoQ + Queue + Tunnel Flow (Family Session)
+
+1. **SFU** carries peer audio (members hear each other)
+2. **VPS** receives PCM per member via SFU data channel tap
+3. **ODPE L0** at edge Worker — LOCKED/PROMOTED handled at edge ($0)
+4. **TENSION/DEEP_TENSION** → `ln-echo-relay` queue → Mac 70B via tunnel
+5. **Mac** generates personalized response + XTTS voice clone
+6. **Mac/VPS** publishes audio to MoQ: `PUBLISH_NAMESPACE sanctuary/{session}/nate-voice-{member}`
+7. **Each member** subscribes to their track — MoQ delivers at the nearest of 302 PoPs
+8. **Nevedal C_emo** published to `sanctuary/{session}/coherence-signal` — dashboard subscribes
+9. **Cycle detection** runs across all members simultaneously — transgenerational patterns cross-referenced via `family_fabric.py`
+
+## Infinite Scale Model
+
+MoQ fundamentally changes the scaling equation:
+
+| Dimension | Without MoQ | With MoQ |
+|---|---|---|
+| 1 family (4 members) | VPS pushes 4 streams | VPS publishes 4, relay delivers 4 |
+| 100 families (400 members) | VPS pushes 400 streams | VPS publishes 400, relay delivers 400 |
+| 10,000 families (40,000 members) | VPS collapses | VPS publishes 40,000, relay delivers 40,000 |
+| Global conference (1M members) | Impossible | VPS publishes 1M, relay delivers 1M across 302 PoPs |
+
+The VPS only generates intelligence. MoQ handles distribution. The bottleneck shifts from network I/O to GPU compute — which is solved by the Mac tunnel + Hetzner + queue architecture.
+
+## Rules
+
+1. **SFU API token must NEVER appear in client-side code.** All SFU API calls go through the backend. The demo `index.html` uses the secret in the browser — this is for testing only.
+2. **TURN credentials are ephemeral.** Generate per-session with 24h TTL via the credential API. Never hardcode TURN usernames/passwords.
+3. **STUN is always free and unlimited.** Use `stun:stun.cloudflare.com:3478` in every `RTCPeerConnection` configuration.
+4. **SFU sessions are stateful.** Each session has a `sessionId` that must be tracked server-side. Clean up sessions when users disconnect.
+5. **Track names must be unique per session.** Use `{userId}_{trackType}` (e.g., `client123_audio`, `client123_video`).
+6. **Renegotiation is required** when the SFU responds with `requiresImmediateRenegotiation: true`. Handle both offer and answer types.
+7. **Audio-only sessions save bandwidth.** For therapy voice, coaching, and community mesh, omit video tracks entirely. Only DOJO mentor and classroom need video.
+8. **The SFU does not transcode.** All peers must use compatible codecs. WebRTC defaults (Opus for audio, VP8/VP9/H.264 for video) work across all browsers.
+9. **TURN relay is a fallback, not the default.** Configure `iceTransportPolicy: "all"` (not `"relay"`) to prefer direct connections. TURN activates only when STUN-based connectivity fails.
+10. **Never store SFU credentials in git.** Use `CLOUDFLARE_SFU_APP_ID`, `CLOUDFLARE_SFU_API_TOKEN`, `CLOUDFLARE_TURN_TOKEN_ID`, `CLOUDFLARE_TURN_API_TOKEN` env vars.
+11. **MoQ is for Nate-to-many, SFU is for peer-to-peer.** Never route member-to-member audio through MoQ — that's the SFU's job. MoQ carries only Nate's generated voice, coherence signals, and escalation alerts.
+12. **Use Draft 14** (`draft-14.cloudflare.mediaoverquic.com`) for all MoQ connections. Draft 07 is legacy.
+13. **MoQ namespaces must include sessionId.** Never publish to a bare namespace like `sanctuary/nate-voice` — always scope to `sanctuary/{sessionId}/nate-voice-{userId}` to prevent cross-session bleed.
+14. **Global namespace tracks are anonymized.** `global/coherence-aggregate` and `global/cycle-signals` must never contain user IDs, names, or identifiable data. Only aggregate metrics.
+15. **MoQ publish is fire-and-forget from the VPS perspective.** The relay handles subscriber fan-out. The VPS does not track who is subscribed or manage delivery. If no subscribers exist, the publish is a no-op.

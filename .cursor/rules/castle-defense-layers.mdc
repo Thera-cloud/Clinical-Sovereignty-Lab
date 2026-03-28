@@ -1,0 +1,84 @@
+# Castle Defense Layer Architecture
+
+## Overview
+
+Castle Defense is an 11-service security mesh within Hive Defense v4, providing layered protection from API entry point through forensic reconstruction. All services live under `app.state.hive_v4` and are initialized during the Hive v4 startup block in `main.py`.
+
+## Service Map
+
+| # | Service | app.state Key | File | Purpose |
+|---|---|---|---|---|
+| 1 | Edge Mirror Shell | `edge_mirror` | `edge_mirror_shell.py` | Pre-auth request assessment, phantom responses |
+| 2 | ZTA Gatekeeper | `zta_gatekeeper` | `zta_gatekeeper.py` | Zero Trust continuous verification at every boundary |
+| 3 | SASE Controller | `sase_controller` | `sase_controller.py` | Secure Access Service Edge — outbound monitoring + blocklist |
+| 4 | Endpoint Shield | `endpoint_shield` | `endpoint_shield.py` | Payload scanning for injection, XSS, SQLi |
+| 5 | Skeptic Guard | `skeptic_guard` | `skeptic_guard.py` | First-pass malice scoring with sensitivity multiplier |
+| 6 | Critic Guard | `critic_guard` | `critic_guard.py` | Second-pass overrule/confirm for skeptic assessments |
+| 7 | ZTA Bug Fibre | `zta_bug` | `zta_bug_fibre.py` | Guard agreement tracing + escalation detection |
+| 8 | Mirror Gateway | `mirror_gateway` | `mirror_gateway.py` | Honeypot tarpits + canary tracking + attacker intel |
+| 9 | YubiKey Gate | `yubikey_gate` | `yubikey_gate.py` | Hardware key challenge integration |
+| 10 | Fall Command | `fall_command` | `sovereign_fall_command.py` | Backup orchestration + incident reports |
+| 11 | Upstream Canary | `upstream_canary` | `upstream_canary.py` | External provider health monitoring |
+
+## Upstream Canary Network
+
+Monitors 4 critical external providers every 3600s:
+
+| Provider | Check Method | What It Validates |
+|---|---|---|
+| Azure OpenAI | HTTPS probe | API reachable, not rate-limited |
+| Stripe | HTTPS probe | Payment gateway accessible |
+| SendGrid | `GET /v3/scopes` | API key valid, email service reachable |
+| Anthropic | HTTPS probe | AI provider accessible |
+
+**Alert threshold:** 3 consecutive failures trigger `_canary_alert()` callback.
+
+**Status endpoint:** `GET /api/hive-defense/v4/canary/status` returns per-provider `{alive, last_check, consecutive_failures}`.
+
+## Zero Trust Architecture (ZTA)
+
+The `ZTAGatekeeper` enforces continuous verification:
+- Every API request must carry valid auth
+- Session re-verification after suspicious activity
+- `guardian_fibre` integration for fibre-level access control
+
+**Stats:** `{active_sessions, total_verified, total_denied, total_reauth_required}`
+
+## Heritage Vault (Multi-Cloud Replication)
+
+The `MultiCloudHeritageVault` provides quad-redundant storage:
+
+| Backend | Env Config | Purpose |
+|---|---|---|
+| Cloudflare R2 | `R2_ACCOUNT_ID` + keys | Zero-egress primary |
+| Backblaze B2 | `B2_KEY_ID` + keys | Cost-effective secondary |
+| Azure Blob | `AZURE_STORAGE_CONNECTION_STRING` | Enterprise cloud backup |
+| AWS S3 | `AWS_ACCESS_KEY_ID` + keys | Cross-provider redundancy |
+| Local Disk | Always available | Immediate-access fallback |
+
+**Durability:** `ReplicationResult.durable = True` when >= 2 backends succeed.
+
+## Rules
+
+1. **All Castle services must initialize independently** — failure in one must not crash the Hive v4 init block. Each service is wrapped in its own `try/except`.
+2. **Edge Mirror runs before authentication** — it sees raw requests and must never access user credentials or tokens.
+3. **Skeptic + Critic guards operate as a pair** — the Critic overrules or confirms Skeptic assessments. Never run only one.
+4. **ZTA Bug Fibre traces guard disagreements** — if Skeptic says "block" and Critic says "allow", the Bug Fibre records the trace for analysis.
+5. **Upstream Canary uses `/v3/scopes` for SendGrid** — NOT `/v3/user/credits` which requires `billing.read` scope (causes 403).
+6. **Heritage Vault `initialize()` returns backend availability** — a dict of `{r2: bool, b2: bool, azure: bool, aws: bool, local: bool}`. Not all backends need to succeed.
+7. **Fall Command requires `project_root`** — defaults to `/app` inside Docker.
+8. **`get_zta()` accepts `guardian_fibre` parameter** — this was fixed in Mar 2026; the factory function passes it to the `ZTAGatekeeper` constructor.
+
+## Trust Auditor
+
+- Audited by: `CastleDefenseAuditor` (14 checks)
+- Activity type: `castle_defense_audit_sent`
+- Baseline key: `castle_defense_check_count` (expected: 14)
+- Stagger: 45s
+
+## Heritage Vault Auditor
+
+- Audited by: `HeritageVaultAuditor` (8 checks)
+- Activity type: `heritage_vault_audit_sent`
+- Baseline key: `heritage_vault_check_count` (expected: 8)
+- Stagger: 40s

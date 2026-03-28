@@ -1,0 +1,42 @@
+---
+description: Patent portfolio integrity — file locations, naming, and protection rules
+alwaysApply: true
+---
+
+# Patent Portfolio Integrity
+
+## Patent Directory
+
+All patent documents live in `/patent/`. Never store patents in `docs/`, `legal/`, or the repo root.
+
+## Current Portfolio (14 Markdown Documents + PDFs + Figures)
+
+| # | File | Short Title | Date |
+|---|---|---|---|
+| 1 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT.md` (.pdf) | Original QEC — Nevedal Formula | Feb 2026 |
+| 2 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT_PROVISIONAL_2.md` (.pdf) | Clinical Supervision & Matching | Feb 2026 |
+| 3 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT_PROVISIONAL_3.md` (.pdf) | Visual Biometrics & Co-Piloting | Feb 2026 |
+| 4 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT_PROVISIONAL_4.md` (.pdf) | Legal Training Simulation (DOJO) | Feb 2026 |
+| 5 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT_PROVISIONAL_5.md` | PMB Shame/Crisis (earlier draft) | Mar 2026 |
+| 6 | `QUANTUM_EMOTIONAL_COHERENCE_PATENT_PROVISIONAL_6.md` | ODPE Geometric Topology (earlier draft) | Mar 2026 |
+| 7 | `PATENT_OSCILLATING_DUAL_PROCESS_ECHO.md` | ODPE Standalone (Dodecahedron + Deltoidal) | Mar 2026 |
+| 8 | `PATENT_PROVISIONAL_5_CRYSTAL_INTELLIGENCE.md` | Crystal Memory, Transgenerational Encoding, Trajectory | Mar 2026 |
+| 9 | `PATENT_PROVISIONAL_6_ODPE_SIGNAL_ROUTING.md` | ODPE Signal Taxonomy, Helix Pipeline, Technique Selection | Mar 2026 |
+| 10 | `PATENT_PROVISIONAL_7_LIMINAL_RESOLVE.md` | Liminal Resolve, Night School, Sovereign Standard | Mar 2026 |
+| 11 | `PATENT_PROVISIONAL_8_VOICE_THERAPY.md` | Backchannel Engine, PAUSED Recovery, Prepaid Billing | Mar 2026 |
+| 12 | `PATENT_PROVISIONAL_9_NEUROANATOMICAL_ARCHITECTURE.md` | Brain-Mapped Modules, Clinical Records, ExaFLOPS Growth | Mar 2026 |
+| 13 | `PATENT_PROVISIONAL_10_UNIFIED_GOVERNING_FUNCTION.md` | Nevedal Formula as Unified Governor Across All Subsystems | Mar 2026 |
+| 14 | `PATENT_PROVISIONAL_11_NEURAL_MIRROR.md` | Virtual EEG Fingerprinting, Emotional DNA, Neural Mirror Co-regulation | Mar 2026 |
+
+Patent figures (32 PDFs + 32 PNGs, `patent_fig_1` through `patent_fig_32`) and 2 complete drawing compilations (`PATENT_DRAWINGS_COMPLETE.pdf`, `PATENT_DRAWINGS_4_COMPLETE.pdf`) are co-located in the same directory.
+
+## Rules
+
+1. **Never delete or rename** any patent file. These are legal documents with filing dates.
+2. **Never modify patent claims** without explicit inventor approval. Claims define the legal scope of protection.
+3. **Never modify the Nevedal Formula** (EC = (A × Aw × I) / R) or the C_emo formula in code without checking patent consistency — the formula appears in Patents 1, 5, 6, 7, 9, and 10.
+4. **New patents** use the naming convention `PATENT_PROVISIONAL_{N}_{SHORT_TITLE}.md` and increment from the highest existing number.
+5. **Patent figures** (PDFs) are stored in the same `patent/` directory alongside the markdown.
+6. **Cross-references between patents** use "Patent Application No. N" format. When adding a new patent, update its RELATED APPLICATIONS section to reference all prior patents.
+7. **Code implementing patent claims** should reference the patent in a comment (e.g., `# Patent 8, Claim 1: Backchannel Engine`) when the implementation is non-obvious.
+8. **CONFIDENTIAL**: Patent files must never be committed to a public repository or exposed through any API endpoint.

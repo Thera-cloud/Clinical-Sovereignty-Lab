@@ -1,0 +1,33 @@
+---
+description: Prevents hallucination in Little Nate's crystallized intelligence and chat responses
+alwaysApply: true
+---
+
+# Nate Accuracy & Truth Audit
+
+Hallucination crystallized into memory becomes persistent false belief. This rule prevents it.
+
+## Accuracy Layers (All Must Be Active)
+
+| Layer | Location | Function |
+|-------|----------|----------|
+| System prompt rules | `skyeye_chat.py` → `YOUR ACCURACY RULES` | Prevents fabricated claims at generation time |
+| Empty data guards | `skyeye_chat.py` → 8 context functions | Tells Nate when context sections have 0 records |
+| Response validator | `nate_response_validator.py` | Post-generation regex scan for hallucination patterns |
+| Truth audit | `skyeye_chat.py` → `_truth_audit()` | Cross-references claims against ground truth DB |
+| Crystal validation | `nate_memory_crystallizer.py` | Validator runs before any crystal is stored |
+| Context reordering | `skyeye_chat.py` → conversation builder | Accuracy-critical context first (survives token truncation) |
+
+## Rules
+
+1. **Never remove YOUR ACCURACY RULES from the system prompt.** These rules are the primary defense against fabricated posting claims, capability hallucinations, and invented timestamps.
+
+2. **Empty data guards must use the exact marker format.** `[SECTION_NAME: 0 RECORDS — No data available. Do not fabricate.]` The marker text is what tells Nate to say "I don't have data" instead of inventing plausible-sounding records.
+
+3. **The response validator must scan every crystal before storage.** `NateResponseValidator.validate()` returns a list of violations. If any violation has severity `high`, the crystal must not be stored. This is the last gate before a potential hallucination enters permanent memory.
+
+4. **Truth audit is user-triggerable.** The command "audit your claims" must always work. It cross-references Nate's last 10 messages against `skyeye_content_queue`, `users`, and `skyeye_social_memory`. Each claim is classified as verified, unverifiable, or contradicted.
+
+5. **Context ordering priority:** Knowledge context (crystals, wisdom, posting history) comes before conversational context (chat history). When the token window truncates, conversational context is sacrificed first. Nate must always have access to his ground truth data even in long conversations.
+
+6. **Archived wisdom is conversation, not action.** The `_get_archived_wisdom_context()` header must always include: "These are PAST CONVERSATIONS, not records of actions taken." This prevents Nate from treating discussed plans as executed actions.

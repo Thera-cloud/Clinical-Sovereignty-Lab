@@ -1,0 +1,82 @@
+# Dual Brain Mutual Repair
+
+## R2 as the Neural Bridge
+
+R2 serves as the shared communication channel between Edge and Sovereign brains. Neither brain calls the other's health endpoint directly — they communicate via R2 objects.
+
+| R2 Key Pattern | Direction | Purpose |
+|---|---|---|
+| `heartbeat/sovereign.json` | Sovereign → Edge | Sovereign health status (120s interval) |
+| `edge-queue/*.json` | Edge → Sovereign | Deferred events when Sovereign is down |
+| `crystals/*.json` | Sovereign → Edge | Intelligence crystal replication for Edge recall |
+
+## Sovereign Heartbeat Format
+
+```json
+{
+  "timestamp": "2026-03-10T12:00:00Z",
+  "epoch": 1741608000,
+  "service_count": 97,
+  "immune_state": "HEALTHY",
+  "version": "1.0"
+}
+```
+
+Edge considers Sovereign dead if `epoch` is older than 300 seconds. When dead:
+1. Edge skips all Sovereign calls (circuit breaker + heartbeat check)
+2. Edge queues events to `edge-queue/` for later processing
+3. Edge operates in standalone mode (Workers AI only)
+
+## Edge Queue Event Format
+
+```json
+{
+  "type": "summon_interaction",
+  "message_hash": "abc123...",
+  "source": "edge_resonance",
+  "timestamp": 1741608000
+}
+```
+
+Sovereign drains the queue every 300 seconds via `SovereignHeartbeat._drain_edge_queue()`. Items are deleted after successful processing.
+
+## Crystal Replication to R2
+
+Every new intelligence crystal is replicated to `crystals/{content_hash}.json` in R2 after PostgreSQL insert. This enables future Edge Worker crystal recall without hitting the VPS.
+
+## Circuit Breaker States
+
+| State | Trigger | Behavior | Reset |
+|---|---|---|---|
+| CLOSED | Default / success | Requests flow to Sovereign | — |
+| OPEN | 5 consecutive failures | All Sovereign calls skipped | Auto-reset after 120s |
+
+The circuit breaker is KV-backed (`circuit:sovereign` key) with 600s TTL. After reset, the next request is a "half-open" probe — success fully closes, failure re-opens.
+
+## Self-Repair Flow
+
+1. Quarantine expires (600s)
+2. Immune Sentinel starts repair verification
+3. 3 checks at 30s intervals
+4. Each check evaluates: error_rate < 0.2 AND poison_detections == 0
+5. All 3 pass → brain restored to HEALTHY
+6. Any fails → quarantine extended for another 600s
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/immune_sentinel.py` | Behavioral anomaly detection, quarantine, repair |
+| `backend/app/services/sovereign_heartbeat.py` | R2 heartbeat writer + edge queue drainer |
+| `backend/app/routers/summon_api.py` | Hardened `/internal` with HMAC, sanitization, shields |
+| `cloudflare/workers/nate-summon-worker/worker.js` | HMAC signing, circuit breaker, response validation |
+| `backend/app/services/nate_memory_crystallizer.py` | R2 crystal replication |
+
+## Rules
+
+1. **Never call Sovereign directly from Edge without checking circuit breaker AND heartbeat** — both gates must pass.
+2. **Never write to `heartbeat/sovereign.json` from the Edge Worker** — only Sovereign writes this, Edge only reads.
+3. **Edge queue items must be deleted after processing** — leaving them causes duplicate processing on the next drain cycle.
+4. **Crystal replication failure is non-fatal** — the crystal exists in PostgreSQL and Vectorize. R2 is the redundancy layer.
+5. **The R2 bucket `nate-vault` must exist** — the `CRYSTAL_STORE` binding in `wrangler.toml` references this bucket.
+6. **After any change to heartbeat format**, update both `sovereign_heartbeat.py` (writer) and `worker.js` (reader).

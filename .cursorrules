@@ -91,8 +91,36 @@ Key vars: AZURE_API_KEY, DATABASE_URL, JWT_SECRET
 ## GitHub
 Repo: git@github.com:Thera-cloud/Clinical-Sovereignty-Lab.git
 
+## Voice Pipeline Decision (LOCKED)
+- Live calls use Azure Realtime TTS (TWILIO_VOICE_PIPELINE=azure_realtime)
+- XTTS on Hetzner is STOPPED and DISABLED (systemctl disable xtts-server)
+- Do NOT restart XTTS on Hetzner
+- Do NOT set TWILIO_VOICE_PIPELINE=grok_xtts
+- XTTS will only be used when a dedicated GPU is available (not shared with firehose)
+- The degradation ladder: Azure Realtime → Edge TTS fallback. XTTS is not in the chain.
+
 ## When Making Changes
 1. Check if algorithm is in "Key Algorithms" section - if so, be very careful
 2. Update tests when modifying business logic
 3. Keep .env.template in sync with any new env vars
 4. Follow existing code patterns in each directory
+
+## PRODUCTION CRITICAL FILES — MINIMAL CHANGES ONLY
+These files require explicit approval before modification.
+Changes must be additive only: no reformatting, no restructuring, no refactoring existing code.
+
+### Protected Files
+- `backend/app/websocket/bridge_server.py` (production WebSocket backbone)
+- `backend/app/main.py` (application lifespan + service initialization)
+- `backend/app/services/littlenate_inference.py` (core inference pipeline)
+- `backend/app/services/nate_memory_crystallizer.py` (crystal promotion engine)
+- `docker-compose.prod.yml` (production deployment config)
+- `backend/migrations/*.sql` (database schema — additive only, never ALTER/DROP existing)
+
+### Rules for Protected Files
+1. Maximum 50 lines changed per commit.
+2. No reformatting or whitespace-only changes to existing code.
+3. No moving or renaming existing functions.
+4. New code must be behind a feature flag.
+5. Every change must include a comment: `# QUANTUM-CRYSTAL-ARCH` or `# SOVEREIGN-VOICE`.
+6. If Composer/agent proposes more than 50 lines changed, stop and ask for explicit approval.

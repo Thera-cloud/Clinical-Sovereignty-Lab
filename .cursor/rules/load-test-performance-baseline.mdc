@@ -1,0 +1,163 @@
+---
+description: Load test baseline and 8 critical performance fixes that must never regress
+alwaysApply: true
+---
+
+# Load Test Performance Baseline
+
+The March 21, 2026 load test established the production performance baseline: 100% success at 25 concurrent users, 84% at 50 users, 3.9s p50 latency. Eight fixes produced this result. Reverting any one causes cascading failure.
+
+## The 8 Protected Fixes (Ranked by Impact)
+
+### H1: WebSocket `ping_timeout` — 10s → 60s
+
+**File**: `bridge_server.py` → `main()` → `websockets.serve()`
+
+```python
+async with websockets.serve(
+    handle_client, HOST, PORT,
+    ping_interval=20,
+    ping_timeout=60,       # LOAD-TEST-BASELINE: was 10, caused mass disconnects at 50 users
+    close_timeout=30,      # LOAD-TEST-BASELINE: graceful close window
+    max_size=1_048_576,
+):
+```
+
+**Why**: AI inference takes 5-25s. A 10s ping_timeout kills connections mid-response when the event loop is busy serving other users. This was the single biggest failure mode on March 12 (every connection drop at 50 users).
+
+**Never**: Set `ping_timeout` below 60. Set `ping_interval` below 20.
+
+### H2: Vectorize Indexing Outside DB Connection Block
+
+**File**: `nate_memory_crystallizer.py` → `_cluster_and_synthesize_cycle()`
+
+The `index_wisdom()` call must be OUTSIDE the `async with self._db_pool.acquire() as conn:` block. Vectorize is a network call to Cloudflare — holding a DB connection open while waiting for it causes pool starvation under load.
+
+```python
+async with self._db_pool.acquire() as conn:
+    await conn.execute("""INSERT INTO nate_intelligence_crystals ...""")
+# ← conn released here, BEFORE Vectorize
+try:
+    await index_wisdom(...)  # Network call, no DB conn held
+except Exception:
+    logger.warning(...)
+```
+
+**Never**: Move Vectorize/R2/network calls inside a `db_pool.acquire()` block.
+
+### H3: DB Pool `max_size` — 10 → 25
+
+**File**: `bridge_server.py` → `main()` → `asyncpg.create_pool()`
+
+```python
+db_pool = await asyncpg.create_pool(
+    host=_pg_host, port=_pg_port,
+    user=_pg_user, password=_pg_pass, database=_pg_db,
+    min_size=2,
+    max_size=25,           # LOAD-TEST-BASELINE: was 10, caused pool exhaustion at 50 users
+    command_timeout=30,
+)
+```
+
+**Why**: Each concurrent user can hold 1-3 DB connections (login + metrics + crystal recall). 10 connections for 50 users = guaranteed exhaustion. PostgreSQL `max_connections=200` supports 25 easily.
+
+**Never**: Set `max_size` below 25. If raising above 50, verify PostgreSQL `max_connections` can accommodate bridge + backend + clone pools.
+
+### H4: Load Test Client Accepts Both Response Types
+
+**File**: `backend/tests/load_test_graduated.py` and any future load test scripts
+
+The bridge sends AI responses as either `nate_response` (live inference) or `ai_response` (cached/crystal). Load test clients must accept BOTH:
+
+```python
+if msg_type in ("nate_response", "ai_response"):
+    metrics.ai_response_received = True
+```
+
+**Why**: March 12 results showed 38% turn completion, but reality was higher — cached crystal responses were invisible to the test client. The test was measuring itself, not the system.
+
+**Never**: Write a load test that only checks for `nate_response`.
+
+### C1: O(n²) → O(n log n) Crystal Graph Rebuild
+
+**File**: `nate_memory_crystallizer.py`
+
+The supersession graph must not iterate all-pairs. Use sorted-by-domain + sequential comparison, not nested loops over all crystals. An O(n²) rebuild with 21,000+ crystals stalls the event loop for seconds, blocking all WebSocket message processing.
+
+**Never**: Add nested loops over `nate_intelligence_crystals` without domain partitioning or LIMIT.
+
+### C2: FederatedSearch Key Name Consistency
+
+**File**: `quantum_knowledge_field.py`
+
+The `FederatedSearchCoordinator` must use consistent key names (`crystal_text`, not `text`) when returning results. A key name mismatch silently returns empty results, breaking the LOCKED crystal bypass that serves Turn 1+ responses in <1s.
+
+**Never**: Rename fields in FederatedSearch result dicts without updating all consumers.
+
+### C3: Transaction + executemany for Edge Persistence
+
+**File**: `nate_memory_crystallizer.py` → `_persist_edges()`
+
+Bulk edge inserts must use `async with conn.transaction():` with `executemany`. Without a transaction, a mid-batch failure leaves partial state (some edges written, others not), corrupting the supersession graph.
+
+**Never**: Write bulk INSERT/UPDATE loops without wrapping in a transaction.
+
+### H4b: Graceful Shutdown Hook for Bridge DB Pool
+
+**File**: `bridge_server.py` → signal handlers or `atexit`
+
+When the bridge shuts down, `db_pool.close()` must be called. Without it, PostgreSQL connections become orphaned (89 leaked connections were observed, eating into the 200-connection limit). Over multiple restarts, this exhausts PostgreSQL entirely.
+
+```python
+import signal
+
+async def _graceful_shutdown(sig):
+    if db_pool:
+        await db_pool.close()
+    # ... other cleanup
+
+loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(_graceful_shutdown(signal.SIGTERM)))
+```
+
+**Never**: Remove the shutdown hook. Never skip `db_pool.close()` on exit.
+
+## Load Test Methodology (March 21 Pattern)
+
+The March 21 graduated test is the reference methodology:
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| Recovery between levels | 60s minimum | Allows connection cleanup and pool recovery |
+| Ramp-up per user | 0.5s stagger | Prevents thundering herd |
+| Test duration per level | 30s | Long enough for 1-2 AI turns |
+| Levels | 10, 25, 50, 75, 100 | Graduated to find the knee |
+| Auth method | Per-user accounts (`loadtest_001`–`loadtest_300`) | Realistic; avoids token collision |
+| Password | `LoadTest2026!Nate` | Standard for all load test accounts |
+| WebSocket library | `aiohttp` with `ws.send_str()` | Not `ws.send()` (API changed) |
+
+**Never**: Use <30s recovery between levels (causes cumulative stress that masks the actual ceiling). Never reuse a single account for all concurrent users.
+
+## Production Capacity (Established March 21)
+
+| Metric | Value |
+|---|---|
+| Max stable AI concurrency | 10-25 simultaneous chat queries |
+| WebSocket connection scaling | 200+ connections hold fine |
+| Bottleneck | AI inference pipeline (Grok Foundry), NOT WebSocket bridge |
+| Real-world capacity | 30-50+ logged-in users (not all chat simultaneously) |
+| LOCKED crystal bypass (Turn 1+) | 147ms-974ms |
+| Turn 0 (cold, full inference) | 5-25s depending on provider |
+
+## Verification After Any Bridge/Pool Change
+
+```bash
+# Confirm protected values on production:
+ssh root@68.183.168.75 "docker exec nate_bridge grep -E 'ping_timeout|max_size|close_timeout' /app/app/websocket/bridge_server.py"
+# Expected: ping_timeout=60, max_size=25 (pool), close_timeout=30
+
+# Confirm no orphaned connections after restart:
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = 'little_nate'\""
+
+# Quick smoke test (10 users):
+cd backend/tests && python3 load_test_graduated.py --levels 10 --per-user --duration 15 --recovery 30
+```

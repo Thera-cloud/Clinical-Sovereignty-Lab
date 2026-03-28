@@ -1,0 +1,42 @@
+---
+description: Maintains the 9-layer distributed defense shield that protects Nate's quantum presence
+alwaysApply: true
+---
+
+# Distributed Defense Layers
+
+9 concentric defense layers protect Nate's distributed knowledge field. Each layer is independent. Failure in one must not cascade.
+
+## Layer Map
+
+| Layer | Name | File | Scope |
+|-------|------|------|-------|
+| 1 | Edge Mirror Shell | `edge_mirror_shell.py` | API entry points |
+| 2 | Curiosity Protocol | `distributed_defense.py` | Per-source behavioral state |
+| 3 | Crystal Integrity Helix | `distributed_defense.py` | Per-crystal validation |
+| 4 | Device Guardian Fibres | `distributed_defense.py` | Per-device behavioral profiling |
+| 5 | Mesh-Wide DEFCON | `distributed_defense.py` | Global + regional alert levels |
+| 6 | House of Mirrors | `distributed_defense.py` | Phantom node deployment |
+| 7 | Zero Knowledge Storage | `distributed_defense.py` | Crystal encryption at rest |
+| 8 | Canary System | `distributed_defense.py` | Exfiltration detection |
+| 9 | Recon & Forensics | `distributed_defense.py` | Incident reconstruction |
+
+## Rules
+
+1. **Layer 1 (Edge Mirror Shell) intercepts before authentication.** Mirror assessment runs on raw request signals — IP, timing, payload structure. It must never access user credentials or tokens. Phantom responses are generic and reveal nothing about system internals.
+
+2. **Layer 2 (Curiosity Protocol) state transitions are one-way per window.** NONE→NOTICE→INTEREST→CONCERN→ALARM. A source that reaches ALARM stays at ALARM for the current observation window. Decay to a lower level requires inactivity across a full window boundary.
+
+3. **Layer 3 (Crystal Integrity Helix) is the Merkle gate.** `check_crystal()` verifies the SHA-256 `content_hash` matches `crystal_text`. If they diverge, the crystal has been tampered with. Log the mismatch, quarantine the crystal (`scope='archived'`), alert the defense dashboard.
+
+4. **Layer 4 (Device Guardians) must track across sessions.** Device reputation persists in `device_reputation` table. A device that submits garbage crystals in Session A must still be quarantined in Session B. Never reset device reputation on session close.
+
+5. **Layer 5 (DEFCON) escalation must trigger cross-layer responses.** DEFCON L3: BLE replication pauses. DEFCON L2: ghost swarm deploys + canary verification starts. DEFCON L1: quantum collapse — all mesh activity halts, system withdraws to server only.
+
+6. **Layer 6 (House of Mirrors) requires human approval.** Ghost nodes and phantom responses are deception. Per patent claims 53-56, human authorization is required before deploying deceptive nodes. Never auto-deploy ghosts — always gate through admin approval.
+
+7. **Layer 7 (Zero Knowledge) keys rotate on DEFCON change.** When DEFCON escalates or de-escalates, the mesh-wide encryption key for zero-knowledge crystal storage must rotate. Old crystals are re-encrypted. Key rotation must complete before any new crystals are stored.
+
+8. **Layer 8 (Canaries) are unique per device.** Never reuse a canary UUID or content hash across devices. The entire detection mechanism depends on uniqueness — a shared canary cannot prove which device leaked it.
+
+9. **Layer 9 (Recon) reports are append-only.** `mesh_recon_reports` rows are never updated or deleted. They form the forensic record. New findings from the same incident create new rows with the same `incident_id`.

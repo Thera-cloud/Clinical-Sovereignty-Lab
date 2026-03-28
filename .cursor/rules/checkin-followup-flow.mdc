@@ -1,0 +1,42 @@
+# Nate Check-In Follow-Up Flow
+
+When a coach or client replies to a 72-hour check-in via SMS or email, Little Nate must reply and direct them to the app.
+
+## Flow
+
+1. **Twilio/SendGrid** store the reply in `checkin_wisdom`, mark `nate_checkins` as `responded`.
+2. **Fire-and-forget** `asyncio.create_task(process_checkin_reply(...))` — do not await in webhook.
+3. **CheckInReplyProcessor** (`backend/app/services/checkin_reply_processor.py`):
+   - Generates a substantive reply via Azure OpenAI.
+   - Coach: inserts into `coach_nate_chat_history` (role=assistant) so INSIGHTS tab shows it.
+   - Client: updates `checkin_wisdom.ai_summary` and inserts into `client_nate_messages`.
+   - Sends follow-up: **email first** when available, **then SMS** when phone exists.
+
+## Follow-Up Copy
+
+- Coach: "{Name}, I got your response. I replied back to you in our INSIGHTS chat. Please come review it."
+- Client: "{Name}, I got your response. I replied in our chat. Open the app to see my reply."
+
+## Coach Portal
+
+- **GET /api/coach/insights/history** returns `coach_nate_chat_history` for the logged-in coach (chronological).
+- Flutter INSIGHTS tab loads history when the tab is first selected (`_loadInsightsHistory()`).
+
+## Client Portal
+
+- **GET /api/client/checkin-reply** returns the latest unread row from `client_nate_messages`.
+- **POST /api/client/checkin-reply/{id}/read** marks it read; caller must be the message owner.
+- Flutter shows a "Little Nate replied to your check-in" banner (not "Nate replied"); View adds the message to chat and marks read; Dismiss marks read only.
+
+## Tables
+
+- `checkin_wisdom.ai_summary`: stores Little Nate's reply text (and is updated by the processor).
+- `coach_nate_chat_history`: INSIGHTS chat; check-in follow-up rows have `context_snapshot.source = "checkin_followup"`.
+- `client_nate_messages`: per-client Nate-initiated messages (e.g. check-in follow-up); `read_at` for unread.
+
+## Rules
+
+1. Webhooks must return quickly; never block on Azure in the request.
+2. Use **email first, then SMS** for follow-up; use only the channel(s) the user has.
+3. Twilio immediate TwiML: "Thanks, I got it! Check the app for my reply in a moment."
+4. Client-facing copy must say **"Little Nate"** not "Nate".

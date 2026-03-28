@@ -1,0 +1,37 @@
+---
+description: Me2Me database tables use non-obvious names — always verify before writing queries
+globs: backend/app/routers/me2me.py, backend/app/services/me2me/*.py, backend/app/services/token_usage_agent.py
+alwaysApply: false
+---
+
+# Me2Me Table Names
+
+## The Problem
+
+Me2Me tables use verbose names that differ from what you'd naively guess. Using the wrong name causes silent 500 errors that are swallowed by exception handlers.
+
+## Correct Table Names (Migration 028)
+
+| Guessed Name | Actual Name | Key Columns |
+|---|---|---|
+| `me2me_imprints` | `me2me_imprint_entries` | `user_id`, `source`, `content`, `themes`, `emotions`, `c_emo`, `captured_at` |
+| `me2me_crystals` | `me2me_identity_crystals` | `user_id`, `personality`, `values`, `language_patterns`, `life_themes`, `synthesized_at` |
+| `me2me_sessions` | `me2me_visitor_sessions` | `user_id`, `visitor_id`, `session_type`, `created_at` |
+| `me2me_consent` | `me2me_consent_records` | `user_id`, `consent_level`, `granted_at` |
+| `me2me_fabric` | `me2me_family_fabric` | `fabric_id`, `family_id`, `created_at` |
+| `me2me_trust` | `me2me_legacy_trusts` | `trust_id`, `user_id`, `trust_type`, `created_at` |
+
+## Timestamp Columns
+
+| Table | Timestamp Column | NOT |
+|---|---|---|
+| `me2me_imprint_entries` | `captured_at` | `created_at` |
+| `me2me_identity_crystals` | `synthesized_at` | `created_at` |
+| All others | `created_at` | |
+
+## Rules
+
+1. **Never use the short name** — always use the full table name from migration 028.
+2. **Before writing any Me2Me SQL**, verify the table and column names against this rule or the migration file.
+3. **The export endpoint** (`GET /api/me2me/export/{hw_id}`) queries both `me2me_imprint_entries` and `me2me_identity_crystals` — if either name is wrong, the export silently returns empty arrays.
+4. **Crystal synthesis** in `token_usage_agent.py` queries `me2me_imprint_entries WHERE EXTRACT(MONTH FROM captured_at)` — using `created_at` would silently return no rows.

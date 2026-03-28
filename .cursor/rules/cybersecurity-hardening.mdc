@@ -1,0 +1,231 @@
+# Cybersecurity Hardening Patterns
+
+## Overview
+
+These patterns prevent the security vulnerabilities identified in the Mar 2026 audit. Every pattern below has either been exploited or was found to be exploitable. Do not weaken or remove them.
+
+## 1. No Plaintext Password Fallback
+
+`verify_password()` in `api_server.py` must NEVER fall back to `password == stored`. All credentials must be hashed with `pbkdf2_hmac('sha256', ..., 100000)` in `salt:hash` or `salt$hash` format. Use `hmac.compare_digest()` for constant-time comparison.
+
+```python
+# BAD — allows plaintext passwords
+if '$' not in stored:
+    return password == stored
+
+# GOOD — reject non-hashed credentials
+if ':' not in stored and '$' not in stored:
+    logger.warning("Rejected non-hashed credential")
+    return False
+```
+
+## 2. Every REST Endpoint Must Require Authentication
+
+No REST endpoint returning user data should be publicly accessible. Use the appropriate dependency:
+
+| Data sensitivity | Dependency | Returns |
+|---|---|---|
+| Any authenticated user | `Depends(get_current_user)` | Dict (full profile) |
+| Coach + Admin | `Depends(require_coach)` | Dict |
+| Admin only | `Depends(require_admin)` | Dict |
+
+Apply at the router level when all endpoints share the same requirement:
+```python
+users = APIRouter(prefix="/api/users", dependencies=[Depends(require_auth)])
+```
+
+Or per-endpoint when mixed:
+```python
+@router.post("/meetings/create", dependencies=[Depends(require_coach)])
+```
+
+## 3. XSS Prevention — Always Escape Dynamic Content
+
+All dashboard HTML files must use `esc()` when inserting server-returned data into the DOM via `innerHTML`. This applies to:
+
+- Error messages (`data.detail`)
+- User-submitted content (names, emails, descriptions)
+- CSV/import preview data (column headers AND cell values)
+- Select option labels and values
+- Any data from API responses rendered as HTML
+
+```javascript
+// BAD — XSS via crafted API response or CSV column name
+'<td>' + r[c] + '</td>'
+'<option value="' + c.username + '">' + c.name + '</option>'
+
+// GOOD
+'<td>' + esc(r[c] != null ? String(r[c]) : '') + '</td>'
+'<option value="' + esc(c.username) + '">' + esc(c.name) + '</option>'
+```
+
+Every dashboard page must define an `esc()` helper:
+```javascript
+function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+```
+
+## 4. JWT_SECRET Must Be Validated on Startup
+
+`backend/app/auth.py` validates that `JWT_SECRET` is set and >= 32 characters. In production (`ENVIRONMENT=production`), a missing or short secret raises `RuntimeError` and prevents startup. This prevents the backend from running with a weak or empty JWT secret.
+
+## 5. Never Use `os.system()` — Use `subprocess`
+
+`os.system()` passes commands through the shell with no input sanitization. Always use `subprocess.run()` with explicit argument lists or `check=False` for non-critical cleanup commands.
+
+```python
+# BAD — shell injection vector
+os.system("lsof -ti:8765 | xargs kill -9")
+
+# GOOD — controlled execution
+subprocess.run(["sh", "-c", "lsof -ti:8765 | xargs kill -9 2>/dev/null"], check=False)
+```
+
+For commands with user-derived inputs, always use argument lists (no shell=True):
+```python
+subprocess.run(["ls", "-la", safe_path], check=True)
+```
+
+## 6. Sandbox HMAC Key Must Not Be Empty
+
+The detonation sandbox (`sandbox_api.py`) rejects all requests when `SANDBOX_HMAC_KEY` is empty, returning 503. This prevents unauthenticated access to the sandbox API which can execute arbitrary code.
+
+## 7. File Upload Security (Video/Document)
+
+All file upload endpoints must implement:
+
+1. **Filename sanitization** — strip path separators, null bytes, and `..` sequences
+2. **Magic-byte validation** — verify file content matches expected type (not just extension)
+3. **Chunked streaming** — read files in chunks to enforce size limits without loading entire file into memory
+4. **Type restriction** — whitelist allowed MIME types and extensions
+
+```python
+ALLOWED_VIDEO_SIGS = {
+    b'\x00\x00\x00': 'mp4/mov',
+    b'\x1a\x45\xdf\xa3': 'webm/mkv',
+}
+
+def _sanitize_filename(name: str) -> str:
+    name = name.replace('/', '_').replace('\\', '_').replace('\x00', '')
+    while '..' in name:
+        name = name.replace('..', '_')
+    return name.strip('. ')
+```
+
+## 8. Stripe Webhook Signature Verification
+
+All Stripe webhook handlers must verify the `Stripe-Signature` header using `stripe.Webhook.construct_event()`. Never process webhook payloads without signature verification — this prevents forged webhook attacks.
+
+## 9. Rate Limiting on Sensitive Endpoints
+
+Authentication endpoints, token generation, and OAuth callbacks must implement rate limiting:
+- In-memory per-user cooldown (5-10 second window)
+- Redis-backed counters for distributed rate limiting
+- Return 429 Too Many Requests when exceeded
+
+## 10. Parameterized SQL Queries Only
+
+Never use f-strings or string concatenation to build SQL queries. Always use parameterized queries with `$1`, `$2`, etc.:
+
+```python
+# BAD — SQL injection
+await db.fetch(f"SELECT * FROM users WHERE username = '{username}'")
+
+# GOOD — parameterized
+await db.fetch("SELECT * FROM users WHERE username = $1", username)
+```
+
+## 11. PII Detection in AI Pipeline
+
+The Night School PII detector must scan all AI-generated wisdom and training data for:
+- SSN patterns (XXX-XX-XXXX)
+- Phone numbers
+- Email addresses
+- Physical addresses
+
+Flagged content must be quarantined, not published. This is enforced by the Wisdom Pipeline Auditor.
+
+## 12. Nginx Security Headers (CSP + HSTS + Rate Limiting)
+
+All 4 nginx server blocks (`api`, `app`, `coach`, `command`) must include:
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+add_header X-Frame-Options "DENY" always;  # SAMEORIGIN for app/coach
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Content-Security-Policy "default-src 'self'; ..." always;
+```
+
+Rate limiting zones are defined in `nginx.conf` `http {}` block:
+- `auth_limit` — 5r/s for auth endpoints
+- `api_limit` — 30r/s for API endpoints
+- `general_limit` — 50r/s for general traffic
+
+The `api.sovereignsanctuary.net` config applies `limit_req zone=auth_limit burst=10 nodelay` to `/api/auth/`.
+
+**Rule**: When adding new nginx location blocks that use `add_header`, re-add HSTS and X-Content-Type-Options in that block (nginx's `add_header` in a location block replaces server-level `add_header` directives).
+
+## 13. Redis-Backed Account Lockout
+
+The bridge brute-force limiter (`bridge_server.py`) locks accounts after 5 failed login attempts for **15 minutes** (upgraded from 3min). Lockout is stored in both:
+- In-memory `_login_attempts` dict (fast, same-process)
+- Redis key `nate:{env}:lockout:{user}:{ip}` with 900s TTL (persistent across bridge restarts)
+
+On each failed login, the bridge also:
+- Logs to `security_events` table (event_type: `login_failed`, severity: `WARN`)
+- Increments a Redis counter `nate:{env}:auth_fails:{ip}` with 5min TTL
+- Triggers `auth_anomaly` (severity: `CRITICAL`) when a single IP accumulates >= 10 failures in 5 minutes
+
+## 14. PII Encryption at Rest (Fernet AES-128-CBC)
+
+`pii_cipher.py` provides `encrypt_pii()` / `decrypt_pii()` using the same Fernet key as `TokenCipher` (`SKYEYE_TOKEN_ENCRYPTION_KEY`). Applied to:
+
+| Table | Encrypted Columns | Tracking Column |
+|---|---|---|
+| `users` | `email`, `phone` (via profile_data) | `pii_encrypted` |
+| `conversation_history` | `user_text`, `ai_text` | `content_encrypted` |
+
+- `UserStore.upsert_user()` encrypts email before INSERT
+- `UserStore._row_to_entry()` decrypts email/phone on read
+- `_memorize_pg()` encrypts conversation text before INSERT
+- `client_data_api.py` decrypts conversation text on read (memory_search, memory_sessions)
+- Auto-detects plaintext (doesn't start with `gAAAAA`) for backward compatibility
+
+**Rule**: If no encryption key is set, data passes through in plaintext with a warning. This allows dev/test without a key.
+
+## 15. Security Events Table
+
+`security_events` (migration 100) provides structured security audit logging:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `event_type` | VARCHAR(50) | `login_failed`, `account_lockout`, `auth_anomaly` |
+| `severity` | VARCHAR(10) | `INFO`, `WARN`, `HIGH`, `CRITICAL` |
+| `source_ip` | VARCHAR(45) | Client IP address |
+| `username` | VARCHAR(255) | Target username |
+| `detail` | JSONB | Additional context |
+| `created_at` | TIMESTAMPTZ | Event timestamp |
+
+Indexed on `event_type`, `created_at`, `source_ip`, and severity (partial index for HIGH/CRITICAL).
+
+## 16. Environment File Permissions
+
+The `.env` file on the production server must be `chmod 600` (owner read/write only). This prevents other system users from reading database passwords, API keys, and JWT secrets.
+
+## Audit Checklist for New Code
+
+When adding any new endpoint, service, or dashboard page:
+
+1. Does it require authentication? Add the appropriate `Depends()`.
+2. Does it accept user input? Validate and sanitize (parameterized SQL, escaped HTML).
+3. Does it handle file uploads? Apply sanitization + magic-byte + size limits.
+4. Does it use environment secrets? Validate they exist on startup.
+5. Does it render data in HTML? Use `esc()` for all dynamic content.
+6. Does it call external processes? Use `subprocess`, never `os.system()`.
+7. Does it handle passwords? Use `pbkdf2_hmac` with random salt, constant-time comparison.
+8. Does it store PII (email, phone, conversation text)? Use `encrypt_pii()` before INSERT.
+9. Does it read PII from the database? Use `decrypt_pii()` after SELECT.
+10. Does it handle auth failures? Log to `security_events` with appropriate severity.

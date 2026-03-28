@@ -1,0 +1,64 @@
+---
+description: RLS bypass pattern for coach router endpoints that query RLS-protected tables using hardware_id auth
+globs: backend/app/routers/coach.py
+alwaysApply: false
+---
+
+# Coach Router RLS Bypass Pattern
+
+## The Problem
+
+The coach router uses `get_current_user_id` from `app.auth`, which returns `hardware_id` (e.g., `COACH_COACHN_ID`) and does NOT set the RLS context via `set_rls_context()`. This differs from `get_current_user` in `api_server.py` which DOES set RLS context.
+
+Additionally, the bridge token profile stored in Redis has `username: None` — only `hardware_id` and `name` are populated. So even if `set_rls_context` is called with the profile data, the username is empty.
+
+When `db_pool.acquire()` is called, the `RLSPoolWrapper` reads empty contextvar values and sets `app.acting_username = ''` in PostgreSQL. RLS policies on `users`, `coach_nate_chat_history`, and other tables check `coach_username = current_setting('app.acting_username')` — empty string matches nothing, so all rows are silently filtered out. The query returns `null` / empty with a 200 status code.
+
+## The Fix
+
+Any coach router endpoint that queries RLS-protected tables must:
+
+1. Call `set_rls_admin()` BEFORE the first `db_pool.acquire()`
+2. Resolve `username` from `hardware_id` via the `users` table (also RLS-protected, hence admin needed first)
+3. Use the resolved `username` in all subsequent WHERE clauses
+
+```python
+from app.services.rls_context import set_rls_admin
+
+@router.get("/some-endpoint")
+async def some_endpoint(request: Request, user_id: str = Depends(get_current_user_id)):
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        return None
+
+    set_rls_admin()
+    async with db_pool.acquire() as conn:
+        username = await conn.fetchval(
+            "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1", user_id,
+        )
+        if not username:
+            username = user_id
+        # Now query RLS-protected tables using `username`
+        row = await conn.fetchrow(
+            "SELECT ... FROM coach_nate_chat_history WHERE coach_username = $1", username,
+        )
+    return row
+```
+
+## Why set_rls_admin() Is Safe Here
+
+The endpoint is already authenticated via `Depends(get_current_user_id)` — only valid bridge tokens pass. The application-level WHERE clause (`coach_username = $1`) provides the same row-scoping that RLS would enforce. This is the same pattern used by `checkin_reply_processor.py`.
+
+## Tables With RLS Policies Affecting Coach Endpoints
+
+| Table | RLS Policy Column | What `get_current_user_id` Returns |
+|---|---|---|
+| `users` | `username = acting_username` | `hardware_id` (mismatch) |
+| `coach_nate_chat_history` | `coach_username = acting_username` | `hardware_id` (mismatch) |
+| `nevedal_metrics` | `user_id = acting user UUID` | `hardware_id` string (mismatch) |
+
+## Never Do
+
+- Never assume `get_current_user_id` sets RLS context — it does not
+- Never query RLS-protected tables without either `set_rls_admin()` or `set_rls_context()` first
+- Never assume the bridge token profile has `username` — it is always `None`; resolve via `SELECT username FROM users WHERE hardware_id = $1`

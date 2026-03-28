@@ -1,0 +1,178 @@
+---
+description: Crystal recall and crystallization wiring requirements across all AI conversation surfaces
+alwaysApply: true
+---
+
+# Crystal Recall & Crystallization Wiring
+
+Every AI conversation surface must have BOTH crystal recall (inject memory) and crystallization (forge new crystals).
+
+## Required Wiring Per Surface
+
+| Surface | File | Recall | Crystallize | Source Tag |
+|---|---|---|---|---|
+| Regular chat | `bridge_server.py` → `process_interaction()` | `recall_crystals_for_context()` | `crystallize_from_conversation()` | `bridge_chat` |
+| Family Sanctuary | `bridge_server.py` → `process_sanctuary_message()` | `recall_crystals_for_context()` per-member | `crystallize_from_conversation()` | `family_sanctuary` |
+| Group Coaching | `bridge_server.py` → `generate_group_coaching_response()` | `recall_crystals_for_context()` | `crystallize_from_conversation()` | `group_coaching` |
+| Private Coaching | `bridge_server.py` → `process_private_coaching()` | `recall_crystals_for_context()` | `crystallize_from_conversation()` | `private_coaching` |
+| Voice Call (Grok+XTTS) | `twilio_grok_xtts_pipeline.py` | `recall_crystals_for_context()` via `_crystal_recall` | `crystallize_from_conversation()` via `_crystal_forge` | `voice_call` |
+| Call Coaching | `call_coaching_engine.py` | `recall_crystals_for_context()` via `_crystal_recall` | (planned) | `call_coaching` |
+
+## Family Sanctuary: Per-Member Recall AND Per-Member Crystallization (Critical)
+
+Family Sanctuary MUST recall crystals for ALL active members, not just the head-of-household:
+
+```python
+_member_crystal_parts = []
+for _fp in family_profiles:
+    _fp_hw = _fp.get("hardware_id", "")
+    if _fp_hw:
+        _fp_ctx = await recall_crystals_for_context(db_pool, _fp_hw, max_results=4, source="family_sanctuary")
+        if _fp_ctx:
+            _fp_name = _fp.get("name", "Member")
+            _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
+sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts)
+```
+
+Crystallization must also be per-member with **individual message text** (not the concatenated conversation):
+
+```python
+_hw_by_id = {p.get("hardware_id", ""): p.get("name", "Member") for p in family_profiles if p.get("hardware_id")}
+for msg in recent_messages[-8:]:
+    _msg_text = msg.get("content", "")
+    _msg_sender = msg.get("sender_id", "") or msg.get("user_id", "")
+    if _msg_text and _msg_sender and _msg_sender in _hw_by_id:
+        asyncio.create_task(crystallize_from_conversation(
+            db_pool, _msg_sender, _msg_text, clean_response,
+            user_name=_hw_by_id[_msg_sender], domain="clinical", min_score=3,
+        ))
+```
+
+**Never pass the `conversation` variable to crystallize** — it's a concatenated context string for the LLM. The heuristic needs individual messages to score accurately. Passing accumulated conversation text inflates scores (many keywords across many messages) and produces muddled crystals.
+
+Using HOH-only recall/crystallization breaks the EFT framework — the therapist needs both sides of the pursue-withdraw cycle.
+
+## Member-to-Member Messages (No LN Response Required)
+
+The `sanctuary_message` handler crystallizes **every** incoming member message on arrival, before LN even responds:
+
+```python
+# In the sanctuary_message handler, after broadcast
+asyncio.create_task(crystallize_from_conversation(
+    db_pool, current_profile['hardware_id'], message, "",
+    user_name=current_profile.get('name', ''), domain="clinical", min_score=3,
+))
+```
+
+Empty string for `nate_response` is correct — the crystal captures what the user said. When John tells Kristy "she is using my trauma," that message is therapeutically rich regardless of whether LN generates a response. The `sanctuary_send_suggested_response` handler also crystallizes coached responses.
+
+This ensures member-to-member dialogue (the richest therapeutic content in couples therapy) is never lost.
+
+## Identifier Flexibility
+
+`recall_crystals_for_context()` and `crystallize_from_conversation()` accept both `hardware_id` AND `username` via `WHERE hardware_id = $1 OR username = $1`. Services that only have a username (voice pipeline, call coaching) can pass it directly.
+
+## Recall Architecture: Split-Slot with Confidence Tiers
+
+`recall_crystals_for_context()` splits its results into two partitions to prevent global crystals from drowning out personal memory:
+
+- **User crystals** (user_id = resolved UUID): confidence >= 0.30, ordered by `created_at DESC`, gets `max_results // 2` slots
+- **Global crystals** (user_id IS NULL): confidence >= 0.55, ordered by `confidence DESC`, gets the remaining slots
+
+This ensures that a user with 4 personal crystals at 0.50 confidence will always see them alongside high-confidence global knowledge, rather than being outranked by 21,000+ global marketing/clinical crystals.
+
+The output is labeled separately: `YOUR PERSONAL MEMORIES` (user crystals) and `GENERAL KNOWLEDGE` (global crystals) so LN can reference personal history naturally.
+
+## Recall Reinforcement (Why Inline SQL Is Banned)
+
+`recall_crystals_for_context()` does THREE things raw SQL doesn't:
+1. Increments `recall_count` on every recalled crystal
+2. Updates `last_recalled_at` to NOW()
+3. Nudges `confidence` up by +0.03 (capped at 0.95)
+
+Without reinforcement, crystals die after 90 days of non-recall. Any surface that queries `nate_intelligence_crystals` directly (bypassing the bridge function) creates crystals that silently decay.
+
+## Confidence Thresholds (Critical)
+
+| Threshold | Value | Purpose |
+|---|---|---|
+| Crystal forge initial confidence | 0.50 | New crystals start low, get promoted via recall |
+| User crystal recall minimum | 0.30 | Personal memories surface even at low confidence |
+| Global crystal recall minimum | 0.55 | General knowledge needs validation before surfacing |
+
+**Never set the user recall threshold above 0.50** — this creates a dead zone where new crystals are forged at 0.50 but can't be recalled at >= 0.55, so they never get reinforcement and die silently.
+
+## Voice Crystallization: Dual-Layer
+
+Voice calls have two crystallization layers:
+1. **Lightweight** (always active): `_crystal_forge` runs on every call cleanup, heuristic-only, zero LLM
+2. **Heavy** (flag-gated): `ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true` enables conversation_history storage, vectorize indexing, EC snapshots, biometrics
+
+The lightweight layer ensures voice calls always produce crystals even when the heavy pipeline is off.
+
+## Cross-Package Import Pattern
+
+Services in `backend/app/services/` import from the websocket package with fallback:
+
+```python
+try:
+    from app.websocket.crystal_recall_bridge import (
+        recall_crystals_for_context as _crystal_recall,
+        crystallize_from_conversation as _crystal_forge,
+    )
+except ImportError:
+    _crystal_recall = None
+    _crystal_forge = None
+```
+
+Always guard calls with `if _crystal_recall:` to handle import failure gracefully.
+
+## Crystallization Heuristic Design
+
+The heuristic must match how **real clients talk**, not clinical vocabulary. Clients say "cry me a river" not "I feel resentful." The pattern list covers:
+
+- Core emotions: feel/felt, afraid, scared, need, want, wish
+- Shame/vulnerability: ashamed, worthless, lonely, abandoned, invisible
+- Trauma vocabulary: trauma, triggered, wounded, manipulate, gaslighting, toxic
+- Raw emotion: sad, crying, tears, hurt, pain, heartbroken, not happy, miserable
+- Family/attachment: mother, father, childhood, grew up, bullied, babies, menopause
+- Relational: divorce, leave me, empathy, projecting, held it in, bottled up, never told
+- Intensity markers: wtf, fuck, shit, damn (profanity signals emotional activation)
+- Obligation/entrapment: supposed to, expected to, have to, can't win
+
+**Length-based bonus**: Messages over 200 characters containing first-person language (`I`, `I'm`, `my`, `me`) get +2 score automatically — long first-person messages are almost always disclosures.
+
+**Configurable threshold**: `min_score` defaults to 4 (regular chat) but drops to 3 for Family Sanctuary and private coaching where emotional content is more diffuse across short messages.
+
+## Recall Source Tagging (Critical for Time Crystal Forge)
+
+`recall_crystals_for_context()` accepts a `source` parameter that tags every entry in `crystal_recall_log`. The time crystal forge uses these source tags to distinguish relational patterns (family/couples) from individual patterns.
+
+| Surface | Source Tag | File |
+|---|---|---|
+| Regular chat | `bridge_chat` | `bridge_server.py` → `process_interaction()` |
+| Family Sanctuary | `family_sanctuary` | `bridge_server.py` → per-member loop |
+| Group Coaching | `group_coaching` | `bridge_server.py` → `generate_group_coaching_response()` |
+| Private Coaching | `private_coaching` | `bridge_server.py` → `process_private_coaching()` |
+| Voice Call | `voice_call` | `twilio_grok_xtts_pipeline.py` |
+| Call Coaching | `call_coaching` | `call_coaching_engine.py` |
+
+When adding a new recall call site, **always pass a unique `source` tag**. Never use the default `bridge_chat` for non-chat surfaces.
+
+## Privacy Wall in Family Sanctuary
+
+The per-member recall loop ensures each member only sees their OWN crystals. `recall_crystals_for_context(db_pool, _fp_hw)` resolves each member's `hardware_id` to their UUID and queries `WHERE user_id = that_UUID`. John's slot returns only John's crystals. Kristy's slot returns only Kristy's.
+
+Both sets are injected into LN's system prompt (therapist sees both — correct for EFT). Neither John nor Kristy sees the other's crystals in their client view.
+
+**Never merge crystal recall across family members into a single query.** The user_id scoping IS the privacy wall.
+
+## When Adding a New AI Surface
+
+1. Import `recall_crystals_for_context` and `crystallize_from_conversation`
+2. Call recall BEFORE generating the AI response (inject into system prompt / context)
+3. Call crystallize AFTER generating the response (fire-and-forget via `asyncio.create_task()`)
+4. Pass a unique `source` tag to recall (e.g., `source="new_surface"`)
+5. Use `hardware_id` or `username` — both work
+6. Choose `min_score`: 4 for general chat, 3 for intimate/therapeutic contexts
+7. Add the source tag to the table in this rule

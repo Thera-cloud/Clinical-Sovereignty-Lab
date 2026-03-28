@@ -1,0 +1,67 @@
+---
+description: Prevents 'No module named' errors by ensuring all Python files are deployed to the server before restarting.
+globs: backend/app/**/*.py
+alwaysApply: false
+---
+
+# Missing Module Prevention
+
+Every Python file referenced in `main.py` imports must exist on the production server at `/opt/clinical-sovereignty-lab/`. A missing file causes `No module named` and drops the service health count.
+
+## Before Restarting Backend
+
+After deploying code changes, verify no modules are missing:
+
+```bash
+ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'No module named' | sort -u"
+```
+
+If any appear, deploy the missing file:
+
+```bash
+scp backend/app/services/MODULE.py root@68.183.168.75:/opt/clinical-sovereignty-lab/backend/app/services/MODULE.py
+```
+
+## Common Miss Patterns
+
+| Pattern | Why It Happens |
+|---|---|
+| New service created locally, only `main.py` deployed | Service file never reaches server |
+| Service imports a helper module | Helper deployed, but service file not |
+| `security/` subdirectory files | `__init__.py` or subdirectory doesn't exist on server |
+| Router + service pair | Router deployed, service it imports not deployed |
+
+## Transitive Dependency Chain
+
+When deploying a new service, trace its imports:
+
+```
+main.py imports → service.py imports → helper.py imports → ...
+```
+
+ALL files in the chain must be on the server. A single missing link produces `No module named`.
+
+## Files That Were Missing (Mar 2026 — Migration 123 Incident)
+
+These 10 files were created locally but never deployed, causing 116/124:
+
+- `backend/app/routers/summon_api.py`
+- `backend/app/routers/telegram_webhook.py`
+- `backend/app/services/summon_privacy_shield.py`
+- `backend/app/services/nate_summon_service.py`
+- `backend/app/services/nate_response_validator.py`
+- `backend/app/services/nate_agent_template.py`
+- `backend/app/services/serverless_migration.py`
+- `backend/app/services/oauth_server.py`
+- `backend/app/services/security/distributed_defense.py`
+- `backend/app/services/security/edge_mirror_shell.py`
+
+## Subdirectory Checklist
+
+The `security/` subdirectory requires `__init__.py`:
+
+```bash
+ssh root@68.183.168.75 "ls /opt/clinical-sovereignty-lab/backend/app/services/security/__init__.py"
+```
+
+If missing: `ssh root@68.183.168.75 "touch /opt/clinical-sovereignty-lab/backend/app/services/security/__init__.py"`

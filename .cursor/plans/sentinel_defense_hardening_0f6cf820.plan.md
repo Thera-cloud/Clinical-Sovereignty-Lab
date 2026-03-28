@@ -28,6 +28,10 @@ isProject: false
 
 # Sentinel and Hive Defense Hardening Plan
 
+> **Depends on:** `sentinel_mirror_trap_wiring_595369a4.plan.md` (completed — migration 092 creates `sentinel_banned_ips`; this plan extends it)
+> **Note:** Some schema overlap with mirror trap plan. Verify `sentinel_banned_ips` columns before adding new ones.
+> **Deploy order:** Migration first, then sentinel.py, then bridge_server.py, then auditor
+
 ## Current State — What Worked
 
 The Sentinel escalated correctly through three levels against IP `68.43.85.92`:

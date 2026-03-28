@@ -48,13 +48,13 @@ After deploying backend changes, follow this exact sequence to ensure all 23 aud
 
 | Auditor | Expected | Checks |
 |---------|----------|--------|
-| SkyEye Tab | 58/58 | 20 tabs, 58 API endpoints |
+| SkyEye Tab | 61/61 | 21 tabs, 61 API endpoints |
 | Command Tab | 25/25 | Sovereign Command endpoints |
 | The Eye | 21/21 | The Eye dashboard endpoints |
 | Login | 2/2 | WebSocket login (client + coach) |
 | Client App | 23/23 | Client-facing REST endpoints |
 | Coach Dojo | 55/55 | Coach portal, DOJO, Night School, Coach QuickBooks |
-| Billing | 32/32 | Billing pipeline + discount management endpoints |
+| Billing | 35/35 | Billing pipeline + discount management + sync-stripe endpoints |
 | Defense | 8/8 | Hive Defense subsystem |
 | AI Pipeline | 6/6 | Azure OpenAI, TTS, coherence |
 | WS Flow | 10/10 | WebSocket message flow tests |

@@ -1,0 +1,130 @@
+---
+description: ODPE (Oscillating Dual-Process Echo) engine architecture, topology invariants, and integration rules
+alwaysApply: true
+---
+
+# ODPE Engine Architecture
+
+## Overview
+
+The Oscillating Dual-Process Echo (ODPE) engine evaluates every cognitive query through two geometric topologies simultaneously:
+
+1. **Dodecahedron** (12 faces, 5 neighbors/face) — broad consensus evaluator with adjacency-based quorum validation.
+2. **Deltoidal Icositetrahedron** (24 kite-shaped faces, 4 neighbors/face) — Catalan solid C_{24}, dual of the small rhombicuboctahedron. 26 vertices (8 cubic + 6 octahedral + 12 rhombicuboctahedral), 48 edges, face-transitive. Deep-resolution evaluator with adjacency-based quorum validation.
+
+Both topologies apply consensus validation: outlier face scores are attenuated (0.5x) when fewer than 3 edge-neighbors agree within the divergence threshold (0.2). The resonance ratio between topology amplitudes classifies each query into a signal that governs context allocation, inference routing, memory recall, and C_emo modulation.
+
+## Core Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/odpe_engine.py` | ODPESignal enum, evaluators, comparator, liminal reader, ODPEEngine |
+| `backend/app/services/helix_orchestrator.py` | ODPE integrated as Step 4.5 in `think()` pipeline |
+| `backend/app/services/nevedal_engine.py` | `_apply_odpe_modulation()` for C_emo parameter adjustment |
+| `backend/app/services/nate_inference_router.py` | Topology-aware tier override via `odpe_signal` |
+| `backend/app/services/quantum_knowledge_field.py` | `context_budget` parameter for adaptive search |
+| `backend/app/services/vectorize_service.py` | `index_subset` parameter for targeted Vectorize queries |
+| `backend/app/services/session_memory_store.py` | `oscillation_profile` in session metadata |
+| `backend/app/services/nate_memory_crystallizer.py` | ODPE-aware `record_recall()` weighting |
+
+## Signal Classification (5 States)
+
+| Signal | Resonance Ratio | Meaning |
+|---|---|---|
+| `LOCKED` | ratio >= 1.5 AND both amps > 0.6 | Both topologies strongly agree |
+| `PROMOTED` | ratio >= 1.2 AND both amps > 0.4 | Dodecahedron dominates |
+| `TENSION` | ratio <= 0.7 AND icosi > 0.5 | Icositetragon dominates |
+| `NOISE` | both amps < 0.2 | Neither topology has signal |
+| `PROVISIONAL` | all other cases | Ambiguous, use standard processing |
+
+## Constants (Never Modify Without Updating Both Engine + Patents)
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `DODECAHEDRON_FACES` | 12 | Broad-consensus topology face count |
+| `ICOSITETRAGON_FACES` | 24 | Deep-resolution topology face count (Deltoidal Icositetrahedron) |
+| `LOCK_THRESHOLD` | 1.5 | Minimum resonance ratio for LOCKED |
+| `TENSION_THRESHOLD` | 0.7 | Maximum resonance ratio for TENSION |
+| `BIAS_DECAY_PER_CYCLE` | 0.05 | Liminal equilibrium decay toward neutral |
+| `MAX_BIAS_DEVIATION` | 0.5 | Maximum bias swing from 1.0 |
+| `ICOSI_CONSENSUS_QUORUM` | 3 | Minimum agreeing neighbors (of 4) for Deltoidal face validation |
+| `DELTOIDAL_DUALITY_PAIRS` | 12 pairs | Antipodal face pairs for 24→12 geometric projection |
+
+## Integration Points
+
+### 1. Helix Orchestrator (Step 4.5)
+After quantum evaluation, before final synthesis. Populates `OrchestratorCycleResult.odpe_result`, `recommended_context_tokens`, and `recommended_inference_tier`.
+
+### 2. Inference Router
+`generate(odpe_signal=...)` overrides tier selection: LOCKED -> utility, TENSION -> clinical, NOISE -> skip LLM entirely.
+
+### 3. C_emo Modulation
+`process_biometrics(odpe_amplitudes=...)` adjusts p_ent, T_tunnel, gamma_env, E_G_joint based on resonance ratio and signal. Modulation capped at +/-0.10.
+
+### 4. Memory Recall
+`record_recall(odpe_signal=...)`: LOCKED doubles recall_count, TENSION flags needs_reeval, NOISE skips increment.
+
+### 5. Liminal Feedback Loop
+`LiminalEquilibriumReader` queries `liminal_presence_analysis` for bias adjustment from language drift, silence sentinel, and field response signals.
+
+## Rules
+
+1. **Never modify topology face counts** without updating `odpe_engine.py`, both patent documents, and this rule.
+2. **Never call inference router directly from consumer code** -- ODPE routing goes through helix orchestrator `think()`.
+3. **Resonance ratio is dodec / icosi, never inverted.** Ratio > 1 means dodecahedron dominates.
+4. **ODPE modulation of C_emo must not exceed +/-0.10** per parameter.
+5. **Liminal bias must decay toward 1.0** (neutral). Without decay, signals permanently bias evaluations.
+6. **NOISE signal must never trigger LLM calls or crystal storage.**
+7. **Never modify `DELTOIDAL_ICOSITETRAHEDRON_ADJACENCY`** without verifying every face has exactly 4 neighbors and the total edge count is 48 (24 × 4 / 2). The adjacency is derived from the small rhombicuboctahedron vertex-edge structure.
+8. **Antipodal duality pairs are fixed.** `DELTOIDAL_DUALITY_PAIRS` maps geometrically opposite faces on the Catalan solid. Never swap or reorder without re-deriving from the dual vertex coordinates.
+
+## Factual Grounding Signal (Sovereign Standard §8)
+
+When `NateResponseValidator` detects `unverified_factual_assertion_about_person` in a response, the ODPE signal context shifts:
+
+- The assertion indicates the system is operating on unverifiable factual terrain — a natural **TENSION** or **PROVISIONAL** case.
+- The inference router should treat this as a clinical-tier query (soft redirect, not authoritative correction).
+- Crystal storage is blocked for responses containing this warning (high severity in the validator).
+- The therapeutic redirect pattern ("What's coming up for you around that?") is the correct resolution — it doesn't require fact-checking infrastructure.
+
+This is a consumer-side routing decision, not a topology change. The ODPE engine itself doesn't detect factual claims — the validator does, and the signal interpretation adjusts accordingly.
+
+### Scope (v1.0.2)
+
+- **In scope**: any factual claim about a real person that falls outside the model's verifiable knowledge — current status (alive/dead, married/divorced), post-training-cutoff events (even if settled), and disputed claims.
+- **Out of scope**: established historical facts clearly within training data ("Abraham Lincoln was the 16th president") — no TENSION signal.
+- **The test**: if real-time data would be needed to confirm the claim, it is in scope.
+- The validator excludes **reflective echoes** (Nate mirroring a client's words back), **personal relational references** ("your father is dead"), and **client echo matches** from triggering. Only Nate-volunteered assertions fire Layer 8.
+- **Clause-level analysis**: if a reflective prefix and an assertive conjunction co-occur in the same sentence ("I hear that he's dead, and honestly I think that's true"), the assertion after the conjunction is flagged independently.
+
+### Retrieval-time filtering
+
+`NateResponseValidator.filter_recalled_crystals()` screens crystals at recall time using the same Layer 8 patterns. Crystals stored before the validator existed that contain unverifiable assertions are excluded from the recall set (not deleted — they remain in PostgreSQL). **v1.1 optimization**: replace post-hoc regex scan with a pre-indexed `contains_unverified_assertion` boolean column on `nate_intelligence_crystals` for `WHERE`-clause filtering.
+
+### Audit trail
+
+Every Layer 8 activation inserts a `factual_grounding_redirect` row into `skyeye_activity` with `session_id`, `user_id`, `validator_warning`, and `odpe_signal` metadata. This satisfies Illinois MHDDCA § 740 ILCS 110 clinical supervision compliance.
+
+**Retention**: `factual_grounding_redirect` and `nate_accuracy_warning` rows are exempt from `db_maintenance_agent` automated cleanup. Illinois 740 ILCS 110 and HIPAA 45 CFR 164.530(j) require minimum 7-year retention from last interaction (or 7 years past age 18 for minors). These types are listed in `IMMUTABLE_TYPES` in `db_maintenance_agent.py`.
+
+## Trust Integration
+
+- Audited by: `NoeticHelixAuditor` (Tab 5: ODPE Engine, 4 checks)
+- Activity type: `noetic_helix_audit_sent`
+- Baseline key: `noetic_helix_check_count` (expected: 18)
+- Registered on `app.state.odpe_engine` in `main.py`
+
+## Deltoidal Icositetrahedron Geometry
+
+The 24-face evaluator uses the Deltoidal Icositetrahedron (Catalan solid), the dual of the small rhombicuboctahedron. Its adjacency graph was derived from the dual's vertex coordinates — permutations of (±1, ±1, ±(1+√2)) — where two faces are adjacent iff their dual vertices are at Euclidean distance 2.
+
+- **Face-transitive**: every face is geometrically equivalent (a property of Catalan solids)
+- **Graph diameter**: 4 (vs dodecahedron's 5) — tighter consensus propagation
+- **Consensus quorum**: 3 of 4 neighbors (75%) vs dodecahedron's 3 of 5 (60%)
+- **Antipodal projection**: `map_to_dodecahedron()` pairs geometrically opposite faces (negate all dual vertex coordinates) for 24→12 projection
+
+## Patent Coverage
+
+- Provisional Patent 6 (QEC Series): Claims 64-79
+- Standalone Patent: PATENT_OSCILLATING_DUAL_PROCESS_ECHO.md
+- Deltoidal Icositetrahedron upgrade: additive enrichment of Claims 64-67 (geometric topology specification)

@@ -1,0 +1,99 @@
+# Phase 11 Edge Architecture
+
+## Overview
+
+Phase 11 is the Cloudflare edge layer that intercepts all public `@LittleNate` summon traffic before it reaches the VPS. It provides sub-50ms cached responses, rate limiting, L0 ODPE evaluation, and Workers AI inference — all at zero egress cost.
+
+## Dual-Brain Architecture
+
+| Brain | Location | Latency | Purpose |
+|---|---|---|---|
+| Edge Brain | Cloudflare Workers (300+ PoPs) | <50ms cached | L0 ODPE evaluation, KV cache, rate limiting, Workers AI inference |
+| Sovereign Brain | VPS Cluster (68.183.168.75 + clones) | 200-800ms | L1/L2 ODPE evaluation, clinical inference, crystal recall, memory |
+
+## Cloudflare Components
+
+| Component | Type | Binding | Purpose |
+|---|---|---|---|
+| `nate-summon-worker` | Worker | — | Main request router at `/api/nate/ask` |
+| `SUMMON_CACHE` | KV Namespace | `9e7c13aca09d489faa5ce30b87333aaa` | Response cache (60s TTL provisional, 300s locked) |
+| `SUMMON_RATE` | KV Namespace | `25e51962a9bd4e5b877c1d8d161f08d0` | Per-IP rate limiting (10 req/min) |
+| `SUMMON_DB` | D1 Database | `summon_edge_log` table | Edge analytics and request logging |
+| Workers AI | AI Binding | `@cf/meta/llama-3.1-8b-instruct` | L0 inference for PROVISIONAL signals |
+
+## Worker Routes
+
+| Route | Method | Auth | Response |
+|---|---|---|---|
+| `/api/nate/ask` | POST | None (public) | AI response + ODPE signal |
+| `/api/nate/health` | GET | None | `{status: "operational", ...}` |
+| `/*` | * | — | 404 with JSON error |
+
+## Request Flow
+
+```
+User → Cloudflare Edge PoP → nate-summon-worker
+  1. Rate limit check (SUMMON_RATE KV)
+  2. Cache check (SUMMON_CACHE KV, keyed by normalized question)
+  3. L0 ODPE evaluation (heuristic, in-worker)
+  4. If LOCKED: Workers AI response (edge-only, no VPS hit)
+  5. If TENSION: Forward to Sovereign Brain (/api/nate/summon)
+  6. If PROVISIONAL: Workers AI response (edge), then async VPS resonance
+  7. Cache response in SUMMON_CACHE
+  8. Log to SUMMON_DB (D1)
+```
+
+## EDGE_INTERNAL_TOKEN
+
+The Worker authenticates to the Sovereign Brain using `EDGE_INTERNAL_TOKEN` (env secret on both Worker and VPS). This token must:
+- Be at least 32 characters
+- Be set as a Cloudflare Worker secret: `wrangler secret put EDGE_INTERNAL_TOKEN`
+- Match the VPS env var `EDGE_INTERNAL_TOKEN` in `.env`
+- Never appear in client-facing responses or logs
+
+## L0 ODPE Evaluation (Edge-Side)
+
+The `odpe_l0.js` module runs a heuristic ODPE evaluation without database access:
+- Classifies questions by keyword patterns into 5 signals
+- Clinical/crisis keywords → TENSION (always forward to VPS)
+- Common/FAQ keywords → LOCKED (edge-only response)
+- Everything else → PROVISIONAL (edge response + optional VPS resonance)
+
+## Cache Strategy
+
+| Signal | Cache TTL | Cache Key |
+|---|---|---|
+| LOCKED | 300s (5 min) | `summon:v1:{normalized_hash}` |
+| PROVISIONAL | 60s (1 min) | `summon:v1:{normalized_hash}` |
+| TENSION | Never cached | — |
+
+Cache keys are SHA-256 hashes of normalized (lowercased, trimmed) questions.
+
+## Rate Limiting
+
+- 10 requests per minute per IP
+- Stored in `SUMMON_RATE` KV with 60s TTL
+- Returns 429 with retry-after header when exceeded
+
+## Deployment
+
+```bash
+cd cloudflare/workers/nate-summon-worker
+npx wrangler deploy
+```
+
+## Rules
+
+1. **Never cache TENSION responses** — clinical/crisis content must always hit the Sovereign Brain for full L1/L2 evaluation.
+2. **Never expose `EDGE_INTERNAL_TOKEN`** in responses, logs, or error messages.
+3. **L0 is heuristic only** — it cannot access PostgreSQL, crystals, or user profiles. Any decision requiring user context must go to the Sovereign Brain.
+4. **Workers AI is the L0 inference provider** — never call Azure or Grok from the edge Worker. Those are Sovereign Brain providers.
+5. **After any Worker deployment**, verify health: `curl https://api.sovereignsanctuary.net/api/nate/health`.
+6. **KV namespace IDs are permanent** — never delete and recreate them. The bindings in `wrangler.toml` reference these specific IDs.
+
+## Trust Auditor
+
+- Audited by: `EdgeHealthAuditor` (10 checks)
+- Activity type: `edge_health_audit_sent`
+- Baseline key: `edge_health_check_count` (expected: 10)
+- Stagger: 55s

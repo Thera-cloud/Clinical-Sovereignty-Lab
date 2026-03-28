@@ -1,0 +1,108 @@
+---
+description: Voice therapy pipeline — Twilio/Grok/TTS architecture, billing, memory, and safety rules
+alwaysApply: true
+---
+
+# Voice Therapy Pipeline
+
+## Architecture
+
+Little Nate Voice Therapy runs on phone number **656-231-8192** via a Twilio Media Stream → Grok Realtime API → TTS pipeline.
+
+| Component | File | Purpose |
+|---|---|---|
+| Pipeline | `twilio_grok_xtts_pipeline.py` | Media stream handler, Grok session, TTS, memory, billing |
+| Billing | `voice_billing.py` | Prepaid minute-block purchase, deduction, extension |
+| Metering | `voice_metering.py` | Bridge between prepaid billing and legacy tier system |
+| Notifications | `voice_notifications.py` | SMS alerts (welcome, low balance, session summary, recovery) |
+| Phone Utils | `voice_phone.py` | Phone normalization, carrier lookup |
+| Webhook | `voice_webhook_handler.py` | Stripe webhook for voice block purchases |
+| Migration | `migrations/voice_billing_migration.sql` | `voice_accounts`, `voice_sessions`, `voice_transactions`, `voice_crystals`, `voice_leads` |
+
+## Prepaid Minute-Block Pricing
+
+| Block | Minutes | Price | Cost/Min |
+|---|---|---|---|
+| Starter | 20 | $50 | $2.50 |
+| Standard | 100 | $250 | $2.50 |
+| Professional | 200 | $500 | $2.50 |
+| Unlimited | 400 | $1,000 | $2.50 |
+
+Stripe Product ID: `prod_UDnPpUcR7Fl6gE`. Price IDs in env vars `STRIPE_VOICE_PRICE_*`.
+
+## DrNevedal1 Is Always Free
+
+DrNevedal1's account (phone 586-524-3969) bypasses all billing. The billing loop must check `is_admin_free` before any deduction. Never charge the admin account.
+
+## Call Flow
+
+1. Twilio webhook → `_handle_twilio_start_event()` → resolve caller by phone
+2. Load crystal memory + conversation history into system prompt
+3. Open Grok Realtime session with grounded prompt
+4. Audio streams: Twilio → Grok (STT+reasoning) → TTS → Twilio
+5. Billing loop deducts 10s increments from prepaid balance
+6. On hangup → `_finalize()` → PAUSED state (5-min recovery window) → crystallization
+
+## Memory at Session Start
+
+`_build_grounded_voice_prompt()` queries:
+- `conversation_history` by **username** (not hardware_id) — `LIMIT 25`, `LENGTH(user_text) > 15`
+- Crystal recall via `recall_crystals_for_context()` with `source="voice_call"`
+
+Memory is placed as "PRIOR SESSION MEMORY" at the **top** of the system prompt, before personality instructions.
+
+## Deep Memory Search (Mid-Session RAG)
+
+When a client asks "do you remember..." or similar, `_is_memory_query()` detects the intent and triggers `_deep_memory_search()` which runs 4 parallel searches:
+
+| Search | Source | Method |
+|---|---|---|
+| Conversation FTS | `conversation_history` | PostgreSQL full-text search (`plainto_tsquery`) |
+| Crystal ILIKE | `nate_intelligence_crystals` | Keyword substring match |
+| Crystal Recall | `crystal_recall_bridge` | Semantic recall with reinforcement |
+| Vectorize | `vectorize_service` | Cosine similarity across 6 indexes |
+
+Results are injected via `conversation.item.create` (or `session.update` fallback). A filler phrase ("Let me check my notes...") plays while the search runs.
+
+## VAD and Interruption Tuning
+
+Grok's server-side VAD controls when it considers the user "done talking." Key parameters in `session.update`:
+
+| Parameter | Purpose | Current |
+|---|---|---|
+| `silence_duration_ms` | How long silence before Grok responds | 800ms (tune up to reduce interruptions) |
+| `threshold` | Audio energy threshold for speech detection | 0.5 |
+| `prefix_padding_ms` | Audio included before speech start | 300ms |
+
+**Increasing `silence_duration_ms` to 1200-1500ms** reduces interruptions during natural pauses in long speech.
+
+## Active Listening Fillers
+
+The pipeline needs periodic backchannel cues ("Mmhmm", "I hear you") during extended client speech. These are:
+- Pre-rendered audio clips injected directly to Twilio (bypass Grok)
+- Triggered every 10-15 seconds of continuous user speech without Grok response
+- Must NOT reset Grok's VAD or trigger a new response
+
+## Session States
+
+| State | Meaning |
+|---|---|
+| `ACTIVE` | Call in progress, billing loop running |
+| `PAUSED` | Call dropped, 5-min recovery window for redial |
+| `COMPLETED` | Session finalized, crystals generated |
+| `WAITING_EXTENSION` | Balance exhausted, awaiting purchase decision |
+
+## Rules
+
+1. **Never charge DrNevedal1** — check `is_admin_free` before any deduction.
+2. **Crystal recall uses `source="voice_call"`** — this tags recall logs correctly for the Time Crystal Forge.
+3. **Memory lookup by username, not hardware_id** — `conversation_history.user_id` stores usernames for voice sessions.
+4. **Billing loop must be fault-tolerant** — wrap in `try/except`, log errors, continue on next 10s cycle. Never crash the call over a billing failure.
+5. **PAUSED state has a 5-minute window** — if the client redials within 5 minutes, resume the same session without re-billing the connection.
+6. **Session crystallization happens in `_finalize()`** — uses `app.state.littlenate_inference.generate()` (not `inference_router`), `system` parameter (not `system_prompt`).
+7. **New callers without accounts** get a welcome message and SMS with signup link. Their phone is stored in `voice_leads` for follow-up.
+8. **SMS recovery** on call drop has a 2-minute cooldown to prevent spam on flaky connections.
+9. **The billing loop pauses during `WAITING_EXTENSION`** — no deductions while the client decides whether to purchase more minutes.
+10. **`_is_memory_query()` patterns must be tight** — require strong signal (explicit memory phrases, question marks) to avoid false positives. Broad patterns like `\\b(history|previous)\\b` alone are insufficient.
+11. **Deep search dedup** — don't re-trigger if the same user turn was already searched in the current session.
+12. **Stripe webhook secret** is `STRIPE_VOICE_WEBHOOK_SECRET` — separate from the main Stripe webhook secret.

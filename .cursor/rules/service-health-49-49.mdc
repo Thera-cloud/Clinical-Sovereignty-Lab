@@ -32,7 +32,7 @@ The backend reports `STARTUP COMPLETE: N/94 services healthy` on boot. The targe
 | 17 | db_maintenance_agent | Prune old rows (24h) |
 | 18 | session_recovery_agent | Retry failed summaries (2h) |
 | 19 | agent_status_digest | 3x daily email (5am/5pm/11pm UTC) |
-| 20 | skyeye_tab_auditor | 3x daily SkyEye 56-endpoint trust scorecard |
+| 20 | skyeye_tab_auditor | 3x daily SkyEye 61-endpoint trust scorecard |
 | 21 | command_tab_auditor | 3x daily Sovereign Command 25-endpoint trust scorecard |
 | 22 | the_eye_auditor | 3x daily The Eye 21-endpoint trust scorecard |
 | 23 | login_auditor | 3x daily blind WebSocket login test (client + coach) |

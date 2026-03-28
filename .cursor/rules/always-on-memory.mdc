@@ -1,0 +1,96 @@
+# Always-On Memory Architecture
+
+## Overview
+
+Little Nate has **Total Recall** — semantic memory search runs on EVERY user message at zero cost via Cloudflare Vectorize. This replaces the old intent-gated approach where memory only activated when specific keywords were detected.
+
+## Architecture (Patent-Pending: Multi-Surface Semantic Recall)
+
+```
+User Message
+ ↓
+always_on_memory_recall() [zero cost — Cloudflare Vectorize]
+ ↓ queries 6 indexes concurrently (topK=30 each)
+ ├── nate-memory-search (conversations)
+ ├── nate-vault-search (vault files)
+ ├── nate-wisdom (wisdom extractions)
+ ├── nate-me2me (identity patterns)
+ ├── nate-sessions (session notes)
+ └── nate-annotations (photo analyses)
+ ↓ filters by relevance threshold (score > 0.30)
+ ↓ caps at 25 results
+ ↓ injects as memory_search_context
+process_interaction()
+```
+
+## Two Memory Modes
+
+| Mode | Trigger | Scope | Sources |
+|---|---|---|---|
+| **Always-On** | Every message | Vectorize semantic only | 6 vector indexes |
+| **Deep Search** | Intent keywords or explicit request | Full unified_search | PostgreSQL FTS + ILIKE + vault + annotations + device local + Vectorize |
+
+The always-on mode is lightweight and fast (one embedding + 6 parallel vector queries). Deep search activates when the user explicitly asks to search ("find my photo", "search my history", etc.).
+
+## Key Parameters
+
+| Parameter | Value | Location | Rationale |
+|---|---|---|---|
+| `RELEVANCE_THRESHOLD` | 0.30 | `always_on_memory_recall()` | Filters noise; vectors below this score are irrelevant |
+| `TOP_K_PER_INDEX` | 30 | `always_on_memory_recall()` | Broader recall per index; was 10 |
+| `MAX_RESULTS_TO_LLM` | 25 | `always_on_memory_recall()` | Prevents context overflow |
+| Conversation truncation | 600 chars | `format_search_context()` | Was 200; allows richer context |
+| Photo analysis truncation | 2000 chars | `format_search_context()` | Was 1200; full AI descriptions |
+| Vault preview | 400 chars | `format_search_context()` | Was 200; more detail visible |
+| `unified_search` results cap | `limit * 2` | `unified_search()` | Accounts for Vectorize additions |
+
+## Entity Extraction at Capture
+
+Every `memorize()` call runs `_extract_entities()` on the combined user + AI text. This extracts:
+
+| Category | Examples | Stored In |
+|---|---|---|
+| colors | red, blue, gold, navy | `metadata.entities.colors` |
+| clothing | shirt, dress, hat, watch | `metadata.entities.clothing` |
+| people | mom, dad, friend, boss | `metadata.entities.people` |
+| places | home, work, church, park | `metadata.entities.places` |
+| emotions | happy, anxious, overwhelmed | `metadata.entities.emotions` |
+| topics | relationship, trauma, career | `metadata.entities.topics` |
+| temporal | yesterday, last year, childhood | `metadata.entities.temporal` |
+
+These entities are stored in the `metadata` JSONB column of `conversation_history` and indexed via Vectorize for precision recall.
+
+## System Prompt Additions
+
+Two new guidelines added to Nate's system prompt:
+
+1. **TOTAL RECALL** — instructs Nate to weave recalled memories naturally into responses
+2. **PRECISION MEMORY** — instructs Nate to search for exact detail matches (colors, clothing, objects)
+
+## Rules
+
+1. **Never remove always-on memory** — it runs at zero cost (Cloudflare Vectorize) and is the core differentiator
+2. **Never lower the relevance threshold below 0.25** — below this, noise overwhelms the context
+3. **Never raise MAX_RESULTS_TO_LLM above 30** — LLM context windows have limits
+4. **Entity extraction must remain zero-cost** — regex-only, no LLM calls at capture time
+5. **The intent gate still exists** for deep search — don't remove `_ms_intents` or `_vault_content_patterns`
+6. **Always-on search failures are non-blocking** — wrapped in try/except, falls through to normal conversation
+7. **Keep `_is_vault_share_text` check** — system-generated vault share text must not trigger memory search
+
+## Patent Coverage
+
+The existing provisional patent (`PATENT_SPLIT_SOVEREIGNTY_MEMORY.md`, filed March 2, 2026) covers the dual-store architecture and federated query delegation. The always-on semantic recall, multi-surface vector search, relevance-gated injection, and entity enrichment at capture are **new innovations not covered by the existing claims** — candidates for a continuation-in-part (CIP) filing.
+
+## Verification After Changes
+
+```bash
+# Confirm Vectorize is configured
+docker exec nate_bridge printenv | grep -i CF_
+
+# Confirm always-on memory logs appear
+docker logs nate_bridge --since 5m 2>&1 | grep "ALWAYS-ON MEMORY"
+
+# Confirm entity extraction
+docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+  "SELECT metadata->>'entities' FROM conversation_history WHERE metadata->>'entities' IS NOT NULL ORDER BY created_at DESC LIMIT 3"
+```

@@ -1,0 +1,92 @@
+---
+description: Cloudflare R2 + Tiered Cache + Workers storage architecture
+alwaysApply: true
+---
+
+# Cloudflare R2 Storage Architecture
+
+## Storage Priority Chain
+
+All object storage flows through this priority chain:
+
+| Priority | Backend | Egress Cost | Config Check |
+|---|---|---|---|
+| 1 | Cloudflare R2 | $0 (zero) | `R2_ACCOUNT_ID` + `R2_ACCESS_KEY_ID` + `R2_SECRET_ACCESS_KEY` |
+| 2 | Azure Blob | ~$0.087/GB | `AZURE_STORAGE_CONNECTION_STRING` |
+| 3 | Local disk | N/A | Always available |
+
+If R2 is not configured, the system falls back to Azure, then local disk — identical to pre-R2 behavior.
+
+## R2 Buckets
+
+| Bucket | Env Var | Purpose |
+|---|---|---|
+| `nate-vault` | `R2_DEFAULT_BUCKET` | Vault uploads, general blob storage |
+| `nate-warm-memory` | `R2_WARM_BUCKET` | Warm memory tier (session archives, insights) |
+| `nate-cold-archive` | `R2_COLD_BUCKET` | Cold memory tier (client history, legacy data) |
+| `nate-heritage-vault` | `R2_HERITAGE_BUCKET` | Heritage Vault quad-redundant storage |
+
+## Files Implementing R2
+
+| File | Role |
+|---|---|
+| `backend/app/services/r2_storage.py` | Core R2 client (boto3 S3-compatible) |
+| `backend/app/services/blob_storage.py` | Unified storage facade (R2 → Azure → local) |
+| `backend/app/services/memory/warm.py` | Warm memory tier with R2 primary |
+| `backend/app/services/memory/cold.py` | Cold memory tier with R2 primary |
+| `backend/app/services/multi_cloud_heritage_vault.py` | Heritage Vault with R2 as 4th backend |
+| `backend/app/services/session_memory_store.py` | Session memories replicated to R2 (local hot + R2 backup) |
+| `backend/app/routers/folder_api.py` | Coach folder uploads stored in R2 via blob_storage |
+| `backend/app/services/night_school_director.py` | DOJO assessment PDFs replicated to R2 |
+| `backend/app/services/pm_export_service.py` | DOJO Gantt/Excel exports replicated to R2 |
+| `backend/app/routers/sessions.py` | Classroom videos uploaded to R2 after local write |
+| `backend/app/routers/dojo_api.py` | Download endpoints with R2 fallback |
+| `backend/app/middleware/cache_control.py` | Cache-Control headers for Tiered Cache |
+| `cloudflare/workers/nate-edge-cache.js` | Cloudflare Worker for edge caching |
+
+## R2 Key Prefixes
+
+| Prefix | Data | Written By |
+|---|---|---|
+| `session_memories/{session_id}/` | Transcripts, analysis, biometrics, observations | SessionMemoryStore |
+| `coach_uploads/{coach_id}/` | Coach folder files (PDFs, images, docs) | folder_api.py |
+| `dojo_assessments/{mode}/{coach_id}/` | DOJO assessment PDFs | night_school_director.py |
+| `dojo_exports/` | Gantt PDFs, Excel exports | pm_export_service.py |
+| `classroom_videos/{coach_id}/` | Classroom session videos (MP4, MOV) | sessions.py |
+
+## Rules
+
+1. **Never remove the Azure fallback** — R2 is primary, but Azure must remain as a safety net. The fallback chain is the system's resilience guarantee.
+2. **R2 uses boto3 with S3v4 signatures** — `region_name="auto"` is required. Do not use AWS regions.
+3. **`r2_storage.py` is sync with async wrappers** — all cloud operations run in `asyncio.to_thread()` to avoid blocking the event loop.
+4. **Presigned URLs bypass the origin** — `generate_presigned_url()` lets clients download directly from R2 without hitting the backend.
+5. **After adding R2 env vars**, use `docker compose -f docker-compose.prod.yml up -d` (not `docker restart`) to pick up the new values.
+6. **Heritage Vault is now quad-redundant** — R2 + Azure + AWS + Local. `ReplicationResult.to_dict()` includes an `r2` field.
+7. **Cache-Control headers guide Cloudflare Tiered Cache** — the `CacheControlMiddleware` sets appropriate headers. Never override `Cache-Control` on responses that already have it set.
+8. **The Cloudflare Worker script** (`cloudflare/workers/nate-edge-cache.js`) must be deployed via `wrangler deploy`. It is NOT part of the Python backend.
+9. **Session memories write local first, then R2** — local disk is the hot path for immediate retrieval. R2 is the redundancy layer. On read, local is checked first; if missing, R2 is fetched and cached locally.
+10. **Classroom videos write local first, then R2** — videos can be large (up to 500MB). The R2 upload happens after local write + validation. If R2 upload fails, the video is still available locally.
+11. **Coach uploads go directly through blob_storage** — the unified R2 → Azure → local chain. The `azure_blob_url` column stores the R2 key or local path.
+
+## Tiered Cache Setup (Cloudflare Dashboard)
+
+1. Go to Cloudflare Dashboard > sovereignsanctuary.net > Caching > Tiered Cache
+2. Enable "Smart Tiered Cache Topology" (free)
+3. This alone reduces origin pulls by ~60% for cacheable content
+
+## Cache Reserve Setup (Cloudflare Dashboard)
+
+1. Go to Cloudflare Dashboard > sovereignsanctuary.net > Caching > Cache Reserve
+2. Enable Cache Reserve ($5/month for first 1 TB)
+3. This keeps content cached persistently in R2-backed storage, surviving eviction
+
+## Worker Deployment
+
+```bash
+cd cloudflare/workers
+npx wrangler deploy
+```
+
+## Required Dependencies
+
+Add `boto3` to `requirements.txt` (if not already present) for the R2 client.

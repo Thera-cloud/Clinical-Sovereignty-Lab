@@ -1,0 +1,50 @@
+---
+description: ODPE-specific trust verification patterns, C_emo modulation safety, and topology data integrity checks
+globs: backend/app/services/odpe_engine.py, backend/app/services/helix_orchestrator.py, backend/app/services/nevedal_engine.py, backend/app/services/noetic_helix_auditor.py
+alwaysApply: false
+---
+
+# ODPE Trust Verification
+
+## 4 ODPE Auditor Checks (Tab 5 of NoeticHelixAuditor)
+
+| Check | What It Verifies | Pass Condition |
+|---|---|---|
+| `odpe_engine_initialized` | ODPEEngine on `app.state` or constructible | `is not None` |
+| `odpe_dual_evaluators` | Both topology evaluators produce valid [0,1] amplitudes | `0 <= amp <= 1` for both |
+| `odpe_resonance_comparator` | Comparator classifies an AmplitudeVector into an ODPESignal | `isinstance(signal, ODPESignal)` |
+| `odpe_liminal_reader` | Reader returns a bias value in [0.5, 1.5] | `0.5 <= bias <= 1.5` |
+
+## C_emo Modulation Safety
+
+The `_apply_odpe_modulation()` method in `nevedal_engine.py` is the only place where ODPE influences the therapeutic C_emo formula. Safety invariants:
+
+1. **Modulation cap**: `mod_strength = min(abs(deviation) * 0.15, 0.10)` — maximum ±10% adjustment per parameter
+2. **gamma_env floor**: `max(0.01, ...)` — gamma_env never reaches zero (prevents C_emo division by near-zero)
+3. **Signal-based overrides only amplify the cap**, not bypass it — LOCKED halves existing gamma_env, doesn't set it to an arbitrary value
+4. **All outputs clipped to [0, 1]** via `np.clip`
+
+## When Modifying ODPE
+
+1. **If changing signal thresholds** (LOCK_THRESHOLD, TENSION_THRESHOLD): update `odpe_engine.py`, `odpe-architecture.mdc`, and both patent documents
+2. **If adding a new ODPESignal value**: update the enum, `ResonanceComparator.classify()`, the auditor test, `record_recall()` branching, and `nate_inference_router.py` signal handling
+3. **If changing C_emo modulation weights**: verify the cap is still ≤0.10 per parameter. Run a manual test with extreme inputs to confirm no parameter goes below 0.01 or above 1.0
+4. **If modifying the liminal feedback loop**: verify `BIAS_DECAY_PER_CYCLE` is still positive (bias must decay toward neutral)
+
+## Data Integrity Patterns
+
+### Resonance Ratio Consistency
+The ratio is always `dodec_amplitude / icosi_amplitude`. If `icosi_amplitude < 0.001`, clamp to 0.001 to prevent division by zero. The `DodecahedronEvaluator` and `IcositetragonEvaluator` use different face counts, so their raw amplitudes are NOT directly comparable — the ratio normalizes them.
+
+### Oscillation Profile in Sessions
+`session_memory_store.py` stores `oscillation_profile` as metadata. This dict contains:
+- `signal`: ODPESignal name
+- `dodec_amplitude`, `icosi_amplitude`: raw topology outputs
+- `resonance_ratio`: computed ratio
+- `liminal_bias`: current equilibrium reader bias
+
+This is read-only archival data. Never use stored oscillation profiles to influence future evaluations — each evaluation must be computed fresh from current helix outputs and liminal signals.
+
+## Topology Evaluation Must Be Deterministic
+
+Given the same list of agent outputs, the evaluators must always produce the same amplitude. No randomness, no external state. The only non-deterministic input is the liminal equilibrium bias, which is explicitly tracked and logged.

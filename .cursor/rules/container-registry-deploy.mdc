@@ -1,0 +1,103 @@
+# Container Registry Deployment
+
+## Architecture
+
+Docker images are built locally, pushed to DigitalOcean Container Registry, and pulled on the production server. This eliminates on-server builds and provides instant rollback via tagged images.
+
+| Component | Value |
+|---|---|
+| Registry | `registry.digitalocean.com/sovereign-container-repo` |
+| Deploy script | `scripts/deploy-registry.sh` |
+| Override file (server) | `/opt/clinical-sovereignty-lab/docker-compose.registry.yml` |
+| Deploy history (server) | `/opt/clinical-sovereignty-lab/.deploy-history` |
+| Previous images (server) | `/opt/clinical-sovereignty-lab/.deploy-previous-images` |
+
+## Image Names
+
+| Service | Image | Dockerfile | Build Context |
+|---|---|---|---|
+| backend | `nate-backend` | `backend/Dockerfile` | `backend/` |
+| bridge | `nate-bridge` | `backend/Dockerfile.bridge` | `backend/` |
+| admin | `nate-admin` | `admin/Dockerfile` | `admin/` |
+
+## Tag Format
+
+`YYYYMMDD-HHMMSS-GITSHA` (e.g., `20260313-143022-abc1234`)
+
+Every deploy creates a uniquely tagged image. The `latest` tag is also pushed for convenience but should never be used for production deploys — always use the timestamped tag.
+
+## How It Works
+
+The deploy script generates a `docker-compose.registry.yml` override file on the server:
+
+```yaml
+services:
+  backend:
+    image: registry.digitalocean.com/sovereign-container-repo/nate-backend:TAG
+  bridge:
+    image: registry.digitalocean.com/sovereign-container-repo/nate-bridge:TAG
+  admin:
+    image: registry.digitalocean.com/sovereign-container-repo/nate-admin:TAG
+```
+
+Docker Compose merges this with `docker-compose.prod.yml`. The `image:` directive takes precedence over `build:`, so the server pulls pre-built images instead of building from source.
+
+## Commands
+
+```bash
+# Full pipeline: build + push + deploy
+./scripts/deploy-registry.sh all
+
+# Deploy only backend
+./scripts/deploy-registry.sh all --service=backend
+
+# Rollback to a previous tag
+./scripts/deploy-registry.sh rollback --tag=20260313-143022-abc1234
+
+# List available tags
+./scripts/deploy-registry.sh list-tags
+
+# Check what's running
+./scripts/deploy-registry.sh status
+```
+
+## Rollback
+
+Every deploy records its tag in `.deploy-history` on the server. To rollback:
+
+1. `./scripts/deploy-registry.sh list-tags` — find the previous good tag
+2. `./scripts/deploy-registry.sh rollback --tag=PREVIOUS_TAG`
+
+Rollback pulls the old image (already cached on server if recently used) and restarts. Takes ~30 seconds.
+
+## Source Code Mounts Still Active
+
+`docker-compose.prod.yml` still bind-mounts `./backend/app:/app/app:ro` into both backend and bridge. This means `scp` + `docker restart` still works for quick hotfixes without a full registry deploy cycle. The bind mount overlays the baked-in `/app/app` directory from the image.
+
+For production-critical changes, always use the registry deploy to ensure the image itself is correct and rollback is possible.
+
+## Prerequisites
+
+| Where | Requirement |
+|---|---|
+| Local (Mac) | `doctl` authenticated (`doctl auth init`), Docker running |
+| Server | `doctl` installed + authenticated, OR Docker config with registry credentials |
+
+### Server Setup (one-time)
+
+```bash
+ssh root@68.183.168.75
+snap install doctl
+doctl auth init  # paste API token
+doctl registry login
+```
+
+## Rules
+
+1. **Never build Docker images on the production server** for deploys. Use the registry pipeline.
+2. **Always use timestamped tags**, never bare `latest`, for production deploys.
+3. **The `docker-compose.prod.yml` is NOT modified** by the deploy script. The override file (`docker-compose.registry.yml`) is generated separately.
+4. **Rollback requires a known good tag.** The `.deploy-history` file on the server tracks all deploys.
+5. **After registry deploy, verify health** using the same checks from `build-deploy-ux-verification.mdc`.
+6. **Source bind mounts remain for hotfixes.** `scp` + `docker restart` still works for urgent single-file patches. Use registry deploy for anything more than a quick hotfix.
+7. **The admin service rarely changes.** Use `--service=backend` or `--service=bridge` to skip rebuilding the admin image when only backend code changed.

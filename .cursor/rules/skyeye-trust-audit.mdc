@@ -1,13 +1,13 @@
 ---
-description: SkyEye Tab Trust Audit — 20 tabs, 58 endpoints, 100% trust required
+description: SkyEye Tab Trust Audit — 21 tabs, 61 endpoints, 100% trust required
 alwaysApply: true
 ---
 
 # SkyEye Tab Trust Audit
 
-The `SkyEyeTabAuditor` agent (`backend/app/services/skyeye_tab_auditor.py`) tests all 58 API endpoints across the 20 SkyEye dashboard tabs 3x daily (5am/5pm/11pm UTC) and emails a trust scorecard to `support@sovereignsanctuary.net`.
+The `SkyEyeTabAuditor` agent (`backend/app/services/skyeye_tab_auditor.py`) tests all 61 API endpoints across the 21 SkyEye dashboard tabs 3x daily (5am/5pm/11pm UTC) and emails a trust scorecard to `support@sovereignsanctuary.net`.
 
-## 20 Tabs (58 Endpoints)
+## 21 Tabs (61 Endpoints)
 
 | Tab | Name | Endpoints | Router |
 |-----|------|-----------|--------|
@@ -31,6 +31,7 @@ The `SkyEyeTabAuditor` agent (`backend/app/services/skyeye_tab_auditor.py`) test
 | 18 | Swarm | coherence/pulse, fibres, mesh/health | coherence_api.py, fibre_api.py |
 | 19 | Threat Dropbox | hive-defense/v4/threat-dropbox/hunts | hive_defense_api.py |
 | 20 | Hive Defense | 18 hive-defense/* endpoints (defcon, mirror, gate, curiosity, heartbeat, drift, containment, quarantine, ghost, helix, projection, conservation, attackers, forensics, inverted-spaces, namespaces, defcon/history, overview) | hive_defense_api.py |
+| 21 | Crystal Intelligence | crystal-network/status (GET), crystal-network/diagnostics (GET), crystal-network/control (POST) | nate_agent_api.py |
 
 ## Trust Criteria
 
@@ -48,4 +49,4 @@ The `SkyEyeTabAuditor` agent (`backend/app/services/skyeye_tab_auditor.py`) test
 
 4. **Manual trigger**: `POST /api/admin/skyeye-audit/send` fires an immediate scorecard from the live process.
 
-5. **Target is 58/58 TRUSTED (100%)**. Any scorecard below 100% means an endpoint is broken and must be investigated.
+5. **Target is 61/61 TRUSTED (100%)**. Any scorecard below 100% means an endpoint is broken and must be investigated.

@@ -1,0 +1,42 @@
+---
+description: Enforces integrity of the intelligence crystal lifecycle — creation, validation, recall, decay, and supersession
+alwaysApply: true
+---
+
+# Crystal Intelligence Integrity
+
+Intelligence crystals are Nate's memory. Corruption here means Nate forgets, lies, or drifts.
+
+## Crystal Creation
+
+1. **Every crystal must pass NateResponseValidator before storage.** The validator scans for hallucination patterns (fabricated timestamps, false capability claims, invented history). A crystal that bypasses validation is a potential hallucination frozen into permanent memory.
+
+2. **source_count must be >= 2 for generation-0 crystals.** A crystal synthesized from a single fragment is an echo, not a synthesis. The clustering step in `_cluster_and_synthesize_cycle` must enforce minimum cluster size of 2.
+
+3. **content_hash is SHA-256 of crystal_text.** Computed at creation, never recomputed unless crystal_text changes (which creates a new crystal, not an update). The hash enables Merkle integrity verification by the Crystal Integrity Helix (defense Layer 3).
+
+4. **Domain must be one of 7 canonical values.** `clinical`, `coaching`, `marketing`, `research`, `culture`, `defense`, `general`. Any new domain requires updating the crystallizer, all 6 domain agents, the analytics API, and this rule.
+
+## Crystal Recall
+
+5. **Coherence re-ranking is mandatory.** Raw Vectorize similarity scores are necessary but not sufficient. The `rerank_by_coherence()` function in `quantum_knowledge_field.py` must run on every semantic recall result set. Skipping re-ranking causes stale or irrelevant crystals to surface.
+
+6. **Recall telemetry feeds decay prevention.** `last_recalled_at` and `recall_count` updates are the mechanism by which valuable knowledge survives. If a code path retrieves crystals without updating recall metadata, those crystals will eventually decay regardless of their value.
+
+## Crystal Decay
+
+7. **Decay criteria: 90 days unretrieved AND recall_count < 3.** Both conditions must be true. A crystal with 100 recalls that hasn't been touched in 91 days is still valuable (set `scope=archived`, don't delete). A crystal with 0 recalls after 30 days is suspect but not yet decayed.
+
+8. **Archived crystals remain in PostgreSQL.** `scope = 'archived'` removes them from active Vectorize queries but preserves the data for research, audit, and potential reactivation. Never DELETE FROM nate_intelligence_crystals — always archive.
+
+9. **Confidence pruning threshold is 0.15.** Crystals below 0.15 confidence are archived immediately regardless of age. This catches synthesis failures and contradicted knowledge.
+
+## Crystal Supersession
+
+10. **Higher confidence wins.** When two crystals in the same domain cover overlapping topics and contradict each other, the higher-confidence crystal supersedes the lower. The superseded crystal's `superseded_by` field points to the winner.
+
+11. **Supersession is one-directional.** A superseded crystal never un-supersedes. If the superseding crystal itself gets superseded, a chain forms: A → B → C. Queries filter on `superseded_by IS NULL` to get the current truth.
+
+## Database Schema
+
+The `nate_intelligence_crystals` table is the canonical store. Vectorize is a search index. R2 is a backup. If they diverge, PostgreSQL is the source of truth. Vectorize can be re-indexed from PostgreSQL. R2 can be re-synced from PostgreSQL. PostgreSQL cannot be recovered from Vectorize or R2.

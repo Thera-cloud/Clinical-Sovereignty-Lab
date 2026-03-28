@@ -1,0 +1,109 @@
+# Dual Brain Immune System
+
+## Architecture
+
+Two brains protect each other from infection and cross-contamination:
+
+| Brain | Location | Role |
+|---|---|---|
+| Edge Brain | Cloudflare Worker (`nate-summon-worker`) | Public summon, L0 ODPE, KV cache, rate limiting |
+| Sovereign Brain | VPS (`nate_backend`) | Full ODPE, clinical inference, crystal storage |
+
+## Immune Sentinel (`immune_sentinel.py`)
+
+Background agent (60s cycle) monitoring both brains for behavioral anomalies.
+
+| State | Score Threshold | Action |
+|---|---|---|
+| HEALTHY | < 3 | Normal operation |
+| NOTICE | >= 3 | Logging intensified |
+| ALERT | >= 6 | Enhanced monitoring |
+| QUARANTINE | >= 10 | Brain isolated, no cross-brain traffic |
+
+Score decays 0.5 per cycle. Quarantine auto-expires after 600s → repair verification (3 checks, 30s apart).
+
+## Sovereign Heartbeat (`sovereign_heartbeat.py`)
+
+Background agent (120s cycle) that:
+1. Writes `heartbeat/sovereign.json` to R2 every 2 minutes
+2. Drains `edge-queue/` R2 prefix every 5 minutes for deferred events
+
+## Cross-Brain Security Layers
+
+### 1. HMAC-SHA256 Request Signing (Edge → Sovereign)
+
+Edge Worker signs every request to `/api/summon/internal` with:
+- `X-Nate-Timestamp`: Unix epoch (30s max age)
+- `X-Nate-Nonce`: UUID v4
+- `X-Nate-Signature`: Base64(HMAC-SHA256(timestamp.nonce.body))
+
+Sovereign verifies before processing. Falls back to `EDGE_INTERNAL_TOKEN` bearer auth if `EDGE_HMAC_SECRET` is not set.
+
+### 2. Input Sanitization
+
+Sovereign sanitizes all inbound messages via `_sanitize_input()`:
+- HTML entity escaping
+- Control character removal
+- 2000 char limit
+
+### 3. EndpointShield (Sovereign)
+
+Wired into `/api/summon/internal` for both inbound and outbound:
+- Inbound: ransomware detection, keylogger pattern detection
+- Outbound: malicious URL removal from AI responses
+
+### 4. Edge Mirror Shell (Sovereign)
+
+Coherence check on every internal summon request via `SignalSource.CLOUDFLARE_WORKER`. Incoherent or high-frequency signals get phantom responses (reveal nothing about real data).
+
+### 5. Response Validation (Edge)
+
+Edge validates every Sovereign response via `validateSovereignResponse()`:
+- Reject if > 10,000 chars
+- Reject if contains `<script>`, `javascript:`, `data:text/html`, `eval`, `Function`, `__proto__`, prompt injection patterns
+
+### 6. Circuit Breaker (Edge → Sovereign)
+
+KV-backed state machine preventing cascading failures:
+
+| State | Behavior |
+|---|---|
+| CLOSED | Requests flow normally |
+| OPEN | All Sovereign calls skipped (Edge-only mode) |
+
+Opens after 5 consecutive failures. Auto-resets after 120 seconds.
+
+### 7. R2 Heartbeat Monitoring (Edge)
+
+Edge reads `heartbeat/sovereign.json` from R2 before calling Sovereign. If heartbeat is stale (> 300s), Edge skips the Sovereign call and queues the event to `edge-queue/`.
+
+## Environment Variables
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `EDGE_HMAC_SECRET` | Both `.env` + `wrangler.toml` | Shared HMAC signing key |
+| `EDGE_INTERNAL_TOKEN` | Both | Fallback bearer auth |
+
+## Wired Defense Systems
+
+5 previously dormant defense systems are now live in the request flow:
+
+| System | File | Where Wired |
+|---|---|---|
+| EndpointShield | `security/endpoint_shield.py` | `summon_api.py` → `/internal` |
+| Crystal Integrity Helix | `distributed_defense.py` | `nate_memory_crystallizer.py` → crystal storage |
+| NateResponseValidator | `nate_response_validator.py` | Now in `enforce` mode (was `log_only`) |
+| Edge Mirror Shell | `security/edge_mirror_shell.py` | `summon_api.py` → `/internal` |
+| Poison Pattern Detection | `worker.js` | `validateSovereignResponse()` |
+
+## Rules
+
+1. **Never remove HMAC verification from `/api/summon/internal`** — it prevents spoofed requests from masquerading as the Edge Worker.
+2. **Never increase `_HMAC_MAX_AGE` above 60 seconds** — tighter windows prevent replay attacks.
+3. **Circuit breaker threshold must stay at 5** — lower causes false circuit opens; higher allows cascading failures.
+4. **Quarantine duration must stay at 600 seconds** — shorter risks premature reconnection; longer causes extended degraded service.
+5. **Score decay rate (0.5/cycle) must be positive** — without decay, a brain that recovered would stay quarantined forever.
+6. **Never skip input sanitization** on the `/internal` endpoint — even "trusted" Edge Worker traffic can carry poisoned user input.
+7. **R2 heartbeat stale threshold is 300 seconds** — the heartbeat writes every 120s, so 300s means ~2 missed heartbeats.
+8. **Edge queue items are processed then deleted** — never leave processed items in R2, they'll be re-processed on next drain.
+9. **The NateResponseValidator `_mode` must remain `enforce`** — reverting to `log_only` disables crystal validation blocking.

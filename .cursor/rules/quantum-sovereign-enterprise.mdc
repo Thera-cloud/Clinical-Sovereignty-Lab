@@ -1,0 +1,103 @@
+# Quantum Sovereign Enterprise Architecture
+
+## Overview
+
+The Quantum Sovereign Enterprise layer maximizes the synergy between the Edge Brain (Cloudflare Workers) and Sovereign Brain (VPS), completes the 24M-face ODPE topology, enables infinite memory architecture, and exposes a global enterprise API.
+
+## Dual-Brain Synergy Matrix
+
+| Capability | Edge Brain | Sovereign Brain | Synergy |
+|---|---|---|---|
+| Inference | Workers AI (Llama 3.1 8B, $0) | Grok 4.1 Fast (xAI Foundry) | L0 at edge, TENSION escalates to sovereign |
+| Semantic Search | Vectorize bindings (sub-ms) | PostgreSQL + Vectorize REST | 3-path parallel: server + vectorize + edge |
+| Memory Hot | D1 read replica (sub-ms) | PostgreSQL | D1SyncAgent pushes every 5min |
+| Memory Warm | R2 session archives | PostgreSQL archives | R2ArchiveAgent moves 90+ day data |
+| Memory Cold | R2 cold archive | Heritage Vault (R2+B2+Azure+AWS) | Tiered recall promotes cold→hot on access |
+| Crystal Recall | Vectorize WISDOM_INDEX + MEMORY_INDEX | FederatedSearchCoordinator | Pre-warmed crystals in R2 for edge fetch |
+| TTS | Workers AI MeloTTS ($0) | Sovereign XTTS-v2 (voice clone) | 3-tier fallback: XTTS→Edge TTS→Workers AI |
+
+## ODPE 24M-Face Topology
+
+| Level | Faces | Evaluator | Where |
+|---|---|---|---|
+| L0 | 12 (Dodec) + 24 (Icosi) | `DodecahedronEvaluator` + `IcositetragonEvaluator` | `odpe_engine.py` |
+| L1 | 2,400 | `HectakisL1Evaluator` via `ODPETaxonomy` | `odpe_taxonomy.py` |
+| L2 | 24,000,000 | `HectakisL2Evaluator` (self-populating) | `odpe_engine.py` + `odpe_l2_faces` table |
+
+L2 faces auto-populate via `nate_memory_crystallizer.py` when crystals with `face_path` depth >= 3 are stored.
+
+## Enterprise API
+
+| Tier | Rate Limit | Daily Cap | Max Tokens | Price |
+|---|---|---|---|---|
+| FREE | 60/min | 1,000/day | 256 | $0 |
+| STARTER | 300/min | 10,000/day | 512 | $49/mo |
+| GROWTH | 1,000/min | 100,000/day | 1,024 | $199/mo |
+| ENTERPRISE | 5,000/min | Unlimited | 2,048 | Custom |
+
+API keys are stored in `api_keys` table (migration 132) and synced to D1 for sub-ms edge validation.
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/d1_sync_agent.py` | PostgreSQL → D1 sync (5min cycle) |
+| `backend/app/services/r2_archive_agent.py` | PostgreSQL → R2 cold archival (6h cycle) |
+| `backend/app/services/odpe_taxonomy.py` | L1 face classifier (2,400 faces) |
+| `backend/app/services/enterprise_api.py` | API key management REST endpoints |
+| `backend/app/services/quantum_knowledge_field.py` | 3-path federated search + tiered memory |
+| `backend/app/services/vectorize_service.py` | face_path metadata on all crystal indexes |
+| `backend/app/services/voice_router.py` | 3-tier TTS fallback (XTTS→Edge→Workers AI) |
+| `backend/app/services/upstream_canary.py` | 7 providers (+ Cloudflare AI/R2/Vectorize) |
+| `backend/app/services/foresight_engine.py` | Predictive crystal pre-warming |
+| `cloudflare/workers/nate-summon-worker/worker.js` | Crystal recall + enterprise API validation |
+
+## Tiered Memory Architecture
+
+| Tier | Store | Latency | Retention | Access Pattern |
+|---|---|---|---|---|
+| Hot | PostgreSQL + Vectorize | <10ms | Active | Real-time queries |
+| Warm | R2 session archives | <100ms | 90 days | On-demand with cold promotion |
+| Cold | R2 archive + Heritage Vault | <500ms | Forever | Rare access, promotes to hot on recall |
+
+## Actual Capacity (Post-Wiring Mar 2026)
+
+| Metric | Current | With Clone VPS | Notes |
+|---|---|---|---|
+| Uvicorn workers | 2 (primary) | 2 + 4 (clone) = 6 | Cloudflare Load Balancer distributes |
+| Concurrent voice sessions | 200 per node | 200 × 2 = 400 | AdmissionController per node |
+| Summon requests/hour | ~100K (VPS-limited) | ~300K VPS + infinite edge cache | KV-cached summon responses bypass VPS |
+| Edge Worker invocations | Unlimited (8 workers) | Unlimited | $0 per invocation |
+| SASE enforcement | Inbound: summon/internal | Outbound: all LLM calls | sase-request-flow.mdc |
+| Voice pipeline | Pool → XTTS → Edge TTS → Workers AI | Pool distributed across nodes | voice-pool-wiring.mdc |
+| Crystal pre-warm | KV `prewarm:` prefix (cron → summon) | Sub-ms crystal access | edge-worker-fleet.mdc |
+
+## Wiring Status (Mar 2026)
+
+| System | Status | Detail |
+|---|---|---|
+| DistributedVoicePool | WIRED | VoiceRouter pool-first dispatch; `STT_WORKER_NODES`/`TTS_WORKER_NODES` env vars |
+| nate-voice-edge Worker | WIRED | Public API URL; `/api/voice/stt` and `/api/voice/tts` backend routes |
+| Crystal pre-warm | WIRED | Cron writes `prewarm:` to KV, summon reads `prewarm:` from KV |
+| SASE inbound | WIRED | `summon_api.py` → `sase_controller.evaluate_request()` |
+| SASE outbound | WIRED | `nate_inference_router.py` → `_sase_validate_outbound()` before all LLM calls |
+| Clone VPS | READY | `docker-compose.clone.yml` defined; needs DigitalOcean snapshot + Cloudflare LB setup |
+| D1 Sync Agent | OPERATIONAL | 5min push cycle, PostgreSQL authoritative |
+| R2 Archive Agent | OPERATIONAL | 6h cold archival cycle |
+| Enterprise API | OPERATIONAL | `api_keys` table, D1 edge validation, 4 tiers |
+
+## Rules
+
+1. **Never remove the 3-path federated search** — server + vectorize + edge must all run in parallel via `asyncio.gather`.
+2. **face_path format is `L{level}/{face_id}`** — e.g., `L0/3`, `L1/3/47`, `L2/3/47/12345`. Each level appends a sub-face ID.
+3. **L2 faces are self-populating** — they are created when crystals with depth-3+ face_paths are stored. Never pre-seed the full 24M.
+4. **Enterprise API keys start with `sk_`** — edge validation in `worker.js` matches this prefix.
+5. **D1 sync is PostgreSQL-authoritative** — D1 is a read replica. Writes always go to PostgreSQL first.
+6. **Workers AI TTS is the last-resort fallback** — sovereign XTTS is preferred for voice quality, Edge TTS for cost, Workers AI for availability.
+7. **Cloudflare canary probes must not be removed** from `upstream_canary.py` — they verify the Edge Brain's infrastructure health.
+8. **Crystal pre-warming uses KV `prewarm:` prefix** — cron worker writes to `SUMMON_CACHE` KV, summon worker reads from the same binding. Never use R2 for pre-warm reads.
+9. **Cycle detections boost ODPE face paths** via `ODPEEngine.boost_from_cycle()` — this creates/increments `odpe_l2_faces` rows.
+10. **R2 archive retention**: conversations 90 days, metrics 30 days, activity 30 days. Archived data is deleted from PostgreSQL after R2 confirmation.
+11. **SASE is live on both directions** — inbound evaluation on `summon/internal`, outbound validation on all LLM provider calls. See `sase-request-flow.mdc`.
+12. **Clone VPS connects to primary's database** — never run PostgreSQL or Redis on the clone. See `clone-vps-operations.mdc`.
+13. **Voice edge worker must use public API URL** — never WireGuard IPs. See `voice-pool-wiring.mdc` and `edge-worker-fleet.mdc`.

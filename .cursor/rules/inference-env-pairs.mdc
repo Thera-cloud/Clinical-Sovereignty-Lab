@@ -1,0 +1,37 @@
+# Inference & database env — paired variables
+
+## Rule
+
+**Never set only half of a provider pair.** Partial config (URL without secret, or template placeholders) is treated as *not configured* in `sovereign_chat_client.py` (`inference_providers_configured()`, `_is_placeholder_secret()`).
+
+## Pairs (Little Nate therapy / CLI streaming — `sovereign_chat_client`)
+
+| Provider | Required together | Notes |
+|----------|-------------------|--------|
+| Grok (Foundry) | `NATE_CHAT_URL` + `NATE_CHAT_KEY` | Optional `NATE_CHAT_MODEL` |
+| Workers AI | `WORKERS_AI_URL` + `WORKERS_AI_TOKEN` | URL must be reachable from backend |
+| Sovereign Ollama | `SOVEREIGN_INFERENCE_URL` | No API key; must expose Ollama `/api/chat` |
+
+**Not wired in `generate_streaming`:** `HOME_GPU_URL`, `DIGITAL_OCEAN_INFERENCE_URL`, Azure chat — use one of the three rows above for this code path.
+
+## Database (separate concern)
+
+| Pair | Purpose |
+|------|---------|
+| `POSTGRES_USER` + `POSTGRES_PASSWORD` | DB auth (and `DATABASE_URL`) |
+
+Do not confuse DB password with inference API keys.
+
+## Docker
+
+After editing root `.env`, use **`docker compose -f docker-compose.prod.yml up -d backend`** (recreate) so new vars load — `docker restart` alone does not reload env from file.
+
+## User-facing errors
+
+- Missing providers: therapy path checks `inference_providers_configured()` before streaming.
+- All providers failed: `RuntimeError` includes `format_inference_setup_help()`; bridge maps it to a short user message + full help in logs.
+
+## Related code
+
+- `backend/app/services/sovereign_chat_client.py` — `format_inference_setup_help()`, `inference_providers_configured()`
+- `.env.template` — comments on each pair

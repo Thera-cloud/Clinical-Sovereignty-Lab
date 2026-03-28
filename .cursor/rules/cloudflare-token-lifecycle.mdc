@@ -1,0 +1,71 @@
+# Cloudflare Token Lifecycle
+
+## Two-Token Architecture
+
+| Token | Env Var | Purpose | Expiry | Permissions |
+|---|---|---|---|---|
+| Worker Token | `CLOUDFLARE_API_TOKEN` | All CF service calls (Vectorize, Workers AI, D1, R2, Pipelines) | Non-expiring | Workers AI (R+W), Vectorize (Edit) |
+| Meta Token | `CLOUDFLARE_META_TOKEN` | Programmatic roll of the worker token | Non-expiring | API Tokens::Edit |
+| Token UUID | `CLOUDFLARE_TOKEN_ID` | UUID of the worker token (used in roll API URL) | N/A | N/A |
+
+The worker token is IP-restricted to `68.183.168.75` (production server only). The meta token has `API Tokens::Edit` scope only — it cannot call any service APIs directly.
+
+## CloudflareTokenGuardian Agent
+
+File: `backend/app/services/cloudflare_token_guardian.py`
+Cycle: Every 30 minutes
+app.state key: `cf_token_guardian`
+
+### Lifecycle
+
+1. Verify worker token via `GET /user/tokens/verify`
+2. If `active` → sleep 30 min
+3. If `expired`/`invalid` → roll via `PUT /user/tokens/{id}/value` using meta token
+4. Verify rolled token is `active`
+5. Hot-reload across all 5 CF consumers
+6. Log to `skyeye_activity` (type: `cf_token_guardian_rolled` or `cf_token_guardian_alert`)
+
+### Hot-Reload Consumers
+
+When a token is rolled, the guardian calls `reload_cf_token(new_token)` on:
+
+| Module | Function |
+|---|---|
+| `vectorize_service.py` | `reload_cf_token()` — also closes aiohttp session |
+| `d1_query_service.py` | `reload_cf_token()` — class recreates session on next request |
+| `d1_sync_agent.py` | `reload_cf_token()` — refreshes session before next D1 batch |
+| `r2_analytics_service.py` | `reload_cf_token()` — class recreates session on next query |
+| `iceberg_cdc_agent.py` | `reload_cf_token()` — refreshes session before next pipeline push |
+
+## Rules
+
+1. **Never store both tokens in the same env var** — the meta token has privileged access to roll any token in the account.
+2. **The meta token must NEVER be used for service calls** — it only has `API Tokens::Edit` scope.
+3. **When adding a new Cloudflare consumer**, add a `reload_cf_token()` function following the same pattern, and import it in `cloudflare_token_guardian.py → _hot_reload_all()`.
+4. **The worker token is IP-restricted** — if the production server IP changes, update the restriction in the Cloudflare dashboard.
+5. **After any `.env` change** involving `CLOUDFLARE_*` vars, use `docker compose -f docker-compose.prod.yml up -d --force-recreate backend` to pick up new values.
+6. **The `_cf_api_token` variable is mutable** in all consumer modules (lowercase `_cf_api_token`, not uppercase `_CF_API_TOKEN`). This is intentional for hot-reload.
+7. **aiohttp sessions bake headers at creation time** — changing the module-level token does not update existing sessions. Each consumer either closes and recreates the session or checks `_session_token != _cf_api_token` before requests.
+
+## Manual Roll (If Guardian Fails)
+
+```bash
+# Roll via Cloudflare API using meta token:
+curl -X PUT "https://api.cloudflare.com/client/v4/user/tokens/$CLOUDFLARE_TOKEN_ID/value" \
+  -H "Authorization: Bearer $CLOUDFLARE_META_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Returns: {"result": "new_token_value_here", "success": true}
+# Update .env with the new value and restart backend
+```
+
+## Verification
+
+```bash
+# Check guardian status:
+docker logs nate_backend 2>&1 | grep -i "CloudflareTokenGuardian" | tail -5
+
+# Verify worker token directly:
+ssh root@68.183.168.75 'curl -s "https://api.cloudflare.com/client/v4/user/tokens/verify" -H "Authorization: Bearer $(grep CLOUDFLARE_API_TOKEN /opt/clinical-sovereignty-lab/.env | cut -d= -f2)"'
+```

@@ -1,0 +1,76 @@
+# Azure Model Lifecycle Management
+
+## Current Active Deployments (Updated Mar 8 2026)
+
+| Env Var | Deployment Name | Model | Retires | Replacement |
+|---|---|---|---|---|
+| `AZURE_OPENAI_DEPLOYMENT` | `gpt-realtime` | gpt-realtime (2025-03-01) | TBD (GA, 12+ mo) | gpt-realtime-1.5 when pricing confirmed |
+| `AZURE_OPENAI_CHAT_DEPLOYMENT` | `gpt-4.1` | gpt-4.1 (2025-04-14) | Oct 14 2026 | gpt-5 |
+| `AZURE_OPENAI_MINI_TTS_DEPLOYMENT` | `gpt-4o-mini-tts` | gpt-4o-mini-tts (2025-12-15) | TBD | Monitor for successor |
+| `AZURE_WHISPER_DEPLOYMENT` | `nate-whisper` | whisper | No retirement announced | Safe |
+
+All deployments share a single Azure resource: `nathanlhr-0393-resource.cognitiveservices.azure.com`
+
+## Retired Models (Do Not Revert)
+
+| Model | Retired | Replaced By |
+|---|---|---|
+| `gpt-4o-realtime-preview` | Mar 24 2026 | `gpt-realtime` |
+| `gpt-4o` (2024-08-06) | Mar 31 2026 (auto-upgrade starts Mar 9) | `gpt-4.1` |
+| `gpt-4o-mini` | Mar 31 2026 | `gpt-4.1-mini` |
+
+## Where Deployment Names Live (All Must Match)
+
+When changing a deployment name, update ALL of these locations:
+
+| # | Location | File |
+|---|---|---|
+| 1 | Env var default | `backend/app/config/_settings.py` |
+| 2 | Canary config | `backend/app/config/canaries.py` |
+| 3 | Bridge default | `backend/app/websocket/bridge_server.py` |
+| 4 | Azure bridge default | `backend/app/services/azure_bridge.py` |
+| 5 | Model stability pinned | `backend/app/services/model_stability.py` |
+| 6 | AI pipeline auditor | `backend/app/services/ai_pipeline_auditor.py` |
+| 7 | Call coaching engine | `backend/app/services/call_coaching_engine.py` |
+| 8 | Insight engine comment | `backend/app/services/insight_engine.py` |
+| 9 | Chat deployment defaults | `document_organizer.py`, `ai_modes.py`, `visual_biometric_extractor.py` |
+| 10 | `.env.template` | Root |
+| 11 | Production `.env` | `/opt/clinical-sovereignty-lab/.env` on server |
+| 12 | Cursor rules | `trust-100-percent.mdc`, `deployment-trust-100-percent.mdc` |
+
+## API Version Compatibility
+
+| Deployment | API Version | WebSocket URL Format |
+|---|---|---|
+| `gpt-realtime` | `2024-10-01-preview` | `wss://{endpoint}/openai/realtime?api-version=2024-10-01-preview&deployment=gpt-realtime` |
+| `gpt-4.1` (chat) | `2025-01-01-preview` | `https://{endpoint}/openai/deployments/gpt-4.1/chat/completions?api-version=2025-01-01-preview` |
+| `gpt-4o-mini-tts` | `2025-01-01-preview` | `https://{endpoint}/openai/deployments/gpt-4o-mini-tts/audio/speech?api-version=2025-01-01-preview` |
+| `nate-whisper` | `2024-06-01` | `https://{endpoint}/openai/deployments/nate-whisper/audio/transcriptions?api-version=2024-06-01` |
+
+## Migration Procedure
+
+1. Create new deployment in Azure AI Foundry (Model Catalog → Deploy)
+2. Update ALL 12 locations listed above (grep for old name to find any missed)
+3. Deploy changed files via `scp` (never `rsync --delete`)
+4. Update production `.env` on server
+5. Recreate containers: `docker compose -f docker-compose.prod.yml up -d backend bridge` (NOT `docker restart` — env vars won't reload)
+6. Verify: `docker exec nate_backend printenv AZURE_OPENAI_DEPLOYMENT` and `docker exec nate_bridge printenv AZURE_OPENAI_DEPLOYMENT`
+7. Trigger audit: `curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/skyeye-audit/send`
+8. Verify AI Pipeline auditor shows 6/6 TRUSTED
+
+## Monitoring for Upcoming Retirements
+
+Check quarterly: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/concepts/model-retirements
+
+Subscribe to Azure Service Health alerts:
+- Service: `azure OpenAI service`
+- Event type: `Health advisories` (covers Upgrade, Deprecation, Retirement)
+
+## Rules
+
+1. **Never revert to a retired model** — `gpt-4o-realtime-preview` and `gpt-4o` are permanently retired.
+2. **Always use `docker compose up -d`, not `docker restart`** when env vars change — restart does not reload env vars.
+3. **Both backend AND bridge** must have matching deployment env vars — a mismatch causes the bridge to connect to a different model than the backend expects.
+4. **The API key is shared** across all deployments on the same Azure resource — changing deployment names does not require a new key.
+5. **Test the realtime WebSocket** after any model change — the auditor's AI Pipeline check validates connectivity.
+6. **gpt-realtime-1.5** is available as an upgrade when pricing is confirmed — same API format, drop-in replacement for `gpt-realtime`.

@@ -38,7 +38,7 @@ for t in TAB_ENDPOINTS:
 "
 ```
 
-## Current Auditor Registry (26 Auditors, 493 Total Checks)
+## Current Auditor Registry (26 Auditors, 499 Total Checks)
 
 | Auditor | Activity Type | Baseline Key | Expected | Stagger |
 |---|---|---|---|---|
@@ -49,7 +49,7 @@ for t in TAB_ENDPOINTS:
 | QuickBooks Sync | `quickbooks_audit_sent` | `quickbooks_check_count` | 10 | 105s |
 | GKM Ministry | `gkm_audit_sent` | `gkm_check_count` | 11 | 110s |
 | Corporate Command | `corporate_command_audit_sent` | `corporate_command_check_count` | 21 | 115s |
-| SkyEye Tab | `skyeye_tab_audit_sent` | `skyeye_endpoint_count` | 58 | 120s |
+| SkyEye Tab | `skyeye_tab_audit_sent` | `skyeye_endpoint_count` | 61 | 120s |
 | Sovereign Command | `command_tab_audit_sent` | `command_endpoint_count` | 25 | 130s |
 | The Eye | `eye_tab_audit_sent` | `eye_endpoint_count` | 21 | 140s |
 | Login | `login_audit_sent` | `login_test_accounts` | 2 | 150s |

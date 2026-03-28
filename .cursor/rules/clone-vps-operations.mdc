@@ -1,0 +1,103 @@
+---
+description: Clone VPS operations and deployment procedures
+alwaysApply: false
+globs:
+  - docker-compose.clone.yml
+  - backend/app/**
+---
+
+# Clone VPS Operations
+
+## Multi-VPS Architecture
+
+| VPS | Public IP | VPC IP | Role | Compose File |
+|---|---|---|---|---|
+| Primary | 68.183.168.75 | 10.120.0.2 | Full stack (Backend + Bridge + Postgres + Redis + Admin) | `docker-compose.prod.yml` |
+| Clone | 159.65.108.25 | 10.120.0.6 | Backend only (REST API), connects to primary's DB/Redis via VPC | `docker-compose.clone.yml` |
+
+Both droplets are in the `default-sfo2` VPC (10.120.0.0/20).
+
+## Clone Architecture
+
+| Property | Value |
+|---|---|
+| Droplet | `nate-vps-clone-2026-03-14-s-2vcpu-4gb-sfo2-01` |
+| Origin | Snapshot of primary (Mar 14, 2026) |
+| Docker network mode | `host` (uses host network for VPC access) |
+| Backend container | `nate_backend` (only container running) |
+| PostgreSQL host | `10.120.0.2` (primary via VPC) |
+| Redis host | `10.120.0.2` (primary via VPC) |
+| Nginx config | `/etc/nginx/sites-enabled/clone-api` |
+| WebSocket | Returns 503 JSON — clone has no bridge |
+| SSL certs | From primary snapshot (Cloudflare LB skips SSL verification) |
+
+## Critical Environment Overrides in docker-compose.clone.yml
+
+These must be present in the `environment:` block to override `.env` defaults:
+
+```yaml
+- POSTGRES_HOST=10.120.0.2
+- POSTGRES_PORT=5432
+- POSTGRES_USER=nate_admin
+- POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+- POSTGRES_DB=${POSTGRES_DB:-little_nate}
+- DATABASE_URL=postgresql://nate_admin:${POSTGRES_PASSWORD}@10.120.0.2:5432/${POSTGRES_DB:-little_nate}
+- REDIS_URL=redis://:${REDIS_PASSWORD}@10.120.0.2:6379
+- REDIS_HOST=10.120.0.2
+- REDIS_PORT=6379
+- ENVIRONMENT=production
+```
+
+`POSTGRES_HOST` is critical because `main.py` reads it from `settings.POSTGRES_HOST` (not from `DATABASE_URL` parsing). Without the explicit override, it defaults to `localhost` from `.env`.
+
+## Deploy to Both Nodes
+
+After any backend code change, deploy to BOTH VPS nodes:
+
+```bash
+PRIMARY=68.183.168.75
+CLONE=159.65.108.25
+
+# Copy changed file(s)
+scp backend/app/services/changed_file.py root@$PRIMARY:/opt/clinical-sovereignty-lab/backend/app/services/
+scp backend/app/services/changed_file.py root@$CLONE:/opt/clinical-sovereignty-lab/backend/app/services/
+
+# Restart both backends
+ssh root@$PRIMARY "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.prod.yml restart backend"
+ssh root@$CLONE "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.clone.yml restart backend"
+```
+
+## Rules
+
+1. **Bridge stays on primary only.** Never start a bridge container on the clone. Two bridges would create split-brain for WebSocket sessions.
+
+2. **Clone does not run PostgreSQL, Redis, Bridge, Admin, or Nginx containers.** It runs only the backend container in `host` network mode plus host-level nginx.
+
+3. **Primary must expose PostgreSQL and Redis on VPC interface.** `docker-compose.prod.yml` binds postgres ports to `10.120.0.2:5432` and redis to `10.120.0.2:6379`. Three firewall layers must allow VPC traffic: UFW, iptables DOCKER-USER, and DO Cloud Firewall.
+
+4. **Always use `docker compose -f docker-compose.clone.yml`** on the clone. Never use `docker-compose.prod.yml` (it would start postgres, redis, bridge, admin, nginx containers).
+
+5. **After deploy, verify BOTH nodes.** A deploy that only updates the primary leaves the clone serving stale code.
+
+6. **If primary goes down, clone can still serve REST API** for reads and writes (same DB). WebSocket connections fail until primary recovers.
+
+7. **Clone nginx returns 503 for `/ws`.** The Cloudflare Custom Rule routes `/ws` to `ws-primary` pool, so this should never be hit in normal operation. The 503 is a safety net.
+
+## Verification
+
+```bash
+# Primary health
+ssh root@68.183.168.75 "curl -s http://localhost:8000/health"
+
+# Clone health
+ssh root@159.65.108.25 "curl -s http://localhost:8000/health"
+
+# VPC connectivity
+ssh root@159.65.108.25 "nc -zv 10.120.0.2 5432 && echo 'PG OK' && nc -zv 10.120.0.2 6379 && echo 'Redis OK'"
+
+# Clone rejects WebSocket
+ssh root@159.65.108.25 "curl -sk https://localhost/ws"
+
+# LB distributes traffic
+for i in 1 2 3 4 5; do curl -s https://api.sovereignsanctuary.net/health; echo; done
+```

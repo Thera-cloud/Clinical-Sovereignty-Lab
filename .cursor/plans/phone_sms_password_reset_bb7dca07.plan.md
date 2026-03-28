@@ -68,7 +68,7 @@ User profiles already store a `phone` field (line 1483 of [bridge_server.py](bac
 In [backend/app/websocket/notification_system.py](backend/app/websocket/notification_system.py):
 
 - Import `twilio.rest.Client` with a fallback (same pattern as SendGrid)
-- Initialize `self.twilio_client` in `__init__` using the three Twilio env vars
+- Initialize `self.twilio_client` in `__init_`_ using the three Twilio env vars
 - Add `send_sms(to_phone, body)` -- core SMS send method
 - Add `send_password_reset_sms(to_phone, code)` -- formatted message: "Your Little Nate password reset code is: XXXXXX. Valid for 10 minutes. Do not share this code."
 
@@ -109,7 +109,7 @@ In [mobile/lib/main.dart](mobile/lib/main.dart), refactor the existing "Forgot p
 
 In [mobile/lib/main.dart](mobile/lib/main.dart), add two new methods:
 
-`**_showForgotPasswordPhoneDialog()**`:
+`**_showForgotPasswordPhoneDialog()`**:
 
 - Dialog with a phone number `TextField` (keyboardType: `TextInputType.phone`)
 - On submit: sends `{ "type": "forgot_password_phone_request", "phone": value }` over WebSocket

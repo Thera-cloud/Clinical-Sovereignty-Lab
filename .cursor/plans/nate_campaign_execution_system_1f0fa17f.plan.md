@@ -1,6 +1,6 @@
 ---
 name: Nate Campaign Execution System
-overview: "Full-scope expansion of Little Nate's marketing: execution bridge, multi-episode interactive campaigns with audience feedback, video scripts, Me-2-Me integration, A/B testing, engagement thresholds, email/SMS drip, cross-platform threading, campaign templates, and a SkyEye campaign management dashboard."
+overview: "Full-scope expansion of Little Nate's marketing: execution bridge, multi-episode interactive campaigns with audience feedback, video scripts, Me-2-Me integration, A/B testing, engagement thresholds, email/SMS drip, cross-platform threading, campaign templates, and a SkyEye campaign management dashboard. Supersedes: little_nate_execution_bridge_f0978d84 (archived — subset of this plan)."
 todos:
   - id: enable-engine
     content: Change ENABLE_SKYEYE_SESSIONS default to True in backend/app/config.py
