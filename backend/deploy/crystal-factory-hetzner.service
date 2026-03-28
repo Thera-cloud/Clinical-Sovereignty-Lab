@@ -1,0 +1,27 @@
+[Unit]
+Description=Crystal Factory — External Knowledge Node (Hetzner)
+Documentation=https://github.com/Thera-cloud/Clinical-Sovereignty-Lab
+After=network.target wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/crystal-factory
+ExecStart=/opt/crystal-factory/venv/bin/python3 crystal_factory.py
+EnvironmentFile=/opt/crystal-factory/.env
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crystal-factory
+
+# Watchdog: restart if no output for 1 hour (2 cycles)
+WatchdogSec=3600
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

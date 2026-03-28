@@ -1,0 +1,25 @@
+[Unit]
+Description=Crystal Factory — Internal Knowledge Node (DigitalOcean)
+Documentation=https://github.com/Thera-cloud/Clinical-Sovereignty-Lab
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/crystal-factory
+ExecStart=/opt/crystal-factory/venv/bin/python3 crystal_factory.py
+EnvironmentFile=/opt/crystal-factory/.env
+Restart=always
+RestartSec=30
+StartLimitBurst=0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crystal-factory
+
+WatchdogSec=3600
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=multi-user.target

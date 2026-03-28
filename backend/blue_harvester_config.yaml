@@ -1,0 +1,67 @@
+blue_node:
+  ollama_url: "http://localhost:11434"
+  models:
+    coding: "qwen2.5-coder:14b"
+    clinical: "qwen2.5:14b-instruct-q4_K_M"
+    default: "qwen2.5:14b-instruct-q4_K_M"
+  green_push_url: "https://api.sovereignsanctuary.net/api/nate-agent/admin/crystal-network/push"
+  jsonl_fallback: "./data/blue_fallback.jsonl"
+  rate_limit_seconds: 10
+  initial_confidence: 0.60
+  workspace: "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2"
+
+scanners:
+  sovereign_rules:
+    paths: [".sovereign/rules/", "docs/SOVEREIGN_STANDARD_v1.0.md"]
+    domain: "coherence"
+    enabled: true
+
+  cursor_rules:
+    paths: [".cursorrules", ".cursor/rules/"]
+    domain: "coding"
+    enabled: true
+
+  night_school:
+    paths:
+      - "backend/app/services/night_school/modality_selector.py"
+      - "backend/app/services/night_school/content_parser.py"
+      - "backend/app/services/night_school/curriculum_pipeline.py"
+    domain: "clinical"
+    enabled: true
+
+  bridge_therapeutic_prompts:
+    path: "backend/app/websocket/bridge_server.py"
+    prompt_line_ranges:
+      - [7458, 7860]
+      - [7789, 7985]
+      - [7866, 8195]
+      - [8201, 8520]
+      - [8528, 8650]
+      - [6271, 6310]
+      - [1312, 1400]
+      - [8466, 8480]
+    domain: "clinical"
+    enabled: true
+
+  git_history:
+    since: "6 months ago"
+    max_commits: 500
+    enabled: true
+
+  documentation:
+    paths: ["docs/", "*.md"]
+    domain: "coherence"
+    enabled: true
+
+  session_outputs:
+    path: "/Users/nathannevedal/Downloads/"
+    patterns:
+      - "quantum_crystal_architecture.py"
+      - "sovereign_intelligence_api.py"
+      - "Family_Sanctuary_E2E_Test_Plan.md"
+      - "BLUE_Node_Harvester_Spec.md"
+    domain: "coherence"
+    enabled: true
+
+green_auth:
+  api_key_env: "SKYEYE_AUDIT_TOKEN"
