@@ -14,6 +14,11 @@ from typing import Any, Dict, List, Optional
 from app.models.me2me import ConsentLevel, ImprintEntry
 from app.services.me2me.constants import IMPRINT_BATCH_SIZE, IMPRINT_SOURCES
 
+try:
+    from app.websocket.crystal_recall_bridge import crystallize_from_conversation as _crystal_forge
+except ImportError:
+    _crystal_forge = None
+
 logger = logging.getLogger("me2me.imprint_accumulator")
 
 
@@ -91,6 +96,18 @@ class ImprintAccumulator:
         # Flush when buffer is full
         if len(self._buffer[user_id]) >= IMPRINT_BATCH_SIZE:
             await self.flush(user_id)
+
+        # Cross-pollinate into main crystal graph for chat recall
+        if _crystal_forge and self._db and content and len(content) >= 40:
+            try:
+                await _crystal_forge(
+                    self._db, user_id, content, "",
+                    user_name=user_id, domain="clinical",
+                    min_score=3,
+                    origin_surface="me2me",
+                )
+            except Exception as e:
+                logger.warning("me2me crystal cross-pollination failed: %s", e)
 
         # Store in vault
         if self._vault:

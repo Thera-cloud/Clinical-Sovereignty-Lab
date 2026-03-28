@@ -82,7 +82,10 @@ services:
       - SANDBOX_URL=http://10.13.13.4:9090
       - SANDBOX_HMAC_KEY=${SANDBOX_HMAC_KEY:-}
       - ENVIRONMENT=production
+      - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
       - DEBUG=false
+      - MAC_AGENT_URL=https://twin-agent.sovereignsanctuary.net
+      - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8000}:8000"
     depends_on:
@@ -92,6 +95,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read
       - backend_logs:/app/logs
@@ -136,6 +140,8 @@ services:
       - DATA_DIR=/app/data
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
+      - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true
+      - ENABLE_SUBCONSCIOUS=true
     ports:
       - "127.0.0.1:${WEBSOCKET_PORT:-8765}:8765"
     depends_on:
@@ -145,6 +151,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
       - ./data/bridge:/app/data
       # Read backend scheduling + Zoom join_url without duplicating stores
       - ./data/backend:/app/backend_data:ro
