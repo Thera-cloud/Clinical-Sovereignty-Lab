@@ -1,0 +1,83 @@
+# Cloudflare Infrastructure
+
+## Overview
+
+All traffic to `sovereignsanctuary.net` and subdomains is proxied through Cloudflare (Pro plan). Cloudflare provides DDoS protection, WAF, bot management, and edge TLS termination.
+
+## Configuration (Active March 2, 2026)
+
+| Setting | Value |
+|---|---|
+| Plan | Pro |
+| DNS Setup | Full |
+| SSL/TLS Mode | Full (Strict) |
+| Edge Certificate | Google Trust Services, 1-month auto-renewal |
+| HSTS | 12 months, subdomains, preload, no-sniff |
+| ECH | Enabled |
+| CT Monitoring | Enabled |
+| WAF | Cloudflare Managed Ruleset + OWASP Core Ruleset |
+| Bot Fight Mode | Super Bot Fight Mode (block definitely automated) |
+| AI Bots | Block on all pages |
+| Zone ID | `08f370c28164099f643acc472ee97db5` |
+| Account ID | `8350b355ec3c721d5f1853e80970d3c1` |
+| Nameservers | `ingrid.ns.cloudflare.com`, `ricardo.ns.cloudflare.com` |
+| Registrar | Squarespace (formerly Google Domains) |
+
+## DNS Records (Proxied)
+
+| Subdomain | Type | Target | Proxy |
+|---|---|---|---|
+| `app` | A | 68.183.168.75 | Proxied (orange) |
+| `api` | A | 68.183.168.75 | Proxied (orange) |
+| `coach` | A | 68.183.168.75 | Proxied (orange) |
+| `command` | A | 68.183.168.75 | Proxied (orange) |
+| `@` (root) | A | Squarespace IPs | Proxied |
+| `www` | CNAME | ext-sq.squarespace.com | Proxied |
+
+## Nginx Real-IP Restoration
+
+`/etc/nginx/conf.d/cloudflare-real-ip.conf` restores visitor IPs from the `CF-Connecting-IP` header. Without this, nginx logs, Fail2ban, and Sentinel see Cloudflare edge IPs instead of actual visitor IPs.
+
+## Rules
+
+1. **Never remove `cloudflare-real-ip.conf`** — Sentinel and Fail2ban depend on real visitor IPs for accurate anomaly detection and banning.
+2. **Update Cloudflare IP ranges periodically** — Check `https://www.cloudflare.com/ips-v4/` quarterly. If Cloudflare adds new ranges and they're not in the config, those edge IPs won't be translated to real visitor IPs.
+3. **SSL/TLS must stay Full (Strict)** — The origin server has valid Let's Encrypt certificates. Downgrading to "Flexible" or "Full" (non-strict) weakens the security chain.
+4. **Never expose the origin IP** — The server IP (68.183.168.75) should not be publicly discoverable. All traffic should flow through Cloudflare. Avoid leaking the IP in email headers, API responses, or error pages.
+5. **"I'm Under Attack" mode** is the emergency switch — only enable during an active DDoS. It shows a JS challenge to every visitor, which breaks WebSocket connections and API calls.
+6. **Cache purging after deploys** — Cloudflare caches static assets. After deploying Flutter web builds or dashboard HTML, purge the cache: `curl -X POST "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json" -d '{"purge_everything":true}'`
+7. **Cloudflare env vars** are in `.env` — `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_ACCOUNT_ID`. A `CF_API_TOKEN` should be generated from the Cloudflare dashboard when API automation is needed.
+
+## Server-Side Security Stack (Full Chain)
+
+```
+Visitor → Cloudflare (DDoS, WAF, Bot, Edge TLS)
+ → Nginx (rate limit, real-IP restore, origin TLS)
+ → Fail2ban (SSH brute-force, nginx auth failures)
+ → Sentinel (behavioral anomaly scoring)
+ → Hive Defense (27 services, detonation sandbox)
+```
+
+## Fail2ban Configuration
+
+4 active jails (`/etc/fail2ban/jail.local`):
+
+| Jail | Max Retries | Ban Time | Purpose |
+|---|---|---|---|
+| `sshd` | 3 | 24 hours | SSH brute-force |
+| `sshd-ddos` | 6 in 30s | 48 hours | SSH flood |
+| `nginx-http-auth` | 5 | 1 hour | HTTP auth failures |
+| `nginx-limit-req` | 10 | 2 hours | Nginx rate limit violations |
+
+## SSH Hardening
+
+Config at `/etc/ssh/sshd_config.d/hardening.conf`:
+- Password authentication: disabled (key-only)
+- Max auth tries: 3
+- Login grace time: 30s
+- X11/agent forwarding: disabled
+- Allowed users: `nateadmin`, `root`
+- Idle timeout: 15 minutes
+- Log level: VERBOSE
+
+Non-root user `nateadmin` has sudo + docker group access. Root login can be disabled after confirming all workflows work via `nateadmin`.

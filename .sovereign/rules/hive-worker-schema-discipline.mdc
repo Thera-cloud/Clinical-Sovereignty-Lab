@@ -1,0 +1,56 @@
+---
+description: Hive Defense workers must match database schema exactly. Prevents column/table drift that caused 116/124 incident.
+globs: backend/app/workers/*.py, backend/app/services/security/*.py, backend/app/services/deadman_switch.py
+alwaysApply: false
+---
+
+# Hive Worker Schema Discipline
+
+Hive Defense workers run every 30–86400 seconds. A single column name mismatch causes silent persistent errors logged every cycle. Migration 123 fixed 11 schema drifts. These rules prevent recurrence.
+
+## Known Column Name Mismatches (Resolved — Do Not Reintroduce)
+
+| Table | Code Must Use | NOT |
+|---|---|---|
+| `hive_defcon_state` | `trigger_reason` | `reason` (legacy column) |
+| `hive_backup_audit_reports` | `audit_number`, `backups_found`, `integrity_pass` | `total_backups`, `valid` (legacy) |
+| `hive_ct_scan_metrics` | `scan_number`, `unauthorized_found` | `unauthorized` (legacy) |
+| `hive_heartbeats` | `fibre_type`, `ring_region`, `recorded_at` | (didn't exist before 123) |
+| `backup_metadata` | `sha256_hash`, `file_size`, `status` | `expected_hash`, `size_bytes` (legacy) |
+| `hive_forensic_logs` | `record_id`, `previous_record_hash`, `timestamp` | `id` (PK), `previous_hash`, `created_at` (legacy) |
+| `hive_curiosity_state` | `level` (VARCHAR for text levels) | `curiosity_level` (INTEGER) |
+
+## Rules
+
+1. **Before adding or modifying any SQL in a worker**, verify every column exists:
+   ```bash
+   ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '\d TABLE_NAME'"
+   ```
+
+2. **Every new worker INSERT/SELECT must have a migration** that adds any new columns with `ADD COLUMN IF NOT EXISTS`.
+
+3. **Never assume `users` table has direct columns for profile fields.** Coach assignment, family role, account status, etc. live in `profile_data` JSONB:
+   ```python
+   # WRONG — column does not exist
+   SELECT assigned_coach FROM users WHERE id = $1
+   # RIGHT
+   SELECT profile_data->>'assigned_coach' FROM users WHERE id = $1
+   ```
+
+4. **When profile_data returns a username but a UUID is needed** (e.g., for FK to `nate_nudges.user_id`), resolve it:
+   ```python
+   coach_username = await conn.fetchval(
+       "SELECT profile_data->>'assigned_coach' FROM users WHERE id = $1", user_id)
+   coach_uuid = await conn.fetchval(
+       "SELECT id FROM users WHERE username = $1 AND role = 'COACH'", coach_username)
+   ```
+
+5. **`audit_log.target_id` is UUID** — never compare with `::text`. Pass UUID values directly.
+
+6. **`audit_log.action_type` has a CHECK constraint** — new action types require `ALTER TABLE audit_log DROP CONSTRAINT audit_log_action_type_check` then re-add with the new values.
+
+7. **After any worker code change**, restart backend and check:
+   ```bash
+   docker logs nate_backend --since 60s 2>&1 | grep -E 'does not exist|invalid input' | sort -u
+   ```
+   Zero matches = clean.

@@ -1,0 +1,229 @@
+---
+description: Cloudflare Tunnel configuration for the Mac Twin Engine (Home GPU + TTS)
+alwaysApply: true
+---
+
+# Cloudflare Tunnel — Little Nate Twin Engine
+
+## Tunnel Details
+
+| Property | Value |
+|---|---|
+| Tunnel Name | Little Nate Twin Engine |
+| Tunnel ID | `d40e5315-4d8a-44b8-a432-debc36750636` |
+| Replica ID | `dcca76d9-08f2-4183-a708-173994e4aed4` |
+| Origin IP | 68.43.85.92 |
+| Edge Locations | ord06, dtw01, ord36 |
+| Architecture | darwin/amd64 |
+| Install Method | macOS native (Homebrew + LaunchDaemon) |
+| Version | 2026.3.0 |
+| Status | Healthy |
+
+## Purpose
+
+The Twin Engine tunnel connects the local Mac to Cloudflare's network, exposing:
+
+1. **Home GPU inference** (Ollama) — zero-cost 70B model for CLINICAL/TENSION queries
+2. **XTTS-v2 TTS** (future) — voice-cloned speech synthesis as a second TTS node
+
+This makes the Mac a reliable, always-reachable sovereign inference + voice node without port forwarding, dynamic DNS, or firewall rules.
+
+## VPC Service — OverSeer Manifold
+
+| Property | Value |
+|---|---|
+| Service Name | `overseer-manifold` |
+| Service ID | `019ce99b-5f34-7902-9513-9b26bc4755c8` |
+| Host | `localhost` |
+| HTTP Port | `11434` |
+| Tunnel | Little Nate Twin Engine |
+| Created | Mar 13, 2026 |
+
+The VPC service exposes Mac's Ollama on `localhost:11434` to any Worker or service on the Cloudflare backbone. Workers call the VPC service hostname directly — no public DNS, no VPS hop.
+
+## Queue — ln-echo-relay
+
+| Property | Value |
+|---|---|
+| Queue Name | `ln-echo-relay` |
+| Queue ID | `218cde12f4f04af58a0bab077fe9fbb0` |
+| Status | Inactive (ready, no consumers yet) |
+| Purpose | Async task dispatch between cloud, VPS, and Mac |
+
+### Message Routing (by task_type)
+
+| task_type | Target | Channel | Priority |
+|---|---|---|---|
+| `gpu_inference` | Mac Ollama via `overseer-manifold` | GPU (70B LLM) | 0-3 (high) |
+| `crystal_synthesis` | Mac Ollama via `overseer-manifold` | GPU (70B synthesis) | 4-6 (medium) |
+| `tts_synthesis` | Mac XTTS via future VPC service | TTS (voice clone) | 4-6 (medium) |
+| `coherence_batch` | Mac GPU compute | GPU (Nevedal formula) | 7-9 (low) |
+| `metric_archive` | Mac → R2 deposit | Storage | 7-9 (low) |
+| `hallucination_review` | Mac Ollama via `overseer-manifold` | GPU (70B validation) | 3-5 (medium-high) |
+
+### Message Schema
+
+```json
+{
+  "task_type": "gpu_inference",
+  "priority": 0,
+  "enqueued_at": "2026-03-13T23:00:00Z",
+  "source": "sovereign_brain",
+  "payload": {},
+  "callback": {
+    "method": "tunnel_push",
+    "destination": "vps_api"
+  },
+  "ttl_seconds": 86400,
+  "retry_policy": {
+    "max_retries": 3,
+    "backoff_ms": 5000
+  }
+}
+```
+
+## Bulk Redirect Lists (5 Active — 118 Entries)
+
+| # | Rule Name | List Name | Entries | Status |
+|---|---|---|---|---|
+| 1 | Sovereign GPU Pipeline Rule | `lntwin_engine_gpu` | 20 | Active |
+| 2 | Voice TTS Pipeline Rule | `voice_tts_pipeline` | 17 | Active |
+| 3 | Crystal Memory Field Rule | `crystal_memory_field` | 26 | Active |
+| 4 | Liminal Intelligence Rule | `liminal_intelligence` | 30 | Active |
+| 5 | Session Lifecycle Legacy Rule | `session_lifecycle_legacy` | 25 | Active |
+
+CSV sources: `cloudflare/bulk-redirects/list{1-5}-*.csv`
+
+The Bulk Redirects evaluate at the Cloudflare edge (sub-millisecond, $0) before any Worker invocation. They pre-sort traffic into the correct processing pipeline so Workers only consume — they don't route.
+
+## Architecture — Three Brains, One Nervous System
+
+```
+              ┌─────────────────────────────────────────────┐
+              │            Cloudflare Backbone                │
+              │                                              │
+              │  ┌──────────┐  ┌────────────────────┐       │
+              │  │ 8 Workers │  │   ln-echo-relay    │       │
+              │  │ (edge AI) │  │   (async queue)    │       │
+              │  └─────┬─────┘  └────┬──────────┬────┘       │
+              │        │             │          │             │
+              │  ┌─────▼─────────────▼──┐       │             │
+              │  │  overseer-manifold   │       │             │
+              │  │  VPC Service         │       │             │
+              │  │  (019ce99b...)       │       │             │
+              │  └──────────┬───────────┘       │             │
+              │             │                   │             │
+              │  ┌──────────▼───────────────────▼──────────┐ │
+              │  │  Cloudflare Realtime                     │ │
+              │  │  ┌──────────┐ ┌──────────┐ ┌─────────┐ │ │
+              │  │  │ TURN     │ │ SFU      │ │ MoQ     │ │ │
+              │  │  │ 1TB/mo   │ │ peer A/V │ │ pub/sub │ │ │
+              │  │  │ NAT trav │ │ routing  │ │ 302 PoP │ │ │
+              │  │  └──────────┘ └──────────┘ └─────────┘ │ │
+              │  └─────────────────────────────────────────┘ │
+              └───────┼─────────────────────────┼────────────┘
+                      │                         │
+           ┌──────────▼──────┐       ┌──────────▼─────────┐
+           │  Mac (Twin)     │       │  VPS (Sovereign)    │
+           │  Tunnel: d40e.. │       │  68.183.168.75      │
+           │  Ollama 70B     │       │  PostgreSQL+Redis   │
+           │  XTTS (future)  │       │  Bridge+147 svcs    │
+           │  GPU coherence  │       │  WG→Hetzner 8B      │
+           └─────────────────┘       └────────────────────┘
+```
+
+## Exposed Services (via Tunnel Routes)
+
+| Service | Local Port | VPC Service | Purpose |
+|---|---|---|---|
+| Ollama LLM | `localhost:11434` | `overseer-manifold` (active) | Home GPU inference (70B models) |
+| XTTS-v2 TTS | `localhost:8100` | TBD (second VPC service) | Voice-cloned TTS (future) |
+
+## Integration Points
+
+| Consumer | Connection | Path |
+|---|---|---|
+| `sovereign_chat_client.py` | `HOME_GPU_URL` → VPC hostname | Direct: VPS → VPC `overseer-manifold` → tunnel → Mac:11434 |
+| `nate_inference_router.py` | `HOME_GPU_URL` → VPC hostname | Same as above |
+| `nate-summon-worker` | VPC binding `overseer-manifold` | Edge Worker → VPC → tunnel → Mac:11434 (no VPS hop) |
+| `nate-cron-worker` | Queue `ln-echo-relay` → consumer | Worker enqueues → Mac consumer drains via VPC |
+| `sovereign_tts.py` | Future VPC service (port 8100) | VPS → VPC → tunnel → Mac:8100 |
+| `DistributedVoicePool` | `TTS_WORKER_NODES` JSON | Add Mac as second TTS node via VPC hostname |
+| `nate-voice-edge` worker | Future VPC TTS binding | Edge Worker → VPC → tunnel → Mac:8100 |
+
+## Zero-Cost Impact
+
+Every query served by the Home GPU through this tunnel is $0 and triggers `BillingSystem.refund_tokens()` with `source="sovereign_refund"`. The tunnel itself is free on the Cloudflare Workers Paid plan ($5/mo, already active).
+
+## Rules
+
+1. **Never expose the tunnel token in code or logs.** The token in the `cloudflared service install` command grants full tunnel access. It lives in the macOS LaunchDaemon plist, not in source code.
+
+2. **The Mac is an optional provider, never primary.** If the Mac is off, asleep, or disconnected, the inference router skips Home GPU and falls to the next provider in the chain. No user-facing degradation.
+
+3. **Routes must use private hostnames, not public DNS.** Tunnel routes should map to internal-only hostnames (e.g., `twin.internal.sovereignsanctuary.net`) that are only resolvable through Cloudflare Access or the tunnel itself. Never expose Ollama or XTTS to the public internet.
+
+4. **Apple Silicon GPU memory is shared.** Running Ollama 70B (~40GB) and XTTS-v2 (~2GB) simultaneously requires ~42GB of unified memory. On a Mac with 64GB+, this is fine. On 32GB, only one should run at a time, with priority given to Ollama (inference is higher value than TTS).
+
+5. **LaunchDaemon survives reboots.** The `sudo cloudflared service install` command created a LaunchDaemon at `/Library/LaunchDaemons/com.cloudflare.cloudflared.plist`. It starts before login. If the Mac reboots, the tunnel auto-reconnects.
+
+6. **Health checks route through the tunnel.** The sovereign inference router's `health_check()` method should ping the Home GPU via the tunnel hostname, not a LAN IP. This tests the full path.
+
+7. **When adding tunnel routes**, update the `HOME_GPU_URL` env var in `.env` and `docker-compose.prod.yml` `environment:` block on the production VPS so the backend can reach the Mac through the tunnel.
+
+## Relationship to Existing Infrastructure
+
+| Node | Connection | Purpose |
+|---|---|---|
+| DigitalOcean VPS (68.183.168.75) | Direct / WireGuard | Production backend + bridge |
+| Hetzner VPS (37.27.244.80) | WireGuard (10.13.13.5) | Sovereign Ollama 8B + XTTS |
+| Sandbox VPS (178.128.178.15) | WireGuard (10.13.13.4) | Detonation chamber |
+| **Mac (Twin Engine)** | **Cloudflare Tunnel** | **Home GPU 70B + future XTTS** |
+
+The Mac is the only node using a Cloudflare Tunnel instead of WireGuard. This is intentional — residential connections have dynamic IPs and NAT, making WireGuard unreliable. The tunnel provides a stable, authenticated path through Cloudflare's backbone.
+
+## VPC-as-Host Architecture
+
+The OverSeer Manifold VPC service makes the Cloudflare backbone the routing host. Physical machines (VPS, Mac, Hetzner) are compute peers.
+
+### Peer Responsibilities
+
+| Peer | Owns | Serves | Needs From Others |
+|---|---|---|---|
+| **Mac (Twin)** | 70B model weights, Apple GPU, XTTS voice refs | Deep inference, voice clone TTS, batch coherence | State lookups (from VPS), crystal storage (to VPS) |
+| **VPS (Sovereign)** | PostgreSQL, Redis, sessions, bridge, 147 services | Auth, state, real-time chat, auditors | Inference (from Mac/Hetzner), edge cache (from Workers) |
+| **Hetzner** | 8B model, Whisper, XTTS backup, ARM CPU | Fast inference, STT, backup TTS | Same as Mac but lower priority |
+| **Workers (Edge)** | KV, D1, Vectorize, R2, edge code | Public API, caching, auth, analytics, summon | Everything from peers |
+
+### Queue-Driven Flows
+
+| Flow | Path |
+|---|---|
+| TENSION query depth | VPS → ln-echo-relay → overseer-manifold → Mac 70B → crystal back to VPS |
+| Crystal synthesis | Crystallizer harvest → ln-echo-relay → Mac 70B synthesis → PostgreSQL + Vectorize |
+| Voice clone (async) | VPS → ln-echo-relay → Mac XTTS → R2 audio deposit → user notification |
+| Coherence batch | VPS collects nevedal_metrics → ln-echo-relay → Mac GPU batch → R2 archive |
+| Hallucination review | Validator flags suspect response → ln-echo-relay → Mac 70B review → quarantine or approve |
+
+### Offline Tolerance
+
+When the Mac is off/asleep, `ln-echo-relay` accumulates messages (TTL: 24h). When the tunnel reconnects, the queue consumer drains the backlog at Ollama's slot capacity (4 concurrent). GPU inference tasks drain first (priority 0-3), then synthesis (4-6), then batch/archive (7-9).
+
+### Direct Worker-to-Peer Path (Active)
+
+```
+Before VPC:  Worker → https://api.sovereignsanctuary.net → VPS → WireGuard → Hetzner
+With VPC:    Worker → overseer-manifold (VPC) → tunnel → Mac localhost:11434
+```
+
+Workers skip the VPS entirely for inference. The VPS handles state (PostgreSQL, Redis) but not routing.
+
+## Rules (Updated)
+
+8. **VPC service `overseer-manifold` is the canonical entry point for Mac GPU.** All code that needs Home GPU inference should target the VPC service, not a direct IP or LAN address. The VPC handles tunnel routing, health, and failover.
+
+9. **Queue `ln-echo-relay` uses `task_type` for routing.** Do not create separate queues per task type until volume warrants it. Use priority field (0-9) for ordering: clinical/inference first, batch/archive last.
+
+10. **Queue messages must be self-contained.** Include all data needed for processing in the payload. The Mac should not need to call back to the VPS to fetch context — that adds a round-trip and creates a dependency on VPS availability during processing.
+
+11. **Results flow back through the tunnel, not through the queue.** The Mac pushes results directly to the VPS API (via tunnel → Cloudflare → VPS) or deposits to R2. The queue is one-way: dispatch. Results take the direct path back.

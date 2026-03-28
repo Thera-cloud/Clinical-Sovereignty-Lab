@@ -1,0 +1,54 @@
+---
+description: Keeping Little Nate's system prompt accurate about his own capabilities and agents
+alwaysApply: true
+---
+
+# Little Nate Self-Awareness Maintenance
+
+## Rule
+
+Little Nate's system prompt in `backend/app/services/skyeye_chat.py` contains three self-awareness sections that must be kept in sync with the actual codebase:
+
+1. **YOUR OPERATIONAL AWARENESS** — lists background agents by name
+2. **YOUR ACCURACY RULES** — prevents hallucinated claims about posting history
+3. **YOUR PLATFORM CAPABILITIES** — what he can/cannot do on each platform
+
+## When to Update
+
+| Change | Update Required |
+|---|---|
+| New background agent added to `main.py` | Add to YOUR OPERATIONAL AWARENESS |
+| New social platform adapter created | Add to YOUR PLATFORM CAPABILITIES |
+| New posting mode (e.g., threading, articles) implemented | Add to YOUR PLATFORM CAPABILITIES |
+| Posting mode removed or changed | Update YOUR PLATFORM CAPABILITIES |
+| New context method added to Big Nate Chat | Mention in YOUR OPERATIONAL AWARENESS if relevant |
+| Agent renamed or retired | Update YOUR OPERATIONAL AWARENESS |
+
+## Context Injection Pipeline
+
+Every Big Nate Chat message includes these context blocks (in `skyeye_chat.py`):
+
+| Context | Source | What It Provides |
+|---|---|---|
+| Marketing context | `MarketingBrain.get_chat_context()` | Playbook, performance, proposals |
+| Mode-specific context | `_get_mode_context()` | Data for current chat mode |
+| Archived wisdom | `_get_archived_wisdom_context()` | Past conversation excerpts |
+| Unified insights | `InsightAccumulator.get_unified_context()` | Cross-domain learnings |
+| Posting history | `_get_posting_history_context()` | Recent posted/scheduled items with timestamps |
+| Activity timeline | `_get_activity_timeline_context()` | Last 7 days of publish/generate events |
+
+If a new context method is added, it must be wired into the conversation pipeline at the same location (the `conversation_text = ...` concatenation line).
+
+## Accuracy Rules (Do Not Weaken)
+
+These rules exist because Little Nate hallucinated posting history (Feb 2026). Never remove or soften them:
+
+- NEVER claim posting without verified timestamp from posting history context
+- NEVER invent timestamps
+- NEVER claim features that don't exist in the codebase
+- Say "Executed, time unverified" when timestamp is unavailable
+- Say "I don't have a confirmed record" when posting history has no match
+
+## Hallucination Prevention Pattern
+
+Little Nate's context gives him real data. If data is missing, he must acknowledge the gap rather than fill it with plausible-sounding fiction. The system prompt enforces this via YOUR ACCURACY RULES. These rules are the fix for the Feb 2026 incident where Little Nate claimed "Presence Without Capture" was released on X in sections when it was actually posted to LinkedIn as a single article.

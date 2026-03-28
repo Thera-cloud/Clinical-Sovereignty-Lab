@@ -1,0 +1,75 @@
+---
+description: Rules for agents that send SMS/email notifications — cooldowns, channels, shared instances, admin contact sourcing
+globs: backend/app/services/**/*.py, backend/app/workers/**/*.py
+alwaysApply: false
+---
+
+# Agent Notification Protocol
+
+## Which Agents Notify
+
+| Agent | What It Notifies | Channel |
+|-------|-----------------|---------|
+| Token Renewal Agent | Expired OAuth tokens needing human re-auth | SMS + Email |
+| Token Audit Agent | Notification gaps (renewal agent missed an expiry) | SMS + Email |
+| Deadman Switch | Client silence exceeding threshold | SMS + Email |
+| Dependency Guardian | Critical CVE in pinned dependency | Email |
+| Billing Monitor | Anomalies (churn spike, webhook flood) | Email |
+| Upstream Canary | External provider failures (Azure, Stripe) | Email |
+| Hive DEFCON | DEFCON escalation to level 1-2 | SMS + Email |
+
+## Cooldown Enforcement
+
+Never re-notify for the same issue within the cooldown window:
+
+- **Token failures**: 2 hours per platform
+- **Deadman silence**: 4 hours per client
+- **DEFCON escalations**: 1 hour per level change
+- **Dependency CVEs**: 24 hours per CVE ID
+- **Billing anomalies**: 6 hours per anomaly type
+
+Track cooldowns in-memory with `{issue_key: last_notified_at}`. Clear on agent restart (acceptable since the next cycle will re-detect and notify).
+
+## Channel Priority
+
+- **SMS** (`send_sms`): Time-sensitive alerts requiring immediate human action (token re-auth, DEFCON 1-2, deadman trigger)
+- **Email** (`_send_email`): Informational reports, audit summaries, CVE reports, billing anomalies
+- Both channels for critical security events
+
+## Admin Contact Source
+
+Always read from settings, never hardcode:
+
+```python
+from app.config import settings
+admin_phone = settings.ADMIN_ALERT_PHONE or os.environ.get("ADMIN_VERIFY_PHONE", "")
+admin_email = (settings.ADMIN_ALERT_EMAILS or "").split(",")[0].strip()
+```
+
+## Shared NotificationSystem Instance
+
+**Never** instantiate a new `NotificationSystem()` inside an agent. Reuse the shared instance:
+
+```python
+# CORRECT — reuse from app.state or pass via constructor
+notify = getattr(app.state, "notification_system", None)
+
+# WRONG — creates a broken instance missing required args
+notify = NotificationSystem()
+```
+
+If `app.state.notification_system` is not available (e.g., bridge owns it), create ONE instance in the main.py lifespan and share it across all agents.
+
+## Logging Every Notification
+
+Every notification attempt must be logged:
+
+```python
+await self._log_activity(
+    platform, "token_renewal_notification",
+    f"Admin notified — attempt #{attempts} (sms={sms_sent}, email={email_sent})",
+    severity="warning"
+)
+```
+
+This ensures the Token Audit Agent can verify notifications were actually sent.

@@ -1,0 +1,64 @@
+---
+description: Coach-client assignment field consistency and coach view alignment
+alwaysApply: true
+---
+
+# Coach-Client Assignment Field Consistency
+
+## Three Assignment Fields (Must Stay in Sync)
+
+Client profiles have THREE fields that indicate coach assignment. All three must be set consistently:
+
+| Field | Value | Purpose |
+|---|---|---|
+| `coach_id` | `COACH_COACHN_ID` | Primary assignment (hardware ID of coach) |
+| `assigned_coach_id` | `COACH_COACHN_ID` | Legacy field checked by `coach_get_clients` |
+| `assigned_coach` | `CoachN` | Username-based lookup (used as fallback) |
+
+The `coach_get_clients` handler checks all three fields plus session history. If any field is missing or stale, the client won't appear in the coach portal.
+
+## When Assigning a Client to a Coach
+
+Always update all three fields atomically:
+
+```sql
+UPDATE users SET profile_data = jsonb_set(
+  jsonb_set(
+    jsonb_set(profile_data, '{coach_id}', '"COACH_COACHN_ID"'),
+    '{assigned_coach_id}', '"COACH_COACHN_ID"'
+  ),
+  '{assigned_coach}', '"CoachN"'
+)
+WHERE username = $1 AND role = 'CLIENT';
+```
+
+After DB update, restart `nate_bridge` to reload the in-memory registry cache.
+
+## Default Coach Assignment
+
+All new clients are assigned to **CoachN** (`COACH_COACHN_ID`) until further notice. This applies to:
+- New client registrations (via `register_new_user()` in `bridge_server.py`)
+- Clients without an assigned coach
+- Any client previously assigned to DrNevedal1 (admin should never be a coach)
+
+When modifying `register_new_user()`, always verify all three fields (`coach_id`, `assigned_coach_id`, `assigned_coach`) are set with consistent defaults. The old default was `hnevedal`/`COACH_HNEVEDAL_ID` — this is retired. Never revert to it.
+
+## Coach View Filters
+
+The coach portal has 5 filter modes. All operate on the same `_clients` list:
+
+| Filter | Shows |
+|---|---|
+| All | All clients grouped by family/company, individuals separate |
+| Clients | Every client as an individual row (no family grouping) |
+| Families | Only clients with a `family_id`, grouped by family |
+| Coach-Only | Only `COACH_ONLY` tier clients |
+| Company | Only clients with a `company_id`, grouped by company |
+
+## Assistant Coach Visibility
+
+When a coach is an assistant (via `coach_hierarchy` table), `coach_get_clients` also returns clients assigned to their master coach(es). This ensures assistants can view and schedule sessions for the master's clients.
+
+## Session Creation Uses Individual Client IDs
+
+Live sessions are always keyed to `client_id` (individual), not `family_id`. The `family_id` is optional metadata for grouping. Coaches can schedule sessions for any individual client regardless of family membership.

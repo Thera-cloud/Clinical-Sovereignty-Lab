@@ -1,0 +1,16 @@
+{
+  "agent": "nate-mac-agent",
+  "status": "ok",
+  "uptime_s": 131929.5,
+  "timestamp": "2026-03-28T02:50:49.805741+00:00",
+  "managed_processes": {
+    "blue_harvester": {
+      "name": "blue_harvester",
+      "pid": 23237,
+      "running": false,
+      "restart_count": 3,
+      "restart_policy": "on-failure"
+    }
+  },
+  "tunnel_healthy": true
+}

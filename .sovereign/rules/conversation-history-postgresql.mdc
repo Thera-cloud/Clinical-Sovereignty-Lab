@@ -1,0 +1,74 @@
+---
+description: Conversation history is stored in PostgreSQL, not memory.json. This rule prevents regression to JSON reads.
+globs:
+  - backend/app/websocket/bridge_server.py
+  - backend/app/routers/client_data_api.py
+  - backend/app/routers/coach.py
+  - backend/app/routers/admin.py
+  - backend/app/routers/me2me.py
+  - backend/app/websocket/bridge_handlers_v2.py
+  - backend/app/services/ticket_service.py
+alwaysApply: false
+---
+# Conversation History: PostgreSQL Source of Truth
+
+## Rule
+
+The `conversation_history` PostgreSQL table is the **primary store** for all client-AI conversation memory. The `memory.json` file is a capped backup only (1,000 entries, disaster recovery).
+
+## Architecture
+
+| Layer | Store | Purpose |
+|-------|-------|---------|
+| Primary | `conversation_history` table | Lifetime retention, no cap, FTS-indexed |
+| Backup | `memory.json` (Vaults/{role}/{hw_id}/) | Capped at 1,000 entries, disaster recovery only |
+| Client-side | `nate_history.db` (SQLite FTS5) | On-device lifetime history, federated search |
+
+## Table Schema
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `user_id` | TEXT | hardware_id of the user |
+| `session_id` | TEXT | Session identifier |
+| `user_text` | TEXT | What the user said |
+| `ai_text` | TEXT | What Nate responded |
+| `me2me_absorbed` | BOOLEAN | Whether ImprintAccumulator has processed this entry |
+| `created_at` | TIMESTAMPTZ | When the exchange occurred |
+
+## Migrated Files (9 total — never revert to JSON reads)
+
+| File | What was migrated |
+|------|-------------------|
+| `bridge_server.py` MemorySystem | `memorize()` writes PG first; `recall()`, `recall_full()`, `recall_by_session()`, `search_pg()` read from PG |
+| `bridge_server.py` memory_search handler | Uses `search_pg()` FTS instead of in-memory JSON filter |
+| `client_data_api.py` | `/memory/search` and `/memory/sessions` read from PG |
+| `coach.py` | 2 places read client memories from PG |
+| `admin.py` | View reads from PG; wipe/purge DELETE from PG + clear JSON backup |
+| `me2me.py` | SLF export reads conversation entries from PG |
+| `bridge_handlers_v2.py` | `get_client_session_history()` reads from PG |
+| `sanctuary_engine.py` | Calls `recall()` which now reads from PG internally |
+| `ticket_service.py` | Still creates empty `memory.json` for backup compatibility |
+
+## Login-Time Device Sync
+
+On every `login_success`, the Flutter client runs `_fetchClientHealthCheck()` which:
+
+1. Reads local SQLite entry count via `LocalHistoryService.getEntryCount()`
+2. Calls `GET /api/client/health-check?hw_id=X` — returns `server_entry_count` and `last_server_entry_at`
+3. If the device has entries the server is missing (local > server), pushes them via `POST /api/client/history/push`
+4. If the server has entries the device is missing, future sessions fill the gap via `nate_history_entry` WebSocket messages
+
+The push endpoint deduplicates using `WHERE NOT EXISTS (... user_id + created_at + LEFT(user_text, 100))`. Max 200 entries per push.
+
+## Rules
+
+1. **Never add new `memory.json` reads** — all conversation data comes from PostgreSQL.
+2. **Always write to PG first** in `memorize()` — the JSON write is a fire-and-forget backup.
+3. **Wipe/purge operations must DELETE from both** PostgreSQL and clear the backup JSON.
+4. **The `me2me_absorbed` column** is managed by `ImprintAccumulator.absorb_from_conversations()` — never set it manually.
+5. **Federated search** (`device_search_request`/`device_search_results`) supplements PG FTS with client-side SQLite results.
+6. **Backfill**: Run `backend/scripts/backfill_conversation_history.py` once after migration to import existing `memory.json` data.
+7. **No cap, no pruning** — `conversation_history` has lifetime retention. The `db_maintenance_agent` does NOT prune this table.
+8. **Both NeuralInterface screens must handle `nate_history_entry`** — `main.dart` (NeuralInterface) and `updated_screens.dart` (NeuralInterfaceV2) both insert into `LocalHistoryService` on receiving this WebSocket message. The field name is `timestamp` (not `created_at`).
+9. **Never clear local SQLite on login** — the device history is the user's safety net against server data loss.
+10. **Push before pull** — device entries go to server first, then server backfill comes to device. This order prevents data loss.

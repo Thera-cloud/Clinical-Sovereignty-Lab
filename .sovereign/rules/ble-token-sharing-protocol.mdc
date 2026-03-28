@@ -1,0 +1,44 @@
+---
+description: BLE/NFC token sharing between clients — fees, rewards, and Little Nate responses
+alwaysApply: true
+---
+# BLE Token Sharing Protocol
+
+## Sharing Rules
+
+| Constraint | Value |
+|---|---|
+| Minimum share | 1,000 tokens |
+| Maximum share | 500,000 tokens |
+| Fee | $5.00 per 10,000 tokens (rounded up) |
+| Fee recipient | GKM 501(c)(3) donation |
+| Free month reward | At 100,000 cumulative tokens shared |
+
+## Flow
+
+1. Client A discovers Client B via BLE/NFC on `CommunityMeshScreen`
+2. Client A taps "Share Tokens" → enters amount → confirms fee
+3. `POST /api/gkm/token-share/initiate` validates balances, charges Stripe, transfers tokens
+4. Transaction recorded in `token_shares` + `gkm_donations` + `token_transactions` (source: `share_out` / `share_in`)
+5. Little Nate generates a unique heartfelt response via `SkyEyeChatService.generate_gifting_response()`
+6. If sharer's cumulative total reaches 100k, a free month is awarded (`free_month_start/end` in profile)
+
+## Little Nate Gifting Responses
+
+`generate_gifting_response()` in `skyeye_chat.py` calls Azure OpenAI with context about the sharer's history (total shares, unique recipients, cumulative amount). Rules enforced in the system prompt:
+
+- Never be repetitive — vary tone and phrasing
+- Reference the specific context (amount, recipient name, history)
+- Acknowledge charitable impact
+- Keep under 3 sentences
+
+If Azure is unavailable, a warm fallback message is used.
+
+## Rules
+
+1. **Sharing is client-to-client only** — both parties must have role=CLIENT.
+2. **Sharer must have sufficient balance** — `token_balance >= tokens_shared`.
+3. **Fee is non-refundable** — Stripe PaymentIntent is captured immediately.
+4. **Free month reward is one-time per 100k threshold** — tracked via cumulative total, not per-share.
+5. **All shares are logged in three places** — `token_shares`, `token_transactions` (two rows: share_out + share_in), `gkm_donations`.
+6. **The BLE/NFC mesh itself does not consume tokens** — only the explicit "Share Tokens" action charges fees.

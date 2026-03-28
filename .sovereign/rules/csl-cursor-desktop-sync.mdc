@@ -1,0 +1,39 @@
+# CSL - Cursor Desktop Sync
+
+## Rule
+
+Whenever a new `.mdc` rule file is created in `.cursor/rules/` or a new `.plan.md` plan file is created in `.cursor/plans/`, it **must also be copied** to the corresponding folder on the Desktop:
+
+| Source | Desktop Mirror |
+|---|---|
+| `.cursor/rules/*.mdc` | `/Users/nathannevedal/Desktop/CSL - Cursor/Rules/` |
+| `.cursor/plans/*.plan.md` | `/Users/nathannevedal/Desktop/CSL - Cursor/Plans/` |
+| `AGENTS.md` | `/Users/nathannevedal/Desktop/CSL - Cursor/AGENTS.md` |
+| `.cursorrules` | `/Users/nathannevedal/Desktop/CSL - Cursor/cursorrules.txt` |
+
+## When to Sync
+
+1. **After creating a new rule** — copy the `.mdc` file to `~/Desktop/CSL - Cursor/Rules/`
+2. **After creating a new plan** — copy the `.plan.md` file to `~/Desktop/CSL - Cursor/Plans/`
+3. **After updating an existing rule or plan** — copy the updated file to overwrite the old version
+4. **After updating `AGENTS.md` or `.cursorrules`** — copy to the top-level Desktop folder
+
+## Sync Command
+
+```bash
+# Single rule file
+cp .cursor/rules/<filename>.mdc "/Users/nathannevedal/Desktop/CSL - Cursor/Rules/"
+
+# Single plan file
+cp .cursor/plans/<filename>.plan.md "/Users/nathannevedal/Desktop/CSL - Cursor/Plans/"
+
+# Full re-sync (if needed)
+cp .cursor/rules/*.mdc "/Users/nathannevedal/Desktop/CSL - Cursor/Rules/"
+cp .cursor/plans/*.plan.md "/Users/nathannevedal/Desktop/CSL - Cursor/Plans/"
+cp AGENTS.md "/Users/nathannevedal/Desktop/CSL - Cursor/AGENTS.md"
+cp .cursorrules "/Users/nathannevedal/Desktop/CSL - Cursor/cursorrules.txt"
+```
+
+## Why
+
+The `CSL - Cursor` Desktop folder gives Dr. Nevedal a browsable, Finder-accessible view of all Cursor rules and plans without needing to navigate hidden `.cursor/` directories. It must stay in sync with the workspace originals.

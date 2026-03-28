@@ -1,0 +1,21 @@
+name = "nate-auth-edge"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+[[d1_databases]]
+binding = "D1_HOT"
+database_name = "nate-hot"
+database_id = "8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0"
+
+[[kv_namespaces]]
+binding = "AUTH_CACHE"
+id = "9e7c13aca09d489faa5ce30b87333aaa"
+
+[vars]
+SOVEREIGN_API = "https://api.sovereignsanctuary.net"
+JWT_ISSUER = "littlenate-1.x"
+TOKEN_TTL_SECONDS = "86400"

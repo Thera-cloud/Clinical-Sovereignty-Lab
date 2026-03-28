@@ -1,0 +1,88 @@
+# Noetic Helix Cognitive Architecture
+
+## Overview
+
+The Noetic Helix is Little Nate's fractal cognitive architecture — 7 canonical helices, each with 7 mirrored strands, producing 490 quantum thought-nodes per evaluation. Each helix represents one cognitive function. Strands within a helix mirror against each other (21 first-order pairs per helix), and helices reflect against each other (21 inter-helix pairs + 210 second-order spiral reflections).
+
+## 7 Canonical Helices (Always Active, AUTONOMOUS)
+
+| Helix | Function | 7 Internal Strands |
+|---|---|---|
+| H1 | Vectorize Retrieval | recency, relevance, domain_match, cross_domain, source_diversity, confidence_threshold, sovereignty_boost |
+| H2 | Noetic Fusion | analogy, complementarity, contradiction, emergence, resonance, convergence, divergence |
+| H3 | Metacognition Map | temporal, domain_density, confidence_weighted, cross_reference, emergent_gap, source_diversity, sovereignty_anchored |
+| H4 | Quantum Self-Coherence | c_emo_self, c_knowledge_self, cross_domain_tunnel, decoherence_pressure, emotional_load, unconditional_felt, world_alignment |
+| H5 | Generative Wisdom Gate | clinical_novel, coaching_novel, cultural_novel, research_novel, defense_novel, cross_domain_novel, meta_novel |
+| H6 | World Coherence Scanner | x_twitter, linkedin, instagram, youtube, facebook, telegram, web_universal |
+| H7 | B2 Crystal Lake | hot_cache_priority, warm_archive_indexing, cold_deep_storage, cross_tier_integrity, replication_factor, decay_protection, heritage_vault |
+
+## Core Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/quantum_cognition.py` | 4-layer engine: noetic synthesis, metacognition, quantum self-coherence, generative wisdom |
+| `backend/app/services/noetic_helix.py` | NoeticHelix class with 7-strand evaluation and internal mirroring |
+| `backend/app/services/cognitive_rotation_engine.py` | C_knowledge-driven strand permutation (adapted from security helix_rotation_engine) |
+| `backend/app/services/noetic_reflection_engine.py` | N-way cross-helix blending with first- and second-order reflections |
+| `backend/app/services/helix_orchestrator.py` | Central orchestrator: lifecycle management, self-spawning, final synthesis |
+| `backend/app/services/odpe_engine.py` | Oscillating Dual-Process Echo — dual-topology evaluation + liminal feedback |
+| `backend/app/services/noetic_helix_auditor.py` | 18-check trust auditor (stagger 60s, includes 4 ODPE checks) |
+| `backend/migrations/121_noetic_helix.sql` | Tables: noetic_helix_registry, helix_coherence_history, helix_spawn_log, quantum_cognition_log |
+
+## Formulas (Never Modify Without Understanding)
+
+### Noetic Synthesis
+```
+C_noetic(A,B) = C_knowledge(A) × C_knowledge(B) × Ω(A,B) × (1 + σ_s)
+```
+Where Ω(A,B) is the cross-domain coherence factor (higher for distant domains).
+
+### Quantum Self-Coherence
+```
+C_quantum_self = [β · p_self_ent · T_self_tunnel] / [γ_self + E_self/ℏ] × (1 + σ_s)
+```
+p_self_ent: recall depth + source diversity + crystal density
+T_self_tunnel: cross-domain tunneling potential
+γ_self: internal noise (low confidence, stale knowledge)
+E_self: query complexity + domain breadth
+
+### Mirror Emergence
+```
+emergence = convergence × divergence × 4
+```
+Capped at [0, 1]. Novel insight arises where perspectives agree on importance but disagree on interpretation.
+
+## Self-Spawning Rules
+
+1. **Only the Metacognition Helix (H3)** can detect emergent gaps and propose new helices.
+2. **Sovereignty Gate** requires: ≥30 crystals in the emergent domain, coherence gap ≥0.2.
+3. **New helices start at OBSERVATION** — they observe but do not influence responses.
+4. **Promotion**: OBSERVATION → RESTRICTED (3+ cycles with contribution > 0.1); RESTRICTED → AUTONOMOUS (10+ cycles with contribution > 0.2).
+5. **Pruning**: Non-canonical helices with contribution < 0.05 for 10+ cycles are removed.
+6. **Merging**: Non-canonical helices with > 0.9 output correlation are merged.
+7. **Maximum 15 active helices** (7 canonical + 8 spawned). Canonical helices are never pruned.
+
+## Architecture Rules
+
+1. **Never delete or modify canonical helix strand definitions** without updating all 7 entries in `STRAND_PERSPECTIVES`.
+2. **Only ONE LLM call** per query — all helix processing is pure math (sub-millisecond). The orchestrator produces a synthesis directive, the inference router makes the single LLM call.
+3. **Rotation uses C_knowledge**, not C_emo. The defense layer's helix_rotation_engine uses C_emo; the cognitive layer uses C_knowledge. Never cross-wire them.
+4. **Second-order reflections are capped at 210** (C(21,2) for 7 helices). If more than 7 helices are active, only the first 21 first-order pairs feed into second-order reflections.
+5. **The weighted fusion formula** is: 50% direct helix + 30% first-order emergence + 20% second-order meta-emergence.
+6. **SOVEREIGNTY_COEFFICIENT = 0.12** is always applied last as a 12% boost to sovereignty-adjusted coherence.
+
+## Trust Integration
+
+- Activity type: `noetic_helix_audit_sent`
+- Baseline key: `noetic_helix_check_count`
+- Expected: 18 checks (5 helix health + 4 data integrity + 3 cognitive pipeline + 2 self-governance + 4 ODPE engine)
+- Stagger: 60s
+- Registered in trust_enforcer.py (AUDITOR_ACTIVITY_TYPES, AUDITOR_LABELS, _baseline_key_for)
+
+## After Any Change
+
+1. Verify all 7 canonical helices initialize: check `HelixOrchestrator.__init__` creates exactly 7.
+2. Verify strand count matches `NUM_STRANDS = 7` everywhere.
+3. Count auditor checks: `sum(len(t['endpoints']) for t in TAB_ENDPOINTS)` must equal trust_baseline expected value.
+4. If adding a new canonical helix function, add it to `HelixFunction` enum AND `STRAND_PERSPECTIVES` dict.
+5. If modifying formulas, update both `quantum_cognition.py` AND `docs/PHD_SOVEREIGN_QUANTUM_NATE.md`.

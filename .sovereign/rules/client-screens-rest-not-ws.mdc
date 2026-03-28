@@ -1,0 +1,53 @@
+# Client Screens: REST API, Not WebSocket
+
+## Rule
+
+Client-facing Flutter screens that display data (Coherence Reports, Memory Search, Current Members, etc.) must use **REST API calls** (`http.get` / `http.post`), NOT a second WebSocket connection.
+
+## Why
+
+Mobile Safari (iOS) fails silently when the Flutter app opens a **second WebSocket** from a sub-screen while the main app's WebSocket is already connected. The auth handshake on the second socket never completes, causing an infinite spinner. Desktop browsers tolerate concurrent WebSocket connections, so this only manifests on mobile.
+
+## Pattern
+
+```dart
+// CORRECT — REST API call with existing Bearer token
+import 'package:http/http.dart' as http;
+
+final resp = await http.get(
+  Uri.parse('${AppConfig.apiBaseUrl}/api/coherence/report/$hwId'),
+  headers: {'Authorization': 'Bearer $token'},
+).timeout(const Duration(seconds: 15));
+
+final data = jsonDecode(resp.body);
+```
+
+```dart
+// WRONG — Opening a second WebSocket from a sub-screen
+_socket = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+_socket!.sink.add(jsonEncode({'type': 'auth', ...}));
+// This fails on mobile Safari
+```
+
+## Requirements
+
+1. **Never open a second WebSocket** from a child screen (Settings sub-tabs, reports, search). Only the main lobby/chat screen should hold a WebSocket.
+2. **Backend must expose REST endpoints** for any data that sub-screens need. Place them in the appropriate router (e.g., `coherence_api.py`, `strategic_memory_api.py`).
+3. **Auth via Bearer token** — read `session_token` from `FlutterSecureStorage` and pass as `Authorization: Bearer <token>` header.
+4. **Backend data access** — the backend container needs `./data/bridge:/app/data:ro` volume mount in `docker-compose.yml` to read vault data.
+5. **Timeout** — always set a 10-15 second timeout on HTTP calls from Flutter to avoid silent hangs.
+
+## Affected Screens
+
+| Screen | Old Method | New Method | REST Endpoint |
+|---|---|---|---|
+| Coherence Reports | WebSocket `get_coherence_report` | `GET /api/coherence/report/{hw_id}` | `coherence_api.py` |
+| Memory Search | WebSocket `memory_search` | `GET /api/client/memory/search/{hw_id}?q=...` | `client_data_api.py` |
+| Current Members | WebSocket `get_family_members` | `GET /api/client/family/members/{hw_id}` | `client_data_api.py` |
+
+## Testing
+
+After converting any screen from WebSocket to REST:
+1. Verify on desktop (Safari + Chrome)
+2. Verify on mobile Safari (iOS) — this is the platform that fails with dual WebSocket
+3. Confirm the REST endpoint returns 200 with correct data via `curl`

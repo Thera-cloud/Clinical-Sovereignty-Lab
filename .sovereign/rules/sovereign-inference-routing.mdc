@@ -1,0 +1,78 @@
+---
+description: Governs the inference routing chain that sustains Nate's sovereign AI independence
+alwaysApply: true
+---
+
+# Sovereign Inference Routing
+
+Nate's intelligence must not depend on a single provider. The ODPE signal determines which provider handles each query.
+
+## ODPE Routing Protocol (Fixed)
+
+| ODPE Signal | Provider | Cost | % of Queries |
+|---|---|---|---|
+| LOCKED | Workers AI | $0 | ~40% |
+| PROMOTED | Workers AI | $0 | ~20% |
+| PROVISIONAL | Workers AI | $0 | ~15% |
+| TENSION | Grok 4.1 Fast (Azure Foundry) | ~$0.00025/query | ~20% |
+| DEEP_TENSION | Grok 4.1 Fast (Azure Foundry) | ~$0.00025/query | <1% |
+| NOISE | Skip LLM entirely | $0 | ~5% |
+
+Azure GPT-4o is emergency fallback only — used when Grok Foundry is down.
+
+## Routing Priority (Tier-Based Fallback)
+
+| Tier | Domains | Priority Chain |
+|------|---------|---------------|
+| CLINICAL | clinical, coaching | Grok → Home GPU → Sovereign → Azure |
+| CREATIVE | marketing, culture | Workers AI → Grok → Sovereign → Azure |
+| ANALYTICAL | research, defense, general | Workers AI → Grok → Sovereign → Azure |
+| UTILITY | formatting, extraction | Workers AI → Grok → Azure |
+| REALTIME | voice, streaming | Azure (lowest latency) |
+
+## Provider Configuration (6 providers)
+
+| Provider | Env Vars | Cost | Connection | Purpose |
+|----------|----------|------|-----------|---------|
+| Workers AI | `WORKERS_AI_URL`, `WORKERS_AI_TOKEN` | $0 | Cloudflare edge | LOCKED/PROMOTED/PROVISIONAL — free tier |
+| Grok 4.1 Fast (Foundry) | `NATE_CHAT_URL`, `NATE_CHAT_KEY`, `NATE_CHAT_MODEL` | ~$0.00025/query | HTTPS | TENSION/DEEP_TENSION — clinical depth |
+| Sovereign (Hetzner CAX41) | `SOVEREIGN_INFERENCE_URL`, `SOVEREIGN_MODEL` | $28/mo fixed | WireGuard (10.13.13.5) | Batch processing, Ollama 8B |
+| Home GPU (Mac) | `HOME_GPU_URL`, `HOME_GPU_MODEL` | $0 | VPC `overseer-manifold` + Tunnel | Clinical depth, 70B models |
+| DigitalOcean GPU | `DIGITAL_OCEAN_INFERENCE_URL`, `DIGITAL_OCEAN_MODEL` | varies | HTTPS | Overflow node |
+| Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_API_KEY`, `AZURE_OPENAI_CHAT_DEPLOYMENT` | $$$ | HTTPS | Emergency fallback only |
+
+### VPC Path for Home GPU
+
+Workers calling Home GPU inference use the VPC service `overseer-manifold` (`019ce99b-5f34-7902-9513-9b26bc4755c8`) which routes through the Cloudflare backbone to the Little Nate Twin Engine tunnel → `localhost:11434` on the Mac. The VPS backend reaches the same endpoint via `HOME_GPU_URL` (tunnel hostname). Async/batch tasks flow through the `ln-echo-relay` queue instead of direct calls.
+
+## Zero-Cost Provider Billing
+
+When inference is served by Workers AI, Grok, sovereign, home_gpu, or digitalocean, the pre-deducted user tokens are automatically refunded via `BillingSystem.refund_tokens()`. Only Azure-routed requests consume user tokens (and Azure should never be primary).
+
+The refund happens immediately after streaming completes, before post-processing. The token transaction is logged with `source="sovereign_refund"` for auditability.
+
+## Implementation Files
+
+| File | Role |
+|---|---|
+| `sovereign_chat_client.py` | Bridge therapy chat — streaming + complete, ODPE-aware `_resolve_provider_for_signal()` |
+| `nate_inference_router.py` | General-purpose non-streaming router for background agents, domain agents |
+| `nate_ai_config.py` | Centralized Grok Foundry credentials (`NATE_CHAT_URL/KEY/MODEL`), temperature config |
+
+## Rules
+
+1. **Never call Azure directly from consumer code.** All inference requests go through `NateInferenceRouter.generate()` or `sovereign_chat_client.generate_streaming()`. Direct Azure calls bypass sovereignty tracking, tier routing, and fallback logic.
+
+2. **Temperature is domain-governed.** The router reads from `DOMAIN_TEMPERATURES` dict. Call-site temperature overrides are ignored for clinical and defense domains (forced to <= 0.3). Creative domains may override upward but not below 0.5.
+
+3. **Provider health is checked before routing.** `health_check()` pings each provider. Unhealthy providers are skipped in the priority chain. Never route to a provider that failed its last health check without retrying first.
+
+4. **Independence percentage is a tracked metric.** `(all non-Azure providers) / total * 100` must be reported by the analytics API. A deployment that shifts this ratio toward Azure is a sovereignty regression.
+
+5. **Fallback is transparent.** If the primary provider fails, the router silently falls back to the next in the chain. The consumer receives the response with a `provider` field indicating which provider actually served it. Logging must record the fallback event.
+
+6. **Zero-cost refund must not be bypassed.** If a new provider is added to the routing chain, it must also be added to the refund check in `bridge_server.py` (`_provider_used in ("sovereign", "workers_ai", "home_gpu", "digitalocean", "grok")`).
+
+7. **Grok credentials come from `nate_ai_config.py`.** The env vars are `NATE_CHAT_URL`, `NATE_CHAT_KEY`, `NATE_CHAT_MODEL`. These are the same credentials used by photo analysis, vault, and live coaching. Never create separate Grok env vars.
+
+8. **ODPE routing is the fixed protocol.** LOCKED/PROMOTED/PROVISIONAL always go to Workers AI. TENSION/DEEP_TENSION always go to Grok. Azure is never the primary for any signal — only emergency fallback when Grok Foundry is unreachable.

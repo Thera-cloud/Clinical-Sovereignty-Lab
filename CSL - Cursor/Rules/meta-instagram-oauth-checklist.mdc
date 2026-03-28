@@ -1,0 +1,71 @@
+---
+description: Hard-won checklist for Meta/Instagram OAuth configuration — every item has caused a production failure
+alwaysApply: true
+---
+
+# Meta / Instagram OAuth Checklist
+
+Instagram OAuth integration has **six independent failure points** that each produce vague errors. Before debugging, verify ALL of these in order.
+
+## Pre-Flight Checklist
+
+| # | Check | Where to verify | Failure symptom |
+|---|-------|----------------|-----------------|
+| 1 | **App ID is correct (16 digits)** | `.env` → `INSTAGRAM_APP_ID` / `FACEBOOK_APP_ID` vs Meta Developer Dashboard | `Invalid Client ID`, `Verify failed: 400` |
+| 2 | **Redirect URI matches exactly** | Backend `get_oauth_url()` output vs Meta Dashboard → Facebook Login → Settings → Valid OAuth Redirect URIs | `redirect_uri mismatch`, silent 400 |
+| 3 | **App is Published** (not in Development) | Meta Dashboard → App Review → App Status toggle | OAuth dialog shows "App not set up" or blank |
+| 4 | **Data Deletion URL is configured** | Meta Dashboard → App Settings → Basic → Data Deletion Callback URL | Can't publish the app without it |
+| 5 | **`config_id` is included in OAuth URL** | `instagram.py` → `get_oauth_url()` params | "This content isn't available" in OAuth dialog |
+| 6 | **Scopes use `instagram_business_*` naming** | `instagram.py` → scope string | Permissions silently denied |
+| 7 | **API version is current** | `instagram.py` → `META_API_VERSION` | Deprecated endpoint errors |
+
+## Current Known-Good Values
+
+| Setting | Value |
+|---------|-------|
+| App ID | `4344149339199552` (16 digits — note the `33` before `199`) |
+| Config ID | `1458216979214040` (from Facebook Login for Business Use Case) |
+| API Version | `v21.0` |
+| Redirect URI | `https://api.sovereignsanctuary.net/api/skyeye/platforms/instagram/callback` |
+| Data Deletion URL | `https://app.sovereignsanctuary.net/data-deletion.html` |
+| Required Scopes | `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_comments`, `instagram_business_manage_insights`, `business_management` |
+
+## OAuth URL Shape
+
+```python
+params = {
+    "client_id": self.app_id,
+    "redirect_uri": redirect_uri,
+    "config_id": "1458216979214040",
+    "response_type": "code",
+    "state": "skyeye_instagram",
+    "override_default_response_type": "true",
+}
+```
+
+## Emergency Bypass: Manual Token Injection
+
+If the interactive OAuth dialog persistently fails (e.g., "This content isn't available"), generate a token via the **Meta Graph API Explorer** and inject it directly:
+
+1. Go to `https://developers.facebook.com/tools/explorer/`
+2. Select the correct app, add required permissions, generate a **User Token**
+3. Exchange for a long-lived token (60 days): `GET /oauth/access_token?grant_type=fb_exchange_token&client_id=...&client_secret=...&fb_exchange_token=<short_lived_token>`
+4. Get the Instagram Business Account ID: `GET /me/accounts` → page ID → `GET /<page_id>?fields=instagram_business_account`
+5. Insert directly into PostgreSQL:
+
+```sql
+UPDATE skyeye_platform_tokens SET
+  access_token  = '<long_lived_token>',
+  token_expiry  = NOW() + INTERVAL '60 days',
+  account_id    = '<instagram_business_account_id>',
+  error_message = NULL,
+  updated_at    = NOW()
+WHERE platform = 'instagram';
+```
+
+## Common Traps
+
+- **App ID typo**: The real ID has `4344149339199552`. A previous `.env` had `434414933919952` (missing a `9` — 15 vs 16 digits). Always count the digits.
+- **"Facebook Login" vs "Facebook Login for Business"**: They are different Meta products. The app uses "Facebook Login for Business" which requires a `config_id`. Standard "Facebook Login" does not.
+- **Scope naming changed**: Meta renamed `instagram_content_publish` → `instagram_business_content_publish` (and similar for other scopes). Old names are silently ignored.
+- **API version drift**: `v19.0` endpoints may return different error formats or be deprecated. Always use `v21.0` or later.

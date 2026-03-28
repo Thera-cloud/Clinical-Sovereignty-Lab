@@ -1,0 +1,111 @@
+---
+description: Client device must store conversation history locally and sync it to the server on login so users never lose data
+globs:
+  - mobile/lib/updated_screens.dart
+  - mobile/lib/services/local_history_service.dart
+  - mobile/lib/main.dart
+  - backend/app/routers/client_data_api.py
+alwaysApply: true
+---
+
+# Device History Sync on Login
+
+## Architecture
+
+Conversation history is stored in THREE locations. All must stay in sync:
+
+| Layer | Store | Lifetime | Cap |
+|-------|-------|----------|-----|
+| Server (primary) | `conversation_history` PostgreSQL table | Forever | None |
+| Device (local) | `nate_history.db` SQLite FTS5 (`LocalHistoryService`) | Until app uninstall | None |
+| Backup | `memory.json` per-user vault | Disaster recovery | 1,000 entries |
+
+## Login-Time Sync Flow
+
+On every `login_success`, `_fetchClientHealthCheck()` fires. This must:
+
+1. **Read local entry count** from `LocalHistoryService.getEntryCount()`
+2. **Call `GET /api/client/health-check`** — returns `server_entry_count`, `memory_ready`, `last_server_entry_at`
+3. **Compare counts**: If `localCount > serverCount`, the device has entries the server is missing
+4. **Push delta**: Call `POST /api/client/history/push` with entries newer than `last_server_entry_at`
+5. **Pull backfill**: If `serverCount > localCount`, fetch missing entries from server and insert locally
+
+## Push Endpoint
+
+`POST /api/client/history/push` accepts a batch of conversation entries from the device:
+
+```json
+{
+  "hw_id": "CLIENT_FOO_ID",
+  "entries": [
+    {
+      "session_id": "session_123",
+      "user_text": "How do I manage anxiety?",
+      "ai_text": "Let's explore that together...",
+      "created_at": "2026-03-06T12:00:00Z"
+    }
+  ]
+}
+```
+
+Server inserts with `ON CONFLICT DO NOTHING` on `(user_id, created_at, LEFT(user_text, 100))` to prevent duplicates. Maximum 200 entries per push.
+
+## Health-Check Response (Enhanced)
+
+```json
+{
+  "vault_ready": true,
+  "memory_ready": true,
+  "needs_backfill": false,
+  "server_entry_count": 142,
+  "last_server_entry_at": "2026-03-06T10:30:00Z"
+}
+```
+
+## Flutter Implementation
+
+```dart
+Future<void> _fetchClientHealthCheck(String hwId, String token) async {
+  final localCount = await _localHistory.getEntryCount();
+  final resp = await http.get(healthCheckUri, headers: authHeaders);
+  final serverCount = data['server_entry_count'] ?? 0;
+  final lastServerEntry = data['last_server_entry_at'];
+  
+  // Push local entries the server is missing
+  if (localCount > serverCount && lastServerEntry != null) {
+    final localEntries = await _localHistory.getEntriesAfter(lastServerEntry);
+    if (localEntries.isNotEmpty) {
+      await _pushHistoryToServer(hwId, token, localEntries);
+    }
+  }
+}
+```
+
+## Rules
+
+1. **Never clear local SQLite on login** — the device history is the user's safety net if the server ever loses data.
+2. **Always push before pull** — device entries go to server first, then server backfill comes to device. This prevents data loss.
+3. **Deduplication is server-side** — the push endpoint uses `ON CONFLICT DO NOTHING` so duplicate entries are harmless.
+4. **Max 200 entries per push** — prevents request timeout. If more entries exist, chunk them.
+5. **Non-blocking** — history sync must not block the login flow. Run as a background task after the UI is interactive.
+6. **`nate_history_entry` WebSocket messages** continue to be the real-time path. The login sync is a catch-up mechanism.
+7. **Coach/Admin devices** store history too — the same sync applies but uses `role`-appropriate paths.
+
+## Data Loss Scenarios This Prevents
+
+| Scenario | Without sync | With sync |
+|----------|-------------|-----------|
+| User chats offline, reconnects | Entries only on device | Pushed to server on login |
+| Server DB restored from backup | Recent entries missing | Device pushes them back |
+| User switches phones | New phone has no history | Server has all history (pull on login) |
+| App reinstalled | SQLite wiped | Server has all history (pull on login) |
+| Server conversation_history empty | User sees "no history" | Device pushes its local copy |
+
+## Verification
+
+After any change to login flow or history handling:
+
+1. Check local SQLite count: add `print('[SYNC] local=$localCount')` in `_fetchClientHealthCheck`
+2. Check server count in health-check response
+3. After login, verify: `SELECT COUNT(*) FROM conversation_history WHERE user_id = 'USERNAME'`
+4. If push happened, verify: `SELECT * FROM conversation_history WHERE user_id = 'USERNAME' ORDER BY created_at DESC LIMIT 5`

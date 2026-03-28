@@ -1,0 +1,222 @@
+# Four-Tier Data Architecture
+
+## Overview
+
+Data is partitioned across 4 tiers optimized for access pattern, latency, and cost:
+
+| Tier | Engine | Latency | Data | Cost at 1M users |
+|---|---|---|---|---|
+| **Hot** | Cloudflare D1 (SQLite at edge) | <5ms | Live sessions, schedules, rosters, presence, balances, gates | ~$5/mo |
+| **Warm** | PostgreSQL | 20-50ms | Complex relational, auth, billing, JSONB profiles, FKs | ~$50/mo |
+| **Cold** | R2 SQL (Apache Iceberg) | 100-500ms | Historical analytics, trends, aggregations, ML features | ~$2/mo |
+| **Semantic** | Cloudflare Vectorize | 10-30ms | Memory search, wisdom lookup, vault search, annotations | ~$5/mo |
+
+PostgreSQL is the **source of truth** for all data. D1 and R2 are read-optimized caches that sync from PG.
+
+## Architecture
+
+```
+                    ┌─ D1 (Hot: 30s sync) ── Edge Workers
+PostgreSQL ────────┤
+(source of truth)  ├─ R2 Iceberg (Cold: 60s CDC) ── R2 SQL
+                   │
+                   └─ Vectorize (async on write) ── Workers AI
+```
+
+## D1 Hot Cache
+
+### Database
+- **Name**: `nate-hot`
+- **ID**: `8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0`
+- **Region**: ENAM
+- **Schema**: `cloudflare/d1/schema.sql` (9 tables)
+
+### Tables
+
+| Table | Source | Sync | Purpose |
+|---|---|---|---|
+| `user_presence` | Bridge WebSocket events | Real-time | Who is online now |
+| `coach_schedules` | `coaching_sessions` (PG) | 30s | Next 14 days of sessions |
+| `client_roster` | `users` (PG) | 30s | Denormalized per-coach client list |
+| `token_balances` | `users` (PG) | 30s | Real-time token balances |
+| `tier_gates` | `users` (PG) | 30s | Role/tier/subscription for feature gating |
+| `live_sessions` | Bridge session events | Real-time | Active coaching sessions |
+| `coach_availability` | Computed from schedules | 30s | Open booking slots |
+| `rate_limits` | Worker writes | Real-time | Per-endpoint rate limiting |
+| `d1_sync_watermarks` | Internal | Per-sync | Sync tracking |
+
+### Sync Agent (`d1_sync_agent.py`)
+
+| Property | Value |
+|---|---|
+| Cycle | 30 seconds |
+| Sync tasks | 4 parallel (roster, schedules, balances, gates) |
+| Batch size | 100 statements per D1 API call |
+| app.state key | `d1_sync_agent` |
+
+### Query Service (`d1_query_service.py`)
+
+All methods fall back to PostgreSQL if D1 is unavailable:
+
+| Method | D1 Table | Fallback |
+|---|---|---|
+| `get_coach_roster(coach_id)` | `client_roster` | `users WHERE coach_id = ?` |
+| `get_coach_schedule(coach_id)` | `coach_schedules` | `coaching_sessions` |
+| `get_online_users(role?)` | `user_presence` | (no PG equivalent) |
+| `get_token_balance(username)` | `token_balances` | `users.token_balance` |
+| `check_tier_gate(username)` | `tier_gates` | `users WHERE username = ?` |
+| `get_live_sessions()` | `live_sessions` | (no PG equivalent) |
+
+### Edge Worker Endpoints
+
+D1 queries run directly in the Cloudflare Worker — zero origin round-trips:
+
+| Endpoint | Method | Response |
+|---|---|---|
+| `/api/edge/d1/roster/:coach_id` | GET | Client list for coach |
+| `/api/edge/d1/schedule/:coach_id` | GET | Upcoming sessions |
+| `/api/edge/d1/presence` | GET | Online users |
+| `/api/edge/d1/presence/count` | GET | Online counts by role |
+| `/api/edge/d1/balance/:username` | GET | Token balance |
+| `/api/edge/d1/gate/:username` | GET | Tier gate check |
+| `/api/edge/d1/live-sessions` | GET | Active sessions |
+
+## Query Routing Decision Tree
+
+```
+Is this a hot read? (presence, roster, balance, schedule, gate)
+  ├─ YES → D1QueryService (edge SQLite, <5ms)
+  │         └─ D1 unavailable? → PostgreSQL fallback
+  │
+  ├─ Is this a search query?
+  │   ├─ YES → Vectorize (semantic, 10-30ms)
+  │   │         └─ Vectorize unavailable? → PostgreSQL FTS fallback
+  │   └─ NO → continue
+  │
+  ├─ Is this an analytics/aggregation query?
+  │   ├─ YES → R2AnalyticsService (R2 SQL, 100-500ms)
+  │   │         └─ R2 SQL unavailable? → PostgreSQL fallback
+  │   └─ NO → continue
+  │
+  └─ NO → PostgreSQL (source of truth, 20-50ms)
+```
+
+## Per-Tier Optimizations
+
+### D1 Hot — TTL Policies
+
+Every D1 table has an `expires_at` column. The D1SyncAgent sweeps expired rows every cycle (30s). Edge Worker queries include `(expires_at IS NULL OR expires_at > NOW())` to filter stale data in-flight.
+
+| Table | TTL | Rationale |
+|---|---|---|
+| `user_presence` | 5 minutes | Detect disconnects even if bridge misses cleanup |
+| `token_balances` | 5 minutes | Re-synced every 30s; stale beyond 5m = dead data |
+| `tier_gates` | 10 minutes | Re-synced every 30s; wider window for gate checks |
+| `client_roster` | 10 minutes | Re-synced every 30s |
+| `live_sessions` | 4 hours | Safety net for orphaned sessions |
+| `coach_schedules` | 24h after end | Auto-clean past sessions |
+| `rate_limits` | window_seconds | Per-row TTL based on rate limit window |
+| `coach_availability` | end of slot date | Clean past availability slots |
+
+**Schema**: `cloudflare/d1/ttl_migration.sql` adds `expires_at TEXT` + index to all 8 tables.
+
+### PostgreSQL Warm — Hyperdrive (Connection Pooling + Query Cache)
+
+Cloudflare Hyperdrive provides:
+1. **Connection pooling** — eliminates cold-start TCP/TLS overhead (saves ~100ms per connection)
+2. **Automatic query caching** — repeated SELECT queries served from Cloudflare's edge cache
+3. **Prepared statement reuse** — across Worker invocations
+
+| Component | File | Status |
+|---|---|---|
+| `HyperdriveQueryRouter` | `hyperdrive_service.py` | Routes SELECT→Hyperdrive, INSERT/UPDATE→direct PG |
+| Wrangler binding | `wrangler.toml` (commented) | Activate after Cloudflare Tunnel setup |
+| Env vars | `HYPERDRIVE_ID`, `HYPERDRIVE_CONNECTION_STRING` | Set after `wrangler hyperdrive create` |
+
+**Prerequisite**: Cloudflare Tunnel (`cloudflared`) must be running on the server to privately expose PostgreSQL port 5432 to Cloudflare's edge — never expose it publicly.
+
+**Setup**:
+1. `cloudflared tunnel create nate-pg` on the server
+2. Map tunnel to `localhost:5432`
+3. `wrangler hyperdrive create nate-pg-warm --connection-string="postgresql://nate_admin:PASS@<tunnel-hostname>:5432/little_nate"`
+4. Set `HYPERDRIVE_ID` and uncomment the `[[hyperdrive]]` binding in `wrangler.toml`
+
+**Estimated savings**: ~40% reduction in PostgreSQL CPU + ~60% cache hit rate for CRM reads.
+
+### R2 SQL Cold — Partition Pruning
+
+Every CDC table includes partition columns so R2 SQL skips 95-99% of Parquet files when querying:
+
+| Table | Partition Columns | Pruning Effect |
+|---|---|---|
+| `conversation_history` | `user_id`, `event_date` | User query scans 1 partition, not 1M |
+| `token_transactions` | `username`, `source`, `event_date` | Usage map scans 1 user's data |
+| `nevedal_metrics` | `user_id`, `event_date` | Coherence trend scans 1 user |
+| `wisdom_extractions` | `user_id`, `family_id`, `insight_type`, `event_date` | Family wisdom scans 1 family |
+| `me2me_imprint_entries` | `user_id`, `event_date` | Legacy journal scans 1 user |
+| `coaching_sessions` | `client_id`, `coach_id`, `event_date` | Coach report scans 1 coach |
+| `skyeye_post_analytics` | `platform`, `event_date` | Platform metrics scans 1 platform |
+| `skyeye_notifications` | `platform`, `notification_type`, `event_date` | Engagement filter on type |
+| `skyeye_activity` | `type`, `event_date` | Activity feed filtered by type |
+| `skyeye_sessions` | `status`, `event_date` | Session summary by status |
+
+All pre-built queries in `r2_analytics_service.py` use `event_date` (and entity IDs where applicable) in WHERE clauses. R2 SQL reads Iceberg metadata to determine which Parquet files contain matching partition values and skips everything else.
+
+### Vectorize Semantic — Metadata Filtering
+
+Every vector now carries scope metadata so queries only scan the user's own vectors, not the full index:
+
+| Metadata Field | Applied To | Effect |
+|---|---|---|
+| `user_id` | All 6 indexes | **Always** filtered — each user scans only their own vectors |
+| `family_id` | conversation, vault, wisdom, me2me, session, annotation | Family-scoped search across members |
+| `group_id` | All 6 indexes | Community group-scoped search |
+| `company_id` | conversation, wisdom, session | Corporate group-scoped search |
+| `tier` | conversation, vault, me2me, wisdom | Tier-specific content filtering |
+
+**Search functions**:
+
+| Function | Scope | Use Case |
+|---|---|---|
+| `semantic_search()` | user_id + optional family/group/company | Single-user memory search |
+| `semantic_search_all()` | user_id across all 6 indexes | Unified memory search |
+| `semantic_search_family()` | family_id across wisdom/session/me2me | Transgenerational wisdom lookup |
+| `semantic_search_group()` | group_id across all indexes | Community group content search |
+
+**At 1M users**: Without metadata filtering, each query would scan ~1B vectors (1M users x 1K vectors each). With `user_id` filter, each query scans ~1K vectors. That's a **1,000,000x reduction** in scan volume.
+
+## Rules
+
+1. **Writes always go to PostgreSQL first.** D1 and R2 sync from PG. Never write to D1 directly for persistent state.
+2. **D1 is eventually consistent** — data may be up to 30 seconds stale. This is acceptable for dashboard reads, not for auth or billing decisions.
+3. **`user_presence` and `live_sessions` are real-time** — they are updated via direct D1 API calls from the bridge on WebSocket connect/disconnect and session start/end, not via the 30s sync.
+4. **D1 has a 10GB limit** — only hot, frequently-read data belongs here. Historical data goes to R2 Iceberg.
+5. **D1QueryService falls back silently** — if D1 is unavailable, methods return PG results with no error to the caller.
+6. **Edge Worker D1 queries bypass the backend entirely** — the `/api/edge/d1/*` endpoints run in the Cloudflare Worker with zero origin latency.
+7. **Never query PG for data that's in D1** in request-hot paths (coach dashboard rendering, token balance display, tier gate checks). Use D1QueryService.
+8. **The D1SyncAgent gracefully degrades** — if `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` are not set, it logs a message and does not start.
+9. **TTL is enforced at both query time and sweep time** — edge Worker queries filter by `expires_at`, and the sync agent deletes expired rows every cycle. Both layers must be active.
+10. **Partition columns must be included in CDC queries** — every `CDC_TABLES` entry has a `partition_cols` list and includes `event_date` in the SELECT. Without these, R2 SQL cannot prune.
+11. **Vectorize writes must include all available scope metadata** — when the calling context has `family_id`, `group_id`, `company_id`, or `tier`, pass them to the `index_*` functions.
+12. **Never remove the `user_id` filter from Vectorize queries** — it's the primary isolation boundary. Without it, one user's search scans all 1M users' vectors.
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Used by D1 sync + query REST API |
+| `CLOUDFLARE_API_TOKEN` | Auth for D1 REST API |
+| `D1_DATABASE_ID` | D1 database ID (`8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0`) |
+| `HYPERDRIVE_ID` | Hyperdrive config ID (after tunnel setup) |
+| `HYPERDRIVE_CONNECTION_STRING` | Hyperdrive-proxied PG connection string |
+
+## Cost Breakdown at Scale
+
+| Users | D1 reads/mo | D1 writes/mo | D1 cost | PG savings |
+|---|---|---|---|---|
+| 1,000 | ~10M | ~2M | $0.50 | -60% PG load |
+| 100,000 | ~1B | ~200M | $5 | -85% PG load |
+| 1,000,000 | ~10B | ~2B | $50 | -95% PG load |
+
+D1 pricing: first 25B reads free, $0.001/M after. First 50M writes free, $1/M after.
+At 1M users, the $50/mo D1 cost replaces $500+/mo of PostgreSQL read scaling.

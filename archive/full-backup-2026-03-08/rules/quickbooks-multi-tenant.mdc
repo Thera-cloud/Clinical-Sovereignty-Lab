@@ -1,0 +1,87 @@
+---
+description: QuickBooks multi-tenant architecture — admin, corp, and coach OAuth/sync
+alwaysApply: true
+---
+
+# QuickBooks Multi-Tenant Architecture
+
+## Three Tenants, One Intuit App
+
+All three QB integrations share the same `QB_CLIENT_ID` / `QB_CLIENT_SECRET` but use different callback URIs and database tables.
+
+| Tenant | Router | Prefix | Auth | DB Tables | Callback URI |
+|---|---|---|---|---|---|
+| Admin (global) | `quickbooks_api.py` | `/api/admin/quickbooks` | `require_admin` | `qb_connection`, `qb_sync_log` | `QB_REDIRECT_URI` |
+| Corp | `corp_quickbooks_api.py` | `/api/corp/quickbooks` | `require_corp_admin` | `qb_corp_connection`, `qb_corp_sync_log`, `qb_corp_account_mapping` | `QB_CORP_REDIRECT_URI` |
+| Coach | `coach_quickbooks_api.py` | `/api/coach/quickbooks` | `require_coach` | `qb_coach_connection`, `qb_coach_sync_log`, `qb_coach_account_mapping` | `QB_COACH_REDIRECT_URI` |
+
+## Router Architecture — Dual Export Pattern
+
+Each QB router exports two `APIRouter` objects:
+
+- `router` — auth-gated (admin/corp/coach dependency), all functional endpoints
+- `oauth_router` — public, handles Intuit OAuth callback only
+
+Both must be registered in `main.py`. The `oauth_router` is public because Intuit's redirect cannot include auth headers.
+
+```python
+# main.py registration pattern
+from app.routers.corp_quickbooks_api import router as corp_qb_router, oauth_router as corp_qb_oauth_router
+app.include_router(corp_qb_router)
+app.include_router(corp_qb_oauth_router)
+```
+
+## Security Requirements (Intuit Audit)
+
+| Pattern | Implementation | Location |
+|---|---|---|
+| OAuth CSRF | `secrets.token_urlsafe()` stored in Redis with 5-min TTL, validated on callback | All 3 callback handlers |
+| Token encryption at rest | `TokenCipher.get().encrypt()` / `.decrypt()` (Fernet) | All token storage/retrieval |
+| Secure logging | `get_secure_logger(__name__)` — never log raw API response bodies or token fragments | All QB files |
+| Rate limiting | Per-user in-memory dict, 10s cooldown on connect/disconnect/sync | All 3 auth-gated routers |
+| Exponential backoff | `_qb_api_with_retry()` with jitter on all QB API calls | All 3 routers + sync agent |
+| XSS prevention | `esc()` helper in `corporate_command.html` | Corp dashboard |
+
+## Never Do
+
+- **Never log `access_token`, `refresh_token`, or raw QB API response bodies** — use `get_secure_logger` and log only status codes.
+- **Never store tokens unencrypted** — always use `TokenCipher.get().encrypt()` before DB write and `.decrypt()` on read.
+- **Never skip CSRF state validation** on OAuth callbacks — a missing or mismatched state token must return 400.
+- **Never register `oauth_router` with auth dependencies** — Intuit's redirect cannot authenticate.
+- **Never use `load_dotenv(override=True)`** in QB files — it clobbers Docker-injected `REDIS_URL`.
+
+## Migration 086
+
+Creates 6 tables + 3 tracking columns. Must be applied before QB features are usable.
+
+| Table | Unique Constraint |
+|---|---|
+| `qb_corp_connection` | `(company_id)` |
+| `qb_corp_sync_log` | none (append-only) |
+| `qb_corp_account_mapping` | `(company_id, internal_category)` |
+| `qb_coach_connection` | `(coach_username)` |
+| `qb_coach_sync_log` | none (append-only) |
+| `qb_coach_account_mapping` | `(coach_username, internal_category)` |
+
+Tracking columns: `payment_history.synced_to_corp_qb`, `token_transactions.synced_to_corp_qb`, `signup_sharing_ledger.synced_to_coach_qb`.
+
+## Auditor Coverage
+
+| Auditor | QB Checks | Baseline Key |
+|---|---|---|
+| Corporate Command | 9 (7 API + 2 DB) | `corporate_command_check_count` (21 total) |
+| Coach & DOJO | 9 (all API) | `coach_dojo_endpoint_count` (55 total) |
+| QuickBooks Sync | 10 (3 API + 7 DB) | `quickbooks_check_count` (10 total) |
+
+## Env Vars
+
+| Variable | Purpose |
+|---|---|
+| `QB_CLIENT_ID` | Intuit OAuth app client ID (shared) |
+| `QB_CLIENT_SECRET` | Intuit OAuth app client secret (shared) |
+| `QB_REDIRECT_URI` | Admin callback URL |
+| `QB_CORP_REDIRECT_URI` | Corp callback URL |
+| `QB_COACH_REDIRECT_URI` | Coach callback URL |
+| `QB_ENVIRONMENT` | `sandbox` or `production` |
+
+All callback URIs must be registered in the Intuit Developer Portal under the same app's "Redirect URIs" list.

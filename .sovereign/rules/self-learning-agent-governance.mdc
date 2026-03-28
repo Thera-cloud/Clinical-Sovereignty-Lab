@@ -1,0 +1,35 @@
+---
+description: Governs the 6 autonomous domain agents and their observe/recall/reason/crystallize lifecycle
+alwaysApply: true
+---
+
+# Self-Learning Agent Governance
+
+6 domain agents learn autonomously. Without governance, they hallucinate, cross-contaminate, or waste resources.
+
+## Agent Registry
+
+| Agent | Domain | Cycle | Temp | Observes |
+|-------|--------|-------|------|----------|
+| MarketingIntelligence | marketing | 4h | 0.8 | Post analytics, engagement, campaign touchpoints |
+| ClinicalPattern | clinical | 6h | 0.3 | Aggregated coherence metrics (min 5 clients) |
+| CoachDiscovery | coaching | 4h | 0.5 | Wisdom extractions, DOJO activity |
+| ThreatIntelligence | defense | 2h | 0.3 | Sentinel events, defense alerts |
+| CulturalIntelligence | culture | 6h | 0.9 | Liminal presence analysis, language drift |
+| ResearchSynthesis | research | 4h | 0.6 | Web wisdom, low-confidence crystals |
+
+## Rules
+
+1. **Clinical agent must aggregate.** Minimum 5 distinct client sessions before crystallizing any clinical pattern. Individual client data must never appear in a crystal — only de-identified, aggregated patterns. Violation = privacy breach.
+
+2. **Defense agent temperature is 0.3 maximum.** A false threat alert causes operational disruption (DEFCON escalation, BLE pause, ghost deployment). Conservative inference prevents this.
+
+3. **Marketing agent may be creative.** Temperature 0.8 allows novel content strategies. But marketing crystals must still pass the response validator — creative is not hallucinated.
+
+4. **Domain agents must not read outside their domain.** The Marketing agent queries `skyeye_post_analytics` and `skyeye_content_queue`. It does not query `coaching_sessions` or `nevedal_metrics`. Each agent's `observe()` method is scoped to its domain's tables.
+
+5. **Auto-research triggers on confidence < 0.5.** The ResearchSynthesis agent fetches crystals with low confidence and uses internet search to improve them. It does not research on a fixed schedule — token cost is proportional to need, not time.
+
+6. **All agents share one crystallizer.** Domain agents append fragments to `NateMemoryCrystallizer._harvest_buffer`. The crystallizer handles clustering, synthesis, validation, and storage. Agents must never write directly to `nate_intelligence_crystals`.
+
+7. **Agent lifecycle: start() and stop().** All agents run as background asyncio tasks registered on `app.state`. They must be stopped gracefully in the `lifespan()` shutdown block. An agent that survives shutdown leaks its asyncio task.

@@ -1,0 +1,176 @@
+---
+description: VPS infrastructure details for sandbox and sovereign inference nodes
+alwaysApply: true
+---
+
+# Sovereign VPS Fleet
+
+## Hetzner Sovereign Inference VPS (LittleNate-1.X)
+
+| Property | Value |
+|----------|-------|
+| Public IP | 37.27.244.80 |
+| WireGuard IP | 10.13.13.5 |
+| Ollama API | http://10.13.13.5:11434 |
+| XTTS-v2 API | http://10.13.13.5:8100 |
+| OS | Ubuntu 24.04 LTS (ARM64) |
+| Hardware | CAX41 — 16 ARM Ampere cores, 32 GB RAM, 320 GB NVMe |
+| Location | Helsinki, Finland |
+| Python (system) | 3.12.3 |
+| XTTS venv | /opt/xtts-venv (Python 3.11.15 via deadsnakes) |
+| Ollama model | llama3.1:8b-instruct-q4_K_M (4.9 GB) |
+| XTTS-v2 model | tts_models/multilingual/multi-dataset/xtts_v2 (1.87 GB) |
+| Voice refs | /opt/xtts-data/voice_refs/ |
+| Provider | Hetzner Cloud (~$28/mo) |
+
+### SSH Access
+
+```bash
+ssh root@37.27.244.80
+```
+
+### Services
+
+- `ollama.service` — systemd-managed, listens on `0.0.0.0:11434`
+- `xtts-server.service` — XTTS-v2 voice clone server, listens on `0.0.0.0:8100`
+- `wg-quick@wg0` — WireGuard tunnel to production VPS
+
+### XTTS-v2 Voice Cloning
+
+The XTTS server provides voice-cloned TTS using Dr. Nevedal's voice reference audio. Upload a 6-30 second WAV of clean speech to `/opt/xtts-data/voice_refs/father.wav` (or via `POST /upload-voice`). Without a reference, it falls back to the default XTTS speaker.
+
+**API endpoints:**
+- `GET /health` — server status + voice ref availability
+- `POST /synthesize` — form data: `text`, `language`, `voice_id`, `speed` → WAV audio
+- `POST /upload-voice` — upload voice reference file
+- `GET /voices` — list available voice references
+
+**PyTorch compatibility note:** TTS/utils/io.py is patched to use `weights_only=False` in `torch.load` for PyTorch 2.10+ compatibility. Transformers pinned to 4.41.2 for `BeamSearchScorer` availability.
+
+### Production Integration
+
+- **LLM**: `NateInferenceRouter` uses `SOVEREIGN_INFERENCE_URL=http://10.13.13.5:11434` as Tier 1 provider
+- **TTS**: `sovereign_tts.py` calls `SOVEREIGN_TTS_URL=http://10.13.13.5:8100` for voice-cloned synthesis
+- **Fallbacks**: Ollama → Workers AI → Azure (LLM), XTTS → Edge TTS (TTS)
+
+---
+
+# DigitalOcean VPC Peering
+
+| Property | Value |
+|----------|-------|
+| Peering Name | `default-nyc1--default-sfo2-1773463468472` |
+| VPC A | `default-sfo2` — 10.120.0.0/20 (primary VPS: 10.120.0.2) |
+| VPC B | `default-nyc1` — 10.116.0.0/20 (1 resource, future clone) |
+| Status | Active (Mar 14, 2026) |
+| Cost | $0 |
+
+Peering allows any SFO2 droplet to reach any NYC1 droplet (and vice versa) via private IP over DigitalOcean's internal backbone. Used for PostgreSQL replication and Redis state sharing across regions.
+
+---
+
+# Clone VPS (REST API Node)
+
+| Property | Value |
+|---|---|
+| Public IP | 159.65.108.25 |
+| VPC IP | 10.120.0.6 |
+| VPC | `default-sfo2` (10.120.0.0/20) |
+| Droplet Name | `nate-vps-clone-2026-03-14-s-2vcpu-4gb-sfo2-01` |
+| OS | Ubuntu (snapshot of primary, Mar 14, 2026) |
+| Compose file | `docker-compose.clone.yml` |
+| Running services | Backend only (`nate_backend`, `network_mode: host`) |
+| PostgreSQL | Primary via VPC: `10.120.0.2:5432` |
+| Redis | Primary via VPC: `10.120.0.2:6379` |
+| Nginx | Host-level, REST API only, 503 for `/ws` |
+| Cloudflare LB | Endpoint in `sovereign-core` pool (weight 0.5) |
+
+### SSH Access
+
+```bash
+ssh root@159.65.108.25
+```
+
+### Operations
+
+```bash
+# Start backend
+cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.clone.yml up -d
+
+# Check health
+curl -s http://localhost:8000/health
+
+# VPC connectivity to primary
+nc -zv 10.120.0.2 5432 && nc -zv 10.120.0.2 6379
+```
+
+### Key Constraint
+
+Clone has NO bridge — WebSocket traffic must route to primary only. The Cloudflare LB Custom Rule pins `/ws` to `ws-primary` pool.
+
+---
+
+# Sandbox VPS (Detonation Chamber)
+
+## Infrastructure
+
+The detonation sandbox runs on a **dedicated VPS**, not on the production server.
+
+| Property | Value |
+|----------|-------|
+| Public IP | 178.128.178.15 |
+| WireGuard IP | 10.13.13.4 |
+| Sandbox API | http://10.13.13.4:9090 |
+| OS | Ubuntu 24.04 LTS |
+| Python | 3.12 (venv at /opt/sandbox/venv) |
+| Code dir | /opt/sandbox/ |
+| Service | systemd `sandbox-api.service` |
+| Disk | 70GB |
+
+## SSH Access
+
+The VPS public IP is firewalled. SSH only via WireGuard:
+
+- From MacBook: `ssh -J root@68.183.168.75 root@10.13.13.4`
+- From production: `ssh root@10.13.13.4`
+
+## Deploying Code Updates
+
+```bash
+# Copy updated file through production jump host
+scp -o ProxyJump=root@68.183.168.75 backend/app/services/security/<file>.py root@10.13.13.4:/opt/sandbox/<file>.py
+
+# Restart the service
+ssh root@68.183.168.75 "ssh root@10.13.13.4 systemctl restart sandbox-api"
+```
+
+Files deployed to `/opt/sandbox/`:
+- `sandbox_api.py`
+- `detonation_chamber.py`
+- `phishing_link_hunter.py`
+- `phishing_detector.py`
+
+## Critical: No ulimit -v for Chromium
+
+NEVER set `ulimit -v` (virtual memory limit) in any environment running Playwright/Chromium. Chromium's PartitionAlloc reserves 8-16 GB of virtual address space (not physical RAM). A virtual memory cap causes `partition_address_space.cc` to abort on startup. Use Docker `mem_limit` or systemd `MemoryMax` for actual memory enforcement instead.
+
+## Subprocess Python Path
+
+When spawning Python subprocesses (e.g., for detonation), always use `sys.executable` instead of `"python3"` to ensure the correct virtualenv interpreter is used.
+
+---
+
+# Mac Twin Engine (Home GPU + Future XTTS)
+
+The Mac connects to Cloudflare via the **Little Nate Twin Engine** tunnel (not WireGuard). See `cloudflare-tunnel-twin-engine.mdc` for full details.
+
+| Property | Value |
+|---|---|
+| Tunnel ID | `d40e5315-4d8a-44b8-a432-debc36750636` |
+| Replica ID | `dcca76d9-08f2-4183-a708-173994e4aed4` |
+| VPC Service | `overseer-manifold` (`019ce99b-5f34-7902-9513-9b26bc4755c8`) |
+| Queue | `ln-echo-relay` (`218cde12f4f04af58a0bab077fe9fbb0`) |
+| Origin IP | 68.43.85.92 |
+| Connection | Cloudflare Tunnel + VPC (not WireGuard) |
+| Services | Ollama (70B inference), XTTS-v2 TTS (future) |
+| Env Vars | `HOME_GPU_URL`, `HOME_GPU_MODEL` |

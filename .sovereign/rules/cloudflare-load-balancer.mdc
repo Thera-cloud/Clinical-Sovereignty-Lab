@@ -1,0 +1,132 @@
+---
+description: Cloudflare Load Balancer configuration for api.sovereignsanctuary.net
+alwaysApply: true
+---
+
+# Cloudflare Load Balancer
+
+## Live Configuration (Phase 2 — COMPLETE)
+
+| Property | Value |
+|---|---|
+| Hostname | `api.sovereignsanctuary.net` |
+| Plan | $25/month (6 endpoints, 1 custom rule) |
+| Status | **Phase 2 COMPLETE** — 4 pools, 5/6 endpoints, all Healthy (Mar 14, 2026) |
+| Traffic Steering | Off (failover order) |
+| Session Affinity TTL | 82800s (~23h) |
+| Zero Downtime Failover | Temporary |
+| Failover Across Pools | On |
+| Endpoint Drain TTL | 300s |
+
+## Infrastructure Map
+
+| Node | Public IP | VPC IP | LB Role |
+|---|---|---|---|
+| DO VPS (primary) | 68.183.168.75 | 10.120.0.2 | `sovereign-core` (weight 1.0) + `ws-primary` |
+| DO VPS (clone) | 159.65.108.25 | 10.120.0.6 | `sovereign-core` (weight 0.5) — REST API only |
+| Hetzner CAX41 | 37.27.244.80 | 10.13.13.5 (WG) | `sovereign-inference` + `sovereign-voice` |
+
+## 4 Pools
+
+| Pool | Endpoints | Address | Port | Weight | Service |
+|---|---|---|---|---|---|
+| `sovereign-core` | `do-vps-primary` | 68.183.168.75 | 443 | 1.0 (67%) | Full API + Bridge + Admin |
+|                   | `do-vps-clone` | 159.65.108.25 | 443 | 0.5 (33%) | REST API only (no bridge) |
+| `sovereign-inference` | `hetzner-ollama` | 37.27.244.80 | 11434 | 1.0 | Ollama 8B inference |
+| `sovereign-voice` | `hetzner-xtts` | 37.27.244.80 | 8100 | 1.0 | XTTS-v2 voice synthesis |
+| `ws-primary` | `ws-primary-origin` | 68.183.168.75 | 443 | 1.0 | WebSocket bridge (primary only) |
+
+**Fallback Pool**: `sovereign-core`
+
+## 3 Monitors
+
+| Monitor | Type | Path | Port | Response Body | Host Header |
+|---|---|---|---|---|---|
+| `sovereign-core-health` | HTTPS | `/health` | 443 | `healthy` | `api.sovereignsanctuary.net` |
+| `sovereign-inference-health` | HTTP | `/api/tags` | 11434 | `models` | (none) |
+| `sovereign-voice-health` | HTTP | `/health` | 8100 | (none) | (none) |
+
+All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
+
+`sovereign-core-health` has "Don't verify SSL/TLS certificates" checked.
+
+## Custom Rule: "WebSocket to Primary"
+
+| Field | Value |
+|---|---|
+| Condition | `URI Path equals /ws` (`http.request.uri.path eq "/ws"`) |
+| Override: Terminates | On |
+| Override: Fallback Pool | `ws-primary` |
+| Override: Session Affinity | By Cloudflare cookie and Client IP fallback |
+
+All `/ws` WebSocket connections route exclusively to the primary VPS. The clone has no bridge and returns 503 for `/ws`.
+
+## Clone VPS Architecture
+
+| Property | Value |
+|---|---|
+| Public IP | 159.65.108.25 |
+| VPC IP | 10.120.0.6 |
+| Compose file | `docker-compose.clone.yml` |
+| Running services | Backend only (`nate_backend`) |
+| Network mode | `host` (for VPC access) |
+| PostgreSQL | Primary via VPC: `10.120.0.2:5432` |
+| Redis | Primary via VPC: `10.120.0.2:6379` |
+| Nginx config | `/etc/nginx/sites-enabled/clone-api` |
+| WebSocket | Returns 503 (no bridge) |
+
+## VPC Peering
+
+| Field | Value |
+|---|---|
+| Name | `default-nyc1--default-sfo2-1773463468472` |
+| VPC A | `default-sfo2` — 10.120.0.0/20 (San Francisco) |
+| VPC B | `default-nyc1` — 10.116.0.0/20 (New York) |
+| Status | Active (Mar 14, 2026) |
+
+## Rules
+
+1. **REST API traffic distributes across primary (67%) and clone (33%).** Both origins use `sovereign-core-health` monitor. If the clone goes unhealthy, all traffic routes to primary.
+
+2. **WebSocket traffic ALWAYS goes to primary.** The Custom Rule overrides `/ws` to `ws-primary` pool. Never add the clone to `ws-primary` — it has no bridge.
+
+3. **Clone reads from primary's PostgreSQL and Redis via VPC.** The clone's `docker-compose.clone.yml` sets `POSTGRES_HOST=10.120.0.2`, `REDIS_HOST=10.120.0.2`. This uses DO's internal backbone with zero egress cost.
+
+4. **Primary must expose PostgreSQL and Redis on VPC interface.** `docker-compose.prod.yml` binds postgres to `10.120.0.2:5432` and redis to `10.120.0.2:6379`. UFW, iptables DOCKER-USER, and DO Cloud Firewall all allow VPC subnet `10.120.0.0/20` on these ports.
+
+5. **Never add the clone's bridge container.** The clone runs backend only. Adding a second bridge would create split-brain for WebSocket sessions (two ACTIVE_TOKENS dicts, two user registries). All WebSocket traffic must route to the single primary bridge.
+
+6. **If the primary goes down, the clone can serve REST API traffic** — all read endpoints and most write endpoints work since the clone connects to the primary's DB directly. However, WebSocket connections will fail until the primary recovers.
+
+7. **Host header is required on both `sovereign-core` endpoints.** Both primary and clone Nginx expect `Host: api.sovereignsanctuary.net` for correct routing.
+
+8. **Hetzner firewall port 51820 must be UDP, not TCP.** WireGuard uses UDP. TCP on 51820 will silently block all WireGuard traffic.
+
+9. **To add a Phase 3 NYC1 origin**, use the remaining endpoint slot (slot 6/6) in `sovereign-core`. Deploy NYC1 droplet from snapshot, configure like clone, enable Geo Steering.
+
+## Verification
+
+```bash
+# Both VPS origins
+curl -sk --max-time 5 https://68.183.168.75/health -H "Host: api.sovereignsanctuary.net"
+curl -sk --max-time 5 https://159.65.108.25/health -H "Host: api.sovereignsanctuary.net"
+
+# Through LB
+curl -sI https://api.sovereignsanctuary.net/health | grep -E "__cflb|server"
+
+# Clone rejects WS
+curl -sk --max-time 5 https://159.65.108.25/ws
+
+# VPC connectivity
+ssh root@159.65.108.25 "nc -zv 10.120.0.2 5432 && nc -zv 10.120.0.2 6379"
+```
+
+## Cost (Phase 2)
+
+| Item | Cost |
+|---|---|
+| LB base | $5/mo |
+| 5 endpoints x $2.50 | $12.50/mo |
+| Health checks (3 monitors) | $5/mo |
+| Clone VPS (s-2vcpu-4gb) | $24/mo |
+| **Total** | **~$46.50/mo** |

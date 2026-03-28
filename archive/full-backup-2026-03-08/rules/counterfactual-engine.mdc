@@ -1,0 +1,50 @@
+---
+description: Member Removal Counterfactual Engine — quantum separation model, ghost nodes, PMB assessment
+alwaysApply: true
+---
+
+# Member Removal Counterfactual Engine
+
+## Architecture
+
+When a human member is unchecked in the Nevedal Lab Family Dynamics tab, the dashboard sends `admin_member_removal_scenario` via WebSocket instead of re-sending `admin_get_group_coherence` with a smaller list. The bridge computes:
+
+1. **Baseline** (full group) — with/without Nate, contribution, per-member bonds
+2. **Reduced** (remaining members only) — same metrics for the smaller group
+3. **Quantum Separation Decoherence** — per removed↔remaining pair using three factors:
+   - Entanglement Strength (40%): `with_nate_matrix_full[X:Y]`
+   - Tunnelling Factor (30%): `pmb.reconsolidation_readiness`
+   - Quak Adjustment (30%): `shame_index * 0.4 + legacy_depth * 0.35 + max(0, -C_emo_trend) * 0.25`
+4. **PMB Transgenerational Assessment** — separation risk, legacy patterns, behavioral predictions, `_build_removal_recommendation()`
+
+## Response Type: `member_removal_scenario`
+
+| Field | Content |
+|---|---|
+| `baseline` | Full group with/without Nate + contribution |
+| `reduced` | Remaining-only with/without Nate + contribution |
+| `separation_decoherence` | Per-pair risk, trend (critical/significant/moderate), 3 sub-metrics |
+| `nate_assessments` | Per-removed-member PMB assessment + recommendation |
+
+## Dashboard Rendering
+
+- **Stat cards**: Show baseline (full group) values with "Baseline (full group)" label
+- **Network canvases**: Remaining members as normal nodes + removed members as ghost nodes (25% opacity, dashed border, 14px radius)
+- **Separation bonds**: Dashed lines colored by risk (red >0.55, orange >0.30, gray ≤0.30)
+- **Decoherence panel**: Shows `renderSeparationDecoherence()` with 3-column grid of Entanglement/Tunnelling/Quak + trend badge
+- **Nate Assessment panel**: Collapsible card with risk badge, crisis perception type, pattern tags, predictions, recommendation
+
+## State Variables
+
+| Variable | Purpose |
+|---|---|
+| `lastRemovalData` | Most recent `member_removal_scenario` response |
+| `removalMode` | `true` when members are deselected |
+
+## Rules
+
+1. **Never modify the quantum weights** (0.40/0.30/0.30) without updating both `bridge_server.py` and `nevedal_lab_family.html` sub-metric labels
+2. **Ghost nodes must use `isGhost:true`** — this controls 25% opacity and dashed rendering
+3. **`_SENTINEL_SKIP` must include `admin_member_removal_scenario`** — it is read-only analysis
+4. **Selecting all members exits removal mode** — `removalMode=false`, `lastRemovalData=null`, hide assessment panel
+5. **Nate toggle is independent** — toggling Nate only changes `includeNate` for the network visualization, not the counterfactual flow

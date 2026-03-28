@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Ask Little Nate",
+  "version": "1.0.0",
+  "description": "Summon Little Nate from anywhere on the web. Highlight text, right-click, and ask Nate. Or type @littlenate in any text field.",
+  "permissions": ["activeTab", "contextMenus", "storage"],
+  "host_permissions": ["https://api.sovereignsanctuary.net/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["nate-overlay.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/nate-16.png",
+      "48": "icons/nate-48.png",
+      "128": "icons/nate-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/nate-16.png",
+    "48": "icons/nate-48.png",
+    "128": "icons/nate-128.png"
+  }
+}

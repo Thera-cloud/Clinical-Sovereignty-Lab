@@ -1,0 +1,123 @@
+# R2 Data Lake & CDN Architecture
+
+## Overview
+
+Heavy analytics are offloaded from PostgreSQL to Apache Iceberg tables stored in Cloudflare R2, queried via R2 SQL. Static assets (avatars, PDFs, videos) are served through a CDN Worker on `cdn.sovereignsanctuary.net` with Smart Tiered Cache for near-zero repeated-read costs.
+
+## Architecture
+
+```
+PostgreSQL (transactional OLTP)
+  ↓ CDC Agent (60s poll)
+Cloudflare Pipelines (HTTP ingest)
+  ↓ sink (Parquet files)
+R2 bucket: nate-analytics (Iceberg tables via Data Catalog)
+  ↓
+R2 SQL (distributed analytics queries)
+  ↓
+/api/analytics/* REST endpoints (admin dashboard)
+```
+
+```
+R2 bucket: nate-vault (static assets)
+  ↓
+cdn.sovereignsanctuary.net Worker (nate-r2-cdn)
+  ↓ Cache-Control: s-maxage=2592000
+Cloudflare Smart Tiered Cache (upper-tier DC near R2)
+  ↓
+Cloudflare Edge (200+ DCs worldwide)
+  ↓ cache HIT (99%+ after warmup)
+Client browser
+```
+
+## 5 R2 Buckets
+
+| Bucket | Purpose | CDN | Data Catalog |
+|---|---|---|---|
+| `nate-vault` | Avatars, PDFs, videos, exports, coach files | `cdn.sovereignsanctuary.net/vault/*` | Yes |
+| `nate-analytics` | Iceberg tables (CDC from PostgreSQL) | `cdn.sovereignsanctuary.net/lake/*` | Yes |
+| `nate-cold-archive` | Cold memory tier | No | No |
+| `nate-heritage-vault` | Transgenerational legacy storage | No | No |
+| `nate-warm-memory` | Warm memory tier | No | No |
+
+## CDC Agent (`iceberg_cdc_agent.py`)
+
+| Property | Value |
+|---|---|
+| Cycle | 60 seconds |
+| Tables | 10 (conversation_history, skyeye_activity, token_transactions, nevedal_metrics, wisdom_extractions, me2me_imprint_entries, skyeye_post_analytics, skyeye_notifications, coaching_sessions, skyeye_sessions) |
+| Watermark table | `iceberg_cdc_watermarks` |
+| Batch size | 500 rows per table per cycle |
+| Encrypted content | Redacted (empty string) in CDC events |
+
+The agent polls each table for rows newer than its watermark timestamp, pushes them as JSON events to Cloudflare Pipeline HTTP endpoints, and advances the watermark on success.
+
+## R2 Analytics Service (`r2_analytics_service.py`)
+
+Executes SQL queries against R2 Iceberg tables via the R2 SQL API. Falls back to PostgreSQL if R2 SQL is unavailable.
+
+Pre-built queries:
+- `conversation_volume(days)` — daily chat volume + word counts
+- `token_usage_trends(days)` — daily token usage by source
+- `coherence_trends(days)` — daily Nevedal metric averages + CEE windows
+- `wisdom_insights(days)` — insight types + approval rates
+- `social_engagement_trends(days)` — platform engagement metrics
+- `coaching_session_stats(days)` — session status + revenue
+- `cross_table_user_engagement(user_id)` — multi-table user profile
+
+## Analytics REST API (`analytics_api.py`)
+
+All endpoints require `require_admin`. Prefix: `/api/analytics/`.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Analytics + CDC status |
+| `/cdc/status` | GET | CDC watermarks and stats |
+| `/cdc/backfill` | POST | Reset watermark and re-sync |
+| `/conversations/volume` | GET | Daily conversation volume |
+| `/conversations/by-user` | GET | Top users by conversation count |
+| `/tokens/trends` | GET | Token usage trends by source |
+| `/tokens/by-user` | GET | Top users by token usage |
+| `/coherence/trends` | GET | Nevedal metric trends |
+| `/coherence/user/{id}` | GET | Per-user coherence history |
+| `/wisdom/insights` | GET | Wisdom extraction breakdown |
+| `/me2me/activity` | GET | Me2Me imprint activity |
+| `/social/engagement` | GET | Post analytics trends |
+| `/social/notifications` | GET | Notification breakdown |
+| `/social/heatmap` | GET | Activity heatmap by hour |
+| `/coaching/stats` | GET | Session stats by status |
+| `/coaching/by-coach` | GET | Per-coach performance |
+| `/skyeye/sessions` | GET | SkyEye session summary |
+| `/user/{id}/engagement` | GET | Cross-table user profile |
+| `/query` | POST | Raw SQL (read-only) |
+
+## R2 CDN Worker (`cloudflare/workers/r2-cdn/`)
+
+| Route | Bucket | Cache Profile |
+|---|---|---|
+| `/vault/*` | nate-vault | 30d edge / 7d browser (static), 1h/10m (exports) |
+| `/lake/*` | nate-analytics | 24h edge / 1h browser (Parquet immutable) |
+| `/health` | — | Health check |
+
+## Smart Tiered Cache
+
+Enabled at the zone level (sovereignsanctuary.net). Automatically picks the optimal upper-tier DC nearest to R2 data location (ENAM). Reduces origin pulls to R2 even for cache misses at the edge — the upper-tier DC absorbs them.
+
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `CLOUDFLARE_ACCOUNT_ID` | Used by CDC agent for Pipeline HTTP endpoint |
+| `CLOUDFLARE_API_TOKEN` | Auth for Pipelines + R2 SQL |
+| `R2_CDN_BASE_URL` | `https://cdn.sovereignsanctuary.net` |
+| `R2_ANALYTICS_WAREHOUSE` | R2 SQL warehouse ID |
+
+## Rules
+
+1. **Never query analytics tables directly from PostgreSQL in request handlers** — use the R2 analytics service which routes to R2 SQL.
+2. **CDC agent handles encrypted content** — `conversation_history` rows with `content_encrypted = true` have `user_text` and `ai_text` redacted to empty strings in CDC events. The encrypted columns are never sent to R2.
+3. **Iceberg tables are append-only** — the CDC agent only pushes INSERTs. Updates and deletes are not captured (PostgreSQL remains authoritative for live data).
+4. **CDN URLs use `/vault/` prefix** — `get_cdn_url("avatars/foo.png")` returns `https://cdn.sovereignsanctuary.net/vault/avatars/foo.png`.
+5. **The CDC agent gracefully degrades** — if `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` are not set, it logs a message and does not start.
+6. **Backfill is idempotent** — resetting watermarks and re-pushing rows is safe because Pipeline sinks use append semantics.
+7. **R2 SQL queries use the `sanctuary` namespace** — all tables are under `sanctuary.*` (e.g., `sanctuary.conversation_history`).

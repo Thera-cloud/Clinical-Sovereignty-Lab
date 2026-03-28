@@ -1,0 +1,51 @@
+---
+description: Deployment safety checks - prevent accidental file deletion on server
+alwaysApply: true
+---
+
+# Deployment Safety Rules
+
+## NEVER use rsync --delete
+
+When deploying to the production server (68.183.168.75), **never** use `rsync --delete`. This flag deletes files on the server that don't exist locally, which has previously wiped critical files (Flutter web build assets, dashboard HTML, static files).
+
+- Use `rsync -avz` **without** `--delete` to only add/update files
+- Or use `scp` for targeted file transfers
+
+## Always verify before deploying
+
+Before running any deployment command:
+
+1. **List exactly which files changed** — only deploy those files
+2. **Check for `--delete`, `rm -rf`, `--force`** in any deploy script or command
+3. **Prefer targeted `scp`** over broad `rsync` when only 1-5 files changed
+4. **No backend restart needed** for static HTML/CSS/JS changes (dashboard files served directly by nginx)
+5. **Flutter `updated_screens.dart` changes** require a `flutter build web` + rsync (without --delete) to go live
+
+## Dashboard deploy targets — THREE directories
+
+Dashboard HTML files must be copied to **all three** locations:
+
+| Directory | Purpose |
+|-----------|---------|
+| `/opt/clinical-sovereignty-lab/dashboard/` | Source / Docker bind mount |
+| `/var/www/sovereignsanctuary-web/` | app.sovereignsanctuary.net (client gateway) |
+| `/var/www/sovereign-command/` | command.sovereignsanctuary.net (admin portal — **this is the one nginx actually serves for SkyEye, command.html, etc.**) |
+
+Missing `/var/www/sovereign-command/` causes the admin to see stale/old versions even after deployment.
+
+## NEVER deploy old file versions
+
+When deploying files, **always deploy from the current local workspace**. Never copy files between server directories as a substitute for deploying the latest code — this risks propagating stale versions. The local workspace is the single source of truth.
+
+- Before any `scp` or `rsync`, verify the local file contains the expected changes (e.g., `grep` for a known new string)
+- After deploying, verify the target file on the server contains the changes
+- If a file exists in multiple server directories, deploy to **all** of them in the same command
+
+## Deploy script review
+
+If modifying `deploy.sh`, always double-check:
+- No `--delete` flag on rsync commands
+- No `rm` commands that could remove server files
+- Dashboard HTML is copied to **all three** directories listed above
+- `index.html` from Flutter build is never overwritten by dashboard `index.html`

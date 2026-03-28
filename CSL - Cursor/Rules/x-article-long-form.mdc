@@ -1,0 +1,55 @@
+---
+description: X long-form article integration — virtual platform voice, queue normalization, and article cadence
+globs: backend/app/services/platforms/x_twitter.py,backend/app/services/skyeye_content_generator.py,backend/app/services/skyeye_session_engine.py,backend/app/services/skyeye_chat.py
+alwaysApply: false
+---
+
+# X Long-Form Article Integration
+
+## Architecture
+
+X Articles (100K chars, rich formatting) have no public API. Long-form content on X is published via the same `POST /2/tweets` endpoint, which supports up to **4,000 characters** for X Premium accounts. No separate API or OAuth scope is needed.
+
+## Virtual Platform: `x_article`
+
+`PLATFORM_VOICE["x_article"]` in `skyeye_content_generator.py` is a virtual voice profile (max 4,000 chars, essay-style). It is NOT a real platform in `skyeye_platforms` or `skyeye_platform_tokens`.
+
+### Queue Normalization
+
+`queue_content()` normalizes `x_article` before DB insert:
+
+```python
+if platform == "x_article":
+    platform = "x"          # stored as "x" in skyeye_content_queue
+    content_type = "article" # tagged for post_phase routing
+```
+
+This ensures:
+- The `_post_phase` finds article content when filtering by `platform = 'x'`
+- The `content_type = 'article'` column triggers `ContentType.ARTICLE` in the adapter
+- No new platform adapter, DB table, or token row is needed
+
+## Article Cadence
+
+The session engine generates a long-form article every **3rd X post** (checked over a 72-hour window). The logic in `_create_phase()`:
+
+```python
+if platform == "x":
+    total_x = await self._get_recent_post_count("x", hours=72)
+    if total_x > 0 and total_x % 3 == 0:
+        gen_platform = "x_article"
+```
+
+Articles skip hashtag enrichment (`_append_hashtags`) since long-form content doesn't use hashtags on X.
+
+## Big Nate Chat Detection
+
+Both `generate_content` and `push_chat_to_social` detect article intent via keywords: "article", "long post", "long-form", "essay", "deep dive", "thought piece", "extended". When detected with X as the target platform, `gen_platform` is set to `x_article`.
+
+## Rules
+
+1. **Never add `x_article` to `skyeye_platforms` or `skyeye_platform_tokens`** — it's a content voice profile, not a real platform. The adapter is `XTwitterAdapter` (`platform_name = "x"`).
+2. **Always normalize in `queue_content()`** — any code path that generates article content must pass `platform="x_article"` to `queue_content()`, which handles the `x` -> `article` split.
+3. **The X adapter uses the same endpoint for all content types** — `POST /2/tweets` handles both 280-char tweets and 4,000-char articles. The 4,000-char limit is enforced by X based on the account's Premium status, not by the API.
+4. **Content safety and PII filtering apply equally** to articles. The content generator's `check_content_safety()` and `strip_pii()` run on all generated content regardless of length.
+5. **If X releases an Articles API** in the future, add a `post_article()` method to `XTwitterAdapter` and route `ContentType.ARTICLE` to it. The content generator's `x_article` voice profile and the queue normalization will work unchanged.

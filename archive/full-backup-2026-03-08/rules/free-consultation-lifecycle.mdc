@@ -1,0 +1,73 @@
+---
+description: Free consultation flow spans bridge, backend, and Flutter — daily limit, Zoom auto-end, and session type override
+globs: backend/app/routers/sessions.py, backend/app/websocket/bridge_server.py, mobile/lib/updated_screens.dart, mobile/lib/main.dart
+alwaysApply: false
+---
+
+# Free Consultation Lifecycle
+
+## Overview
+
+Assistant coaches get one free 15-minute consultation per day with their master coach. The flow creates a real `coaching_sessions` row with `payment_status = 'waived'` and `session_type = 'MASTER_CONSULTATION'`, and auto-terminates the Zoom meeting at expiry.
+
+## Flow
+
+```
+Coach Create Session Dialog (toggle ON)
+  → POST /api/sessions/schedule (free_consultation=true)
+  → Backend enforces: 1 per day per assistant, sets duration=15, payment=waived
+  → Zoom meeting created normally
+  → _run_consultation_timer() starts 900s countdown
+  → At 300s remaining: WebSocket "consultation_warning" (5 min)
+  → At 60s remaining: WebSocket "consultation_warning" (1 min)
+  → At 0s: ZoomClient.end_meeting() terminates meeting, WebSocket "consultation_ended"
+  → coaching_sessions.status = 'completed', supervised_hours logged
+```
+
+## Daily Limit Enforcement
+
+The backend checks `coaching_sessions` for existing free sessions today:
+
+```sql
+SELECT COUNT(*) FROM coaching_sessions
+WHERE client_id = $1 AND session_type = 'MASTER_CONSULTATION'
+  AND payment_status = 'waived'
+  AND scheduled_start::date = CURRENT_DATE
+```
+
+If count > 0, returns `400: Free consultation already used today`.
+
+## UI Integration Points
+
+### Coach Dashboard (updated_screens.dart)
+
+- `_openCreateSessionDialog()` shows a "Free Consultation" toggle when `sessionType == "COACH"`
+- `_checkConsultStatus()` calls `GET /api/sessions/consultation-status/{username}` to check daily usage
+- When toggled ON: duration locked to 15 min, `freeConsultation: true` passed to `_scheduleSessionViaApi`
+- Toggle disabled with "Already used today" when `consultUsedToday == true`
+
+### Client Schedule (main.dart)
+
+- `_bookSession()` detects COACH role users and shows `_showFreeConsultationPrompt()`
+- Dialog offers three choices: Free Consultation / Book Paid Session / Cancel
+- If free consultation already used, the "Free Consultation" button is hidden
+
+## Rules
+
+1. **The Consult button was removed from the ASSISTANTS tab** — free consultations are now created exclusively through the Create Session dialog or client booking flow. Never re-add a standalone consultation button.
+2. **Daily limit is per assistant, not per master** — the same assistant cannot have two free consultations in one day regardless of which master they consult with.
+3. **Zoom auto-end is mandatory** — `_run_consultation_timer()` must call `ZoomClient.end_meeting()` at expiry. The timer accepts `zoom_meeting_id` as a parameter.
+4. **Backend is the authoritative limiter** — the Flutter UI checks status for UX only. Even if the UI fails to check, the backend rejects duplicate free consultations.
+5. **Session type override** — when `free_consultation=true`, the backend forces `session_type='MASTER_CONSULTATION'` and `duration_minutes=15` regardless of what the client sends.
+6. **consultation-status endpoint** lives at `GET /api/sessions/consultation-status/{assistant_username}` in `sessions.py`, not in `schedule_api.py`.
+
+## Verification After Changes
+
+```bash
+# Check endpoint exists
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/sessions/consultation-status/audit_coach
+# Expected: 200
+
+# Check free consultation creates correctly
+# POST /api/sessions/schedule with free_consultation=true should set payment_status='waived'
+```

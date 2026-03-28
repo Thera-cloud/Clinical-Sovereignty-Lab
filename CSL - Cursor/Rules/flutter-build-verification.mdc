@@ -1,0 +1,41 @@
+---
+description: Flutter web build verification before deployment
+alwaysApply: true
+---
+
+# Flutter Build Verification
+
+## Always Build Before Deploying
+
+After editing any `.dart` file, run `flutter build web --release` locally before deploying. If the build fails, fix ALL errors before deploying — do not deploy a stale build.
+
+## Capture Errors Efficiently
+
+```bash
+cd mobile && flutter build web --release 2>&1 | grep -E "^lib/|Error:|error:" | head -30
+```
+
+## Known Widget Field Mismatches (Do Not Repeat)
+
+| Widget | Correct Field | Wrong Field |
+|---|---|---|
+| `CoachDashboardScreenV2` | `widget.currentUserProfile` | `widget.profile` |
+| `CommunityMeshScreen` | `profile` only (no `token` param) | `profile` + `token` |
+| `AppConfig` | `AppConfig.apiBaseUrl` | `AppConfig.apiUrl` (does not exist) |
+
+## Design Token Completeness
+
+The `_Design` class in `settings_screen.dart` must include all color tokens from the design system. If code references a missing token, add it — don't remove the reference.
+
+| Token | Value | Notes |
+|---|---|---|
+| `goldDim` | `Color(0xFF8B7355)` | Was missing, caused build failure |
+
+## Deploy Sequence
+
+1. Edit `.dart` files
+2. Run `flutter build web --release` — must succeed
+3. `rsync -avz mobile/build/web/ root@68.183.168.75:/var/www/sovereignsanctuary-web/` (no `--delete`)
+4. `rsync -avz mobile/build/web/ root@68.183.168.75:/var/www/coach-portal/` (no `--delete`)
+5. Verify `flutter_bootstrap.js` in deployed `index.html`
+6. Verify no-cache headers on service worker

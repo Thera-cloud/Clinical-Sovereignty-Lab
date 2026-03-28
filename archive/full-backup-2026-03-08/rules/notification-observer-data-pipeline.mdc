@@ -1,0 +1,70 @@
+---
+description: Notification Observer data pipeline and Growth Dashboard dependency chain
+alwaysApply: true
+---
+
+# Notification Observer Data Pipeline
+
+## Pipeline Flow
+
+```
+NotificationObserver (30min poll via skyeye_platform_tokens)
+  ↓ polls each platform adapter (X, LinkedIn, Instagram, Facebook, YouTube)
+  ↓ stores to
+skyeye_notifications    (likes, reposts, follows, reactions, comments)
+skyeye_post_analytics   (per-post likes/reposts/comments/impressions snapshots)
+skyeye_follower_snapshots (follower count deltas)
+  ↓ consumed by
+Growth Dashboard → Post Performance (7 Days) / Engagement Notifications
+SkyEye Session Engine → React Phase (DMs, reciprocal likes)
+FunnelRouter → social user scoring
+Big Nate Chat → marketing context (top posts, engagement summary)
+```
+
+If the Observer is broken, **all downstream consumers show empty data**.
+
+## Platform Discovery Query
+
+The Observer discovers connected platforms from `skyeye_platform_tokens` (NOT `skyeye_platforms`):
+
+```python
+SELECT platform FROM skyeye_platform_tokens
+WHERE access_token IS NOT NULL AND access_token != ''
+  AND (token_expiry IS NULL OR token_expiry > NOW())
+  AND (error_message IS NULL OR error_message = '')
+```
+
+**Never query `skyeye_platforms` for connection status** — that table has no `status` or `token_status` columns. The token table is the authoritative source for which platforms have valid OAuth credentials.
+
+## skyeye_activity Column Names
+
+The `skyeye_activity` table uses these column names:
+
+| Correct Column | Wrong Assumption |
+|---|---|
+| `type` | `action`, `activity_type` |
+| `content` | `details`, `description` |
+| `created_at` | `timestamp` |
+| `platform` | (correct) |
+
+All INSERT statements targeting `skyeye_activity` must use `type`, `content`, and `created_at`.
+
+## Verification After Observer Changes
+
+After modifying `notification_observer.py`:
+
+1. Deploy and restart backend
+2. Wait 5 minutes (260s stagger + first poll cycle)
+3. Check Observer logs: `docker logs nate_backend 2>&1 | grep -i 'observer' | tail -20`
+4. Verify platforms were polled: `SELECT type, content, created_at FROM skyeye_activity WHERE type = 'notification_observer_cycle' ORDER BY created_at DESC LIMIT 3`
+5. Verify data appeared: `SELECT COUNT(*) FROM skyeye_post_analytics` and `SELECT COUNT(*) FROM skyeye_notifications`
+6. Check Growth Dashboard shows data in "Post Performance (7 Days)"
+
+## Common Failure Modes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "No post analytics yet" on Growth Dashboard | Observer not polling | Check `_get_connected_platforms()` returns platforms |
+| Observer logs "no connected platforms" | Token query returns empty | Verify `skyeye_platform_tokens` has valid rows |
+| Observer starts but no cycle logs | Stagger delay (260s) not elapsed | Wait 5+ minutes after restart |
+| Post analytics table has 0 rows | Observer query uses wrong columns | Verify query matches `skyeye_platform_tokens` schema |

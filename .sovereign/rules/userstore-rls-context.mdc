@@ -1,0 +1,45 @@
+---
+description: UserStore background sync tasks must set RLS admin context before PostgreSQL writes
+globs:
+  - backend/app/websocket/user_store.py
+  - backend/app/websocket/bridge_server.py
+alwaysApply: false
+---
+
+# UserStore RLS Context
+
+## The Problem (Mar 2026 Incident)
+
+The bridge's `UserStore._background_sync_keys()` and `_background_sync()` run as fire-and-forget `asyncio.create_task()`. These tasks inherit the parent's `contextvars` context, but the bridge's main loop never sets `set_rls_admin()`. When RLS policies are active on the `users` table, every `upsert_user()` call fails silently with `new row violates row-level security policy`.
+
+**Impact**: ALL user profiles (33+ accounts) failed to sync to PostgreSQL. The bridge logged `[UserStore] upsert_user failed for <username>: new row violates row-level security policy` for every user, every save cycle.
+
+## Required Pattern
+
+Every `async` method in `UserStore` that acquires a connection and writes to an RLS-protected table must call `set_rls_admin()` at the top:
+
+```python
+async def _background_sync_keys(self, registry, keys):
+    try:
+        from app.services.rls_context import set_rls_admin
+        set_rls_admin()
+    except Exception:
+        pass
+    # ... rest of sync logic
+```
+
+## Rules
+
+1. `_background_sync_keys()` and `_background_sync()` must call `set_rls_admin()` before any `self.pool.acquire()`.
+2. `upsert_user()` itself does NOT need to call it — the caller must set the context.
+3. `save_registry_async()` in `bridge_server.py` already runs in the main handler's context where RLS may be set. But background debounce flushes (`_flush_dirty_keys` → `schedule_sync`) spawn new tasks that need their own RLS context.
+4. Any new method that calls `self.pool.acquire()` in a `create_task()` context must also set RLS admin.
+
+## Verification
+
+After bridge restart, confirm zero RLS failures:
+
+```bash
+docker logs nate_bridge 2>&1 | grep -c 'upsert_user failed'
+# Expected: 0
+```

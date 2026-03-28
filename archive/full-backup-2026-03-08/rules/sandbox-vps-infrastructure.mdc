@@ -1,0 +1,52 @@
+---
+description: Sandbox VPS infrastructure details for the detonation chamber (Layer 6)
+alwaysApply: true
+---
+
+# Sandbox VPS (Detonation Chamber)
+
+## Infrastructure
+
+The detonation sandbox runs on a **dedicated VPS**, not on the production server.
+
+| Property | Value |
+|----------|-------|
+| Public IP | 178.128.178.15 |
+| WireGuard IP | 10.13.13.4 |
+| Sandbox API | http://10.13.13.4:9090 |
+| OS | Ubuntu 24.04 LTS |
+| Python | 3.12 (venv at /opt/sandbox/venv) |
+| Code dir | /opt/sandbox/ |
+| Service | systemd `sandbox-api.service` |
+| Disk | 70GB |
+
+## SSH Access
+
+The VPS public IP is firewalled. SSH only via WireGuard:
+
+- From MacBook: `ssh -J root@68.183.168.75 root@10.13.13.4`
+- From production: `ssh root@10.13.13.4`
+
+## Deploying Code Updates
+
+```bash
+# Copy updated file through production jump host
+scp -o ProxyJump=root@68.183.168.75 backend/app/services/security/<file>.py root@10.13.13.4:/opt/sandbox/<file>.py
+
+# Restart the service
+ssh root@68.183.168.75 "ssh root@10.13.13.4 systemctl restart sandbox-api"
+```
+
+Files deployed to `/opt/sandbox/`:
+- `sandbox_api.py`
+- `detonation_chamber.py`
+- `phishing_link_hunter.py`
+- `phishing_detector.py`
+
+## Critical: No ulimit -v for Chromium
+
+NEVER set `ulimit -v` (virtual memory limit) in any environment running Playwright/Chromium. Chromium's PartitionAlloc reserves 8-16 GB of virtual address space (not physical RAM). A virtual memory cap causes `partition_address_space.cc` to abort on startup. Use Docker `mem_limit` or systemd `MemoryMax` for actual memory enforcement instead.
+
+## Subprocess Python Path
+
+When spawning Python subprocesses (e.g., for detonation), always use `sys.executable` instead of `"python3"` to ensure the correct virtualenv interpreter is used.

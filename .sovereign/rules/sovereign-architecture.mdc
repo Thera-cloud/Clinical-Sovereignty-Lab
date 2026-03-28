@@ -1,0 +1,141 @@
+# Sovereign Swarm Intelligence Framework — 8-Layer Architecture Rule
+
+## Applicability
+This rule applies to ALL files under `backend/app/services/zefcp/`, `backend/app/services/quakete/`, `backend/app/models/`, `backend/app/services/sovereign_mind.py`, `backend/app/routers/big_nate_chat.py`, `backend/app/workers/`, and any file referencing ZEFCP, Quakete, Cosmic Rings, Trail Emission, or the 8-layer stack.
+
+## The Eight-Layer Stack
+
+```
+L8: SWARM SOLIDARITY (Quakete Protocol)     — backend/app/services/quakete/
+L7: EXTERNAL INTEGRATION (SkyEye, Marketing) — backend/app/services/platforms/, routers/
+L6: FORESIGHT (Prediction, Pattern Alerts)   — backend/app/services/foresight_engine.py
+L5: COHERENCE MEASUREMENT (5 nested layers)  — backend/app/services/coherence_engine.py
+L4: SECURITY (Sovereign Immunity)            — backend/app/services/sovereign_immunity.py
+L3: SWARM INTELLIGENCE (Fibres, Wisdom Mesh) — backend/app/fibres/, services/wisdom_mesh.py
+L2: COMMAND (Sovereign Mind, Big Nate Chat)  — backend/app/services/sovereign_mind.py
+L1: PHYSICAL TRANSPORT (ZEFCP)               — backend/app/services/zefcp/
+```
+
+**Information Flow:**
+- Therapeutic session data enters at L5
+- External cultural signals enter at L7
+- Fibre field observations enter at L1 (ZEFCP) → L3 (Wisdom Mesh) → L2 (Sovereign Mind)
+- When Fibres struggle, L8 (Quakete) activates
+- Strategic directives flow downward from L2 through L3 to all layers
+- Security (L4) wraps every inter-layer message
+
+## Four Autonomous Loops
+
+- **Loop A (Observe→Publish):** SkyEye → Cultural Sentinels → Campaign Fibres → Publish → Measure → Refine
+- **Loop B (Engage→Convert):** Content → Quiz → SendGrid drip → Golden Ticket → Enrich coherence
+- **Loop C (Observe→Approve):** Sovereign Mind → Proposal → SendGrid/Twilio → Approve → Execute → Learn
+- **Loop D (Trail→Rescue):** Trail emission → Trail Map → Quakete activate → Donate → Accelerate → Rescue
+
+## 26 Patent Claims → Code Mapping
+
+| # | Claim | Primary Code |
+|---|-------|-------------|
+| 1 | Therapeutic Swarm Architecture | fibre_manager.py, base_fibre.py, sovereign_mind.py |
+| 2 | Wisdom Mesh Distributed Sync | wisdom_mesh.py, convergence.py |
+| 3 | Fibre Lifecycle + Wisdom Absorption | fibre_manager.py, sovereign_mind.absorb_fibre_wisdom() |
+| 4 | Immutable Ethical Core | base_fibre.FrozenEthicalCore |
+| 5 | Sovereign Immunity Protocol | sovereign_immunity.py, identity_chain.py |
+| 6 | Transgenerational Pattern Engine | pattern_engine.py |
+| 7 | Cultural Coherence Gap | cultural_incoherence.py |
+| 8 | Five-Layer Coherence Architecture | coherence_engine.py |
+| 9 | Foresight Engine | foresight_engine.py |
+| 10 | Human-Swarm Collaboration | coach_support.py, base_fibre.py mirroring |
+| 11 | Big Nate Chat Command Protocol | big_nate_chat.py, sovereign_mind.py |
+| 12 | Cultural Sentinel Architecture | cultural_sentinel.py |
+| 13 | Legacy Vault | legacy_vault.py |
+| 14 | Communication Overload Management | wisdom_mesh.py hierarchical topology |
+| 15 | Mirroring + Statistical Growth | base_fibre.py mirroring properties |
+| 16 | Quiz-to-Golden-Ticket Pipeline | quiz_funnel.py, marketing routers |
+| 17 | Inside/Outside Coherence Bridge | cultural_incoherence.py dual-signal |
+| 18 | Autonomous Strategy Proposal | sovereign_mind.generate_proposal() |
+| 19 | Swarm Consensus Validation | sovereign_immunity.validate_consensus() |
+| 20 | Token Budget + Graceful Degradation | base_fibre.py budget enforcement |
+| 21 | Graduated Autonomy | fibre_manager.py promotion system |
+| 22 | Evolution Journal Absorption | sovereign_mind.absorb_fibre_wisdom() |
+| 23 | Predictive Pattern Activation Alerts | foresight_engine.py + pattern_engine.py |
+| 24 | Global Coherence Index | coherence_engine.py Layer 5 |
+| 25 | Zero-Energy Parasitic BLE Communication | zefcp/ entire package |
+| 26 | Quakete Collisionless Solidarity Protocol | quakete/ entire package |
+
+## ZEFCP Specification (Layer 1)
+
+**Package:** `backend/app/services/zefcp/`
+
+**Fragment Structure (Extended 12 bytes):**
+```
+Leading [6B]: SIG | OBS_ID | SEQ | TOTAL | FLAGS | EPOCH
+Trailing [6B]: PAYLOAD[5] | CHK
+```
+
+**SIG Rotation:** `HMAC-SHA256(swarm_secret, epoch_minute // 15)[0]` — accept current ± 1 period
+
+**False Positive Rate:** 0.00228% (SIG 1.17% × CRC 0.39% × structural 50%)
+
+**Reconstruction Threshold:** 70% of fragments via Reed-Solomon GF(2^8)
+
+**Encryption:** AES-128-CTR, HKDF key derivation per observation, Ed25519 signature verification
+
+**Capacity:** 800 bytes/min at 200 handshakes/min in urban environment
+
+## Quakete Specification (Layer 8)
+
+**Package:** `backend/app/services/quakete/`
+
+**Quakete Coherence (Nevedal Bridge):**
+```
+C_quakete = E_swarm × T_mesh × (1 - γ_comm) × G_load
+ω_q = C_quakete × √(1 - γ_comm) × (1 / d_isolation)
+η = exp(-|ω_donor - ω_recipient|² / 2σ²)
+```
+
+**Three-Cord Solidarity:** Cosmic Relational Rings group exactly 3 Fibres. All pairwise coupling > 0.5. If one weakens, two lift.
+
+**Lorentz Acceleration Caps:** detection 3×, embedding 2×, assembly 2×, forwarding 3×
+
+**Particle Beam:** 5-minute half-life exponential decay
+
+**Trail Emission:** 60-second intervals, TRAIL_FLAG_MASK = 0b10000000
+
+**Ring Circulation:** 10% surplus donation, 30-second cycles
+
+**QuaketeMode enum:** NOMINAL, SURPLUS, REQUESTING, DONATING, CRITICAL, SILENT
+
+## Build Order (Critical Path)
+
+```
+Identity Chain → BaseFibre → Fibre Manager → All Fibre Types
+       ↓
+Wisdom Mesh → Convergence → Foresight
+       ↓
+MicroFragment → Spider Web → Fragment Buffer → ZEFCP Bridge
+       ↓
+Trail Emission → Trail Map → Resonance → Rings → Quakete Transfer
+       ↓
+Nevedal Formula → Coherence Engine → Cultural Incoherence → Foresight
+```
+
+## Test Coverage Requirements
+
+| Area | Minimum | Mandatory 100% |
+|------|---------|----------------|
+| Security services | 95% | SovereignImmunity, IdentityChain, FrozenEthicalCore |
+| BaseFibre | 90% | ethical_compliance, budget enforcement |
+| ZEFCP pipeline | 90% | Fragment roundtrip, reassembly, rotation |
+| Quakete protocol | 90% | Transfer lifecycle, ring circulation, memorial |
+| Coherence engine | 85% | Anonymization threshold enforcement |
+| All other services | 80% | — |
+
+## Coding Conventions for New Packages
+
+- All models use Pydantic v2 with strict type hints
+- Services are async classes with `__init__(self, db_pool, redis, ...)` signatures
+- Use `structlog` for logging with context-rich fields
+- Import config from `app.swarm_config import swarm_settings`
+- Every service file includes a docstring citing the relevant patent claim(s)
+- ZEFCP/Quakete constants go in their respective `constants.py` files
+- Use `from app.models.zefcp import ...` and `from app.models.quakete import ...` for model imports

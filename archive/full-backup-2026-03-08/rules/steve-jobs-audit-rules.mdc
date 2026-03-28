@@ -1,0 +1,173 @@
+# Steve Jobs Audit Rules
+
+Every rule below was discovered during the 158-test Steve Jobs Full Audit. Each prevented a production issue or caught a regression.
+
+## Rule 1: NotificationSystem Must Use Absolute DATA_DIR Path
+
+When creating a `NotificationSystem` instance in `main.py`, always use `os.environ.get("DATA_DIR", "/app/data")` — never the relative fallback `"data/bridge"`.
+
+```python
+# BAD — relative path fails in Docker with read-only mounts
+NotificationSystem(data_dir="data/bridge", ...)
+
+# GOOD — absolute path consistent with Docker DATA_DIR
+NotificationSystem(data_dir=os.environ.get("DATA_DIR", "/app/data"), ...)
+```
+
+**Why**: The relative path `data/bridge` resolves to `/app/app/data/bridge` inside Docker, which is under the read-only source code bind mount. This caused `session_memory`, `token_renewal_agent`, and `nate_checkin_agent` to fail init (3/93 services degraded).
+
+**Also**: Always set `app.state.notification_system = _notify_sys` after creating a new instance so later agents reuse it instead of creating their own.
+
+## Rule 2: Auditor _test_endpoint Must Handle Non-JSON Responses
+
+Auditor `_test_endpoint()` methods must not assume all 200 responses are JSON. Endpoints like CSV downloads (`/api/corp/template/download`, `/api/corp/engagement-report`) return `text/csv`.
+
+```python
+# BAD — throws ContentTypeError on CSV responses → FAILED
+body = await resp.json() if code == 200 else {}
+
+# GOOD — check content-type before parsing
+ct = resp.headers.get("content-type", "")
+if "json" in ct:
+    body = await resp.json()
+    if isinstance(body, dict) and len(body) == 0:
+        return "WARNING"
+```
+
+**Why**: The Corporate Command auditor reported 10/12 TRUSTED because two CSV endpoints were classified as FAILED (exception during JSON parse) instead of TRUSTED.
+
+## Rule 3: Docker Volume Mounts Must Match docker-compose.prod.yml
+
+The running container's mounts are determined at creation time. Changes to `docker-compose.prod.yml` require `docker compose up -d` (recreate), not `docker restart`.
+
+| Correct Backend Mounts | Purpose |
+|---|---|
+| `./data/backend:/app/data` (rw) | Writable backend data |
+| `./data/bridge:/app/bridge_data:ro` | Read-only bridge metrics |
+| `./backend/app:/app/app:ro` | Read-only source code |
+| `backend_logs:/app/logs` (rw) | Writable logs |
+
+**Verify after any compose change**:
+
+```bash
+docker inspect nate_backend --format "{{range .Mounts}}{{.Destination}} -> {{.Source}} ({{.Mode}}){{println}}{{end}}"
+```
+
+If `/app/data` maps to `data/bridge` instead of `data/backend`, the container is stale. Recreate it.
+
+## Rule 4: profile_data JSONB Must Stay in Sync with Indexed Columns
+
+The `data_uniformity_tracer` checks 3 sync fields that commonly drift:
+
+| Field | Authoritative Source | JSONB Copy |
+|---|---|---|
+| `total_sessions_count` | `COUNT(*) FROM sessions WHERE user_id = u.id` | `profile_data->>'total_sessions_count'` |
+| `token_balance` | `users.token_balance` column | `profile_data->>'token_balance'` |
+
+When updating either source directly (via SQL or API), always update both. The bridge upsert uses `jsonb_set` to patch `token_balance` back, but `total_sessions_count` has no automatic sync.
+
+**Remediation query** (safe to run anytime):
+
+```sql
+-- Sync session counts
+UPDATE users u
+SET profile_data = jsonb_set(
+  COALESCE(profile_data, '{}'::jsonb),
+  '{total_sessions_count}',
+  to_jsonb(COALESCE(s.cnt, 0))
+)
+FROM (SELECT user_id, COUNT(*) AS cnt FROM sessions GROUP BY user_id) s
+WHERE s.user_id = u.id AND u.role = 'CLIENT'
+  AND COALESCE((u.profile_data->>'total_sessions_count')::int, 0) != s.cnt;
+```
+
+## Rule 5: Trust Baseline Must Match Auditor TAB_ENDPOINTS Count
+
+After adding endpoints to any auditor's `TAB_ENDPOINTS`, update the `trust_baseline` row:
+
+```bash
+# Count actual endpoints
+python3 -c "
+exec(open('backend/app/services/<auditor>.py').read())
+print(sum(len(t['endpoints']) for t in TAB_ENDPOINTS))
+"
+
+# Update baseline
+docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+  "UPDATE trust_baseline SET parameter_value = jsonb_set(parameter_value, '{expected}', 'N') WHERE parameter_key = '<key>'"
+```
+
+**Why**: The corporate_command_auditor grew from 12 to 25 endpoints but the baseline stayed at 21. The Trust Enforcer flagged this as a DATA_PIPELINE mismatch.
+
+## Rule 6: 93/93 Service Health Is the Target
+
+The backend reports `STARTUP COMPLETE: N/93 services healthy`. Any number below 93 is degraded. Common causes:
+
+| Degraded Service | Root Cause | Fix |
+|---|---|---|
+| session_memory | DATA_DIR unset, writable volume missing | Set `DATA_DIR=/app/data`, ensure `./data/backend:/app/data` mount exists |
+| token_renewal_agent | NotificationSystem init fails (read-only path) | Use absolute path fallback `/app/data` |
+| nate_checkin_agent | Same as token_renewal_agent | Same fix |
+
+After any `main.py` change, verify: `docker logs nate_backend --since 2m 2>&1 | grep "STARTUP COMPLETE"`
+
+## Rule 7: QuickBooks WARNINGs Are Expected Pre-Integration
+
+The QuickBooks auditor runs 10 checks. 4 are expected WARNINGs when no QuickBooks OAuth connection exists:
+
+| Check | Expected State |
+|---|---|
+| `qb_connection_exists` | WARNING until QB is connected |
+| `qb_token_not_expired` | WARNING until QB is connected |
+| `last_sync_within_12h` | WARNING until first sync runs |
+| `sync_log_has_entries` | WARNING until first sync completes |
+
+These 4 WARNINGs do NOT indicate bugs. They auto-resolve when QuickBooks OAuth is configured and a sync completes.
+
+## Rule 8: Schema Errors to Monitor vs Ignore
+
+After every backend restart, check for schema errors:
+
+```bash
+docker logs nate_backend --since 2m 2>&1 | grep "does not exist" | sort -u
+```
+
+**Known pre-existing (ignore)**:
+- `me2me_*` tables — Me2Me feature not yet migrated
+- `metered_billing_state` — Future billing feature
+- `hive_ct_scan_metrics.scan_number` — Hive worker column drift
+- `hive_backup_audit_reports.audit_number` — Same
+- `hive_forensic_logs.record_id` — Same
+
+**Requires investigation**:
+- `column "metric_type" does not exist` — nevedal_coherence query
+- `column "session_id" does not exist` — load_sessions_pg
+- `operator does not exist: uuid = text` — DEADMAN type mismatch
+- `column "username" does not exist` — QuickBooks sync agent
+
+These are schema mismatches between code and database. Each needs either a migration (add the column) or a code fix (use the correct column name).
+
+## Audit Summary (Feb 28, 2026)
+
+| Phase | Tests | Result |
+|---|---|---|
+| 1. First Contact | 12 | PASS (completed prior) |
+| 2. Client Experience | 19 | PASS — all client endpoints 200 |
+| 3. Coach Experience | 19 | PASS — hierarchy, sessions, billing all 200 |
+| 4. Family Experience | 11 | PASS — members, vault, approvals |
+| 5. Money | 23 | PASS — all 23 billing endpoints 200 |
+| 6. SkyEye | 16 | PASS — all 16 endpoints 200 |
+| 7. Sovereign Command | 14 | PASS — all 14 admin endpoints 200 |
+| 8. Security | 14 | PASS — WebAuthn, TOTP, SMS, Hive all 200 |
+| 9. Infrastructure | 14 | FIXED — 93/93 services, bridge PG connected |
+| 10. Liminal Presence | 5 | PASS — 3/3 agents, Sentinel YELLOW |
+| 11. Edge Cases | 9 | PASS — DB pool active, tables populated |
+| 12. App Store Compliance | 8 | PASS — privacy, terms, deletion, all 4 domains 200 |
+
+**Fixes Applied**:
+1. NotificationSystem path fallback: `"data/bridge"` → `"/app/data"` (3 services)
+2. Corporate Command auditor: CSV response handling in `_test_endpoint`
+3. Docker volume mount: Recreated backend with correct `./data/backend:/app/data` mount
+4. Data uniformity: Synced `total_sessions_count` for audit_client and jaimecarpenter
+5. Data uniformity: Synced `token_balance` JSONB with column values
+6. Trust baseline: Updated `corporate_command_check_count` to 25

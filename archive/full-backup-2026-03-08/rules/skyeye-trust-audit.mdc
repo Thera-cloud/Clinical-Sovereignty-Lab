@@ -1,0 +1,51 @@
+---
+description: SkyEye Tab Trust Audit — 20 tabs, 58 endpoints, 100% trust required
+alwaysApply: true
+---
+
+# SkyEye Tab Trust Audit
+
+The `SkyEyeTabAuditor` agent (`backend/app/services/skyeye_tab_auditor.py`) tests all 58 API endpoints across the 20 SkyEye dashboard tabs 3x daily (5am/5pm/11pm UTC) and emails a trust scorecard to `support@sovereignsanctuary.net`.
+
+## 20 Tabs (58 Endpoints)
+
+| Tab | Name | Endpoints | Router |
+|-----|------|-----------|--------|
+| 1 | Command Center | engine-status, pulse, overview, sessions, activity, platforms, platform-status | skyeye_api.py |
+| 2 | Platform Grid | platforms, platform-health | skyeye_api.py |
+| 3 | Activity Feed | activity?limit=100 | skyeye_api.py |
+| 4 | Approval Queue | approvals | skyeye_api.py |
+| 5 | Compliance | compliance | skyeye_api.py |
+| 6 | Drip Bridge | drip-suggestions | skyeye_api.py |
+| 7 | History | history | skyeye_api.py |
+| 8 | Big Nate Chat | chat, chat/archives | skyeye_api.py |
+| 9 | Go Live | livestream/status, livestream/history, livestream/scheduler/config | skyeye_api.py |
+| 10 | Expressions Wall | expressions, expressions/pending | skyeye_api.py |
+| 11 | Content Queue | content-queue, platform-status, moderation-summary, dns-check | skyeye_api.py |
+| 12 | Growth Dashboard | marketing/results, marketing/funnel-stats, marketing/actions, marketing/post-analytics, marketing/notifications | marketing_api.py |
+| 13 | Marketing Brain | marketing/playbook, marketing/actions?status=proposed | marketing_api.py |
+| 14 | Funnel Pipeline | marketing/funnel-stats?days=7 | marketing_api.py |
+| 15 | Quiz Factory | marketing/quiz-factory/generate (POST) | marketing_api.py |
+| 16 | Showcase Generator | marketing/showcase/generate (POST) | marketing_api.py |
+| 17 | Campaigns | skyeye/campaigns | skyeye_api.py |
+| 18 | Swarm | coherence/pulse, fibres, mesh/health | coherence_api.py, fibre_api.py |
+| 19 | Threat Dropbox | hive-defense/v4/threat-dropbox/hunts | hive_defense_api.py |
+| 20 | Hive Defense | 18 hive-defense/* endpoints (defcon, mirror, gate, curiosity, heartbeat, drift, containment, quarantine, ghost, helix, projection, conservation, attackers, forensics, inverted-spaces, namespaces, defcon/history, overview) | hive_defense_api.py |
+
+## Trust Criteria
+
+- **TRUSTED**: GET returns 200; POST returns 200 or 422 (valid input validation)
+- **WARNING**: 4xx other than 422 on POST
+- **FAILED**: 5xx or timeout
+
+## Rules
+
+1. **New SkyEye tabs must be added to `TAB_ENDPOINTS`** in `skyeye_tab_auditor.py`. If a tab is added to `skyeye.html`, its endpoints must also be registered in the auditor so the denominator increases.
+
+2. **New endpoints on existing tabs must also be added** to the matching tab entry in `TAB_ENDPOINTS`.
+
+3. **Auth token resolution**: The auditor scans Redis for a valid admin bridge token (`nate:{env}:auth:*` keys containing `ADMIN`). If no admin is logged in, the audit will show 403s. Ensure at least one admin session exists or set `SKYEYE_AUDIT_TOKEN` in `.env`.
+
+4. **Manual trigger**: `POST /api/admin/skyeye-audit/send` fires an immediate scorecard from the live process.
+
+5. **Target is 58/58 TRUSTED (100%)**. Any scorecard below 100% means an endpoint is broken and must be investigated.

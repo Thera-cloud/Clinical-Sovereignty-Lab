@@ -1,0 +1,81 @@
+---
+description: Rules for the 14 Hive Defense workers — DEFCON-aware interval scaling, coordination, event bus, table naming
+globs: backend/app/workers/**/*.py, backend/app/services/security/**/*.py
+alwaysApply: false
+---
+
+# Hive Defense Worker Rules
+
+## The 14 Hive Defense Workers
+
+| Worker | Default Interval | DEFCON-Scaled | Role |
+|--------|-----------------|---------------|------|
+| HeartbeatMonitor | 60s | Yes (5s at D1) | Entity liveness verification |
+| CuriosityScanner | 300s | Yes (30s at D1) | Mirror reflection probes |
+| TrapMonitor | 120s | No (fixed) | InfiniteMirrorTrap lifecycle |
+| DefconEvaluator | 30s | No (fixed) | Central DEFCON state machine |
+| CanaryMonitor | 60s | Yes (5s at D1) | Decoy credential access detection |
+| CdsComputation | 600s | Yes (30s at D1) | Cumulative Drift Score recompute |
+| BackupAudit | 86400s | No (daily) | Backup integrity verification |
+| ProjectionMonitor | 30s | No (fixed) | Projected Helix management |
+| QuarantineEvaluator | 120s | Yes (15s at D1) | Post-birth Fibre quarantine |
+| SnapshotComparison | 86400s | No (daily) | Behavioral drift analysis |
+| TriangleMonitor | 30s | No (fixed) | Triangular mirror spaces |
+| BirthRateMonitor | 30s | Yes (5s at D1) | Fibre birth anomaly detection |
+| ConservationAudit | 60s | Yes (5s at D1) | Quakete energy conservation |
+| CommunityWarning | varies | No | Community safety alerts |
+| CTMonitor (via worker) | 900s | Yes (60s at D1) | Certificate Transparency scanning |
+
+## DEFCON Interval Scaling
+
+Workers marked "DEFCON-Scaled" must read the current level each iteration:
+
+```python
+DEFCON_INTERVALS = {5: base, 4: int(base*0.75), 3: int(base*0.5), 2: int(base*0.25), 1: int(base*0.1)}
+```
+
+Non-defense agents (Token, Billing, Briefing, Marketing, Insight) do **not** scale with DEFCON.
+
+## DefconEvaluator Is the State Machine
+
+- Only `DefconEvaluatorWorker` transitions DEFCON levels — other workers propose via events
+- 4-hour hold on de-escalation (prevents flapping)
+- DEFCON 1 (CRITICAL) triggers Sovereign Fall Command
+- All level changes persist to `hive_defcon_transitions` AND `audit_log`
+
+## Event Bus Pattern
+
+Workers communicate via events, not direct calls:
+
+- `hive.birth.anomaly_detected` → DefconEvaluator considers escalation
+- `hive.trap.attacker_disengaged` → TrapMonitor lifecycle
+- `hive.conservation.violation` → immediate DEFCON escalation candidate
+- `hive.canary.triggered` → DEFCON 2 escalation
+
+## Table Naming
+
+All Hive Defense tables use the `hive_` prefix:
+
+- `hive_defcon_state`, `hive_defcon_transitions`, `hive_defcon_triggers`
+- `hive_heartbeats`, `hive_heartbeat_metrics`
+- `hive_curiosity_scan_metrics`
+- `hive_birth_events`, `hive_birth_rate_metrics`
+- `hive_drift_scores`, `hive_cds_metrics`
+- `hive_behavioral_snapshots`
+- `hive_ct_scan_metrics`
+- `hive_infinite_mirror_traps`, `hive_trap_state_snapshots`, `hive_trap_monitor_metrics`
+- `hive_quarantine_records`
+- `hive_canary_metrics`
+- `hive_projection_metrics`
+
+New Hive tables must follow this prefix. Never mix Hive data into non-Hive tables.
+
+## CuriosityProtocol Is the Shared Escalation Path
+
+Multiple workers feed entities into `curiosity_protocol.evaluate_entity()`:
+
+- HeartbeatMonitor (anomalous heartbeat patterns)
+- CdsComputation (drift threshold breach)
+- CuriosityScanner (failed mirror tests)
+
+Do not duplicate evaluation logic — always route through CuriosityProtocol.

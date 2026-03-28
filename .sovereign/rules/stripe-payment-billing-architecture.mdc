@@ -1,0 +1,66 @@
+---
+description: Stripe payment, billing, and corporate pricing architecture rules
+alwaysApply: true
+---
+
+# Stripe Payment & Billing Architecture
+
+## Stripe Price ID Environment Variables
+
+All Stripe prices use `STRIPE_PRICE_*` env vars. The code reads these at import time in `stripe_integration.py` and `billing.py`. After adding or changing a Price ID in `.env`, restart the backend container.
+
+| Category | Env Var | Type |
+|---|---|---|
+| Inner Chamber Monthly | `STRIPE_PRICE_INNER_CHAMBER` | Subscription |
+| Inner Chamber Annual | `STRIPE_PRICE_INNER_CHAMBER_ANNUAL` | Subscription |
+| Sovereign Circle Monthly | `STRIPE_PRICE_SOVEREIGN_CIRCLE` | Subscription |
+| Sovereign Circle Annual | `STRIPE_PRICE_SOVEREIGN_CIRCLE_ANNUAL` | Subscription |
+| 7 DOJO tiers | `STRIPE_PRICE_DOJO_{THERAPIST,JUDGE,...}` | Subscription |
+| 4 Token Packs | `STRIPE_PRICE_TOKEN_{LIGHT,STANDARD,POWER,ULTIMATE}` | One-time |
+| Coaching Monthly | `STRIPE_PRICE_COACHING_MONTHLY` | Subscription |
+| Family Monthly | `STRIPE_PRICE_FAMILY_MONTHLY` | Subscription |
+
+## Price ID Format
+
+- Always starts with `price_` (not `prod_`)
+- `prod_` is a Stripe Product ID — never use it in `STRIPE_PRICE_*` env vars
+- Each Price ID must be unique — never assign the same `price_` to two different env vars
+
+## Payment Flows
+
+| Flow | Stripe Object | Handler |
+|---|---|---|
+| Subscription (tier/DOJO) | `Checkout Session` (mode=subscription) | `stripe_integration.create_checkout_session` |
+| Token Pack purchase | `Checkout Session` (mode=payment) | `stripe_integration.create_checkout_session` |
+| Token sharing fee ($5/10k) | `PaymentIntent` | `gkm_api.initiate_token_share` |
+| Payment method setup | `SetupIntent` | `billing.create_setup_intent` |
+| Corporate platform billing | `Subscription` | `stripe_integration.create_corporate_subscription` |
+
+## Webhook Events
+
+`stripe_integration.py` handles these webhook events:
+
+| Event | Action |
+|---|---|
+| `checkout.session.completed` | Credit tokens or activate subscription |
+| `customer.subscription.updated` | Sync tier changes |
+| `customer.subscription.deleted` | Downgrade to Threshold |
+| `invoice.payment_failed` | Flag account |
+
+## Corporate Pricing Model (Hybrid)
+
+Defined in `CORPORATE_TIERS` and `EMPLOYEE_SUBSCRIPTION_PRICES` in `stripe_integration.py`:
+
+- **Platform fee**: Flat monthly (Starter $299, Growth $799, Enterprise $1,999)
+- **Employee subsidy**: Company pays 25–100% of each employee's subscription
+- `calculate_subsidized_rate(tier, pct)` returns company/employee split
+
+## Rules
+
+1. **Never hardcode price amounts** — always read from Stripe Price IDs or `STRIPE_PRICE_*` env vars
+2. **Every new billable product needs 3 things**: Stripe Product+Price in dashboard, env var in `.env`, code reference in `stripe_integration.py`
+3. **Token pack prices live in two places** — `TOKEN_PACKS` dict (fallback) and Stripe Price IDs (authoritative when set)
+4. **Pricing change notifications** — `_notify_pricing_change()` in `stripe_integration.py` emails `support@sovereignsanctuary.net` when any price config is modified programmatically
+5. **Subsidy percentage has a floor of 25%** — enforced by DB CHECK constraint and `calculate_subsidized_rate()`
+6. **Corporate SetupIntents support both card and bank** — `payment_method_types` varies by `type` param
+7. **Client/Coach payment methods** use `PaymentMethodsScreen` in Flutter, which calls `/api/billing/setup-intent` and `/api/billing/payment-methods`

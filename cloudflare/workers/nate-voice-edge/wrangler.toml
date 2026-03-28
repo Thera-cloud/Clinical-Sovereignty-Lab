@@ -1,0 +1,28 @@
+name = "nate-voice-edge"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "VOICE_STATE"
+id = "9e7c13aca09d489faa5ce30b87333aaa"
+
+[[r2_buckets]]
+binding = "VOICE_STORE"
+bucket_name = "nate-vault"
+
+[vars]
+SOVEREIGN_API = "https://api.sovereignsanctuary.net"
+SOVEREIGN_INFERENCE = "https://api.sovereignsanctuary.net"
+SOVEREIGN_TTS = "https://api.sovereignsanctuary.net"
+# Cloudflare Realtime — TURN + SFU + MoQ
+TURN_TOKEN_ID = "17704023fbb65016f12abb900048b359"
+SFU_APP_ID = "8d23ce5179380706d203fd16e1b88a1a"
+MOQ_ENDPOINT = "draft-14.cloudflare.mediaoverquic.com"
+# TURN_API_TOKEN, SFU_API_TOKEN, COHERENCE_HMAC_SECRET set via `wrangler secret put`

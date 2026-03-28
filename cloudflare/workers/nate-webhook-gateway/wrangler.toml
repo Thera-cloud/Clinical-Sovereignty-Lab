@@ -1,0 +1,18 @@
+name = "nate-webhook-gateway"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+[[kv_namespaces]]
+binding = "WEBHOOK_STATE"
+id = "9e7c13aca09d489faa5ce30b87333aaa"
+
+[[r2_buckets]]
+binding = "WEBHOOK_ARCHIVE"
+bucket_name = "nate-vault"
+
+[vars]
+SOVEREIGN_API = "https://api.sovereignsanctuary.net"

@@ -1,0 +1,38 @@
+---
+description: Prevent Flutter index.html from being overwritten by dashboard HTML during deployment
+alwaysApply: true
+---
+
+# Flutter index.html Protection
+
+## Rule
+
+The file `/var/www/sovereignsanctuary-web/index.html` is the **Flutter web app bootstrap** (≈1.5KB). It loads `flutter_bootstrap.js` which loads `main.dart.js` — this is the client gateway at `app.sovereignsanctuary.net` with the 3 role buttons (Client, Coach, Admin).
+
+**NEVER overwrite this file** with a dashboard HTML page (e.g., Sovereign Command login, `command.html`, `skyeye.html`).
+
+## What Goes Where
+
+| Directory | `index.html` purpose | Size |
+|---|---|---|
+| `/var/www/sovereignsanctuary-web/` | Flutter app bootstrap (role chooser gateway) | ~1.5KB |
+| `/var/www/sovereign-command/` | Sovereign Command admin login page | ~37KB |
+
+## How This Breaks
+
+Dashboard deploy scripts that copy `*.html` files to `/var/www/sovereignsanctuary-web/` can accidentally overwrite `index.html` if a dashboard page is named (or renamed to) `index.html`. When this happens, `app.sovereignsanctuary.net` shows the admin login instead of the Flutter app — clients and coaches cannot log in.
+
+## Deploy Safeguards
+
+1. **Never `rsync --delete`** dashboard HTML into `/var/www/sovereignsanctuary-web/` — this is already covered by `deployment-safety.mdc`
+2. **Never copy `command.html` as `index.html`** into the app web root
+3. **After any dashboard deploy**, verify: `grep 'flutter_bootstrap' /var/www/sovereignsanctuary-web/index.html` — must match
+4. **After any Flutter build deploy**, the build's own `index.html` (from `mobile/build/web/`) is the correct file to place there
+5. **If `index.html` is >5KB** in `/var/www/sovereignsanctuary-web/`, it's wrong — the Flutter bootstrap is ~1.5KB
+
+## Recovery
+
+```bash
+# Restore from Flutter build:
+cp /opt/clinical-sovereignty-lab/mobile/build/web/index.html /var/www/sovereignsanctuary-web/index.html
+```

@@ -1,0 +1,54 @@
+---
+description: All auditors must use the same TRUSTED status codes and log per-check detail for post-mortem diagnosis
+globs: backend/app/services/*_auditor.py
+alwaysApply: false
+---
+# Auditor Status Code & Logging Consistency
+
+## Canonical TRUSTED Status Codes
+
+Every auditor's `_test_endpoint` method must classify HTTP responses identically:
+
+| Status Code | Classification | Rationale |
+|---|---|---|
+| 200 | **TRUSTED** | Endpoint healthy |
+| 400 | **TRUSTED** | Endpoint exists, validates input |
+| 404 | **TRUSTED** | Endpoint exists, resource not found (expected for probe requests) |
+| 422 | **TRUSTED** | Endpoint exists, Pydantic validation rejected empty payload |
+| 401, 403 | WARNING | Auth problem — token may be expired |
+| 405 | WARNING | Wrong HTTP method — code bug |
+| 5xx | FAILED | Server error — endpoint broken |
+| Timeout | FAILED | Endpoint unresponsive |
+
+### Required Implementation
+
+```python
+if code in (200, 400, 404, 422):
+    status = "TRUSTED"
+elif 400 <= code < 500:
+    status = "WARNING"
+else:
+    status = "FAILED"
+```
+
+**Never** use a stricter subset (e.g., only 200 + 422). The Hardware Security Auditor used `200 + 422` only, causing its `delete-key` endpoint (which returns 404 for non-matching key prefix) to be classified as WARNING instead of TRUSTED.
+
+## When Creating a New Auditor
+
+Copy `_test_endpoint` from `token_lab_auditor.py` (the reference implementation) rather than writing it from scratch. This ensures status code classification stays consistent.
+
+## Per-Check Detail Logging
+
+Auditors must log individual check results, not just the summary count. When writing audit results to `skyeye_activity`, include the full results array:
+
+```python
+import json
+detail = json.dumps({
+    "trusted": trusted_count,
+    "total": total_count,
+    "results": [{"id": r["id"], "status": r["status"], "detail": r["detail"]} for r in results]
+})
+await self._log_activity("system", "my_audit_sent", detail, "success")
+```
+
+Without per-check detail, diagnosing which specific check failed requires reproducing the audit manually — which is only possible during audit hours.

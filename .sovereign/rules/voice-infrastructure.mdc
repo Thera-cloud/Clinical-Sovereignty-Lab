@@ -1,0 +1,137 @@
+# Voice Infrastructure Architecture
+
+## Overview
+
+Little Nate's carrier-grade voice system supports live phone calls, in-app voice chat, and real-time coaching. The infrastructure uses a distributed worker pool model with tier-based routing and admission control for concurrent session management.
+
+## Core Components
+
+| Component | File | app.state Key | Purpose |
+|---|---|---|---|
+| AdmissionController | `admission_controller.py` | `admission_controller` | Semaphore-based concurrent session limiter + queue |
+| DistributedVoicePool | `distributed_voice_pool.py` | `voice_pool` | STT + TTS worker node management via Redis queues |
+| VoiceRouter | `voice_router.py` | `voice_router` | Tier-based routing (cheap vs premium voice pipeline) |
+| VoicePipelineOptimizer | `voice_pipeline_optimizer.py` | `voice_pipeline_optimizer` | Sentence-level TTS streaming for low-latency first-byte |
+
+## Admission Controller
+
+Controls how many concurrent voice sessions the system accepts.
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `DEFAULT_MAX_CONCURRENT` | 200 | Maximum simultaneous sessions per node |
+| `SESSION_AFFINITY_TTL` | 3600s | Redis key TTL for session-to-node pinning |
+| `QUEUE_POLL_INTERVAL` | 2.0s | How often queued sessions check for availability |
+
+**Health methods:**
+- `health()` → `{status, active, capacity, available}`
+- `get_status()` → `{node_id, max_concurrent, active_sessions, available_slots, queue_depth, utilization_pct, accepting_new, total_served, total_rejected}`
+
+**Rule**: If `utilization_pct > 90%`, the system is near capacity. If `accepting_new` is `false`, new sessions are being queued or rejected.
+
+## Distributed Voice Pool
+
+Manages STT (Speech-to-Text) and TTS (Text-to-Speech) worker nodes.
+
+| Node Type | Default Engine | Hetzner Node |
+|---|---|---|
+| STT | `faster-whisper` (ARM) | LittleNate-1.X (37.27.244.80) |
+| TTS | XTTS-v2 (GPU) | LittleNate-1.X (37.27.244.80) |
+
+**Pool status:** `get_pool_status()` returns per-pool `{node_count, healthy_nodes, total_capacity, active_jobs, nodes[]}`.
+
+**Health check interval:** 60 seconds per node. Nodes with `healthy: false` are excluded from job dispatch.
+
+**Job TTLs:** STT jobs timeout at 30s, TTS jobs at 30s, results expire after 120s.
+
+## Voice Router Tiers
+
+| Tier | STT Provider | TTS Provider | Quality | Cost |
+|---|---|---|---|---|
+| Standard | Pool → Whisper (Hetzner) → Azure | Pool → XTTS → Edge TTS → Workers AI | Good | $0 |
+| Premium | Azure Realtime | Azure gpt-4o-mini-tts | Excellent | ~$0.01/min |
+
+Premium tiers: `TOP_TIER`, `SOVEREIGN_CIRCLE`. All other tiers get the standard pipeline.
+
+**Pool-first dispatch**: VoiceRouter checks `app.state.voice_pool` for healthy remote nodes before using local providers. See `voice-pool-wiring.mdc` for details.
+
+## Voice Edge API Routes
+
+The `nate-voice-edge` Cloudflare Worker proxies through these backend endpoints:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/voice/stt` | POST | Raw audio → VoiceRouter STT chain → transcript |
+| `/api/voice/tts` | POST | JSON `{text, voice}` → VoiceRouter TTS chain → audio |
+| `/api/voice/health` | GET | Voice pipeline + pool health status |
+
+Router: `backend/app/routers/voice_edge_api.py`, registered in `main.py`.
+
+**CRITICAL**: The `nate-voice-edge` worker must use `SOVEREIGN_API` (public `https://api.sovereignsanctuary.net`) for all backend calls. Never use WireGuard private IPs (`10.13.13.x`) — they are unreachable from Cloudflare Workers.
+
+## Voice Pipeline Optimizer
+
+Sentence-level chunking for streaming TTS — sends audio of the first sentence while generating the rest.
+
+| Metric | Purpose |
+|---|---|
+| `avg_first_chunk_ms` | Latency to first audio byte |
+| `avg_total_ms` | Total processing time |
+| `total_requests` | Lifetime request count |
+
+**Chunking constants:** `MIN_SENTENCE_LENGTH` = 20 chars, `MAX_BUFFER_CHARS` = 500 chars.
+
+## Scaling Pattern — Cloudflare Realtime SFU + MoQ (Primary)
+
+For carrier-grade load, three Cloudflare Realtime layers replace VPS-based media routing:
+
+1. **SFU handles peer media plane** — audio/video tracks between users route through Cloudflare's global network, not the VPS
+2. **MoQ handles Nate-to-many delivery** — one publish per member, infinite subscribers across 302 PoPs. No VPS fan-out.
+3. **TURN handles NAT traversal** — 1 TB/month free relay for peers behind firewalls
+4. **VPS handles intelligence only** — ODPE evaluation, C_emo, memory recall, voice generation (lightweight publishing)
+5. **Unlimited concurrent sessions** — SFU + MoQ auto-scale globally, no per-node limits
+
+See `cloudflare-realtime-webrtc.mdc` for credentials, API patterns, and MoQ namespace hierarchy.
+
+| Resource | ID |
+|---|---|
+| SFU App (`aged-block-6976`) | `8d23ce5179380706d203fd16e1b88a1a` |
+| TURN (`restless-math-4d7b`) | Token `17704023fbb65016f12abb900048b359` |
+| MoQ Relay | `draft-14.cloudflare.mediaoverquic.com` |
+
+### Migration Targets
+
+| Current | Provider | Replaces With | Status | Code Integration |
+|---|---|---|---|---|
+| DOJO Mentor video | Zoom API | SFU multi-party video + TURN | Wired | `dojo_mentor_zoom.get_sfu_meeting_config()` + `dojo_mentor_engine.get_sfu_session_config()` |
+| Live call coaching | Twilio Media Streams | SFU audio + TURN | Wired | `call_coaching_engine.get_webrtc_config()` |
+| Community Mesh group | BLE discovery only | BLE discovery → SFU group audio | Wired | `community_mesh_engine.get_group_webrtc_config()` |
+| Coaching Mesh training | Text-over-WebSocket | SFU audio/video + TURN | Wired | `coaching_mesh_engine.get_webrtc_config()` |
+| LittleNate Realtime | Raw WebSocket + base64 PCM | WebRTC Opus + SFU + TURN | Wired | `RealtimeSession.setup_webrtc()` + `webrtc.setup` msg |
+| Family Sanctuary multi-voice | N/A (new) | MoQ pub/sub per family member | Wired | `LittleNateRealtime.create_family_session()` |
+| Global coherence stream | N/A (new) | MoQ `global/coherence-aggregate` | Wired | `GlobalCoherenceAggregator` (30s) → `nate-voice-edge /api/voice/moq/publish-coherence` |
+| Sovereign TTS + MoQ fan-out | N/A (new) | Synthesize once → MoQ publish | Wired | `sovereign_tts.synthesize_and_publish_moq()` |
+
+### Legacy Scaling (VPS Cloning)
+
+For non-SFU workloads or SFU fallback:
+1. Clone the VPS via DigitalOcean snapshot
+2. Each clone runs its own AdmissionController (200 sessions each)
+3. DNS round-robin or load balancer distributes across clones
+4. Redis session affinity pins users to their node for the session duration
+
+## Rules
+
+1. **Never remove the AdmissionController** — without it, unlimited sessions can overwhelm the VPS.
+2. **STT/TTS jobs must have TTLs** — orphaned jobs without timeouts leak worker capacity.
+3. **Voice Router tier check is read-only** — it reads the user's tier from the profile, never modifies it.
+4. **Pipeline Optimizer requires a TTS function** — `_tts_fn` must be set before calling `stream_optimized()`.
+5. **Health checks must run every 60s** — stale health data causes jobs to be dispatched to dead nodes.
+6. **Session affinity is Redis-backed** — a Redis flush during active sessions breaks mid-call routing.
+
+## Trust Auditor
+
+- Audited by: `VoiceInfrastructureAuditor` (10 checks)
+- Activity type: `voice_infra_audit_sent`
+- Baseline key: `voice_infra_check_count` (expected: 10)
+- Stagger: 50s

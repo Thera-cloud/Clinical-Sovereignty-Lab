@@ -1,0 +1,54 @@
+# Timestamp Localization
+
+Every clinical interaction, biometric measurement, audit event, and community activity must store both the UTC timestamp and the client's IANA timezone at the moment of the event.
+
+## Timestamp Rules
+
+1. **Never use `datetime.now()` without `timezone.utc`** — Bare `datetime.now()` returns a naive datetime in the server's local timezone. Always use `datetime.now(timezone.utc)` for an aware UTC datetime.
+
+2. **Never use `datetime.utcnow()`** — This returns a naive datetime. It is deprecated in Python 3.12+. Use `datetime.now(timezone.utc)` instead.
+
+3. **Every client-facing event record must include `client_timezone`** — The IANA timezone string (e.g., `America/Los_Angeles`) from the client's device or profile at the moment of the interaction.
+
+4. **UTC is the storage timestamp; client_timezone enables reconstruction** — To display the client's local time, use PostgreSQL `AT TIME ZONE`: `SELECT created_at AT TIME ZONE client_timezone FROM conversation_history`.
+
+5. **Aggregation queries must use UTC-normalized timestamps** — Cross-user correlation (crystallizer, insight accumulator, community mesh) must compare `created_at` (TIMESTAMPTZ) directly. Never convert to local time before comparing.
+
+## Flutter Client Payload
+
+Every `nate_query` WebSocket message must include:
+
+```dart
+"client_timezone": widget.currentUserProfile?['timezone'] ?? DateTime.now().timeZoneName,
+"utc_offset_minutes": DateTime.now().timeZoneOffset.inMinutes,
+```
+
+## Bridge Server Extraction
+
+The `nate_query` handler extracts timezone from the payload and injects it into the profile:
+
+```python
+current_profile["_live_timezone"] = d.get("client_timezone") or current_profile.get("timezone", "America/New_York")
+current_profile["_utc_offset_minutes"] = d.get("utc_offset_minutes")
+```
+
+## Database Columns
+
+| Table | Column | Type | Purpose |
+|---|---|---|---|
+| `conversation_history` | `client_timezone` | TEXT DEFAULT 'UTC' | Client timezone at interaction time |
+| `conversation_history` | `utc_offset_minutes` | INTEGER | UTC offset in minutes (captures DST) |
+| `nevedal_metrics` | `client_timezone` | TEXT DEFAULT 'UTC' | Client timezone during biometric measurement |
+| `audit_log` | `client_timezone` | TEXT DEFAULT 'UTC' | Actor timezone during admin action |
+| `coaching_sessions` | `client_timezone` | TEXT DEFAULT 'UTC' | Client timezone during session |
+| `nate_intelligence_crystals` | `timezone_spread` | TEXT[] | Distinct timezones contributing to crystal |
+
+## Why This Matters
+
+1. **HIPAA Compliance** — 45 CFR 164.312(b) requires audit controls with precise timestamps. A timestamp that cannot be traced to the client's actual local time of interaction violates this.
+
+2. **False Positive Prevention** — Two clients in PST and EST discussing the same event (e.g., celebrity passing) produce the same UTC timestamp. Without timezone context, the system cannot reconstruct whether the client experienced it at 6pm or 9pm local time.
+
+3. **Community Aggregation Accuracy** — The crystallizer merges fragments from multiple users. `timezone_spread` metadata reveals when a crystal was synthesized from cross-timezone sources, preventing the same real-world event from being counted multiple times.
+
+4. **Clinical Record Precision** — State mental health laws require accurate record-keeping of clinical interactions. The client's local time of interaction is part of the clinical context.

@@ -1,0 +1,113 @@
+---
+description: Universal rules for all 69+ background agents, workers, guardians, and monitors — lifecycle pattern, error isolation, stagger, deployment
+globs: backend/app/workers/**/*.py, backend/app/services/**/*.py, backend/app/main.py
+alwaysApply: false
+---
+
+# Agent Lifecycle Rules
+
+## The Standard Pattern
+
+Every background agent must follow this structure (established by `BriefingWorker`):
+
+```python
+class MyAgent:
+    def __init__(self, db_pool, interval_seconds: int = 300):
+        self.db_pool = db_pool
+        self.interval = interval_seconds
+        self._task = None
+        self._running = False
+
+    async def start(self):
+        if self._task and not self._task.done():
+            return  # idempotent
+        self._running = True
+        self._task = asyncio.create_task(self._run_loop())
+
+    async def stop(self):
+        self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+    async def _run_loop(self):
+        await asyncio.sleep(UNIQUE_STAGGER)  # unique per agent
+        while self._running:
+            try:
+                await self._do_work()
+            except asyncio.CancelledError:
+                raise  # must re-raise
+            except Exception as e:
+                logger.error("cycle failed: %s", e)
+            await asyncio.sleep(self.interval)
+```
+
+## Stagger Delays (Thundering Herd Prevention)
+
+Each agent must sleep a unique number of seconds before its first iteration. Current assignments:
+
+| Agent | Stagger | Interval |
+|-------|---------|----------|
+| Token Guardian | 10s | 45 min |
+| Token Renewal Agent | 30s | 15 min |
+| Token Audit Agent | 60s | 30 min |
+| Insight Accumulator | 15s | 1 hour |
+| Hive workers (14) | 0s (batch-started) | varies |
+| Briefing Worker | 5s | 5 min |
+
+When adding a new agent, pick a stagger that does not collide with existing ones.
+
+## Registration in main.py
+
+Every agent needs **both** a startup block and a shutdown block:
+
+```python
+# STARTUP (inside lifespan, after db_pool is ready)
+_my_agent = None
+try:
+    from app.services.my_agent import MyAgent
+    _my_agent = MyAgent(db_pool, interval_seconds=600)
+    await _my_agent.start()
+    app.state.my_agent = _my_agent
+    print("   ✅ My Agent started (10-min cycle)")
+except Exception as e:
+    print(f"   ⚠️  My Agent init failed: {e}")
+
+# SHUTDOWN (inside lifespan yield teardown)
+_ma = getattr(app.state, "my_agent", None)
+if _ma:
+    await _ma.stop()
+    print("   ✅ My Agent stopped")
+```
+
+- Startup failure must **never** block other agents from starting
+- Always store on `app.state` so other services can reference it
+- Shutdown must `await stop()` for agents with async cleanup
+
+## Error Isolation
+
+- An agent crash must **never** propagate to the FastAPI event loop
+- `_run_loop` catches all `Exception` and continues; only `CancelledError` breaks the loop
+- If an agent accumulates 10+ consecutive failures, log at CRITICAL level but keep running
+
+## Deployment Checklist
+
+After deploying agent code changes:
+
+1. `scp` only the changed files — do NOT rsync with `--delete`
+2. `docker compose restart backend` (service name `backend`, not `nate_backend`)
+3. Wait 15s for healthy status
+4. `docker logs nate_backend 2>&1 | grep -E '✅|⚠️'` — confirm every agent started
+5. If any agent shows `⚠️`, check `docker logs nate_backend --tail 50` for the traceback
+6. Do NOT leave the deployment in a state where agents failed silently
+
+## In-Memory State Limits
+
+Agents must not accumulate unbounded in-memory data:
+
+- `_pending_renewals`, `_generated` sets, etc. should cap at 1000 entries or use TTL eviction
+- If tracking "seen" items, rotate the set periodically (e.g., clear on each daily cycle)
+- Prefer DB/Redis for state that must survive container restarts

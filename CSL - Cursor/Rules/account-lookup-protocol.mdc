@@ -1,0 +1,47 @@
+---
+description: Standard protocol for looking up coach or client accounts
+alwaysApply: true
+---
+
+# Account Lookup Protocol
+
+When looking up any coach or client, always query and display these three fields together:
+
+1. **username**
+2. **role**
+3. **name** (`profile_data->>'name'`)
+
+## Standard Lookup Query
+
+```sql
+SELECT username, role, profile_data->>'name' as name,
+       profile_data->>'coach_id' as coach_id,
+       profile_data->>'email' as email
+FROM users
+WHERE LOWER(username) LIKE '%search_term%'
+   OR LOWER(profile_data->>'name') LIKE '%search_term%'
+ORDER BY profile_data->>'name', role;
+```
+
+## Dual-Account Password Check
+
+Several users have both CLIENT and COACH accounts under the same real name. When a lookup returns multiple rows with the **same name and overlapping username**, compare passwords to understand account relationships:
+
+```sql
+SELECT username, role, profile_data->>'name' as name,
+       LEFT(password_hash, 8) as hash_prefix,
+       LENGTH(password_hash) as hash_len
+FROM users
+WHERE LOWER(profile_data->>'name') LIKE '%search_term%'
+ORDER BY profile_data->>'name', role;
+```
+
+- **Same hash** = same password across roles (user expects one login for both)
+- **Different hash** = different passwords per role (user has intentionally separate credentials)
+
+## Rules
+
+1. **Never display full password hashes** — show only `LEFT(password_hash, 8)` prefix for comparison.
+2. **Always search by both username and name** — users may be registered under a non-obvious username (e.g., `sweet2noend` = Kristy Moore).
+3. **Always show role** — critical for dual-account users where the same person has CLIENT + COACH entries.
+4. **When reporting to the user**, present results as a table with username, role, and name columns at minimum.

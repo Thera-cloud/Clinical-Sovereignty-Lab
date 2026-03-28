@@ -1,0 +1,32 @@
+---
+description: Never create, modify, or delete user accounts without explicit user approval
+alwaysApply: true
+---
+
+# No Account Changes Without Approval
+
+## Rule
+
+NEVER create, modify, or delete user accounts (in `user_registry.json`, PostgreSQL `users` table, or any auth store) without **explicit approval** from the user first.
+
+This includes:
+- Creating new client or coach entries in the registry
+- Modifying existing account roles, tiers, family assignments, or credentials
+- Deleting or deactivating accounts
+- Merging or separating family accounts
+- Assigning coaches to clients
+- Changing subscription plans or statuses
+
+## Required Workflow
+
+1. **Explain** exactly what accounts will be created/changed and why
+2. **List** each account by name and the specific changes
+3. **Wait** for the user to say "yes", "proceed", "approved", or equivalent
+4. Only then execute the changes
+
+## Example
+
+```
+BAD:  "Let me assign all unassigned clients to coach1." [immediately executes]
+GOOD: "11 clients have no assigned coach. I'd like to assign them all to coach1 (Coach Hope). Should I proceed?"
+```

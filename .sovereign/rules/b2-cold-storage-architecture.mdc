@@ -1,0 +1,69 @@
+# Backblaze B2 Cold Storage Architecture
+
+## Overview
+
+Backblaze B2 is the cold storage tier, positioned below Cloudflare R2 (warm) in the storage hierarchy. Both achieve zero egress through the Cloudflare Bandwidth Alliance.
+
+## Storage Hierarchy
+
+| Tier | Provider | Cost/GB/mo | Egress | Use Case |
+|---|---|---|---|---|
+| Hot | Redis | N/A (memory) | N/A | Active session state, ephemeral |
+| Warm | Cloudflare R2 | $0.015 | Free (Cloudflare) | Archived sessions, vault items, active reads |
+| Cold | Backblaze B2 | $0.006 | Free (via Cloudflare CNAME) | Long-term archives, WORM compliance |
+| Heritage | R2 + B2 + Azure + AWS + NAS | Varies | Varies | Penta-redundant critical data |
+
+## B2 Configuration
+
+| Setting | Env Var | Value |
+|---|---|---|
+| Key ID | `B2_APPLICATION_KEY_ID` | `8ef5c2b61ab4` |
+| Endpoint | `B2_S3_ENDPOINT` | `https://s3.us-east-005.backblazeb2.com` |
+| Region | `B2_REGION` | `us-east-005` |
+| Default Bucket | `B2_DEFAULT_BUCKET` | `nate-cold-archive` |
+| Heritage Bucket | `B2_HERITAGE_BUCKET` | `nate-heritage-vault` |
+| Cold Bucket | `B2_COLD_BUCKET` | `nate-cold-archive` |
+| Object Lock | `B2_HERITAGE_LOCK_YEARS` | `7` (WORM compliance) |
+| Public URL | `B2_PUBLIC_URL` | `https://b2.sovereignsanctuary.net` |
+
+## Cloudflare CNAME (Zero Egress Reads)
+
+`b2.sovereignsanctuary.net` → `s3.us-east-005.backblazeb2.com`
+
+With Smart Tiered Cache enabled, reads flow: Client → Cloudflare Edge → Cloudflare Upper Tier → B2 origin. Repeated reads never hit B2.
+
+Cache rule: Hostname equals `b2.sovereignsanctuary.net`, Edge TTL 1 day, Browser TTL 4 hours.
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/b2_storage.py` | Core B2 client (S3-compatible via boto3) |
+| `backend/app/services/memory/cold.py` | Cold tier: B2 preferred for writes, R2 preferred for reads |
+| `backend/app/services/multi_cloud_heritage_vault.py` | Penta-redundant vault with B2 Object Lock |
+| `backend/app/services/cold_tier_agent.py` | Background agent: R2 → B2 migration (6h cycle, 90-day age threshold) |
+
+## ColdTierAgent Behavior
+
+- Runs every 6 hours
+- Scans R2 for objects older than 90 days
+- Copies to B2 (preserving key structure)
+- Does NOT delete from R2 (R2 remains readable for fast retrieval)
+- Heritage vault objects get Object Lock (WORM, 7-year retention)
+
+## URL Resolution
+
+`get_cached_url(key=...)` returns:
+1. Cloudflare-cached public URL if `B2_PUBLIC_URL` is set: `https://b2.sovereignsanctuary.net/file/{bucket}/{key}`
+2. Presigned S3 URL if CNAME not configured (1-hour expiry)
+3. `None` if B2 is not configured
+
+## Rules
+
+1. **Region must be `us-east-005`** — buckets were created in this region. Using `us-west-004` or other regions causes `NoSuchBucket` errors.
+2. **Never delete from R2 when copying to B2** — R2 serves as the fast-read cache. B2 is the durable archive.
+3. **Heritage vault writes always use Object Lock** — `put_object_locked()` in `b2_storage.py` sets GOVERNANCE mode retention.
+4. **B2 Application Key must have read+write on all buckets** — the master key (`8ef5c2b61ab4`) covers this.
+5. **After changing B2_REGION**, update both `.env` and `docker-compose.prod.yml`, then verify the Cloudflare CNAME target matches.
+6. **Class A operations (writes) cost $0.004/1K** — Class B (reads) and Class C (lists) are free through Cloudflare.
+7. **10GB free storage** — first 10GB of B2 storage is free per account.

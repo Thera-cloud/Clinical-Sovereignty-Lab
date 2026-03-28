@@ -1,0 +1,58 @@
+# Voice Pool Wiring
+
+## Architecture
+
+The `DistributedVoicePool` dispatches STT and TTS jobs to remote worker nodes via Redis queues. The `VoiceRouter` checks the pool before falling back to local processing.
+
+```
+VoiceRouter._stt()
+  └── Check pool for healthy remote STT nodes
+      ├── Remote node available → pool.submit_stt_job() (Redis queue)
+      └── No remote nodes → local sovereign_whisper → Azure Whisper fallback
+
+VoiceRouter._tts()
+  └── Check pool for healthy remote TTS nodes
+      ├── Remote node available → pool.submit_tts_job() (Redis queue)
+      └── No remote nodes → local XTTS → Edge TTS → Workers AI fallback
+```
+
+## Environment Variables
+
+```
+STT_WORKER_NODES=[{"id":"hetzner-1","endpoint":"http://10.13.13.5:11434","max_concurrent":20}]
+TTS_WORKER_NODES=[{"id":"hetzner-1","endpoint":"http://10.13.13.5:8100","max_concurrent":30}]
+```
+
+Each entry: `id` (unique name), `endpoint` (HTTP URL), `max_concurrent` (int).
+
+If both vars are empty, the pool creates a single `local` node that signals VoiceRouter to use the existing local fallback chain. The pool is still registered on `app.state.voice_pool` for health reporting.
+
+## Job and Result TTLs
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `STT_JOB_TTL` | 30s | Redis queue expiry for pending STT jobs |
+| `TTS_JOB_TTL` | 30s | Redis queue expiry for pending TTS jobs |
+| `RESULT_TTL` | 120s | How long completed results stay in Redis |
+| `HEALTH_CHECK_INTERVAL` | 60s | Interval between node health probes |
+
+## Rules
+
+1. **VoiceRouter must check the pool before local fallback.** The pool-first pattern in `_stt()` and `_tts()` ensures remote nodes are used when available. Never bypass the pool when remote nodes are healthy.
+2. **The pool is the dispatch layer; AdmissionController is the gate.** Admission decides whether a new session is allowed. The pool decides which node processes it. They are independent.
+3. **Local nodes always exist.** When no `STT_WORKER_NODES` / `TTS_WORKER_NODES` are configured, the pool creates a single `local` node. `submit_stt_job()` returns `{"status": "local"}` for local nodes — VoiceRouter falls through to the existing local chain.
+4. **Node selection is least-loaded.** `_select_node()` sorts healthy nodes by `active_jobs` ascending. Round-robin index is a tiebreaker, not the primary strategy.
+5. **After adding remote nodes**, verify with:
+   ```bash
+   docker exec nate_backend printenv STT_WORKER_NODES
+   docker exec nate_backend printenv TTS_WORKER_NODES
+   ```
+6. **Never remove the local fallback from VoiceRouter.** If all remote nodes are down, local processing must continue.
+
+## Files
+
+| File | Role |
+|---|---|
+| `backend/app/services/distributed_voice_pool.py` | Pool manager + Redis job queues |
+| `backend/app/services/voice_router.py` | STT/TTS routing with pool-first dispatch |
+| `backend/app/main.py` | Pool init on `app.state.voice_pool` |

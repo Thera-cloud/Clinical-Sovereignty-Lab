@@ -1,0 +1,98 @@
+# Clinical Sovereignty Lab / Little Nate
+# Cursor AI Context Rules
+
+## Project Overview
+This is Little Nate, an AI-powered therapy platform with:
+- Flutter mobile app (client + coach portal)
+- Python FastAPI backend with WebSocket bridge
+- React admin console (Sovereign Command)
+- Nevedal quantum emotional coherence engine
+- Night School AI training system
+
+## Tech Stack
+- **Mobile**: Flutter/Dart with Riverpod state management
+- **Backend**: Python 3.11+, FastAPI, asyncpg, WebSockets
+- **Database**: PostgreSQL 15+
+- **Cache**: Redis
+- **AI**: Azure OpenAI GPT-4o Realtime
+- **Payments**: Stripe (when enabled)
+- **Admin**: React with Tailwind
+
+## Architecture Pattern
+- MVVM for Flutter (Models, ViewModels, Views)
+- Service-based routing for Python (single WebSocket, message dispatch)
+- Unidirectional data flow throughout
+
+## Key Algorithms (DO NOT MODIFY without understanding)
+
+### Nevedal Formula
+```
+C_emo(t) = [β · p_ent · T_tunnel] / [γ_env + E_G^(joint)/ℏ] × exp[-(γ_env + E_G^(joint)/ℏ) × t]
+```
+Located in: `backend/app/services/nevedal_engine.py`
+
+### Voice Biometrics
+Extracts: pitch_mean, pitch_variance, energy, speech_rate, pause_ratio
+Located in: `backend/app/services/nevedal_engine.py` → `VoiceBiometricExtractor`
+
+### PII Detection
+Pattern-based detection for SSN, phone, email, addresses
+Located in: `backend/app/services/night_school_director.py` → `PIIDetector`
+
+## Network Configuration
+- Server: 10.0.0.81
+- API Port: 8000
+- WebSocket Port: 8765
+- Admin Port: 3000
+- Database Port: 5432
+
+## File Naming Conventions
+- Python: snake_case (e.g., `nevedal_engine.py`)
+- Dart: snake_case for files, PascalCase for classes
+- React: PascalCase for components (e.g., `SovereignCommand.jsx`)
+
+## Important Directories
+```
+backend/app/services/     # Core business logic
+backend/app/routers/      # API endpoints
+backend/app/websocket/    # Real-time handlers
+mobile/lib/viewmodels/    # Flutter state
+mobile/lib/screens/       # Flutter UI
+admin/src/components/     # React components
+```
+
+## Testing
+Run tests with: `pytest backend/tests/ -v`
+Flutter tests: `flutter test`
+
+## Environment
+All config in `.env` file. Never hardcode credentials.
+Key vars: AZURE_API_KEY, DATABASE_URL, JWT_SECRET
+
+## Design System
+- Background: #050505 (void), #0A0A0A (chamber), #111111 (elevated)
+- Gold: #C9A962 (primary), #E8D5A3 (bright), #8B7355 (dim)
+- Cyan: #4ECDC4 (AI/coaching)
+- Purple: #9D4EDD (research)
+- Red: #EF4444 (alerts)
+- Font Display: Cormorant Garamond
+- Font Body: DM Sans
+
+## Terminology
+- "Sanctuary" = The platform
+- "Threshold" = Trial tier
+- "Inner Chamber" = Standard tier ($49/mo)
+- "Sovereign Circle" = Top tier ($149/mo)
+- "Nate" = The AI companion
+- "CEE Window" = Coherent Emotional Engagement moment
+- "Night School" = AI training/wisdom system
+- "The Dojo" = Adversarial testing environment
+
+## GitHub
+Repo: git@github.com:Thera-cloud/Clinical-Sovereignty-Lab.git
+
+## When Making Changes
+1. Check if algorithm is in "Key Algorithms" section - if so, be very careful
+2. Update tests when modifying business logic
+3. Keep .env.template in sync with any new env vars
+4. Follow existing code patterns in each directory

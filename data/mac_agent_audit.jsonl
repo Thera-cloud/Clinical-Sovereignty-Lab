@@ -1,0 +1,16 @@
+{"timestamp": "2026-03-26T04:25:29.901616+00:00", "action": "exec", "caller_ip": "unknown", "command": "ls", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}
+{"timestamp": "2026-03-26T04:25:30.024762+00:00", "action": "exec", "caller_ip": "unknown", "command": "echo hello", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}
+{"timestamp": "2026-03-26T04:25:31.865081+00:00", "action": "exec", "caller_ip": "unknown", "command": "sleep 200", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 2}
+{"timestamp": "2026-03-26T04:25:34.036461+00:00", "action": "exec", "caller_ip": "unknown", "command": "echo clamped", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 600}
+{"timestamp": "2026-03-26T04:25:34.215018+00:00", "action": "status", "caller_ip": "unknown", "process": "all"}
+{"timestamp": "2026-03-26T04:25:34.429419+00:00", "action": "start", "caller_ip": "unknown", "process": "nonexistent"}
+{"timestamp": "2026-03-26T04:25:34.587378+00:00", "action": "git", "caller_ip": "unknown", "operation": "status", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2"}
+{"timestamp": "2026-03-26T04:28:54.990870+00:00", "action": "exec", "caller_ip": "unknown", "command": "ls", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}
+{"timestamp": "2026-03-26T04:28:55.155006+00:00", "action": "exec", "caller_ip": "unknown", "command": "echo hello", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}
+{"timestamp": "2026-03-26T04:28:57.272157+00:00", "action": "exec", "caller_ip": "unknown", "command": "sleep 200", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 2}
+{"timestamp": "2026-03-26T04:28:59.446597+00:00", "action": "exec", "caller_ip": "unknown", "command": "echo clamped", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 600}
+{"timestamp": "2026-03-26T04:28:59.615581+00:00", "action": "status", "caller_ip": "unknown", "process": "all"}
+{"timestamp": "2026-03-26T04:28:59.836151+00:00", "action": "start", "caller_ip": "unknown", "process": "nonexistent"}
+{"timestamp": "2026-03-26T04:28:59.990856+00:00", "action": "git", "caller_ip": "unknown", "operation": "status", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2"}
+{"timestamp": "2026-03-26T12:40:51.302156+00:00", "action": "exec", "caller_ip": "127.0.0.1", "command": "echo hello from mac agent", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}
+{"timestamp": "2026-03-26T12:41:03.614188+00:00", "action": "exec", "caller_ip": "127.0.0.1", "command": "ls backend/mac_agent/", "cwd": "/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2", "timeout": 120}

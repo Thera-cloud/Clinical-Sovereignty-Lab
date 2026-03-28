@@ -1,0 +1,97 @@
+# =============================================================================
+# Clone VPS — Backend-only node for load-balanced summon/REST traffic
+# =============================================================================
+# This file runs ONLY the backend service. It connects to the primary VPS's
+# PostgreSQL and Redis over private networking (DigitalOcean VPC or WireGuard).
+#
+# Primary VPS:  68.183.168.75  (backend + bridge + postgres + redis, 2 workers)
+# Clone VPS:    174.138.43.30  (backend only, 4 workers)
+#
+# Usage:
+#   scp .env root@174.138.43.30:/opt/clinical-sovereignty-lab/.env
+#   ssh root@174.138.43.30 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.clone.yml up -d"
+#
+# The Cloudflare Load Balancer distributes traffic between both origins.
+# Bridge (WebSocket) stays on primary only — summon/REST is load-balanced.
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nate_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Point at primary VPS's Postgres + Redis over private network
+      - DATABASE_URL=postgresql://nate_app:${NATE_APP_DB_PASSWORD}@${PRIMARY_VPS_IP:-68.183.168.75}:5432/${POSTGRES_DB:-little_nate}
+      - POSTGRES_HOST=${PRIMARY_VPS_IP:-68.183.168.75}
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=nate_app
+      - POSTGRES_PASSWORD=${NATE_APP_DB_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@${PRIMARY_VPS_IP:-68.183.168.75}:6379
+      - REDIS_HOST=${PRIMARY_VPS_IP:-68.183.168.75}
+      - REDIS_PORT=6379
+      - DATA_DIR=/app/data
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=production
+      - DEBUG=false
+      # Cloudflare R2
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - R2_DEFAULT_BUCKET=${R2_DEFAULT_BUCKET:-nate-vault}
+      - R2_WARM_BUCKET=${R2_WARM_BUCKET:-nate-warm-memory}
+      - R2_COLD_BUCKET=${R2_COLD_BUCKET:-nate-cold-archive}
+      - R2_HERITAGE_BUCKET=${R2_HERITAGE_BUCKET:-nate-heritage-vault}
+      # Backblaze B2
+      - B2_APPLICATION_KEY_ID=${B2_APPLICATION_KEY_ID:-}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY:-}
+      - B2_S3_ENDPOINT=${B2_S3_ENDPOINT:-}
+      - B2_REGION=${B2_REGION:-us-east-005}
+      - B2_DEFAULT_BUCKET=${B2_DEFAULT_BUCKET:-nate-cold-archive}
+      - B2_HERITAGE_BUCKET=${B2_HERITAGE_BUCKET:-nate-heritage-vault}
+      - B2_COLD_BUCKET=${B2_COLD_BUCKET:-nate-cold-archive}
+      - B2_HERITAGE_LOCK_YEARS=${B2_HERITAGE_LOCK_YEARS:-7}
+      - B2_PUBLIC_URL=${B2_PUBLIC_URL:-}
+      # Sovereign Inference
+      - SOVEREIGN_INFERENCE_URL=${SOVEREIGN_INFERENCE_URL:-}
+      - SOVEREIGN_MODEL=${SOVEREIGN_MODEL:-llama3.1:8b-instruct-q4_K_M}
+      - SOVEREIGN_TTS_URL=${SOVEREIGN_TTS_URL:-http://10.13.13.5:8100}
+      - SOVEREIGN_VOICE_ID=${SOVEREIGN_VOICE_ID:-father}
+      - SOVEREIGN_TTS_TIMEOUT=${SOVEREIGN_TTS_TIMEOUT:-30}
+      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-base}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+      # Azure Whisper + Edge TTS
+      - AZURE_WHISPER_ENDPOINT=${AZURE_WHISPER_ENDPOINT:-}
+      - AZURE_WHISPER_DEPLOYMENT=${AZURE_WHISPER_DEPLOYMENT:-nate-whisper}
+      - AZURE_WHISPER_API_VERSION=${AZURE_WHISPER_API_VERSION:-2024-06-01}
+      - EDGE_TTS_VOICE=${EDGE_TTS_VOICE:-en-US-GuyNeural}
+      # Workers AI
+      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN:-}
+      - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./data/backend:/app/data
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "3.5"
+          memory: 6G
+        reservations:
+          memory: 2G
+
+volumes:
+  backend_logs:
+    driver: local

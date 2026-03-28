@@ -1,0 +1,204 @@
+---
+description: "Edge Worker fleet architecture — 8 workers for infinite growth at zero marginal cost"
+globs: ["cloudflare/**"]
+alwaysApply: true
+---
+
+# Edge Worker Fleet — 8 Workers, Infinite Scale, Zero Threshold
+
+## Architecture
+
+Cloudflare Workers auto-scale globally. Each worker script handles a distinct concern. Adding workers costs $0 per invocation on the Workers Paid plan. The fleet is designed so no single worker is a bottleneck — each can scale independently from 0 to 10M+ requests/hour.
+
+## Worker Registry
+
+| # | Worker | Directory | Purpose | Bindings |
+|---|---|---|---|---|
+| 1 | `nate-summon-worker` | `cloudflare/workers/nate-summon-worker/` | Public AI summon, enterprise API, ODPE L0, dual-brain | AI, KV, D1, R2, Vectorize x2 |
+| 2 | `nate-edge-cache` | `cloudflare/workers/` (single file) | App caching, semantic search, D1 edge queries | AI, Vectorize x6, R2 x2, D1 |
+| 3 | `nate-r2-cdn` | `cloudflare/workers/` | Static asset CDN from R2 | R2 |
+| 4 | `nate-cron-worker` | `cloudflare/workers/nate-cron-worker/` | Background: heartbeat sweep, crystal pre-warm, D1 sync verify, immune sentinel | AI, KV, D1, R2, Vectorize |
+| 5 | `nate-voice-edge` | `cloudflare/workers/nate-voice-edge/` | Voice pipeline: STT → inference → TTS with <200ms routing | AI, KV, R2 |
+| 6 | `nate-webhook-gateway` | `cloudflare/workers/nate-webhook-gateway/` | Webhook validation (Stripe/Twilio/SendGrid/Zoom) + R2 archive | KV, R2 |
+| 7 | `nate-auth-edge` | `cloudflare/workers/nate-auth-edge/` | Token validation, session bootstrap, tier gating at edge | D1, KV |
+| 8 | `nate-analytics-edge` | `cloudflare/workers/nate-analytics-edge/` | Telemetry ingestion → R2 JSONL, real-time KV counters | R2, KV, D1 |
+
+## Why 8 Workers (Not Fewer, Not More)
+
+**Each handles a fundamentally different concern with different latency/reliability requirements:**
+
+1. **Summon** — Public-facing AI, highest security (prompt injection, rate limiting, immune handshake)
+2. **Edge Cache** — Internal app acceleration, session data, semantic search
+3. **R2 CDN** — Static files, no compute logic
+4. **Cron** — Background tasks on schedule, no HTTP traffic (Cron Triggers only)
+5. **Voice** — <200ms latency budget, audio stream proxying, provider failover
+6. **Webhooks** — External inbound, signature validation, archive-on-failure
+7. **Auth** — Session bootstrap, every authenticated call routes through here
+8. **Analytics** — Write-heavy telemetry, zero VPS load, infinite R2 storage
+
+**Merging any two creates coupling risk:**
+- Voice + Summon: A summon spike delays voice responses (unacceptable for live calls)
+- Auth + Summon: Auth failure takes down public AI
+- Webhooks + Anything: Webhook signature validation bugs affect unrelated traffic
+- Cron + HTTP workers: Cron Triggers require a separate worker entry point
+
+## Cost Model
+
+| Resource | Cost | Threshold |
+|---|---|---|
+| Worker invocations | $0.00 | Included in Workers Paid ($5/mo) |
+| KV reads | $0.50/M | First 10M free |
+| KV writes | $5.00/M | First 1M free |
+| D1 reads | $0.001/M rows | First 25B rows/mo free |
+| D1 writes | $1.00/M rows | First 50M rows/mo free |
+| R2 storage | $0.015/GB/mo | First 10GB free |
+| R2 reads | $0.36/M | First 10M free |
+| R2 writes | $4.50/M | First 1M free |
+| Workers AI | $0.00 | Included (Llama 3.1, Whisper, MeloTTS, BGE) |
+| Vectorize queries | $0.01/M | First 30M free |
+
+**At 10M summon requests/month**: ~$5/mo total (Workers Paid plan only)
+
+## Deployment
+
+```bash
+cd cloudflare/workers/nate-summon-worker && npx wrangler deploy
+cd cloudflare/workers && npx wrangler deploy -c nate-edge-cache-wrangler.toml
+cd cloudflare/workers/nate-cron-worker && npx wrangler deploy
+cd cloudflare/workers/nate-voice-edge && npx wrangler deploy
+cd cloudflare/workers/nate-webhook-gateway && npx wrangler deploy
+cd cloudflare/workers/nate-auth-edge && npx wrangler deploy
+cd cloudflare/workers/nate-analytics-edge && npx wrangler deploy
+```
+
+Secrets (set via `wrangler secret put`):
+- `nate-summon-worker`: `HMAC_SECRET`
+- `nate-webhook-gateway`: `STRIPE_WEBHOOK_SECRET`, `TWILIO_AUTH_TOKEN`, `ZOOM_WEBHOOK_SECRET`
+
+## Known Issues and Fixes (Mar 2026)
+
+### nate-voice-edge: SOVEREIGN_TTS must use public API URL
+**Problem**: `wrangler.toml` previously had `SOVEREIGN_TTS = "http://10.13.13.5:8100"` — a WireGuard private IP unreachable from Cloudflare Workers.
+**Fix**: Changed to `SOVEREIGN_TTS = "https://api.sovereignsanctuary.net"`. TTS calls now route through `/api/voice/tts` backend endpoint. **Never use WireGuard IPs in Worker vars.**
+
+### Crystal pre-warm key alignment
+The `nate-cron-worker` writes pre-warmed crystal text to KV with key pattern `prewarm:{crystalId}` (TTL 3600s). The `nate-summon-worker` reads pre-warmed crystals from the same KV binding (`SUMMON_CACHE`) using `list({ prefix: "prewarm:" })`.
+
+**Previous mismatch**: Summon worker previously read from R2 `pre-warm/${messageHash}.json` — a different storage system and key pattern than where cron writes. This meant pre-warmed crystals were never found.
+
+**Current alignment**: Both workers use KV `SUMMON_CACHE` with `prewarm:` prefix. Cron writes individual crystal text, summon reads the latest N entries.
+
+### D1 Sandbox Bindings
+
+- `nate-summon-worker`, `nate-cron-worker`, and `nate-edge-cache` now include `D1_SANDBOX` binding for `cli-chamberofsecrets`.
+- Summon reads extension hints from `nate_ext_formula_results`.
+- Cron pre-warms extension-derived hints into `SUMMON_CACHE` alongside wisdom crystals.
+- Edge cache keeps D1 hot reads and compliance/social endpoints (`/api/edge/d1/social-dashboard`, `/api/edge/d1/compliance/:jurisdiction`).
+
+### Device Reputation at Edge
+
+- `nate-auth-edge` exposes `GET /api/edge/auth/device-reputation/:device_id` backed by `device_reputation_edge`.
+- Response contract: `{ trusted, quarantined, trust_score }` plus metadata.
+
+## Rules
+
+1. **Never merge workers** — each handles a distinct latency/reliability profile. Merging creates coupling.
+2. **All workers share the same KV namespace** — key prefixes prevent collisions (`summon:`, `voice:`, `auth:`, `analytics:`, `webhook:`, `cron:`, `immune:`, `prewarm:`).
+3. **D1 is read-only from edge** — all writes go through the Sovereign Brain's D1 Sync Agent. Workers only SELECT.
+4. **R2 writes are append-only** from edge workers — analytics JSONL, webhook archives. Never overwrite Sovereign Brain data.
+5. **Voice worker has strict latency budget** — <200ms for provider routing. Never add non-voice logic.
+6. **Cron worker has no HTTP routes** — uses `scheduled()` event handler only. The `fetch()` handler is for health checks.
+7. **Webhook gateway archives on sovereign failure** — R2 `webhook-queue/` prefix. The Sovereign Brain replays these on recovery.
+8. **Auth edge caches for 5 minutes** — KV TTL 300s. D1 is the authoritative edge source. Sovereign API is the final fallback.
+9. **Never use WireGuard IPs in Worker vars** — Cloudflare Workers cannot reach private IPs. Always use the public API URL (`https://api.sovereignsanctuary.net`).
+10. **Crystal pre-warm reads must match cron worker writes** — both use KV `SUMMON_CACHE` with `prewarm:` prefix. If the write pattern changes, update both workers.
+
+## Growth Path
+
+| Scale | What Changes | Cost Impact |
+|---|---|---|
+| 1M req/mo | Nothing — current config handles it | $5/mo |
+| 10M req/mo | Nothing — Workers auto-scale | $5/mo |
+| 100M req/mo | KV reads approach free tier limit | ~$15/mo |
+| 1B req/mo | Add KV caching tiers, R2 tiered storage | ~$100/mo |
+| 10B req/mo | Enterprise plan, Durable Objects for state | Contact CF |
+
+**There is no threshold.** Workers scale from 0 to infinity with no configuration changes. The architecture is designed so doubling traffic requires zero code changes and near-zero cost increase.
+
+## VPC & Queue Integration
+
+### OverSeer Manifold (VPC Service)
+
+| Property | Value |
+|---|---|
+| Service Name | `overseer-manifold` |
+| Service ID | `019ce99b-5f34-7902-9513-9b26bc4755c8` |
+| Host | `localhost` |
+| HTTP Port | `11434` |
+| Tunnel | Little Nate Twin Engine (`d40e5315-4d8a-44b8-a432-debc36750636`) |
+
+Workers that need Home GPU inference can call the VPC service directly — no public URL, no VPS hop. The VPC routes through the Cloudflare backbone to the tunnel, which terminates at `localhost:11434` (Ollama) on the Mac.
+
+**Workers that should bind to `overseer-manifold`:**
+
+| Worker | Use Case |
+|---|---|
+| `nate-summon-worker` | TENSION/DEEP_TENSION queries → 70B depth |
+| `nate-voice-edge` | TTS voice clone (future, when XTTS VPC service added) |
+| `nate-cron-worker` | Crystal pre-warm, hallucination review batches |
+
+### ln-echo-relay (Queue)
+
+| Property | Value |
+|---|---|
+| Queue Name | `ln-echo-relay` |
+| Queue ID | `218cde12f4f04af58a0bab077fe9fbb0` |
+| Purpose | Async task dispatch between Workers, VPS, and Mac |
+
+The queue decouples timing between the cloud brains. Producers (any Worker or VPS agent) enqueue tasks. Consumers (Mac-bound Workers, VPS agents) drain them at their own pace.
+
+**When to use the queue vs. direct VPC call:**
+
+| Scenario | Use |
+|---|---|
+| User-facing, latency-sensitive (<2s budget) | Direct VPC call to `overseer-manifold` |
+| Background processing, can tolerate 30s+ | Queue via `ln-echo-relay` |
+| Mac is offline, task can wait 24h | Queue (messages persist with TTL) |
+| Fire-and-forget (analytics, archival) | Queue |
+
+### Rules
+
+11. **Workers calling `overseer-manifold` must have a timeout.** If the Mac is asleep or tunnel is disconnected, the VPC call hangs. Workers should time out at 30s and fall back to the next inference provider.
+
+12. **Queue consumers must be idempotent.** Messages may be delivered more than once. Use `task_id` (UUID) for deduplication.
+
+13. **Queue message TTL is 24 hours.** Messages older than 24h are dead-lettered. If the Mac was offline for >24h, some synthesis/batch work may be lost — the VPS's next crystallizer/archive cycle will re-enqueue anything still needed.
+
+## Cloudflare Realtime — TURN + Serverless SFU + MoQ Relay
+
+Three Cloudflare Realtime services provide the media plane for all real-time audio/video features. See `cloudflare-realtime-webrtc.mdc` for full credentials and architecture.
+
+| Service | ID | Workers That Use It |
+|---|---|---|
+| TURN (`restless-math-4d7b`) | Token ID `17704023fbb65016f12abb900048b359` | `nate-voice-edge` (credential generation) |
+| SFU (`aged-block-6976`) | App ID `8d23ce5179380706d203fd16e1b88a1a` | `nate-voice-edge` (session proxy), `nate-summon-worker` (summon calls) |
+| MoQ Relay | `draft-14.cloudflare.mediaoverquic.com` | `nate-voice-edge` (Nate voice publish), `nate-summon-worker` (coherence stream) |
+
+**`nate-voice-edge` gains three new responsibilities:**
+- `POST /api/voice/turn-credentials` — proxies TURN credential generation (returns `iceServers` to clients)
+- `POST /api/voice/sfu/*` — proxies SFU session/track API calls (clients never see the SFU token)
+- `POST /api/voice/moq/publish` — publishes Nate's generated voice to MoQ namespace for subscriber fan-out
+
+**MoQ role separation from SFU:**
+- **SFU** handles peer-to-peer media (family members hear each other)
+- **MoQ** handles Nate-to-many voice delivery (one publish, infinite subscribers at 302 PoPs)
+- The VPS/Mac generates the voice, publishes ONCE to MoQ, and never manages distribution
+
+### Rules
+
+14. **SFU API token must never reach the client.** All SFU calls are proxied through Workers or the VPS backend.
+15. **TURN credentials are ephemeral.** Generate per-session via the credential API, never hardcode.
+16. **SFU replaces Zoom for DOJO/classroom video.** No Zoom dependency required for multi-party sessions.
+17. **MoQ is Nate-to-many only.** Never route member-to-member audio through MoQ — that's SFU's job. MoQ carries Nate's generated voice, coherence signals, and escalation alerts.
+18. **MoQ namespaces must be session-scoped.** Always `sanctuary/{sessionId}/nate-voice-{userId}`, never bare `sanctuary/nate-voice`. Prevents cross-session bleed.
+19. **Global MoQ tracks are anonymized.** `global/coherence-aggregate` and `global/cycle-signals` contain only aggregate metrics, never user identifiers.

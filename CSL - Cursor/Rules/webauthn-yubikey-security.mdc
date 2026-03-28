@@ -1,0 +1,141 @@
+---
+description: WebAuthn/YubiKey security requirements for admin authentication. All endpoints are admin-only.
+alwaysApply: true
+---
+
+# WebAuthn / YubiKey Security Protocol
+
+All WebAuthn endpoints live in `backend/app/routers/admin.py` and require `Depends(require_admin)`.
+
+## Endpoint Inventory (6 endpoints)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/admin/webauthn/register-options` | POST | Generate registration challenge |
+| `/api/admin/webauthn/register-complete` | POST | Verify and store credential |
+| `/api/admin/webauthn/keys` | GET | List registered keys (safe metadata only) |
+| `/api/admin/webauthn/delete-key` | POST | Remove a key (must keep >= 1) |
+| `/api/admin/webauthn/auth-options` | POST | Generate authentication challenge |
+| `/api/admin/webauthn/auth-verify` | POST | Verify assertion + unfreeze Sentinel |
+
+## Security Requirements
+
+### 1. Challenge Expiration (120s TTL)
+
+Every challenge stored in `profile_data` must have a companion `*_issued_at` timestamp. Before verification, check:
+
+```python
+age_seconds = (now - issued_at).total_seconds()
+if age_seconds > 120:
+    clear challenge from DB
+    raise HTTPException(400, "Challenge expired")
+```
+
+Both `register-complete` and `auth-verify` enforce this. Never increase the TTL above 120s.
+
+### 2. Challenge Cleared on Every Outcome
+
+After verification — success, failure, or expiry — the challenge fields must be removed from `profile_data`:
+
+```sql
+UPDATE users SET profile_data = profile_data
+    - 'webauthn_challenge' - 'webauthn_challenge_issued_at'
+WHERE hardware_id = $1
+```
+
+A lingering challenge means someone could replay a response. The Hardware Security Auditor checks for stale challenges (`no_stale_challenge` check).
+
+### 3. User Verification: PREFERRED
+
+Both `register-options` and `auth-options` must set:
+
+```python
+user_verification=UserVerificationRequirement.PREFERRED
+```
+
+This means the key will request a PIN if it supports one, but falls back to touch-only for older keys. Never set DISCOURAGED for admin endpoints — that skips PIN entirely.
+
+### 4. Origin Must Be Consistent
+
+Both registration and authentication verification must use the same origin:
+
+```python
+_webauthn_origin = os.environ.get("WEBAUTHN_ORIGIN", "https://command.sovereignsanctuary.net")
+```
+
+Never hardcode the origin in one endpoint and use an env var in another — a mismatch causes keys registered on one origin to fail verification on the other.
+
+### 5. Sign Count Tracked and Validated
+
+On every successful `auth-verify`:
+
+```python
+c["sign_count"] = verification.new_sign_count
+```
+
+The updated credentials array (with new sign counts) must be written back to `profile_data`. The `py_webauthn` library internally checks that the new count is >= the stored count. A regression in sign count indicates a cloned key.
+
+The Hardware Security Auditor checks that all keys have a valid integer `sign_count` (`sign_count_valid` check).
+
+### 6. Key Deletion Requires Minimum 1 Remaining
+
+`/api/admin/webauthn/delete-key` accepts a `credential_id_prefix` (min 8 chars) and removes the matching key. It refuses to delete the last remaining key:
+
+```python
+if len(creds) <= 1:
+    raise HTTPException(400, "Cannot delete last remaining key")
+```
+
+### 7. Rate Limiting on Challenge Generation
+
+`auth-options` enforces a 5-second cooldown per admin user:
+
+```python
+if now_ts - last_ts < 5:
+    raise HTTPException(429, "Too many challenge requests")
+```
+
+This prevents challenge flooding. The rate limit is in-memory (per-process), so it resets on restart. This is acceptable because the endpoint already requires admin auth.
+
+### 8. Sentinel Unfreeze on Successful Verification
+
+`auth-verify` must set `sentinel_frozen: false` in the DB and call `sentinel.unfreeze()` on the in-memory Sentinel instance. This is the only REST API path that clears a Sentinel freeze.
+
+```python
+"sentinel_frozen": False,  # in the DB update payload
+bridge_sentinel.unfreeze(hw_id)  # in-memory clear
+```
+
+### 9. Cross-Platform Authenticator Only
+
+Registration must enforce `AuthenticatorAttachment.CROSS_PLATFORM`. This rejects platform authenticators (Touch ID, Windows Hello) and only accepts physical security keys. Never change this to `PLATFORM` or remove the constraint.
+
+## Auditor Coverage (11 checks)
+
+The `HardwareSecurityAuditor` runs 3x daily and verifies:
+
+| # | Check ID | What it verifies |
+|---|----------|-----------------|
+| 1 | `webauthn_enabled` | `webauthn_enabled = true` in profile |
+| 2 | `primary_key` | First credential has valid ID + public key |
+| 3 | `backup_key` | Second credential has valid ID + public key |
+| 4 | `totp_enabled` | TOTP authenticator active |
+| 5 | `sms_verified` | SMS phone verified |
+| 6 | `sentinel_clear` | `sentinel_frozen` is `false` |
+| 7 | `no_stale_challenge` | No lingering `webauthn_challenge` or `webauthn_auth_challenge` |
+| 8 | `sign_count_valid` | All keys have integer `sign_count` |
+| 9 | `keys_api` | `GET /api/admin/webauthn/keys` returns 200 |
+| 10 | `presence_api` | `GET /api/admin/webauthn/presence` returns 200 |
+| 11 | `delete_key_api` | `POST /api/admin/webauthn/delete-key` returns 422 (valid input validation) |
+
+Target: **11/11 TRUSTED**.
+
+## What Never to Do
+
+- Never store challenges without a `*_issued_at` companion field
+- Never leave a challenge in the DB after verification (success or failure)
+- Never set `user_verification` to `DISCOURAGED` on admin endpoints
+- Never allow deletion of the last remaining key
+- Never hardcode origin in one endpoint and use env var in another
+- Never skip sign count update on successful authentication
+- Never remove `sentinel_frozen: false` from the `auth-verify` success path

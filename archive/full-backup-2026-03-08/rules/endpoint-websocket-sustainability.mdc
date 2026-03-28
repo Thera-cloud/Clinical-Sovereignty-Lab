@@ -1,0 +1,119 @@
+---
+description: Sustainability rules for endpoints, WebSockets, REST fetch calls, and reconnect patterns to prevent regressions
+alwaysApply: true
+---
+
+# Endpoint & WebSocket Sustainability
+
+Every pattern below has caused a silent failure or degraded UX. These rules apply to all portals (client, coach, admin) and all dashboard pages.
+
+## 1. Every `fetch()` Must Include Auth Headers
+
+Direct `fetch()` calls that bypass helper functions (like `apiFetch()`) silently return 401/403. The user sees "Connection issue" with no explanation.
+
+```javascript
+// BAD — 401/403, no auth
+await fetch(`${API}/api/marketing/playbook`);
+await fetch(`${API}/api/skyeye/content-queue/${id}`, { method: 'DELETE' });
+await fetch(`${API}/api/marketing/actions/${id}/decide`, {
+  method: 'POST', headers: {'Content-Type':'application/json'}, body: ...
+});
+
+// GOOD — always use _authHeaders()
+await fetch(`${API}/api/marketing/playbook`, { headers: _authHeaders() });
+await fetch(`${API}/api/skyeye/content-queue/${id}`, { method: 'DELETE', headers: _authHeaders() });
+await fetch(`${API}/api/marketing/actions/${id}/decide`, {
+  method: 'POST', headers: _authHeaders('application/json'), body: ...
+});
+```
+
+**Rule**: When adding any `fetch()` call in a dashboard HTML file, use the page's `_authHeaders()` helper. If no helper exists, create one using the `sessionStorage`/`localStorage` token pattern.
+
+## 2. WebSocket Reconnect Must Use Exponential Backoff + Jitter
+
+Fixed-delay reconnect (`setTimeout(connect, 3000)`) causes thundering herd when the server restarts — all clients reconnect simultaneously at 3s intervals.
+
+```javascript
+// BAD — fixed delay, no jitter
+socket.onclose = function() { setTimeout(connect, 3000); };
+
+// GOOD — exponential backoff with 20% jitter, capped at 30s
+var _wsRetry = 0;
+socket.onopen = function() { _wsRetry = 0; /* ... */ };
+socket.onclose = function() {
+    var attempt = Math.min(_wsRetry, 10);
+    var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+    var jitter = Math.floor(baseMs * 0.2 * Math.random());
+    _wsRetry++;
+    setTimeout(connect, baseMs + jitter);
+};
+socket.onerror = function(e) { console.warn('WS error:', e); };
+```
+
+**Flutter equivalent:**
+
+```dart
+// BAD — no reconnect at all
+onDone: () { setState(() => _statusMessage = "Disconnected"); }
+
+// GOOD
+void _scheduleWsReconnect() {
+    _wsReconnectTimer?.cancel();
+    final attempt = _wsReconnectAttempts.clamp(0, 10);
+    final baseMs = (1000 * (1 << attempt)).clamp(1000, 30000);
+    final jitterMs = (baseMs * 0.2 * (DateTime.now().millisecondsSinceEpoch % 100) / 100).toInt();
+    _wsReconnectAttempts++;
+    _wsReconnectTimer = Timer(Duration(milliseconds: baseMs + jitterMs), () {
+      if (!mounted) return;
+      _connectToBridge();
+    });
+}
+```
+
+**Every WebSocket connection must have**: `onopen` (reset retry counter), `onclose` (schedule reconnect), `onerror` (log warning), and cleanup in `dispose()`/page unload.
+
+## 3. Coach Endpoints Must Use `require_coach`, Not `require_admin`
+
+Endpoints accessed by coaches must use `require_coach` (allows COACH + ADMIN), not `require_admin` (ADMIN only). Using `require_admin` causes 403 for coaches with no server-side error log — the request is silently rejected.
+
+| Endpoint pattern | Correct dependency |
+|---|---|
+| Coach portal data (clients, sessions, reports) | `require_coach` |
+| Admin-only operations (user management, system config) | `require_admin` |
+| Any authenticated user (profile, settings) | `get_current_user` |
+
+**Check**: When adding an endpoint to a router with `dependencies=[Depends(require_admin)]` at the router level, individual endpoints that coaches need must override with `dependencies=[Depends(require_coach)]`.
+
+## 4. Flutter HTTP Requests Must Include Authorization Header
+
+Every `http.post()`, `http.get()`, etc. in Flutter must include the bearer token from the user profile.
+
+```dart
+// BAD — missing auth, returns 403
+final resp = await http.post(uri, headers: {'Content-Type': 'application/json'}, body: ...);
+
+// GOOD
+final token = widget.currentUserProfile['token'] ?? '';
+final resp = await http.post(uri, headers: {
+  'Content-Type': 'application/json',
+  'Authorization': 'Bearer $token',
+}, body: ...);
+```
+
+## 5. Reconnect Timer Must Be Cancelled in dispose()
+
+Uncancelled timers cause "setState called after dispose" crashes and memory leaks.
+
+```dart
+// In dispose():
+_wsReconnectTimer?.cancel();
+_socket?.sink.close();
+super.dispose();
+```
+
+## Verification After Any Endpoint or WebSocket Change
+
+1. **Auth headers**: `grep -n "fetch(" FILE.html | grep -v "_authHeaders\|apiFetch\|apiPost"` — should return 0 unauthenticated calls
+2. **Fixed reconnect**: `grep -n "setTimeout(connect, [0-9]" dashboard/*.html` — should return 0 fixed-delay reconnects
+3. **Flutter auth**: `grep -n "http\.post\|http\.get" mobile/lib/*.dart | grep -v "Authorization"` — should return 0 unauthenticated calls
+4. **Reconnect cleanup**: Every screen with `_wsReconnectTimer` must have `_wsReconnectTimer?.cancel()` in `dispose()`

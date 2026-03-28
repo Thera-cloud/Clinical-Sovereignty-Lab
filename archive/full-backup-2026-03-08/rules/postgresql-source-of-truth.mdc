@@ -1,0 +1,42 @@
+---
+description: PostgreSQL is the single source of truth for all user data. JSON registry is a backup only.
+alwaysApply: true
+---
+
+# PostgreSQL Source of Truth
+
+## Rule
+
+PostgreSQL is the **only** authoritative store for user data. The JSON file (`user_registry.json`) is a disaster-recovery backup — never read from it, never treat its write success as meaningful.
+
+## Architecture
+
+| Layer | Purpose | Function |
+|-------|---------|----------|
+| `_registry_cache` (dict) | In-memory cache, loaded from PG at startup | `load_registry()` returns this |
+| PostgreSQL `users` table | Durable source of truth | `UserStore.upsert_user()` writes here |
+| `user_registry.json` | Backup snapshot only | `_write_json_backup()` — non-fatal if it fails |
+
+## Critical vs Non-Critical Writes
+
+| Operation | Function | Why |
+|-----------|----------|-----|
+| **Registration** | `await save_registry_async(registry, changed_keys=[...])` | Must confirm PG persisted the new user |
+| **Password reset/change** | `await save_registry_async(registry)` | Must confirm PG persisted the new hash |
+| **Dependent account creation** | `await save_registry_async(registry, changed_keys=[...])` | Must confirm PG persisted the dependent |
+| Profile updates, address validation, tier changes | `save_registry(registry)` (sync, fire-and-forget) | Non-critical; PG writes async in background |
+
+## Rules
+
+1. **Never use JSON write success as the return value** for critical operations. `save_registry_async()` returns based on the PG write result.
+2. **`register_new_user()` and `create_dependent_account()` are async** — they `await` the PG write. Any caller must use `await`.
+3. **New user creation paths must go through `save_registry_async()`** — never `save_registry()` alone.
+4. **`load_registry()` always returns the in-memory PG cache** when `USE_POSTGRES_REGISTRY=true`. It never reads JSON.
+5. **On startup**, if PG is empty, the bridge seeds from JSON (one-time migration). After that, PG is authoritative.
+6. **`changed_keys` parameter** — pass the specific registry keys that changed for targeted upserts instead of full-registry `save_all()`. This is faster for single-user operations.
+7. **Never write directly to `user_registry.json`** — use the registry functions which handle PG + JSON backup automatically.
+8. **After any PG schema change**, verify that `UserStore._row_to_entry()` and `UserStore.upsert_user()` handle the new columns correctly.
+
+## Default Coach Assignment
+
+New client registrations default to `hnevedal` / `COACH_HNEVEDAL_ID` (not the retired `CoachN`).

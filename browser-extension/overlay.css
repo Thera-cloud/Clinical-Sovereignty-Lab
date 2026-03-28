@@ -1,0 +1,150 @@
+/* Little Nate Overlay — Design System: Sovereign Sanctuary */
+
+#nate-overlay {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+}
+
+#nate-toggle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #C9A962, #8B7355);
+  color: #050505;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(201, 169, 98, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: none;
+}
+
+#nate-toggle:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 28px rgba(201, 169, 98, 0.6);
+}
+
+#nate-panel {
+  width: 380px;
+  max-height: 520px;
+  background: #0A0A0A;
+  border: 1px solid #C9A96233;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+
+#nate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: #111111;
+  border-bottom: 1px solid #C9A96222;
+  color: #C9A962;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+#nate-header button {
+  background: none;
+  border: none;
+  color: #8B7355;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+#nate-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+}
+
+.nate-msg {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 85%;
+  word-wrap: break-word;
+}
+
+.nate-msg-user {
+  align-self: flex-end;
+  background: #1a1a2e;
+  color: #E8D5A3;
+  border-bottom-right-radius: 4px;
+}
+
+.nate-msg-nate {
+  align-self: flex-start;
+  background: #111111;
+  color: #ddd;
+  border: 1px solid #C9A96222;
+  border-bottom-left-radius: 4px;
+}
+
+.nate-msg-system {
+  align-self: center;
+  color: #8B7355;
+  font-size: 12px;
+  font-style: italic;
+}
+
+#nate-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #C9A96222;
+  background: #111111;
+}
+
+#nate-input {
+  flex: 1;
+  background: #050505;
+  border: 1px solid #C9A96233;
+  border-radius: 8px;
+  color: #E8D5A3;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+}
+
+#nate-input:focus {
+  border-color: #C9A962;
+}
+
+#nate-send {
+  background: linear-gradient(135deg, #C9A962, #8B7355);
+  color: #050505;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+#nate-send:hover {
+  opacity: 0.9;
+}
+
+#nate-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

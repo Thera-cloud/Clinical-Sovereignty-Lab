@@ -1,0 +1,88 @@
+---
+description: Rules for the three-tier token management chain — TokenGuardian → TokenRenewalAgent → TokenAuditAgent
+globs: backend/app/services/token_guardian.py, backend/app/services/token_renewal_agent.py, backend/app/services/token_audit_agent.py, backend/app/routers/skyeye_api.py
+alwaysApply: false
+---
+
+# Token Agent Trio — Guardian → Renewal → Audit
+
+## Architecture
+
+```
+TokenGuardian (45-min sweep)
+   ├── Detects expiring tokens
+   ├── Calls adapter.refresh_token()
+   ├── Calls adapter.authenticate()
+   └── Marks expired in DB if both fail
+          ↓
+TokenRenewalAgent (15-min sweep)
+   ├── Queries skyeye_platform_tokens WHERE status='expired'
+   ├── Attempts adapter.refresh_token() again
+   ├── If refresh fails → SMS + email admin with OAuth URL
+   ├── Watches for resolution (OAuth callback saves new tokens)
+   ├── Validates renewed tokens via adapter.authenticate()
+   ├── Logs green-light: token_renewal_validated to skyeye_activity
+   └── Re-queues failed posts (status='failed' → 'approved')
+          ↓
+TokenAuditAgent (30-min sweep)
+   ├── Audits token_renewal_* events from last 2 hours
+   ├── Independently calls adapter.authenticate() per platform
+   ├── Flags discrepancies (DB says connected but auth fails, or vice versa)
+   ├── Checks notification gaps (expired >30min with no notification)
+   ├── Checks queue integrity (failed posts on now-connected platforms)
+   └── Writes to immutable audit_log with compliance_flags=['AUDIT']
+```
+
+## Separation of Concerns
+
+- **Guardian** is the first responder — proactive refresh before expiry
+- **Renewal Agent** handles what Guardian cannot — human-in-the-loop
+- **Audit Agent** trusts neither — independently verifies everything
+
+The Audit Agent must **never** share code paths, cached state, or adapter instances with the Renewal Agent. It must import its own adapters via `get_all_adapters(self.db_pool)`.
+
+## Green-Light Validation Signal
+
+After successful renewal, the Renewal Agent inserts:
+
+```sql
+INSERT INTO skyeye_activity (platform, type, content, severity)
+VALUES ($1, 'token_renewal_validated', 'Token validated — platform operational', 'success')
+```
+
+The Audit Agent checks these events and verifies them independently. If validation was false, it logs `action_type = 'SECURITY'` to `audit_log`.
+
+## Notification Cooldown
+
+2 hours per platform. Tracked in `_pending_renewals` dict:
+
+```python
+_pending_renewals[platform] = {"notified_at": now, "attempts": count}
+```
+
+## Content Queue Retry
+
+After validated renewal, failed posts are re-queued:
+
+```sql
+UPDATE skyeye_content_queue
+SET status = 'approved', error_message = NULL
+WHERE platform = $1 AND status = 'failed'
+```
+
+## Tables Used
+
+- `skyeye_platform_tokens` — token status, expiry, error messages
+- `skyeye_activity` — all agent events (renewal, validation, audit reports)
+- `skyeye_content_queue` — post queue (failed → approved on renewal)
+- `audit_log` — immutable discrepancy and audit report records
+
+## OAuth Flow Integration
+
+The Renewal Agent sends the admin a GET-based OAuth URL:
+
+```
+{PUBLIC_BASE_URL}/api/skyeye/platforms/{platform}/connect
+```
+
+This redirects to the platform's OAuth page. On callback, `platform_oauth_callback` in `skyeye_api.py` saves the new tokens and redirects to `skyeye.html?connected={platform}`. The Renewal Agent detects the resolution on its next sweep.

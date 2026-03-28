@@ -1,0 +1,45 @@
+---
+description: Token Usage Agent — daily/monthly reset behavior, snapshot logic, and annual receipts
+alwaysApply: true
+---
+# Token Usage Agent Lifecycle
+
+## Agent: `TokenUsageAgent`
+
+| Property | Value |
+|---|---|
+| File | `backend/app/services/token_usage_agent.py` |
+| Cycle | Every 30 minutes |
+| app.state key | `token_usage_agent` |
+| Requires | `db_pool`, `app_state` |
+
+## Cycle Actions
+
+Each 30-minute cycle checks UTC time and performs applicable actions:
+
+| Condition | Action |
+|---|---|
+| New UTC day (hour < 1, not yet snapshotted) | Snapshot yesterday's usage → reset `token_usage_today` to 0 |
+| 1st of month (day == 1, hour < 1) | Reset `token_usage_month` to 0 for all users |
+| Jan 2nd (month == 1, day == 2, hour < 1) | Generate GKM annual receipts for prior tax year |
+
+## Daily Snapshot
+
+1. Query all users where `(profile_data->>'token_usage_today')::int > 0`
+2. For each user, query `token_transactions` grouped by `source` for the snapshot date
+3. Insert rows into `token_usage_snapshots` (one per user per source)
+4. Reset `token_usage_today` to 0 via `jsonb_set`
+5. Update `last_token_reset` to today's date
+
+## Monthly Reset
+
+Update all users: set `profile_data->'token_usage_month'` to 0 via `jsonb_set`.
+
+## Rules
+
+1. **Snapshots are idempotent** — the agent tracks `_last_snapshot_date` in memory to avoid double-snapshotting on the same day.
+2. **Never use full `profile_data` replacement** for resets — always use `jsonb_set` on the specific key to avoid clobbering other fields.
+3. **The agent is NOT an auditor** — it does not send emails or report to Trust Enforcer. It is a background maintenance agent like `db_maintenance_agent`.
+4. **If `db_pool` is None**, the agent logs a warning and skips the cycle (does not crash).
+5. **Annual receipt generation** defers to `gkm_annual_receipts` table's UNIQUE constraint — re-runs update existing rows.
+6. **Bridge cache must not overwrite reset values** — `user_store.py` uses `GREATEST(EXCLUDED.token_balance, u.token_balance)` to preserve the DB value for `token_balance`, but `token_usage_today` and `token_usage_month` live inside `profile_data` JSONB and are handled by the merge strategy.

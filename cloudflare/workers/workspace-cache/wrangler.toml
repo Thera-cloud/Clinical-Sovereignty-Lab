@@ -1,0 +1,14 @@
+# R2 Workspace Cache Worker — wrangler.toml
+# Deploy: cd cloudflare-workers/workspace-cache && wrangler deploy
+
+name = "sovereign-workspace-cache"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[[r2_buckets]]
+binding = "WORKSPACE"
+bucket_name = "sovereign-workspace"
+
+# Auth token — set via: wrangler secret put AUTH_TOKEN
+# [vars]
+# AUTH_TOKEN = ""  # Don't hardcode — use wrangler secret

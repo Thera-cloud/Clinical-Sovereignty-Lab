@@ -1,0 +1,71 @@
+---
+description: Memory Search and conversation_history — fracture points and diagnostics for "blank" results
+globs: backend/app/routers/client_data_api.py, backend/app/websocket/bridge_server.py
+alwaysApply: false
+---
+
+# Memory Search & conversation_history Fracture Points
+
+## Why Memory Search Returns Blank for Some Users
+
+Memory Search (`GET /api/client/memory/search/{hw_id}?q=...`) queries `conversation_history` by `user_id` (hardware_id). It returns blank when:
+
+1. **No rows for that user_id** — most common
+2. **RLS filters all rows** — acting_hardware_id mismatch
+3. **user_id format mismatch** — hw_id in URL differs from stored user_id
+
+## Data Flow
+
+| Source | When | Writes To |
+|--------|------|-----------|
+| Bridge `memorize()` | Real-time (every chat exchange) | PG (`_memorize_pg`) + JSON (`memory.json`) |
+| Backfill script | One-time migration | PG only (from existing memory.json) |
+
+**Bridge PG write** uses `db_pool` (injected at startup). If `db_pool` is None (e.g., POSTGRES_HOST=localhost in Docker), the bridge **never writes to PG** — only to JSON. See `bridge-postgres-connectivity.mdc`.
+
+## conversation_history Schema
+
+- `user_id` TEXT — hardware_id (e.g., CLIENT_LISAWEST_ID)
+- RLS policy `convhist_app_own`: `user_id = current_setting('app.acting_hardware_id')` OR acting_role = ADMIN
+
+## Client Auth & RLS
+
+`client_data_api` uses `get_current_user` from api_server. It sets `set_rls_context(username=..., hardware_id=..., role=...)` from the Redis profile. So `acting_hardware_id` is set. The client requests their own hw_id in the URL. RLS should allow rows where `user_id = acting_hardware_id`.
+
+## Diagnostic Queries
+
+```sql
+-- 1. Which users have conversation_history rows?
+SELECT user_id, COUNT(*) FROM conversation_history GROUP BY user_id ORDER BY COUNT(*) DESC;
+
+-- 2. Lisa/Bill hardware_ids (from users table)
+SELECT username, hardware_id, profile_data->>'name' FROM users
+WHERE LOWER(profile_data->>'name') LIKE '%lisa west%' OR LOWER(profile_data->>'name') LIKE '%bill west%';
+
+-- 3. Rows for a specific user
+SELECT COUNT(*) FROM conversation_history WHERE user_id = 'CLIENT_XXXX_ID';
+```
+
+## Fixes
+
+| Symptom | Likely Cause | Fix |
+|---------|--------------|-----|
+| Blank for all users except John D. | Bridge db_pool was None; only John backfilled | 1) Verify bridge db_pool (logs: "Database pool created"). 2) Run backfill for all Vaults/Clients/*/memory.json |
+| Blank for Lisa/Bill only | No backfill for their folders; bridge may not have written | 1) Check if Vaults/Clients/CLIENT_LISAWEST_ID/memory.json (or similar) exists. 2) Run backfill. 3) Verify bridge is writing (check logs for "[MEMORY PG] INSERT failed") |
+| 200 but empty results | RLS or user_id mismatch | Verify acting_hardware_id matches URL hw_id; consider set_rls_admin for diagnostics |
+
+## Backfill Command
+
+```bash
+python backend/scripts/backfill_conversation_history.py
+# Or dry-run first:
+python backend/scripts/backfill_conversation_history.py --dry-run
+```
+
+Backfill reads `DATA_DIR/Vaults/{Clients,Coaches,Admin}/*/memory.json` and inserts into `conversation_history`. Folder name = user_id.
+
+## Never Assume
+
+- Never assume memory search works for all users because it works for one (e.g., John D. / CLIENT_001)
+- Never assume bridge db_pool is healthy — verify bridge logs on startup
+- Never assume backfill was run for all clients — it processes only existing memory.json files

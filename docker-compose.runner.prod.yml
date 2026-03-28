@@ -1,0 +1,39 @@
+services:
+  # Long-term single-runner container for background agents.
+  # NOTE: requires runtime role gating in backend startup logic.
+  backend-runner:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nate_backend_runner
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://nate_app:${NATE_APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - POSTGRES_USER=nate_app
+      - POSTGRES_PASSWORD=${NATE_APP_DB_PASSWORD}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - NATE_RUNTIME_ROLE=runner
+    command: ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./data/backend:/app/data
+      - ./data/bridge:/app/bridge_data:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - data_network
+      - app_network

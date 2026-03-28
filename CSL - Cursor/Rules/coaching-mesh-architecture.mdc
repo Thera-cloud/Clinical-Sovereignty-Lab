@@ -1,0 +1,56 @@
+---
+description: Architecture rules for the BLE Coaching Mesh system — master/assistant hierarchy, mesh sessions, DOJO training methods
+alwaysApply: true
+---
+
+# Coaching Mesh Architecture
+
+## System Overview
+
+The Coaching Mesh is a two-layer system:
+
+1. **Coach Hierarchy** — Master/assistant coach relationships with supervised hours tracking (`coach_hierarchy`, `supervised_hours` tables)
+2. **BLE Coaching Mesh** — Group training sessions with quiz dispatch, scenario practice, and Little Nate AI evaluation (`coaching_mesh_sessions/participants/messages` tables)
+
+The mesh engine (`coaching_mesh_engine.py`) is a **request-response service** (not a background agent). It has no `start()`/`stop()`/`_run_loop()`. It's registered on `app.state.coaching_mesh_engine` and in `_service_checks` but does NOT need shutdown cleanup.
+
+## DOJO Training Methods (21 Total)
+
+`DOJO_TRAINING_METHODS` in `coaching_mesh_engine.py` defines 3 methods per DOJO (7 DOJOs x 3 = 21). Each method has:
+
+- `id` — Machine key used as `session_type` (e.g., `"ipr_review"`)
+- `nate_system_prompt` — AI evaluation prompt with rubric dimensions baked in
+- `scoring_rubric` — Dict of dimension weights summing to 1.0
+- `participant_flow` — Ordered steps the UI walks participants through
+- `time_pressure` / `minutes` — Whether a countdown timer is shown
+
+**Never modify a method's `scoring_rubric` weights without updating the corresponding `nate_system_prompt`** — the prompt references rubric dimensions so Nate's feedback aligns with scoring.
+
+## WebSocket Broadcast Pattern
+
+Mesh messages broadcast to session participants via a two-step lookup:
+
+1. Query `coaching_mesh_participants` for `user_id`s where `left_at IS NULL`
+2. Iterate `connected_clients` dict to find WebSocket connections matching those `hardware_id`s
+
+This differs from role-based broadcast (e.g., "notify all admins") because the audience is dynamic and session-scoped.
+
+## Auto-Hours Logging
+
+When `end_session()` is called, supervised hours are auto-logged for every participant with `role='assistant'`. The `attestation_status` starts as `'pending'` — the master coach must formally attest via `coach_attest_hours`.
+
+## Email Uniqueness
+
+Registration allows the same email across different roles (CLIENT/COACH/ADMIN) but still enforces uniqueness within the same role. The `forgot_password` flow finds the first matching email — if a user has accounts in multiple roles, the first registry match wins.
+
+## Migration 068
+
+All tables are created by `backend/migrations/068_coach_hierarchy.sql`. The trust baseline seed sets `coach_hierarchy_check_count` to 16.
+
+## REST Router
+
+`coach_hierarchy_api.py` mounts at `/api/coach` with 16 endpoints (10 hierarchy + 6 mesh). It shares the `/api/coach` prefix with the existing `coach.py` router — endpoint paths must not collide.
+
+## Trust Auditor
+
+`coach_hierarchy_auditor.py` runs 16 checks (3x daily, stagger 290s). Registered in trust enforcer as `coach_hierarchy_audit_sent` with baseline key `coach_hierarchy_check_count`.

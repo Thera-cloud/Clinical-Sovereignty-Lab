@@ -1,0 +1,93 @@
+---
+description: Bridge db_pool must connect to postgres service, not localhost. Failure silently degrades auth and data capture.
+alwaysApply: true
+---
+
+# Bridge PostgreSQL Connectivity
+
+## The Problem (Feb 2026 Incident)
+
+The bridge's `db_pool` failed to connect for weeks because `POSTGRES_HOST=localhost` was inherited from `.env`. Inside Docker, `localhost` resolves to the bridge container itself (127.0.0.1), not the PostgreSQL service. The bridge silently fell back to JSON-file auth, and all PostgreSQL data capture (Nevedal metrics, UserStore sync) stopped.
+
+## Required Environment Overrides
+
+The bridge service in `docker-compose.prod.yml` must include these in its `environment:` block:
+
+```yaml
+environment:
+  - POSTGRES_HOST=postgres
+  - POSTGRES_PORT=5432
+  - POSTGRES_USER=${POSTGRES_USER:-nate_admin}
+  - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+  - POSTGRES_DB=${POSTGRES_DB:-little_nate}
+```
+
+These override the `.env` values (which use `localhost` / LAN IPs for local dev).
+
+## Code Safety Net
+
+`bridge_server.py` forces `POSTGRES_HOST` to `postgres` regardless of env var value:
+
+```python
+if _pg_host != "postgres":
+    print(f"[*] Overriding POSTGRES_HOST={_pg_host} → postgres (Docker service)")
+    _pg_host = "postgres"
+```
+
+This is a defense-in-depth measure. The docker-compose override is the primary fix.
+
+## Healthy Startup Indicators
+
+After any bridge restart or deploy, confirm all three lines appear in logs:
+
+```
+[*] PostgreSQL Registry: ENABLED
+[*] Database pool created (2 connections)
+[*] UserStore ready: N users loaded from PostgreSQL
+```
+
+**Degraded indicator** (must be investigated immediately):
+
+```
+[!] USE_POSTGRES_REGISTRY=true but no db_pool — falling back to JSON
+```
+
+## db_pool Injection Points
+
+When `db_pool` is created in `main()`, it is injected into these subsystems:
+
+| Subsystem | Injection | What breaks without it |
+|---|---|---|
+| `billing_system.db_pool` | Direct assignment | Founding member eligibility |
+| `nevedal_handler.db_pool` | Direct assignment | `nevedal_metrics` writes to PG |
+| `VaultBridge(db_pool)` | Constructor arg | Chat file uploads/previews |
+| `UserStore(db_pool, json_path)` | Constructor arg | PG-backed auth, registry sync |
+
+New subsystems needing DB access must be added to this injection block — never create a separate pool.
+
+## Password Storage
+
+Passwords are stored in the `password_hash` column of the `users` table (not inside `profile_data` JSONB). Format: `salt:hash` (32-char hex salt, PBKDF2-HMAC-SHA256, 100k iterations).
+
+The `UserStore._row_to_entry()` method reconstructs the `credentials.password` field from `password_hash` when loading the registry into memory. The `upsert_user()` method extracts `credentials.password` from registry entries and writes it to `password_hash`.
+
+## Verification Commands
+
+```bash
+# Confirm bridge can reach postgres:
+docker exec nate_bridge printenv POSTGRES_HOST
+# Expected: postgres
+
+# Confirm db_pool connected:
+docker logs nate_bridge 2>&1 | grep "Database pool"
+# Expected: [*] Database pool created (2 connections)
+
+# Confirm users loaded from PG:
+docker logs nate_bridge 2>&1 | grep "UserStore"
+# Expected: [*] UserStore ready: 39 users loaded from PostgreSQL
+
+# Confirm passwords exist in PG:
+docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+  "SELECT COUNT(*) FROM users WHERE password_hash IS NOT NULL AND password_hash != ''"
+# Expected: 27+ (all real accounts)
+```

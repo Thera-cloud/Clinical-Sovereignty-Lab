@@ -1,0 +1,120 @@
+---
+description: All 95 services must remain healthy at startup. Never introduce changes that break the 95/95 health check.
+alwaysApply: true
+---
+
+# 97/97 Service Health Requirement
+
+The backend reports `STARTUP COMPLETE: N/97 services healthy` on boot. The target is **97/97 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+
+## Service Registry (96 total)
+
+### Core Services (69)
+
+| # | Service | Source |
+|---|---------|--------|
+| 1 | db_pool | PostgreSQL connection pool |
+| 2 | wisdom_mesh | Redis-backed mesh |
+| 3 | fibre_manager | Sovereign Swarm fibres |
+| 4 | coherence_engine | Nevedal CEE engine |
+| 5 | foresight_engine | Predictive analytics |
+| 6 | session_memory | SessionMemoryStore (requires `storage_root`) |
+| 7 | skyeye | SkyEye session engine |
+| 8 | drip_scheduler | Marketing drip campaigns |
+| 9 | swarm_relay | WebSocket relay server |
+| 10 | token_guardian | OAuth token sweep (45min) |
+| 11 | token_renewal_agent | Token renewal + notify (15min) |
+| 12 | token_audit_agent | Token audit cycle (30min) |
+| 13 | insight_accumulator | 1h synthesis, daily reflection |
+| 14 | web_content_reader | 6 feeds, 4h cycle |
+| 15 | content_queue_janitor | Archive failed posts (6h) |
+| 16 | token_lifecycle_predictor | Expiry early warning (12h) |
+| 17 | db_maintenance_agent | Prune old rows (24h) |
+| 18 | session_recovery_agent | Retry failed summaries (2h) |
+| 19 | agent_status_digest | 3x daily email (5am/5pm/11pm UTC) |
+| 20 | skyeye_tab_auditor | 3x daily SkyEye 56-endpoint trust scorecard |
+| 21 | command_tab_auditor | 3x daily Sovereign Command 25-endpoint trust scorecard |
+| 22 | the_eye_auditor | 3x daily The Eye 21-endpoint trust scorecard |
+| 23 | login_auditor | 3x daily blind WebSocket login test (client + coach) |
+| 24 | client_app_auditor | 3x daily client-facing 26-endpoint trust scorecard |
+| 25 | coach_dojo_auditor | 3x daily coach portal/DOJO/Night School 46-endpoint trust scorecard |
+| 26 | billing_auditor | 3x daily billing pipeline 32-endpoint trust scorecard (incl. discount management CRUD) |
+| 27 | defense_auditor | 3x daily defense subsystem 8-check trust scorecard |
+| 28 | ai_pipeline_auditor | 3x daily AI pipeline 6-check trust scorecard |
+| 29 | ws_flow_auditor | 3x daily WebSocket flow 10-test trust scorecard |
+| 30 | tier_gating_auditor | 3x daily tier feature gate 12-test trust scorecard |
+| 31 | nevedal_lab_auditor | 3x daily Nevedal Research Lab 30-check trust scorecard (24 REST + 6 DB pipeline) |
+| 32 | hw_security_auditor | 3x daily admin MFA/YubiKey/Sentinel 11-check trust scorecard |
+| 33 | system_integrity_auditor | 3x daily preventive security/billing/sync checks |
+| 34 | dojo_session_auditor | 3x daily DOJO/Zoom session lifecycle 30-check trust scorecard |
+| 35 | wisdom_pipeline_auditor | 3x daily wisdom extraction/PII/Night School 12-check trust scorecard |
+| 36 | settings_tab_auditor | 3x daily settings tab 15-check trust scorecard (10 REST + 5 WebSocket) |
+| 37 | notification_observer | Polls social engagement every 30min (likes, reposts, followers) |
+| 38 | trust_enforcer | Meta-agent enforcing 100% trust across all 28 auditors |
+| 38 | assessment_engine | AI-driven dynamic assessment generation (Azure OpenAI) |
+| 39 | hot_memory | Redis-backed tier |
+| 40 | warm_memory | Azure warm tier |
+| 41 | cold_memory | Azure cold tier |
+| 42 | community_mesh_engine | Nate-to-Nate BLE/NFC group wisdom (6h convergence) |
+| 43 | liminal_coaching_engine | External conversation coaching AI |
+| 44 | dojo_mentor_engine | Multi-DOJO AI mentorship for Zoom sessions |
+| 45 | dojo_mentor_zoom | Zoom meeting integration for mentored sessions |
+| 46 | call_coaching_engine | Twilio Media Stream live call coaching |
+| 47 | coaching_mesh_engine | Master/assistant coach training mesh (request-response) |
+| 48 | coach_hierarchy_auditor | 3x daily coach hierarchy/mesh/assistant oversight 20-check trust scorecard |
+| 49 | silence_sentinel | Monitors posting rhythm every 30min, detects silence vs. disappearance |
+| 50 | language_drift_monitor | Analyzes voice integrity every 6h across 6 drift dimensions (Azure gated) |
+| 51 | field_response_parser | Classifies audience responses every 2h into 6 categories incl. authority transfer (Azure gated) |
+| 52 | liminal_presence_auditor | 3x daily freshness check across all 3 liminal presence agents |
+| 53 | pmb_command_center_auditor | 3x daily PMB Command Center 13-endpoint trust scorecard |
+| 54 | data_uniformity_tracer | 3x daily 21-check cross-surface data consistency audit |
+| 55 | token_lab_auditor | 3x daily Token Lab 15-check trust scorecard (11 REST + 3 DB integrity + 1 health) |
+| 56 | gkm_auditor | 3x daily GKM Ministry 11-check trust scorecard (10 REST + 1 DB integrity) |
+| 57 | token_usage_agent | Token usage daily/monthly resets, per-source snapshots, GKM annual receipts (30min cycle) |
+| 58 | nate_checkin_agent | 72h inactivity outreach for clients + coaches, 62h coach alert, DOJO-aware AI questions (30min cycle) |
+| 59 | nate_checkin_auditor | 3x daily check-in system trust scorecard (8 checks: table, activity, snooze, dedup, nudges, webhook) |
+| 60 | fcode_engine | ICD-10-CM suggestion service (request-response) |
+| 61 | session_payment_agent | Session payment 72h enforcement + 24h auto-cancel |
+| 62 | signup_sharing_agent | Signup code sharing revenue distribution |
+| 63 | quickbooks_sync_agent | QuickBooks Online bi-directional sync (30min cycle) |
+| 64 | quickbooks_auditor | 3x daily QuickBooks integration 10-check trust scorecard |
+| 65 | corporate_command_auditor | 3x daily Corporate Command 25-check trust scorecard |
+| 66 | me2me_auditor | 3x daily Me2Me Legacy Pipeline 16-check trust scorecard (9 REST + 3 DB + 4 Conversation History) |
+| 67 | hot_memory / warm_memory / cold_memory | Multi-tier memory (Redis / Azure warm / Azure cold) |
+| 68 | sentinel_orchestrator | Sentinel Defense Orchestrator — House of Mirrors wiring (SASE ban, DEFCON, Mirror Shell, Recon Report, Helix authorization) |
+| 69 | photo_memory_pipeline_auditor | 3x daily Photo & Memory Pipeline 16-check data-verification trust scorecard (5 conv history DB + 4 sync REST + 4 photo analysis DB + 2 memory search REST + 1 cross-pipeline) |
+| 70 | vectorize_pipeline_auditor | 3x daily Vectorize Pipeline 12-check trust scorecard (2 embedding health + 3 push pipeline + 6 retrieval quality + 1 data integrity) |
+
+### Hive Defense Services (27)
+
+webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, billing_monitor, trial_guard, usage_meter, coach_financial_guard, anonymization_proxy, therapeutic_integrity, model_stability, transit_guardian, infiltrator_trap, family_data_guardian, mirror_prediction, coach_integrity_shield, legal_compulsion, sovereign_stripe_proxy, family_session_guardian, zero_knowledge_vault, sovereign_keys, succession_protocol, recovery_drill, heritage_vault, upstream_canary, deadman_switch
+
+## Rules
+
+1. **Never call `app.add_middleware()` inside `lifespan()`** — Starlette raises `RuntimeError: Cannot add middleware after an application has started`, which crashes the entire Hive v4 init block and takes 27+ services down. Middleware must be registered at module level. Use lazy `app_state` lookup if the middleware needs runtime services.
+
+2. **Every new agent/service must be added to the health check** in the `_service_checks` list at the end of `lifespan()` in `main.py`. If you add a new background agent, the denominator increases and the new agent must initialize successfully.
+
+3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
+
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `95/95 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+
+5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
+
+6. **L2 Validation** — All tab auditors validate response payloads are structurally valid (non-null, non-empty dict/list). A response with valid JSON structure is TRUSTED regardless of zero-value fields.
+
+7. **Login Auditor** — Performs actual WebSocket login as audit_client + audit_coach test accounts. Verifies full pipeline: connect, handshake, login_request, login_success, role_match.
+
+8. **Dynamic Assessment Engine** — Uses Azure OpenAI Chat Completions (deployment: gpt-4o, api-version: 2024-06-01, auth: api-key header). Same integration pattern as skyeye_content_generator.py.
+
+9. **Trust Enforcer** — Meta-agent that aggregates results from all 27 auditors, compares against governed trust_baseline table, logs enforcement actions when below 100%, and gates baseline parameter changes through admin (DrNevedal1) approval via proposal/approve REST endpoints. Sends 2 emails per window: full Sovereign Trust Report (always) + Trust Alert (only when < 100%).
+
+10. **Trust Baseline Governance** — Any change to what "trusted" means (L2 rules, endpoint counts, thresholds) must go through `POST /api/trust-enforcer/propose-change` and be approved by admin via `POST /api/trust-enforcer/approve/{id}` before taking effect.
+
+11. **Nevedal Research Lab Auditor** — Tests 24 REST endpoints plus 4 DB pipeline checks across 6 sub-tabs of the Quantum Emotional Coherence Study Platform: Live Analysis, Longitudinal Study, Dyad Comparisons, Family Dynamics, Cohort Analysis, and Coherence Engine layers.
+
+12. **DOJO Session Auditor** — Tests 30 checks across DOJO session lifecycle: Zoom integration (meeting creation, ingested sessions, slot availability), DOJO session flow (start, scenario launch, persona wisdom), Judge DOJO (case upload, case listing, assessment history, preview), session lifecycle (scheduling, upcoming, client sessions), assessment pipeline (generate, score), and consultation status.
+
+13. **Wisdom Pipeline Auditor** — Runs 12 DB-level checks across the knowledge learning loop: extraction health (entry count, insight diversity, freshness), PII safety (SSN, phone, email pattern scans on stored wisdom), Night School integrity (activity logs, DOJO memories, approval pipeline), and data quality (score ranges, orphaned references, valid sources).
+
+14. **Liminal Presence Auditor** — Runs 3 freshness checks across the Liminal Presence agents: Silence Sentinel (result within 35min), Language Drift Monitor (result within 7h), Field Response Parser (result within 2.5h). These agents protect Little Nate's voice integrity and social presence quality. The Language Drift Monitor and Field Response Parser use Azure OpenAI Chat with a cost guard — they skip analysis when fewer than 5 new items exist since the last run.

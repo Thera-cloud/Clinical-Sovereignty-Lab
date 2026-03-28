@@ -1,0 +1,57 @@
+# SASE Request Flow
+
+## Overview
+
+The SASE (Secure Access Service Edge) controller validates both inbound requests and outbound connections. It lives at `app.state.hive_v4["sase_controller"]`.
+
+## Inbound: evaluate_request()
+
+Called on incoming requests to validate source IP, path, method against SASE policies.
+
+| Call Site | File | Trigger |
+|---|---|---|
+| `/api/summon/internal` | `summon_api.py` | After HMAC verification, before input parsing |
+
+```python
+sase = hive_v4.get("sase_controller")
+verdict = await sase.evaluate_request(source_ip=ip, path=path, method="POST")
+if not verdict.allowed:
+    raise HTTPException(403, "Request denied by SASE policy")
+```
+
+## Outbound: validate_outbound()
+
+Called before every external provider call to verify the destination host is on the allowlist.
+
+| Call Site | File | Trigger |
+|---|---|---|
+| `_call_provider()` | `nate_inference_router.py` | Before dispatching to sovereign/workers_ai/grok/azure/home_gpu/digitalocean |
+
+```python
+verdict = sase.validate_outbound(host, purpose=f"inference:{provider}")
+if not verdict.allowed:
+    raise RuntimeError(f"SASE outbound blocked: {host}")
+```
+
+The inference router's `_sase_validate_outbound()` method extracts the hostname from the provider's configured URL and calls `validate_outbound()`. If blocked, the provider call raises `RuntimeError`, causing the router to fall through to the next provider in the priority chain.
+
+## Blocklist Integration
+
+The Sentinel adds/removes entries from the SASE blocklist dynamically. This is separate from the static allowlist in `ALLOWED_OUTBOUND_HOSTS`.
+
+## Rules
+
+1. **Never remove the SASE call from `summon_internal()`.** It is the zero-trust gate for edge-to-origin traffic.
+2. **Never remove `_sase_validate_outbound()` from the inference router.** It prevents exfiltration via malicious provider URLs.
+3. **If SASE is unavailable** (hive_v4 not initialized), requests are allowed through. SASE errors are logged as warnings, not hard failures.
+4. **The defense auditor checks SASE health.** Removing these call sites without updating the defense auditor will cause trust score regression.
+5. **Outbound allowlist** is defined in `ALLOWED_OUTBOUND_HOSTS` in `sase_controller.py`. New inference providers must have their hosts added there.
+
+## Files
+
+| File | SASE Integration |
+|---|---|
+| `backend/app/services/security/sase_controller.py` | Core engine: `evaluate_request()`, `validate_outbound()`, blocklist |
+| `backend/app/routers/summon_api.py` | Inbound: evaluates `/api/summon/internal` requests |
+| `backend/app/services/nate_inference_router.py` | Outbound: validates provider host before each LLM call |
+| `backend/app/main.py` | Init: `app.state.hive_v4["sase_controller"]` |

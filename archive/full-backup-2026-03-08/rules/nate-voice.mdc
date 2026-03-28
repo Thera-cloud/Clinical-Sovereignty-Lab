@@ -1,0 +1,49 @@
+# Little Nate Voice Architecture
+
+## Three-Tier Voice Strategy
+
+Little Nate's voice MUST always be Azure OpenAI "echo" — warm, consistent, and recognizable.
+
+### Tier 1: Pre-Generated Audio ($0 runtime)
+- **Use for:** Static scripted narration (onboarding tour, welcome messages, system announcements)
+- **How:** Pre-generate MP3 files using Azure echo voice, store as static web assets
+- **Files:** `mobile/web/assets/audio/onboarding_*.mp3`
+- **Available to:** All users (Threshold, Inner Chamber, Sovereign Circle)
+
+### Tier 2: Mini-TTS Read-Aloud (~$0.05/request)
+- **Use for:** Reading back Nate's text responses aloud on demand
+- **How:** Client sends `tts_speak` WebSocket message → bridge_server.py opens short-lived Azure session → streams `nate_audio_delta` back
+- **Currently:** Uses GPT-4o Realtime (will swap to GPT-4o-Mini-TTS when deployed)
+- **Handler:** `_handle_tts_speak()` in `bridge_server.py`
+- **Client:** `NateVoice` class in `shared_widgets.dart`
+- **Available to:** Inner Chamber+ ($49/mo and above)
+
+### Tier 3: Full Realtime Interactive Voice ($1.50-7/session)
+- **Use for:** Live bidirectional voice therapy conversations with Little Nate
+- **How:** `azure_bridge.py` opens persistent Azure Realtime WebSocket with VAD
+- **Tier gate:** `SovereignBridge._can_use_realtime()` in `azure_bridge.py`
+- **Available to:** Sovereign Circle ONLY ($149/mo)
+
+## Voice Rules
+
+- **NEVER** use `FlutterTts` or browser SpeechSynthesis for Nate's voice
+- `FlutterTts` is ONLY permitted for user draft read-back (accessibility feature, intentionally NOT Nate's voice):
+  - `NeuralInterfaceV2._readBackDraft()` / `_readBackSentence()`
+  - `AskNateTab._readBackDraft()` / `_readBackSentence()`
+  - `ClientInsightsTab._readBackDraft()`
+- **Azure voice must always be "echo"** — do not change this without explicit approval
+- All audio playback uses `VagusEngine` → `WebPcmPlayer` (Web Audio API on web)
+
+## Key Files
+
+- `mobile/lib/shared_widgets.dart` — VagusEngine, NateVoice, WebPcmPlayer integration
+- `mobile/lib/web_pcm_player.dart` — Web Audio API PCM player (dart:html)
+- `mobile/lib/web_pcm_player_stub.dart` — Mobile stub (no-op)
+- `backend/app/websocket/bridge_server.py` — `_handle_tts_speak()` handler
+- `backend/app/services/azure_bridge.py` — Realtime voice sessions + tier gating
+
+## Message Types
+
+- `tts_speak` — Client → Server: "Speak this text as Nate"
+- `nate_audio_delta` — Server → Client: Base64 PCM audio chunk (24kHz, 16-bit, mono)
+- `tts_done` — Server → Client: Speech complete

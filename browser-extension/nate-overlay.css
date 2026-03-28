@@ -1,0 +1,137 @@
+#nate-overlay {
+  display: none;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 380px;
+  max-height: 500px;
+  background: #0A0A0A;
+  border: 1px solid #C9A962;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(201, 169, 98, 0.15), 0 0 0 1px rgba(201, 169, 98, 0.1);
+  z-index: 2147483647;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #E8D5A3;
+  overflow: hidden;
+}
+
+#nate-overlay.nate-overlay-visible {
+  display: flex;
+  flex-direction: column;
+  animation: nate-slide-in 0.25s ease-out;
+}
+
+@keyframes nate-slide-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.nate-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #111111 0%, #0A0A0A 100%);
+  border-bottom: 1px solid rgba(201, 169, 98, 0.2);
+}
+
+.nate-overlay-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #C9A962;
+  letter-spacing: 0.5px;
+}
+
+.nate-overlay-close {
+  background: none;
+  border: none;
+  color: #8B7355;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.nate-overlay-close:hover {
+  color: #E8D5A3;
+}
+
+.nate-overlay-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  max-height: 320px;
+  flex: 1;
+}
+
+.nate-overlay-question {
+  font-size: 12px;
+  color: #8B7355;
+  margin-bottom: 8px;
+  font-style: italic;
+}
+
+.nate-overlay-answer {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #E8D5A3;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nate-overlay-loading {
+  color: #4ECDC4;
+  animation: nate-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes nate-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.nate-overlay-meta {
+  font-size: 11px;
+  color: #8B7355;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(201, 169, 98, 0.1);
+}
+
+.nate-overlay-input-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid rgba(201, 169, 98, 0.15);
+  background: #050505;
+}
+
+.nate-overlay-input {
+  flex: 1;
+  background: #111111;
+  border: 1px solid rgba(201, 169, 98, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #E8D5A3;
+  outline: none;
+  font-family: inherit;
+}
+.nate-overlay-input:focus {
+  border-color: #C9A962;
+}
+.nate-overlay-input::placeholder {
+  color: #8B7355;
+}
+
+.nate-overlay-send {
+  background: linear-gradient(135deg, #C9A962, #8B7355);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #050505;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nate-overlay-send:hover {
+  background: linear-gradient(135deg, #E8D5A3, #C9A962);
+}

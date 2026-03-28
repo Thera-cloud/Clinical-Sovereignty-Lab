@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  width: 340px;
+  min-height: 400px;
+  background: #0A0A0A;
+  color: #E8D5A3;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.header {
+  padding: 16px;
+  text-align: center;
+  border-bottom: 1px solid rgba(201,169,98,0.2);
+  background: linear-gradient(180deg, #111111 0%, #0A0A0A 100%);
+}
+.header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #C9A962;
+  margin-bottom: 4px;
+}
+.header p {
+  font-size: 11px;
+  color: #8B7355;
+}
+.chat-area {
+  padding: 12px;
+  min-height: 240px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.msg { margin-bottom: 10px; }
+.msg-user {
+  text-align: right;
+  font-size: 13px;
+  color: #8B7355;
+  font-style: italic;
+}
+.msg-nate {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #E8D5A3;
+  white-space: pre-wrap;
+}
+.msg-loading {
+  color: #4ECDC4;
+  font-size: 13px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity:0.5; }
+  50% { opacity:1; }
+}
+.input-area {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px 14px;
+  border-top: 1px solid rgba(201,169,98,0.15);
+  background: #050505;
+}
+.input-area input {
+  flex: 1;
+  background: #111111;
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #E8D5A3;
+  outline: none;
+}
+.input-area input:focus { border-color: #C9A962; }
+.input-area input::placeholder { color: #8B7355; }
+.input-area button {
+  background: linear-gradient(135deg, #C9A962, #8B7355);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #050505;
+  cursor: pointer;
+}
+.input-area button:hover {
+  background: linear-gradient(135deg, #E8D5A3, #C9A962);
+}
+.footer {
+  padding: 8px 12px;
+  text-align: center;
+  font-size: 10px;
+  color: #8B7355;
+}
+.footer a { color: #C9A962; text-decoration: none; }
+.token-section {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(201,169,98,0.1);
+}
+.token-section input {
+  width: 100%;
+  background: #111111;
+  border: 1px solid rgba(201,169,98,0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #8B7355;
+  outline: none;
+}
+.token-section label {
+  font-size: 10px;
+  color: #8B7355;
+  display: block;
+  margin-bottom: 4px;
+}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>Little Nate</h1>
+    <p>Your AI companion — anywhere on the web</p>
+  </div>
+  <div class="chat-area" id="chatArea">
+    <div class="msg msg-nate">Hey! Ask me anything. I'm here to help.</div>
+  </div>
+  <div class="input-area">
+    <input type="text" id="questionInput" placeholder="Ask Little Nate..." autofocus />
+    <button id="sendBtn">Ask</button>
+  </div>
+  <div class="token-section">
+    <label>Summon Token (optional — for full access)</label>
+    <input type="text" id="tokenInput" placeholder="Paste your summon token here..." />
+  </div>
+  <div class="footer">
+    Powered by <a href="https://app.sovereignsanctuary.net" target="_blank">Sovereign Sanctuary</a>
+  </div>
+<script>
+const API = "https://api.sovereignsanctuary.net";
+const chatArea = document.getElementById("chatArea");
+const input = document.getElementById("questionInput");
+const sendBtn = document.getElementById("sendBtn");
+const tokenInput = document.getElementById("tokenInput");
+
+chrome.storage.local.get("summon_token", (d) => {
+  if (d.summon_token) tokenInput.value = d.summon_token;
+});
+
+tokenInput.addEventListener("change", () => {
+  const t = tokenInput.value.trim();
+  chrome.storage.local.set({ summon_token: t });
+});
+
+function addMsg(text, cls) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  chatArea.appendChild(d);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return d;
+}
+
+async function ask() {
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = "";
+  addMsg(q, "msg-user");
+  const loading = addMsg("Thinking...", "msg-loading");
+
+  const headers = { "Content-Type": "application/json" };
+  const data = await chrome.storage.local.get("summon_token");
+  if (data.summon_token) headers["Authorization"] = "Bearer " + data.summon_token;
+
+  try {
+    const resp = await fetch(API + "/api/summon", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message: q, channel: "browser_extension" }),
+    });
+    const json = await resp.json();
+    loading.remove();
+    addMsg(json.response || "No response.", "msg-nate");
+    if (json.queries_remaining != null) {
+      addMsg(json.queries_remaining + " free queries remaining", "msg-loading");
+    }
+  } catch (e) {
+    loading.remove();
+    addMsg("Couldn't reach Little Nate. Check your connection.", "msg-nate");
+  }
+}
+
+sendBtn.addEventListener("click", ask);
+input.addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+</script>
+</body>
+</html>

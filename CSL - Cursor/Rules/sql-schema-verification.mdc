@@ -1,0 +1,58 @@
+---
+description: Prevent SQL column name mismatches — the #1 cause of 500 errors and trust failures. Verify every column in every query against the live schema before deploying.
+globs: backend/app/routers/*.py, backend/app/services/*_auditor.py, backend/app/services/*_engine.py, backend/app/services/*_observer.py
+alwaysApply: false
+---
+
+# SQL Schema Verification
+
+## The Problem
+
+Column name mismatches cause silent 500 errors that drop trust below 100%. These are invisible until an auditor hits the endpoint. Known incidents:
+
+| Table | Code Used | Actual Column | Impact |
+|---|---|---|---|
+| `login_attempts` | `username`, `attempted_at` | `identifier`, `created_at` | geo-data 500 |
+| `skyeye_platforms` | `status`, `token_status` | `enabled`, `compliance_status` | Observer dead for weeks |
+| `skyeye_activity` | `action`, `details`, `timestamp` | `type`, `content`, `created_at` | Silent write failures |
+| `users` | `user_id` | `id` (UUID) + `username` (VARCHAR) | Query crashes |
+
+## Before Writing Any SQL Query
+
+1. Verify every column exists:
+
+```bash
+ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '\d TABLE_NAME'"
+```
+
+2. If you cannot verify live, check migration files in `backend/migrations/` for the CREATE TABLE statement.
+
+## Known Table Schemas (Quick Reference)
+
+### `users`
+`id` (UUID), `username` (VARCHAR unique), `role`, `tier`, `subscription_status`, `hardware_id`, `password_hash`, `profile_data` (JSONB), `created_at`, `updated_at`
+**No `user_id` column. No `email` column (email is inside `profile_data`).**
+
+### `login_attempts`
+`id`, `identifier` (TEXT), `identifier_type`, `success` (BOOL), `ip_address` (TEXT), `user_agent_hash`, `device_imprint_id`, `failure_reason`, `created_at`
+**No `username`. No `attempted_at`.**
+
+### `skyeye_activity`
+`id`, `platform` (TEXT), `type` (TEXT), `content` (TEXT), `compliance_note`, `pillar`, `severity`, `metadata` (JSONB), `created_at`
+**No `action`. No `details`. No `timestamp`. No `activity_type`.**
+
+### `skyeye_platform_tokens`
+`platform`, `access_token`, `refresh_token`, `token_expiry`, `account_id`, `page_id`, `error_message`, `updated_at`
+**No `status`. No `token_status`.**
+
+### `skyeye_platforms`
+`platform`, `enabled`, `compliance_status`, `control_mode`, `follower_count`, `icon`, `tier_required`
+**No `status`. No `token_status`.**
+
+## Rules
+
+1. **Never guess column names** — always verify against schema or migration files
+2. **After writing a new SQL query**, grep the migration that created the target table
+3. **Use `COALESCE` or `... IS NOT NULL`** instead of assuming a column has a default
+4. **The `users` table** — use `username` for lookups, `id` for UUID foreign keys. Never `user_id`.
+5. **Timestamp columns** — most tables use `created_at`, not `timestamp`, `logged_at`, or `attempted_at`

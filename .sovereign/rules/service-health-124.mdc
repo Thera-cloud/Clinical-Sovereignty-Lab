@@ -1,0 +1,71 @@
+---
+description: All 161 services must remain healthy at startup. Never introduce changes that break the service health count.
+alwaysApply: true
+---
+
+# 161/161 Service Health Requirement
+
+The backend reports `STARTUP COMPLETE: N/161 services healthy` on boot. The target is **161/161 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+
+## What Causes Service Count Drops
+
+| Failure Mode | Symptom | Fix |
+|---|---|---|
+| Missing Python file on server | `No module named 'app.services.X'` | Deploy the file via `scp` |
+| Missing DB table | `relation "X" does not exist` | Create migration, run on server |
+| Missing DB column | `column "X" does not exist` | `ALTER TABLE ADD COLUMN IF NOT EXISTS` |
+| Type mismatch in SQL | `operator does not exist: uuid = text` | Fix cast or use correct type |
+| FK constraint fails at CREATE TABLE | Table silently not created | Remove FK or fix type mismatch |
+| Import error in dependency | `No module named 'app.services.Y'` (transitive) | Deploy the dependency file too |
+| `load_dotenv(override=True)` | Redis/Postgres connection fails | Use `load_dotenv()` without override |
+| Middleware in lifespan() | `RuntimeError: Cannot add middleware after started` | Move to module level |
+
+## Deployment Checklist for New Services
+
+When adding a new service to `_service_checks` in `main.py`:
+
+1. **The service file must exist on the server** — `scp` it before restarting
+2. **All imports in the file must resolve** — deploy transitive dependencies too
+3. **All DB tables it queries must exist** — run migration first
+4. **All DB columns it references must exist** — verify with `\d table_name`
+5. **The denominator in this rule must be updated** to the new count
+
+## Deployment Checklist for Existing Services
+
+When modifying a service that's already in `_service_checks`:
+
+1. **If adding new SQL queries**, verify all columns exist in the target table
+2. **If adding new table references**, ensure migration has been applied
+3. **If changing imports**, verify new dependencies are deployed
+4. **After deploy + restart**, confirm the count didn't drop:
+   ```bash
+   docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'
+   ```
+
+## Quick Verification
+
+```bash
+# Health count
+ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'"
+# Expected: 161/161 services healthy
+
+# Schema errors (must be empty)
+ssh root@68.183.168.75 "docker logs nate_backend --since 60s 2>&1 | grep -E 'does not exist|No module' | sort -u"
+
+# Missing files (must be empty)
+ssh root@68.183.168.75 "docker logs nate_backend --since 60s 2>&1 | grep 'No module named' | sort -u"
+```
+
+## Non-Blocking Warnings (Expected, Not Failures)
+
+These appear in logs but do NOT affect the 161/161 count:
+
+| Warning | Reason |
+|---|---|
+| `Local NAS init failed: Permission denied: '/mnt/heritage-vault'` | NAS mount not configured — heritage vault uses R2/Azure fallback |
+| `IcebergCDCAgent: watermark init failed: permission denied` | Iceberg CDC not yet provisioned |
+| `D1SyncAgent: batch failed (403)` | Cloudflare D1 account not yet authorized |
+| `SendGrid canary check failed: 403` | SendGrid API key scoped differently |
+| `Foresight: Insufficient data for forecast` | Pre-launch, no session data yet |
+
+These are operational warnings, not service health failures. They will resolve when the respective external services are configured.

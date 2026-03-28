@@ -1,0 +1,51 @@
+---
+description: GKM Ministry (501c3 nonprofit) data integrity — donations, receipts, token sharing fees, and trust enforcement
+alwaysApply: true
+---
+# GKM Ministry Trust
+
+## Overview
+
+Greatest in the Kingdom Ministry (GKM) is a 501(c)(3) nonprofit. Token sharing fees ($5 per 10,000 tokens shared) are recorded as tax-deductible donations to GKM. The GKM auditor (`gkm_auditor.py`) runs 11 trust checks 3x daily.
+
+## GKM Auditor (11 checks — baseline key: `gkm_check_count`)
+
+| Tab | Checks | Endpoints |
+|---|---|---|
+| Health & Overview | 3 | health, sharing-activity, annual-summary |
+| Donations & Receipts | 4 | donations, donations/audit_client, annual-receipts/generate (POST), send-receipt/audit_client (POST) |
+| Sharing & Scholarships | 3 | token-share/history/audit_client, scholarships, discounts |
+| Data Integrity | 1 | DB: gkm_tables_exist (checks 4 tables + source column) |
+
+## Database Tables
+
+| Table | Purpose | Migration |
+|---|---|---|
+| `token_shares` | Records of BLE/NFC token transfers between users | 076 |
+| `gkm_donations` | Individual donation records linked to Stripe charges | 076 |
+| `gkm_annual_receipts` | Auto-generated Jan 2 for donors with >= $250 annual | 076 |
+| `gkm_discounts` | Free month rewards for 100k cumulative sharing | 076 |
+
+## Fee Calculation
+
+```python
+SHARE_FEE_PER_10K = 500  # $5.00 in cents
+fee_cents = math.ceil(tokens / 10000) * SHARE_FEE_PER_10K
+```
+
+The fee always rounds UP. Sharing 10,001 tokens costs $10.00, not $5.00.
+
+## Annual Receipt Generation
+
+- Triggered automatically on January 2 by `TokenUsageAgent._generate_annual_receipts(tax_year)`
+- Only donors with cumulative donations >= $250 in a tax year receive a receipt
+- Receipt text includes "No goods or services were provided in exchange for this contribution" (IRS requirement)
+- Receipts are stored in `gkm_annual_receipts` table
+
+## Rules
+
+1. **Never modify the $5/10k fee structure** without updating `GKM_DONATION_FRAMEWORK.md` — CPA and board rely on it.
+2. **The `token_transactions.source` column must be `'token_share'`** for all sharing transactions — this feeds the Token Usage Map.
+3. **Migration 076 must be applied** before enabling GKM features — the auditor's DB check verifies all 4 tables exist plus the `source` column on `token_transactions`.
+4. **GKM API is admin-only** — `require_admin` dependency on the router. Client-facing sharing is initiated via the separate `initiate_token_share` endpoint that does NOT require admin auth.
+5. **After modifying `gkm_auditor.py`**, update all 5 trust locations (see `trust-enforcer-architecture.mdc`).

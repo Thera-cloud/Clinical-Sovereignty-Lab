@@ -1,0 +1,54 @@
+---
+description: When adding a new agent to main.py, it must also be added to agent_status_digest.py or it becomes invisible to the 3x daily health email.
+globs: backend/app/main.py, backend/app/services/agent_status_digest.py
+alwaysApply: false
+---
+
+# Agent Digest Coverage Sync
+
+## Rule
+
+Every agent registered on `app.state` in `main.py` must have a corresponding entry in `agent_status_digest.py`. The digest is the system-wide health email sent 3x daily — an agent missing from it is invisible to monitoring.
+
+## When Adding a New Agent
+
+Update **both** files:
+
+1. **`main.py`**: Register agent on `app.state`, add to `_service_checks`, add shutdown
+2. **`agent_status_digest.py`**: Add the agent to the appropriate section
+
+## Digest Sections (17 total, ~121 agents)
+
+| Section | Method | Agents |
+|---|---|---|
+| Token Management | `_section_token_management` | Token Guardian, Renewal, Audit |
+| SkyEye / Social | `_section_skyeye_social` | SkyEye Engine, Marketing Worker, Observer |
+| Content Ops | `_section_content_ops` | ContentQueueJanitor |
+| Token Lifecycle | `_section_token_lifecycle` | TokenLifecyclePredictor |
+| Intelligence | `_section_intelligence` | Insight Accumulator, Web Reader, Night School |
+| Clinical Safety | `_section_clinical_safety` | Therapeutic Integrity, Deadman, Recovery |
+| Billing / Accounts | `_section_billing_accounts` | Billing Worker, Purge, Drip |
+| Trust Auditors (22) | `_section_trust_auditors` | All 22 auditors |
+| Trust Enforcer | `_section_trust_enforcer` | Trust Enforcer meta-agent |
+| Coaching Subsystem | `_section_coaching_subsystem` | Community Mesh, Liminal, DOJO, Coaching Mesh, Call, Assessment |
+| Liminal Presence | `_section_liminal_presence` | Silence Sentinel, Drift Monitor, Field Parser |
+| Data Integrity | `_section_data_integrity` | Agent Status Digest (self) |
+| Hive Workers | `_section_hive_defense_workers` | 16 Hive workers |
+| App Workers | `_section_application_workers` | 23 application workers |
+| DB Maintenance | `_section_db_maintenance` | DatabaseMaintenanceAgent |
+| Infrastructure | `_section_infrastructure` | Swarm Relay, PostgreSQL, Redis |
+| Hive Services | `_section_hive_defense_services` | 27 Hive defense services |
+
+## How to Add
+
+For background agents with `_running` flag, add to the matching section's list:
+
+```python
+("My New Agent", "my_new_agent"),  # app.state attribute name
+```
+
+For request-response services (no `_running`), use `_check_service()` instead of `_check_agent()`.
+
+## Feb 2026 Incident
+
+The digest reported 87/87 TRUSTED while 34 agents were missing entirely (21 auditors, Trust Enforcer, coaching engines, liminal presence agents). These agents could have failed with zero visibility in the health email.

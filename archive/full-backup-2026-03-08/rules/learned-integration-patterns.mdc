@@ -1,0 +1,824 @@
+---
+description: Hard-won lessons from production debugging — integration seams, auth, Redis, browser compat, and deployment
+alwaysApply: true
+---
+
+# Learned Integration Patterns
+
+## 1. PostgreSQL Is the Source of Truth — JSON Is a Backup Only
+
+The bridge uses `USE_POSTGRES_REGISTRY=true`. The in-memory `_registry_cache` is loaded from PostgreSQL via `UserStore` on startup. Writing directly to `user_registry.json` has **no effect** — the data is overwritten on restart.
+
+- `load_registry()` returns the in-memory PG cache, not the JSON file
+- `save_registry()` (sync) updates the in-memory cache, schedules a fire-and-forget PG write, and writes JSON as a non-fatal backup. Use for non-critical profile updates.
+- `save_registry_async()` (async) awaits the PG write and confirms success before returning. **Use for all critical writes**: registration, password changes, credential updates. Pass `changed_keys=["client_username"]` for targeted single-user upserts.
+- `_write_json_backup()` is a best-effort JSON backup — its success/failure does NOT determine the return value of save functions when PG is active.
+- Registration (`register_new_user`) and dependent creation (`create_dependent_account`) are `async` and use `save_registry_async` to guarantee PG persistence.
+- Never write to `user_registry.json` directly — it exists only as a disaster-recovery snapshot.
+- To update user data: UPDATE through the registry functions, which write to the `users` table (`profile_data` JSONB + indexed columns)
+
+## 2. Container Restart vs. Recreate
+
+`docker restart` keeps the same container — env vars from `.env` are NOT reloaded.
+`docker compose up -d <service>` recreates the container and picks up new env vars.
+
+- After adding/changing `.env` vars, always use `docker compose up -d`, not `docker restart`
+- The compose service names differ from container names (e.g., service `bridge` → container `nate_bridge`)
+
+## 3. Reuse Existing Instances — Never Re-instantiate
+
+Module-level singletons exist for a reason. Never create a new instance inside a handler when one is already initialized at module scope.
+
+- `notification_system` is initialized at startup with `DATA_DIR` and `SENDGRID_API_KEY`
+- Creating `NotificationSystem()` without args fails silently with `missing positional argument`
+- Same applies to: `_token_redis_sync`, `_pg_user_store`, `parietal`, `cortex`
+
+## 4. Twilio: Use Verify for OTP, Not Raw SMS
+
+US carriers enforce A2P 10DLC. If the campaign registration is FAILED, all raw SMS are blocked (error 30034). Twilio Verify bypasses this entirely.
+
+- OTP/verification codes: use `client.verify.v2.services(VERIFY_SID).verifications.create(to=phone, channel='sms')`
+- Code checking: use `verification_checks.create(to=phone, code=submitted_code)`, check `status == 'approved'`
+- Env var: `TWILIO_VERIFY_SID` (currently `VAa3b4671b2fa7d590fd06ddaa9065fa46`)
+- Check campaign status before assuming SMS works: `client.messaging.v1.services(SID).us_app_to_person.list()`
+
+## 5. Bridge Tokens vs JWTs — Two Auth Worlds
+
+- Bridge issues hex tokens (e.g., `443d6cf2...`) stored in `ACTIVE_TOKENS` + Redis
+- FastAPI backend issues JWTs for REST API endpoints
+- Dashboard sub-pages send bridge tokens as `Authorization: Bearer` to REST APIs
+- `auth.py` → `get_current_user()` must check JWT first, then fall back to Redis bridge token lookup
+- Key pattern: `nate:{env}:auth:{token}`
+
+## 6. UI Display Maps Must Mirror Backend Data Maps
+
+When backend defines N items (e.g., 7 dojos in `DOJO_PRICES`), every UI that renders them must also list all N. If a UI widget iterates over `dojoLabels.keys`, missing entries are invisible.
+
+- Check: registration flow, subscription display, admin panels, approval screens
+- The `judge` dojo was missing from `_buildDojoSubscriptionsSection()` in `updated_screens.dart`
+
+## 7. Router-Level Auth Applies to ALL Endpoints
+
+`APIRouter(dependencies=[Depends(require_admin)])` gates every endpoint under that prefix. Individual endpoint-level auth comments (`# admin = Depends(require_admin)`) are irrelevant.
+
+- Night School needed `require_coach` (allows COACH + ADMIN), not `require_admin`
+- Flutter screens must send `Authorization: Bearer <token>` in HTTP headers
+- The token lives in `widget.profile['token']`
+
+## 8. Cancel Previous Async Tasks Before Starting New Ones
+
+`asyncio.create_task()` without tracking causes concurrent operations that overlap (e.g., TTS voices). Always:
+
+- Track the active task per connection: `_active_tts_task`
+- Set a cancellation event before spawning a new task
+- Check `cancel_event.is_set()` inside the task before sending data
+- Handle `tts_cancel` messages from the client
+
+## 9. Safari vs Chrome Compatibility
+
+| Issue | Safari | Chrome |
+|-------|--------|--------|
+| Async redirects | Blocked by ITP | Works |
+| `sessionStorage` in Private | Throws on write | Works |
+| Service worker caching | Aggressive, needs no-cache headers | Normal |
+| `window.location.href` in async | Treated as popup, blocked | Works |
+| Cookie lifetime | ITP limits to 7 days | Respects max-age |
+
+- Always use `try/catch` around `sessionStorage.setItem()`
+- Use `webOnlyWindowName: '_self'` for same-tab navigation in Flutter web
+- Set `Cache-Control: no-cache` on service worker and bootstrap files in Nginx
+
+## 10. Session Persistence Across Page Navigations
+
+`sessionStorage` does not reliably survive page navigations in all browsers. Use a four-layer fallback:
+
+1. `sessionStorage` (primary)
+2. URL hash parameters (`#t=<token>&u=<username>&p=<profile>`) via `navTo()`
+3. `localStorage` (prefixed with `sc_`)
+4. Cookies (`sc_token`, `sc_username`, `sc_profile`)
+
+Every sub-page must run `_recoverAuth()` on load to parse fallbacks into `sessionStorage`.
+
+## 11. Password Hash Format: `salt:hash`
+
+All password hashing must use the same format: `secrets.token_hex(16)` for a 32-char hex salt, then `hashlib.pbkdf2_hmac('sha256', password, salt, 100000)`, stored as `salt:hash`.
+
+- Do NOT use `username` as salt
+- Do NOT use `token_hex(32)` (produces 64-char salt, breaks `verify_password`)
+- Verify round-trip after generation: hash it, then immediately verify
+
+## 12. Sentinel False Positives
+
+- Generate a **stable** `hardware_id` using `crypto.randomUUID()` + `localStorage`, not `Date.now()`
+- Pre-seed `typical_hours` for admin accounts so any login hour isn't flagged
+- Auth timeout must be long enough for multi-step login (120s, not 30s)
+- Add auth-related message types to `_SENTINEL_SKIP` set
+- Reset Sentinel session state after passphrase verification
+
+## 13. Redis Token Hygiene
+
+- Use `volatile-lru` eviction policy (not `allkeys-lru`) to protect non-TTL keys
+- TTL buffer: `TOKEN_TTL_HOURS * 3600 * 1.1`
+- Key namespace: `nate:{env}:auth:{token}` — environment-scoped
+- Health check on startup with `ping()`, background loop for auto-reconnect
+- Atomic revocation: clear from both `ACTIVE_TOKENS` and Redis with `_revoke_token()`
+- Use `SCAN` for bulk operations, not `KEYS` (disabled in production Redis)
+
+## 14. load_dotenv(override=True) Clobbers Docker Env Vars
+
+Multiple modules call `load_dotenv(override=True)` at import time, which overwrites Docker-injected environment variables (like `REDIS_URL`, `REDIS_HOST`) with stale values from `.env` files baked into the image (e.g., `/app/app/websocket/.env` has `REDIS_HOST=10.0.0.81`).
+
+- **Capture env vars at module scope** (before any cross-module imports trigger `load_dotenv`): use `_VAR = os.getenv("VAR")` at the top of the file
+- Never read `os.environ` lazily at request time for connection strings — by then, `load_dotenv` may have overwritten Docker values
+- `api_server.py` uses `_REDIS_URL_SNAPSHOT` and `_REDIS_PW_SNAPSHOT` captured at import time
+- The bridge's `.env` at `/app/app/websocket/.env` contains hardcoded LAN IPs (`10.0.0.81`) that are unreachable from inside Docker containers
+- Always test auth endpoints with `curl -H 'Authorization: Bearer <bridge_token>'` after deploying — a 401 from `/api/skyeye/pulse` was the symptom of this env var clobbering
+
+## 15. Two `get_current_user` Functions — Know Which One Your Router Uses
+
+- `backend/app/auth.py` → `get_current_user()` returns a **string** (user_id). Used by routers that import from `app.auth`.
+- `backend/app/services/api_server.py` → `get_current_user()` returns a **Dict** (full profile from Redis). Used by `require_admin`/`require_coach`, which most routers depend on.
+- Both must use the same Redis key pattern (`{prefix}:{env}:auth:{token}`) — a mismatch causes silent 401s
+- When fixing auth, always check WHICH `get_current_user` your router chain ultimately calls
+
+## 16. Embed Sub-Pages Natively — Never Use Iframes
+
+When adding a dashboard section (like Hive Defense) inside another page (like SkyEye), embed the HTML and JS directly as a tab — do NOT use `<iframe>`. Iframes are blocked by `X-Frame-Options` / CSP headers on the server and fail with "refused to connect."
+
+- Add the HTML as a `<section class="tab-content" id="tab-{name}">` block
+- Prefix all JS function names with a short namespace (e.g., `hd` for Hive Defense) to avoid collisions with existing functions
+- Prefix all element IDs similarly (e.g., `hd-defconLevel` instead of `defconLevel`)
+- Reuse the parent page's `apiFetch()` / `_authHeaders()` for authenticated API calls — don't duplicate auth logic
+- Add a `case` in the `switchTab()` handler to call the load function on tab activation
+- The standalone `.html` page can still exist for direct-URL access but should not be loaded via iframe
+
+## 17. Session Engine Settings Must Be Verified After Deploy
+
+`skyeye_settings` stores `session_max_duration_minutes` (default 30) and `max_sessions_per_day` (default 3). After deploying session engine changes:
+
+- Verify the rows exist: `SELECT key, value FROM skyeye_settings WHERE key IN ('session_max_duration_minutes', 'max_sessions_per_day');`
+- After the next session runs, verify actual duration: `SELECT id, session_start, session_end, EXTRACT(EPOCH FROM (session_end - session_start)) as seconds FROM skyeye_sessions ORDER BY id DESC LIMIT 3;`
+- If sessions are still 1-2 minutes instead of 30, the engine may not be reading the setting — check `_get_setting()` calls in `skyeye_session_engine.py`
+
+## 18. Production Database Is `little_nate`
+
+The production PostgreSQL database is named `little_nate`, not `sovereign_sanctuary`. The user is `nate_admin`.
+
+- Always use: `psql -U nate_admin -d little_nate`
+- Inside Docker: `docker exec nate_postgres psql -U nate_admin -d little_nate -c "..."`
+- Never guess the database name — `sovereign_sanctuary` does not exist and produces `FATAL: database does not exist`
+
+## 19. `skyeye_activity` Column Names
+
+The `skyeye_activity` table uses `type` as the column name for activity type, not `activity_type`.
+
+| Correct column | Wrong assumption |
+|---------------|-----------------|
+| `type` | `activity_type` |
+| `content` | `detail` or `description` |
+| `platform` | (correct) |
+| `created_at` | `timestamp` |
+
+Always verify column names with `\d skyeye_activity` before writing queries against this table.
+
+## 20. `users` Table Has No `user_id` Column
+
+The `users` table uses `username` (VARCHAR, unique) for lookups and `id` (UUID) for foreign key references. There is no `user_id` column.
+
+- To find a user: `SELECT ... FROM users WHERE username = $1`
+- To join from a FK table (e.g., `sessions.user_id`): first resolve the UUID with `SELECT id FROM users WHERE username = $1`, then use that UUID for FK queries
+- New tables (`community_check_ins`, `community_attendance_records`, `liminal_sessions`) use VARCHAR `user_id` matching the bridge username — these accept the string directly
+- Old tables (`sessions`, `client_metrics`, `wisdom_extractions`) use UUID `user_id` referencing `users.id` — these require the resolved UUID
+- Never write `WHERE user_id = $1 OR username = $1` — `user_id` does not exist on the `users` table and will throw `UndefinedColumnError`
+
+## 21. `profile_data` JSONB May Deserialize as String
+
+Despite being declared `JSONB` in the schema, `profile_data` from the `users` table sometimes arrives as a raw JSON string rather than a parsed dict. Always guard before calling `.items()` or `.get()`:
+
+```python
+profile = row.get("profile_data", {}) or {}
+if isinstance(profile, str):
+    import json
+    try:
+        profile = json.loads(profile)
+    except Exception:
+        profile = {}
+```
+
+This applies to any code path that reads `profile_data` from asyncpg — receipt validation, data export, billing, etc.
+
+## 22. No `require_auth` in `api_server.py`
+
+The available auth dependency functions in `app.services.api_server` are:
+
+| Function | Returns | Who can access |
+|----------|---------|---------------|
+| `get_current_user` | Dict (full profile) | Any authenticated user |
+| `require_admin` | Dict | ADMIN only |
+| `require_coach` | Dict | COACH + ADMIN |
+
+There is **no** `require_auth`. New routers that need "any authenticated user" should use `Depends(get_current_user)`. Importing `require_auth` will cause an `ImportError` that silently prevents the entire router from loading.
+
+## 23. Trust Report Consolidation — Auditors Never Send Email
+
+Individual auditors must **never** call `_send_email()`. All notification flows through the Trust Enforcer (`trust_enforcer.py`), which sends exactly 2 emails per audit window (5:10am/5:10pm/11:10pm UTC):
+
+- **Sovereign Trust Report** — always sent, full 16-auditor breakdown with pre-flight, bar charts, enforcement actions, pending proposals
+- **Trust Alert** — only sent when trust is NOT 100% GREEN, concise list of failures only
+
+Every auditor's `_build_and_send()` must contain: `# Email silenced — Trust Enforcer sends consolidated report`. If a new auditor is created, follow this pattern — no direct email calls.
+
+## 24. Auditor Endpoint Registration — 5 Locations Must Stay in Sync
+
+When adding, expanding, or modifying an auditor, update **all five** of these locations or the enforcer will flag `DATA_PIPELINE` mismatches. Also update `_service_checks` in `main.py` and the service health rule. See **#35** for full stagger assignments.
+
+| # | Location | What to set |
+|---|----------|-------------|
+| 1 | `TAB_ENDPOINTS` in the auditor `.py` | Actual endpoint definitions |
+| 2 | `AUDITOR_ACTIVITY_TYPES` in `trust_enforcer.py` | Activity type string (e.g., `"coach_hierarchy_audit_sent"`) |
+| 3 | `AUDITOR_LABELS` in `trust_enforcer.py` | Display name (e.g., `"Coach Hierarchy & Mesh"`) |
+| 4 | `_baseline_key_for()` in `trust_enforcer.py` | Baseline key mapping (e.g., `"coach_hierarchy_check_count"`) |
+| 5 | `trust_baseline` table (via SQL migration) | Expected count JSON (e.g., `{"expected":16,...}`) |
+
+## 25. HTTP 400 Is TRUSTED for Audit Endpoints
+
+Auditors sending empty payloads `{}` to POST endpoints may receive 400 (Bad Request) instead of 422 (Unprocessable Entity) depending on whether the endpoint uses `raise HTTPException(400)` or Pydantic validation. Both prove the endpoint exists and validates input.
+
+TRUSTED status codes for auditors: `200`, `400`, `404`, `422`. Only `401`, `403`, `405`, and `5xx` indicate real problems.
+
+## 26. Count Auditor Endpoints Programmatically
+
+Never hand-count `TAB_ENDPOINTS`. Always verify with:
+
+```bash
+python3 -c "
+exec(open('backend/app/services/some_auditor.py').read())
+total = sum(len(t['endpoints']) for t in TAB_ENDPOINTS)
+print(f'{total} endpoints across {len(TAB_ENDPOINTS)} tabs')
+for t in TAB_ENDPOINTS:
+    print(f'  Tab {t[\"tab_num\"]}: {t[\"tab\"]} — {len(t[\"endpoints\"])}')
+"
+```
+
+Manual counting caused baseline mismatches in this project (declared 40, actual 46; declared 33, actual 29).
+
+## 27. Audit Stagger Must Finish Within the Same Hour
+
+Auditors check `now.hour in AUDIT_HOURS` after their stagger delay. If a restart happens at XX:55 and the stagger is 260s+, the auditor won't fire until the next audit window because the clock rolls to a non-audit hour.
+
+Keep staggers under 300s. Current assignments: 120s–250s (original 14), 260s (DOJO Session), 270s (Wisdom Pipeline). A restart at 23:56 with 260s stagger means the auditor tries at 00:00 (hour 0, not in `{5, 17, 23}`), so it waits until 5am.
+
+## 28. `users` Table CHECK Constraints Are Uppercase-Only
+
+The `users` table enforces CHECK constraints on several columns:
+
+| Column | Valid values |
+|--------|-------------|
+| `subscription_status` | `ACTIVE`, `TRIAL_ACTIVE` (not `active`) |
+| `tier` | `STANDARD`, `TRIAL` (not `inner_chamber`, `sovereign_circle`) |
+| `role` | `CLIENT`, `COACH`, `ADMIN` |
+
+The unique constraint is on `username`, not `hardware_id`. Use `ON CONFLICT (username) DO NOTHING` for upserts. Always run `SELECT DISTINCT column FROM users` before inserting new rows with constrained values.
+
+## 29. Wisdom Pipeline Auditor WARNINGs Are Expected Pre-Launch
+
+The Wisdom Pipeline Auditor runs DB-level checks (not HTTP). On a deployment with no live sessions yet, these checks return WARNING:
+
+- "No wisdom extractions found — pipeline may be new"
+- "Only 1 insight type" or "No insight types found"
+- "No Night School activity logged yet"
+- "No DOJO session activity yet"
+- "0/N approved — approval queue may need attention"
+
+These are informational, not bugs. They auto-resolve as real sessions generate data. The Trust Enforcer will flag them as enforcement actions, but they require no intervention until after launch.
+
+## 30. Bridge POSTGRES_HOST Must Be Overridden in Docker Compose
+
+The `.env` file has `POSTGRES_HOST=localhost` (for local development). Inside Docker, `localhost` resolves to the bridge container itself, not the postgres service. The bridge's `docker-compose.prod.yml` `environment:` block **must** include `POSTGRES_HOST=postgres`.
+
+Without this override, `asyncpg.create_pool()` fails with `[Errno 111] Connect call failed ('127.0.0.1', 5432)` and the bridge silently falls back to JSON auth — breaking:
+- PostgreSQL-backed user registry (auth falls back to JSON file)
+- Nevedal metrics writes to PostgreSQL
+- UserStore data capture
+- Any bridge code that depends on `db_pool`
+
+The bridge code also forces `_pg_host = "postgres"` as a safety net, but the docker-compose override is the primary fix.
+
+**Symptom**: Bridge logs show `[!] USE_POSTGRES_REGISTRY=true but no db_pool — falling back to JSON`
+
+**Fix verified**: Bridge logs should show all three of these on healthy startup:
+```
+[*] PostgreSQL Registry: ENABLED
+[*] Database pool created (2 connections)
+[*] UserStore ready: 39 users loaded from PostgreSQL
+```
+
+## 31. Bridge db_pool Cascading Dependencies
+
+When the bridge's `db_pool` is `None`, the following subsystems silently degrade:
+
+| Subsystem | Degraded behavior |
+|---|---|
+| UserStore / Auth | Falls back to JSON file — new PG-only accounts can't log in |
+| NevedalHandler | `_store_state()` skips DB writes — no `nevedal_metrics` rows |
+| VaultBridge | Chat file uploads/previews unavailable |
+| BillingSystem | Founding member eligibility checks fail |
+| NateNudge / AI Modes | Handlers unavailable |
+
+After `db_pool` is created in `main()`, it is injected into:
+- `billing_system.db_pool = db_pool`
+- `nevedal_handler.db_pool = db_pool`
+- `VaultBridge(db_pool)`
+- `UserStore(db_pool, json_path=...)`
+
+If adding a new subsystem that needs database access, add it to this injection block — do not create a separate pool.
+
+## 32. Email Uniqueness Is Role-Scoped
+
+`register_new_user()` in `bridge_server.py` allows the same email across different roles (CLIENT vs COACH vs ADMIN) but still rejects duplicates within the same role. This enables a person to sign up as both a client and a coach with the same email.
+
+The `forgot_password` flow uses the first matching email — if a user has accounts in multiple roles, the first registry match wins. Consider clarifying "which account?" in future UI iterations.
+
+## 33. Request-Response Engine vs Background Agent
+
+Services that process requests on demand (like `CoachingMeshEngine`) differ from background agents (like `CoachHierarchyAuditor`):
+
+| Type | Has `start()`/`stop()` | Needs shutdown cleanup | `_service_checks` entry |
+|---|---|---|---|
+| Request-response engine | No | No | `is not None` check |
+| Background agent | Yes | Yes (`await agent.stop()` in shutdown) | `is not None` check |
+
+Both types get an `app.state` assignment and a `_service_checks` entry. The key difference: background agents need `await agent.stop()` in the `lifespan()` shutdown block to avoid orphaned `asyncio` tasks.
+
+## 34. Auditor Stagger Assignments
+
+Current auditor stagger delays (seconds after audit hour starts):
+
+| Stagger | Auditor |
+|---------|---------|
+| 70 | Photo & Memory Pipeline |
+| 80 | Me2Me Legacy Pipeline |
+| 85 | Data Uniformity |
+| 90 | PMB Command Center |
+| 95 | Memory Nesting |
+| 100 | Token Lab |
+| 110 | GKM Ministry |
+| 120 | SkyEye Tab |
+| 130 | Command Tab |
+| 140 | The Eye |
+| 150 | Login |
+| 160 | Client App |
+| 170 | Coach & DOJO |
+| 180 | Billing |
+| 190 | Defense |
+| 200 | AI Pipeline |
+| 210 | WS Flow |
+| 220 | Tier Gating |
+| 230 | Nevedal Lab |
+| 240 | HW Security |
+| 250 | System Integrity |
+| 260 | DOJO Sessions |
+| 270 | Wisdom Pipeline |
+| 280 | Settings Tab |
+| 290 | Coach Hierarchy |
+
+**The 300s ceiling is firm** — the Trust Enforcer fires at minute >= 10 (600s). All auditors must complete well before that. A stagger of 290s means the auditor starts at ~4:50 into the window and should finish within 30–60s (REST checks are fast). New auditors should use the next available 10s slot.
+
+## 35. Auditor Registration — 5 Locations Must Stay in Sync (Updated)
+
+When adding a new auditor, these 5 locations must all be updated:
+
+| # | Location | What to set |
+|---|----------|------------|
+| 1 | `TAB_ENDPOINTS` in the auditor `.py` | Actual endpoint/check definitions |
+| 2 | `AUDITOR_ACTIVITY_TYPES` in `trust_enforcer.py` | Activity type string (e.g., `"coach_hierarchy_audit_sent"`) |
+| 3 | `AUDITOR_LABELS` in `trust_enforcer.py` | Display name (e.g., `"Coach Hierarchy & Mesh"`) |
+| 4 | `_baseline_key_for()` in `trust_enforcer.py` | Baseline key mapping (e.g., `"coach_hierarchy_check_count"`) |
+| 5 | `trust_baseline` table (via SQL migration) | Expected count JSON (e.g., `{"expected": 16, ...}`) |
+
+Additionally, update `_service_checks` in `main.py` and increment the service health denominator in the `service-health-49-49.mdc` rule.
+
+## 36. GUEST Closes = Stale Service Worker Cache (Safari)
+
+When bridge logs show `[SOCKET] Connection closed for GUEST` with `sockets_before=0` and NO preceding `login_request`, the WebSocket connected but the Flutter UI never became interactive. This is almost always a Safari service worker cache issue — the browser is running an old `flutter_service_worker.js` that loads a stale/broken build.
+
+- **Diagnosis**: Check nginx access log for the user's IP — if the page assets loaded (200) but `/ws` response was small (46–74 bytes), it's a cache issue.
+- **Fix**: User must clear Safari website data or use incognito/Chrome. The nginx no-cache headers on `flutter_service_worker.js`, `flutter_bootstrap.js`, and `index.html` prevent this on future visits.
+- **Do NOT restart the bridge** for this — the bridge is healthy. The problem is client-side.
+
+## 37. Every Login Path Must Pass `expected_role`
+
+Three users have both CLIENT and COACH accounts with different passwords. The `authenticate_user` function correctly routes by `expected_role`, but any code path that sends a `login_request` without it will pick the first matching entry by iteration order.
+
+Affected code paths that MUST include `expected_role`:
+- `_showLoginDialog()` in `main.dart` (lobby) — already correct
+- `CoachDashboardScreenV2._connectToBridge()` — already correct
+- `ReConsentScreen._send()` — **fixed Feb 23, 2026** (was missing)
+- `NeuralInterface._connectToBridge()` — already correct
+- Biometric auto-login `_attemptBiometricLogin()` — already correct
+
+When adding any new login_request sender, always include `"expected_role": role` in the JSON payload.
+
+## 38. Nginx Config Must Survive Restarts and Edits
+
+After any nginx config edit (adding locations, changing proxies, updating SSL), verify:
+
+```bash
+# 1. Config syntax valid
+nginx -t
+
+# 2. Service worker no-cache headers present (prevents Safari stale cache)
+curl -sI https://coach.sovereignsanctuary.net/flutter_service_worker.js | grep Cache-Control
+curl -sI https://app.sovereignsanctuary.net/flutter_service_worker.js | grep Cache-Control
+# Expected: Cache-Control: no-cache, no-store, must-revalidate
+
+# 3. WebSocket proxy works
+curl -sI https://api.sovereignsanctuary.net/ws
+# Expected: 101 or connection upgrade
+
+# 4. Flutter bootstrap intact
+curl -s https://coach.sovereignsanctuary.net/index.html | grep flutter_bootstrap
+# Expected: match
+```
+
+## 39. Registration Must Set `coach_id` Alongside `assigned_coach_id` and `assigned_coach`
+
+The `coach_get_clients` handler checks `coach_id` **first**, then `assigned_coach_id`, then `assigned_coach`. If `register_new_user()` only sets `assigned_coach_id` and `assigned_coach` but not `coach_id`, new clients won't appear in the coach portal unless the handler's fallback matches.
+
+All three fields must use the same hardware ID (`COACH_COACHN_ID`) and username (`CoachN`). Feb 2026: 10 of 16 clients were invisible because `coach_id` was never set during registration.
+
+## 40. New Read-Only WebSocket Handlers Must Be in `_SENTINEL_SKIP`
+
+The `_SENTINEL_SKIP` frozenset in `bridge_server.py` lists message types that Sentinel should not score as anomalous. Every new **read-only** WebSocket handler (status checks, data fetches, polling) must be added here. If not, Sentinel accumulates anomaly points when an admin session triggers them, potentially causing a false freeze.
+
+Current additions needed: `client_get_coach_info`.
+
+Pattern: if the handler only reads data (no writes, no state changes), add it to `_SENTINEL_SKIP`.
+
+## 41. Flutter Widget Field Names Are Not Interchangeable
+
+Widget constructors have specific named parameters that differ between screens. Using the wrong name compiles to a build error, not a runtime error — but these errors are only caught by `flutter build`, not by the IDE lint in all cases.
+
+| Widget | Constructor Field | Common Mistake |
+|---|---|---|
+| `CoachDashboardScreenV2` | `currentUserProfile` | `profile` |
+| `CommunityMeshScreen` | `profile` (no `token`) | `profile` + `token` |
+| `OnboardingTutorialScreen` | `role` + `userData` | `profile` |
+| `ClientScheduleScreen` | `currentUserProfile` | `profile` |
+| `AppConfig` | `apiBaseUrl` (getter) | `apiUrl` (does not exist) |
+
+Before referencing `widget.profile` or `widget.currentUserProfile`, always check the widget class definition.
+
+## 42. Database Column Names Must Match Code Queries — Verify Schema Before Deploying
+
+The Notification Observer was broken for weeks because `_get_connected_platforms()` queried `status` and `token_status` columns on `skyeye_platforms` — columns that don't exist. The `except Exception: return []` silently swallowed the error, making the Observer appear healthy (74/74 services) while never polling a single platform.
+
+**Before deploying any new or modified SQL query**, verify every column name exists in the target table:
+
+```bash
+docker exec nate_postgres psql -U nate_admin -d little_nate -c "\d TABLE_NAME"
+```
+
+Key table schema mismatches caught in this project:
+
+| Table | Code assumed | Actual columns |
+|---|---|---|
+| `skyeye_platforms` | `status`, `token_status` | `enabled`, `compliance_status`, `control_mode` |
+| `skyeye_activity` | `action`, `details`, `timestamp` | `type`, `content`, `created_at` |
+
+## 43. Observer Queries `skyeye_platform_tokens`, Not `skyeye_platforms`
+
+`skyeye_platforms` stores display metadata (name, icon, tier, follower count). `skyeye_platform_tokens` stores actual OAuth credentials (access_token, refresh_token, token_expiry, error_message). The Observer must query the token table to find connected platforms:
+
+```python
+SELECT platform FROM skyeye_platform_tokens
+WHERE access_token IS NOT NULL AND access_token != ''
+  AND (token_expiry IS NULL OR token_expiry > NOW())
+  AND (error_message IS NULL OR error_message = '')
+```
+
+Never query `skyeye_platforms` for connection status — it has no auth information.
+
+## 44. Little Nate's System Prompt Must Reflect Actual Capabilities
+
+Little Nate hallucinated "releasing articles in sections on X" because his system prompt didn't tell him what he CAN'T do. After adding `YOUR PLATFORM CAPABILITIES` and `YOUR ACCURACY RULES` to the system prompt (Feb 2026), he now has:
+
+- Explicit list of what each platform supports (single posts, no threading)
+- Rule to never claim a post without verified timestamp from `[MY POSTING HISTORY]` context
+- Rule to say "I don't have a confirmed record" instead of inventing facts
+
+When adding new capabilities (threading, scheduling, new platforms), update all three sections in `LITTLE_NATE_SYSTEM_PROMPT` in `skyeye_chat.py`.
+
+## 45. LRI Feedback Must Flow Into Content Generation
+
+When `language_drift` is RED or YELLOW, the session engine's Create phase (`_create_phase()` in `skyeye_session_engine.py`) must:
+
+1. Query latest signals from `liminal_presence_analysis` via `_get_voice_correction_context()`
+2. Inject drift-correction instructions into the content generator's `context["voice_correction"]` field
+3. Log a `voice_correction_applied` event to `skyeye_activity` with the drift signal and correction text
+
+The content generator (`skyeye_content_generator.py`) reads `context["voice_correction"]` in `_build_post_prompt()` and appends it to the user prompt.
+
+The Liminal Presence Auditor (`liminal_presence_auditor.py`) verifies this loop is active: if `language_drift` is RED/YELLOW but no `voice_correction_applied` events exist in `skyeye_activity` within 24 hours, the auditor flags a correction-loop warning in the Trust Enforcer report.
+
+The Language Drift Monitor (`language_drift_monitor.py`) tracks trends by comparing current dimension scores against the previous cycle and maintains a `consecutive_red_count` in metadata. If any dimension is regressing while already elevated (>0.3), it is flagged in the detail string.
+
+## 46. Archived Wisdom Is Conversation History, Not Action History
+
+The `_get_archived_wisdom_context()` method in `skyeye_chat.py` injects past Big Nate chat transcripts as context. These transcripts may contain discussion of unreleased features, plans, or intentions — not records of executed actions.
+
+The context block must always include a disclaimer: "These are PAST CONVERSATIONS, not records of actions taken." Little Nate's accuracy rules explicitly state that only `[MY POSTING HISTORY]` and `[MY RECENT ACTIVITY]` confirm actual actions.
+
+If Little Nate claims "I released X" or "I posted Y" based solely on archived wisdom, this is a false claim caused by context confusion. The `CONTENT_GEN_SYSTEM_PROMPT` anti-drift rules and the `YOUR ACCURACY RULES` section both reinforce this boundary.
+
+## 47. Deploy ALL Dependencies — Service + Router + Migration
+
+When deploying a new service (e.g., `coach_hierarchy_auditor.py`), it is not enough to deploy only the service file. If the service tests endpoints defined in a router, that router must also be deployed. If the router queries tables created by a migration, that migration must also be applied.
+
+**Full deployment unit for a new service**:
+
+| Component | Example | What breaks without it |
+|---|---|---|
+| Service file | `backend/app/services/coach_hierarchy_auditor.py` | Service count drops (78/80 instead of 80/80) |
+| Router file | `backend/app/routers/coach_hierarchy_api.py` | `No module named` warning, endpoints return 404 |
+| Migration | `backend/migrations/068_coach_hierarchy.sql` | Router queries fail with `relation does not exist` |
+
+**Rule**: Before considering a service deployment complete, verify:
+1. The service file is on the server and loads (`✅` in startup log)
+2. Any router it depends on is also on the server (no `⚠️ router failed` in logs)
+3. Any database tables it queries exist (`SELECT EXISTS(...)` check)
+
+**Symptom**: The backend reports 80/80 healthy (service started) but auditor scorecards fail because the endpoints it tests don't exist (router missing) or return 500 (table missing).
+
+## 48. Android `res/` Directory Must Be Explicitly Created
+
+Flutter does NOT auto-generate the `android/app/src/main/res/` directory. Unlike iOS (where Xcode manages `Assets.xcassets` automatically), Android requires explicit resource files for:
+
+- Launcher icons (`mipmap-mdpi/` through `mipmap-xxxhdpi/` + `mipmap-anydpi-v26/`)
+- Launch theme (`values/styles.xml`)
+- Splash screen (`drawable/launch_background.xml`)
+- Adaptive icon colors (`values/colors.xml`)
+
+**Use `flutter_launcher_icons`** (add to `dev_dependencies` in `pubspec.yaml`) to generate all icon densities from a single 1024x1024 source. Config:
+
+```yaml
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png"
+  adaptive_icon_background: "#050505"
+```
+
+Run `dart run flutter_launcher_icons` after `flutter pub get`. Verify icons exist in all 5 `mipmap-*` directories.
+
+## 49. Android Release Keystore Is Permanent and Irreplaceable
+
+Google Play requires a release-signed AAB. The keystore (`*.jks`) is generated once and must be **backed up securely and permanently**.
+
+- `key.properties` and `*.jks`/`*.keystore` must be in `.gitignore` — never committed
+- Losing the keystore means you can **never push updates** to the same app listing on Google Play
+- Store backups in at least 2 locations outside the repo (cloud storage, encrypted drive)
+- The `key.properties` file references the keystore by relative path and contains the passwords
+
+## 50. App Store Compliance Pages Must Exist Before Submission
+
+Both Apple App Store and Google Play require publicly accessible pages:
+
+| Page | Required by | URL |
+|---|---|---|
+| Privacy Policy | Apple + Google (mandatory) | `https://app.sovereignsanctuary.net/privacy.html` |
+| Terms of Service | Apple + Google (recommended) | `https://app.sovereignsanctuary.net/terms.html` |
+| Data Deletion | Apple + Google + Meta OAuth | `https://app.sovereignsanctuary.net/data-deletion.html` |
+
+**Data deletion page** must include: how to request deletion (in-app + email), what data is deleted, 30-day recovery window, what is retained (anonymized aggregate only), and contact information. This page is also the Meta/Instagram OAuth `Data Deletion Callback URL`.
+
+Deploy all compliance pages to **all 3 server directories** per `deployment-safety.mdc`.
+
+## 51. AppConfig.environment Must Match useProduction
+
+The `mobile/lib/config/app_config.dart` file has two environment-related fields:
+
+| Field | Purpose |
+|---|---|
+| `useProduction` | Controls which URLs the app connects to (production vs localhost) |
+| `environment` | String label that drives `isProduction` and `enableDebugLogs` |
+
+These must be aligned. Setting `useProduction = true` but `environment = 'development'` means the app connects to production servers but still enables debug logging and treats itself as a dev build. For app store submissions, both must agree:
+
+```dart
+static const bool useProduction = true;
+static const String environment = 'production';
+```
+
+## 52. Service Health Denominator Requires Deployed Files
+
+The `_service_checks` list at the end of `lifespan()` in `main.py` defines the expected service count (currently 80). Every entry in that list must have its corresponding Python files deployed to the server. A service that exists locally but not on the server will fail to import, causing a `try/except` to catch it and set the variable to `None`, which registers as `False` in the health check.
+
+**Rule**: After adding any service to `_service_checks`, verify the file is deployed:
+
+```bash
+ssh root@68.183.168.75 "ls /opt/clinical-sovereignty-lab/backend/app/services/<new_service>.py"
+```
+
+If the file is missing, the denominator stays at 80 but the count drops (e.g., 78/80). The `service-health-49-49.mdc` rule requires ALL services healthy before a deployment is considered complete.
+
+## 53. Bridge Cache Overwrites Direct DB Updates
+
+The bridge's `UserStore.upsert_user()` writes its in-memory `_registry_cache` back to PostgreSQL periodically. If an external service (Token Lab, admin API, direct SQL) modifies a column on the `users` table, the bridge's next save cycle overwrites it with stale cached values.
+
+**Affected columns**: Any column that appears in the `ON CONFLICT DO UPDATE` clause of `upsert_user()`. The `token_balance` column was the Feb 2026 incident — Token Lab set a value via REST API, and the bridge reverted it within minutes.
+
+**Fix pattern**: In the upsert's `ON CONFLICT DO UPDATE`, use `users.<column>` (DB value) instead of `EXCLUDED.<column>` (bridge cache) for columns owned by external services. For `profile_data` JSONB, use `jsonb_set()` to patch the protected key back after the full JSONB replacement.
+
+## 54. asyncpg Requires Explicit Type Casts for Polymorphic Functions
+
+PostgreSQL functions like `to_jsonb()`, `to_json()`, `jsonb_build_object()` accept `anyelement`. asyncpg's binary protocol doesn't send type hints for parameters, so `to_jsonb($1)` fails with `DatatypeMismatchError: could not determine polymorphic type`.
+
+Always cast: `to_jsonb($1::int)`, `to_jsonb($1::text)`, etc. This works fine in `psql` and SQLAlchemy but fails exclusively with asyncpg.
+
+## 55. Agent Status Digest Must Cover All Agents
+
+The Agent Status Digest (`agent_status_digest.py`) sends a 3x daily health email covering all background agents. When adding a new agent to `main.py` (`app.state` + `_service_checks`), also add it to the appropriate section in the digest. Feb 2026: 34 agents (21 auditors, Trust Enforcer, coaching engines, liminal presence agents) were running but invisible to the digest — the email reported 87/87 while 121 agents were actually registered.
+
+## 56. Token Consumption Must Include Source Tags
+
+The bridge's `use_tokens()` and `add_token_usage()` accept an optional `source` parameter. All 4 consumption points must pass it so the Token Usage Map can attribute usage. Without a source, transactions appear as "unknown" in the Token Lab dashboard.
+
+The 4 consumption points in `bridge_server.py` are:
+- `ai_chat` — user-initiated AI chat
+- `sanctuary_ai` — Sanctuary AI automated response
+- `group_coaching` — group coaching suggestion
+- `private_coaching` — private coaching response
+
+When adding a new consumption point, add a new source tag and update the Token Usage Map in `token_lab.html`.
+
+## 57. Token Sharing Fee Is a GKM Donation
+
+The $5/10k token sharing fee charged via Stripe is recorded as a donation to GKM 501(c)(3) (Tax ID: 84-3879515). The `gkm_api.py` router handles the full flow: Stripe charge → token transfer → donation logging → Little Nate heartfelt response. Cumulative donations of $250+ trigger receipt eligibility. Annual receipts are auto-generated by `TokenUsageAgent` on January 2nd.
+
+## 58. Token Usage Agent Is a Maintenance Agent, Not an Auditor
+
+`TokenUsageAgent` runs every 30 minutes but is NOT part of the trust auditor system. It does not have `TAB_ENDPOINTS`, does not send audit emails, and is not registered in `AUDITOR_ACTIVITY_TYPES`. It is registered in `_service_checks` and `agent_status_digest.py` as a background maintenance agent (like `db_maintenance_agent`).
+
+## 59. Token Balance Preservation in Bridge Upserts
+
+`user_store.py` must use `GREATEST(EXCLUDED.token_balance, u.token_balance)` in its `ON CONFLICT DO UPDATE` to prevent the bridge's cached `token_balance` from overwriting direct DB adjustments (Token Lab Quick Adjust, purchase credits). Additionally, `profile_data->>'token_balance'` is patched back via `jsonb_set` after the full JSONB replacement. This pattern was established after Feb 2026 when Token Lab adjustments reverted within minutes.
+
+## 60. GKM Dashboard Navigation
+
+The GKM tab in Sovereign Command (`command.html`) navigates to `gkm.html` via `navTo('gkm.html')`. The dashboard must be deployed to all 3 server directories per `deployment-safety.mdc`. The GKM tab sits next to Token Lab in the nav bar. All GKM admin endpoints require `require_admin` except `token-share/initiate` (authenticated user) and `token-share/history/{username}` (authenticated user).
+
+## 61. Little Nate Gifting Responses Must Be Non-Repetitive
+
+`SkyEyeChatService.generate_gifting_response()` calls Azure OpenAI with full context (sharer name, receiver, amount, history of shares, unique recipients). The system prompt explicitly instructs non-repetitive, warm, genuine messages. If Azure is unavailable, a static fallback is used. The response is returned to the client via the `POST /api/gkm/token-share/initiate` response body as `nate_message`.
+
+## 62. GROUP BY Alias Ambiguity with Real Columns
+
+PostgreSQL resolves `GROUP BY alias` in favor of a real table column when both exist. The `users` table has `family_id` (UUID FK) as an actual column. Writing `SELECT COALESCE(profile_data->>'family_id', 'NONE') as family_id ... GROUP BY family_id` causes PostgreSQL to group by the real UUID column, then complain that `profile_data` isn't in the GROUP BY. Fix: use positional references (`GROUP BY 1`). This caused Token Lab `/api/token-lab/families` to return 500 for the entire Feb 2026 audit window.
+
+## 63. Auditor `_test_endpoint` Must Use Canonical Status Codes
+
+All auditors must use `code in (200, 400, 404, 422)` as TRUSTED. The Hardware Security Auditor originally used only `200 + 422`, causing its `delete-key` endpoint (which returns 404 for non-matching credential prefix) to be classified as WARNING. This dropped HW Security from 11/11 to 10/11 and the overall trust from 100% to 99%.
+
+When creating a new auditor, copy the `_test_endpoint` method from `token_lab_auditor.py` (reference implementation) rather than writing it from scratch.
+
+## 64. Usage Map Must Return Canonical Sources Even When Empty
+
+The `/api/token-lab/usage-by-source` endpoint must always return the 4 canonical sources (`ai_chat`, `sanctuary_ai`, `group_coaching`, `private_coaching`) even when no transaction data exists. Chart.js renders a gray rectangle with a 0-1 y-axis when the response is `[]`. Fix: populate a `CANONICAL_SOURCES` list and merge DB results into it, filling gaps with `total_tokens: 0`.
+
+## 65. Token Transaction Query Must Filter by Action Type, Not Amount Sign
+
+`add_token_usage()` logs positive amounts with `action='usage'` when `deduct_balance=False`. Filtering by `amount < 0` misses these entries entirely. The correct filter for the usage map is `source IS NOT NULL AND action IN ('deduct', 'usage')`.
+
+## 66. Admin Token Adjustments Need Source Tags
+
+`token_transactions` rows with `source = NULL` are invisible to the usage map and unattributable in analytics. Admin grants via Token Lab Quick Adjust must use `source='admin_adjust'`. Token sharing transactions use `source='token_share'`.
+
+## 67. Rule File Count Consistency Is Critical
+
+When any auditor's check count changes (TAB_ENDPOINTS added/removed), update these counts in ALL rule files:
+- `trust-100-percent.mdc` — architecture tree + baseline table
+- `service-health-49-49.mdc` — service registry description
+- `deployment-trust-100-percent.mdc` — verification table
+- `trust-enforcer-architecture.mdc` — total score
+- `auditor-endpoint-sync.mdc` — registry table
+- `AGENTS.md` — header total
+
+Verify counts programmatically against the `trust_baseline` DB table:
+```bash
+docker exec nate_postgres psql -U nate_admin -d little_nate -c "SELECT SUM((parameter_value->>'expected')::int) FROM trust_baseline WHERE parameter_value->>'expected' IS NOT NULL"
+```
+
+## 68. GKM Auditor Stagger at 110s
+
+The GKM Ministry Auditor fires at 110s stagger. Token Lab Auditor fires at 100s. These are the two earliest-firing auditors. The stagger range is now 85s–290s across 23 auditors.
+
+## 70. ENVIRONMENT Variable Must Match Across Bridge and Backend
+
+The bridge and backend both use the `ENVIRONMENT` env var to construct Redis key prefixes for auth tokens:
+
+| Component | Redis key pattern |
+|---|---|
+| Bridge (token storage) | `nate:{ENVIRONMENT}:auth:{token}` |
+| Backend (token lookup) | `nate:{ENVIRONMENT}:auth:{token}` |
+
+If these don't match, the REST API can NEVER find bridge-issued tokens — **every REST API call returns 401**. This is invisible: the bridge logs say "Token stored (memory + Redis scheduled)", and Redis has the tokens, but the backend looks under a different prefix and finds nothing.
+
+**Root cause (Mar 2026)**: `.env` had `ENVIRONMENT=development`. `docker-compose.prod.yml` overrode it to `production` for the backend but NOT for the bridge. The bridge stored tokens as `nate:development:auth:*`, the backend searched for `nate:production:auth:*`. All Token Lab, SkyEye, and dashboard REST API calls returned 401 for every logged-in user.
+
+**Fix**: `docker-compose.prod.yml` must include `ENVIRONMENT=production` in BOTH the `backend` and `bridge` `environment:` blocks.
+
+**Verification**:
+```bash
+docker exec nate_backend printenv ENVIRONMENT  # Must show: production
+docker exec nate_bridge printenv ENVIRONMENT   # Must show: production (MUST MATCH)
+```
+
+**Rule**: Any env var that affects shared state (Redis keys, database names, feature flags) must be explicitly overridden in `docker-compose.prod.yml` for EVERY container that reads it — not just one.
+
+## 71. Never Auto-Redirect Dashboard Pages on 401
+
+Dashboard sub-pages (like `token_lab.html`) must NEVER automatically redirect to `command.html` or `index.html` on receiving 401 from REST API calls. This creates redirect loops because:
+
+1. Bridge tokens are stored asynchronously ("memory + Redis scheduled")
+2. There is a timing gap between WebSocket login success and Redis propagation
+3. A dashboard page that fires REST API calls immediately after navigation may hit the gap
+4. Auto-redirect clears the session and sends the user back to login → they re-authenticate → navigate back → hit the gap again → infinite loop
+
+**Anti-pattern (caused Mar 2026 kick-out loop)**:
+```javascript
+// BAD — races with Redis token propagation, causes redirect loops
+if (resp.status === 401) {
+    _401count++;
+    if (_401count >= 2) { navTo('command.html'); return null; }
+}
+```
+
+**Correct pattern**:
+```javascript
+// GOOD — log the issue, let the user see empty data; they can refresh manually
+if (resp.status === 401) {
+    console.warn('Auth issue on', path, '— token may still be propagating');
+    return null;
+}
+```
+
+If a user's session is truly expired, the WebSocket connection itself will reject the login — that's the authoritative check, not a REST API probe.
+
+## 69. Auditor Stagger Assignments (Updated Mar 2026)
+
+| Stagger | Auditor |
+|---|---|
+| 65 | Vectorize Pipeline |
+| 70 | Photo & Memory Pipeline |
+| 80 | Me2Me Legacy Pipeline |
+| 85 | Data Uniformity |
+| 90 | PMB Command Center |
+| 95 | Memory Nesting |
+| 100 | Token Lab |
+| 110 | GKM Ministry |
+| 120 | SkyEye Tab |
+| 130 | Sovereign Command |
+| 140 | The Eye |
+| 150 | Login |
+| 160 | Client App |
+| 170 | Coach & DOJO |
+| 180 | Billing |
+| 190 | Defense |
+| 200 | AI Pipeline |
+| 210 | WS Flows |
+| 220 | Tier Gating |
+| 230 | Nevedal Lab |
+| 240 | HW Security |
+| 250 | System Integrity |
+| 260 | DOJO Sessions |
+| 270 | Wisdom Pipeline |
+| 280 | Settings Tab |
+| 290 | Coach Hierarchy |
+
+## 72. Coach Calendar Reads from PostgreSQL, Not JSON
+
+`CoachNexusV2.get_calendar_data()` in `bridge_handlers_v2.py` is `async` and queries the `coaching_sessions` PostgreSQL table as the primary source of truth. It falls back to `sessions.json` only when `db_pool` is `None`.
+
+The `fetch_coach_calendar` handler in `bridge_server.py` must `await` this call and pass `db_pool`:
+
+```python
+cal = await coach_nexus_v2.get_calendar_data(profile, month=m, year=y, db_pool=db_pool)
+```
+
+**Why**: The backend's `sessions.py` writes `sessions.json` with Fernet encryption. The bridge reading it with plain `json.load()` silently fails and returns an empty calendar. PostgreSQL bypasses this entirely.
+
+**Rule**: Never revert `get_calendar_data` to synchronous or to JSON-first. The PostgreSQL `coaching_sessions` table is the single source of truth for coach schedules.
+
+## 73. Me2Me Tables Use Non-Obvious Names
+
+See `me2me-table-names.mdc`. The two most commonly confused:
+
+- `me2me_imprint_entries` (NOT `me2me_imprints`) — timestamp is `captured_at`
+- `me2me_identity_crystals` (NOT `me2me_crystals`) — timestamp is `synthesized_at`
+
+## 74. Free Consultation Daily Limit Is Backend-Enforced
+
+The `POST /api/sessions/schedule` endpoint enforces a 1-per-day limit per assistant coach when `free_consultation=true`. The Flutter UI checks `GET /api/sessions/consultation-status/{username}` for display purposes only — the backend is the authoritative limiter.
+
+When `free_consultation=true`, the backend forces `session_type='MASTER_CONSULTATION'`, `duration_minutes=15`, and `payment_status='waived'` regardless of client-submitted values. See `free-consultation-lifecycle.mdc`.

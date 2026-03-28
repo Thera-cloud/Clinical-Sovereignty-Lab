@@ -1,0 +1,64 @@
+---
+description: Rules for the DOJO Mentor Presence feature — multi-DOJO AI mentorship during live Zoom coaching sessions.
+alwaysApply: false
+globs:
+  - "**/dojo_mentor*"
+  - "backend/migrations/063*"
+---
+
+# DOJO Mentor Rules
+
+## Feature Overview
+
+During live Zoom coaching sessions, Little Nate acts as a coach-only pop-up overlay — visible and audible only to the coach. He blends ALL of the coach's active DOJO subscriptions into a single Master-Level mentor persona and provides real-time guidance.
+
+## Multi-DOJO Blending
+
+1. **Dynamic persona construction** — `build_mentor_system_prompt()` combines the `MASTER_PERSONA` fragments for each active DOJO. When multiple DOJOs are active, merge their expertise intelligently using `BLEND_HINTS` for common combinations.
+
+2. **Blending examples**:
+   - Therapist + Judge → therapeutic guidance with family law perspective
+   - Business + Judge → Master-Level Business Law Judge
+   - Business + Therapist → Industrial Psychology / Organizational Psychology
+   - MCAT + Business → Master-Level Hospitalist with business acumen
+   - All 7 DOJOs → polymath mentor, prioritizing the most relevant lens per moment
+
+3. **Only subscribed DOJOs** — a coach can only activate DOJOs they are paying for. The `availableDojosFromProfile()` method reads from `profile_data['dojo_subscriptions']`. Never allow activating an unsubscribed DOJO.
+
+## Session Modes
+
+4. **Four session modes** must be supported:
+   - `coach_client` — standard coaching session with Nate mentoring the coach
+   - `coach_students` — teaching mode with pedagogical guidance
+   - `judge_debate` — two lawyers debating, Nate as presiding Judge
+   - `lawyer_client` — Nate as Expert-Level Legal Assistant to the lawyer
+
+5. **Judge DOJO debate mode** — both coaches see their own mentor overlay. Nate's Judge responses are shared to both. The coach initiating the session is the "host" and controls session lifecycle.
+
+## Privacy and Visibility
+
+6. **Coach-only visibility** — the DOJO Mentor overlay is NEVER rendered in the Zoom video stream. It appears as a Flutter `Overlay` widget on top of the Zoom WebView, visible only on the coach's device.
+
+7. **Client informed** — per existing Terms section 5 (Texas TRAIGA Disclosure), the client must be informed that AI-assisted coaching is in use. This notification is handled by the existing consent flow, not the DOJO Mentor overlay.
+
+8. **Mentor interactions are stored under the coach** — `dojo_mentor_interactions` are linked to the session, which is linked to `coach_user_id`. Client data is accessed via the coach's existing authorized view of the client's session history, coherence metrics, and patterns.
+
+## Token Billing
+
+9. **Base mentoring is included** — coaches paying DOJO subscriptions ($150–$2,100/mo per DOJO) get AI mentoring included. Token consumption for DOJO Mentor sessions follows the same rate as regular AI coaching (~10 tokens/word for responses, ~30 tokens/minute for audio transcription).
+
+10. **Extended sessions beyond tier limits are token-charged** — if the coach exceeds their tier's included AI minutes, additional mentor interactions consume tokens.
+
+## WebSocket Message Types
+
+11. **Six message types** for DOJO Mentor:
+    - `dojo_mentor_start` — coach starts mentored session (includes active_dojos[], client_id, session_mode)
+    - `dojo_mentor_transcript` — real-time transcript chunk from Zoom audio
+    - `dojo_mentor_ask` — coach asks Nate a direct question
+    - `dojo_mentor_response` — Nate's mentoring card (observation, suggestion, or answer)
+    - `dojo_mentor_toggle_dojo` — coach toggles a DOJO lens mid-session
+    - `dojo_mentor_end` — session ends, triggers post-session analysis
+
+## Database
+
+12. **Migration 063** creates `dojo_mentor_sessions` and `dojo_mentor_interactions`. These tables are coach-owned. Never store raw Zoom audio in these tables — only transcripts and mentor observations.

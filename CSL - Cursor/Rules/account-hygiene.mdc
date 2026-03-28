@@ -1,0 +1,30 @@
+# Account Hygiene
+
+## Legitimate Accounts Only
+
+The `users` table must contain only real accounts. Placeholder/test accounts (`client2`–`client9`, `coach2`–`coach5`) were deleted on 2026-02-22 and must never be recreated.
+
+## Allowed Test Accounts
+
+Only these test accounts are permitted (required by auditors):
+
+| Username | Role | Purpose |
+|---|---|---|
+| `audit_client` | CLIENT | Login auditor blind test |
+| `audit_coach` | COACH | Login auditor blind test |
+| `audit_student_1` | CLIENT | DOJO session auditor test |
+| `audit_student_2` | CLIENT | DOJO session auditor test |
+| `audit_lawyer_1` | COACH | Judge DOJO auditor test |
+| `audit_lawyer_2` | COACH | Judge DOJO auditor test |
+
+## Rules
+
+1. **Never bulk-create numbered accounts** (e.g., `client1`–`client10`, `coach1`–`coach5`) for testing or seeding.
+2. **Every account in the `users` table must represent a real person** or a named audit account from the table above.
+3. **Accounts without passwords** (`password_hash IS NULL OR password_hash = ''`) cannot log in and should be investigated — they may be orphaned records from failed registrations.
+4. **Before creating any account**, get explicit approval from the user per the `no-account-creation-without-approval` rule.
+5. **After deleting accounts**, always stop `nate_bridge` first, perform the deletion, then start `nate_bridge` so it loads the updated user set from PostgreSQL.
+
+## Current Account Count
+
+27 accounts as of 2026-02-22. This number should grow only through legitimate user registration, never through bulk seeding.

@@ -1,0 +1,17 @@
+name = "nate-r2-cdn"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+# Custom domain: cdn.sovereignsanctuary.net → R2 buckets
+routes = [
+  { pattern = "cdn.sovereignsanctuary.net/*", zone_name = "sovereignsanctuary.net" }
+]
+
+# R2 bucket bindings
+[[r2_buckets]]
+binding = "VAULT_BUCKET"
+bucket_name = "nate-vault"
+
+[[r2_buckets]]
+binding = "ANALYTICS_BUCKET"
+bucket_name = "nate-analytics"

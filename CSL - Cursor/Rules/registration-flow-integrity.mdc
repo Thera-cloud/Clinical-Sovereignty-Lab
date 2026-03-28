@@ -1,0 +1,44 @@
+---
+description: Registration flow integrity - coach assignment, UI safety, and field consistency
+alwaysApply: true
+---
+
+# Registration Flow Integrity
+
+## Three Coach Fields Must Be Set on Registration
+
+`register_new_user()` in `bridge_server.py` must set ALL THREE coach assignment fields for new clients:
+
+```python
+"coach_id": coach_id_from_invite or data.get("coach_id", "COACH_COACHN_ID"),
+"assigned_coach": coach_username_from_invite or data.get("assigned_coach", "CoachN"),
+"assigned_coach_id": coach_id_from_invite or data.get("assigned_coach_id", "COACH_COACHN_ID"),
+```
+
+Missing `coach_id` caused 10 of 16 clients to be invisible in the coach portal (Feb 2026). The `coach_get_clients` handler checks `coach_id` first.
+
+## Default Coach Is CoachN
+
+All new clients default to `CoachN` / `COACH_COACHN_ID`. Never use `hnevedal` / `COACH_HNEVEDAL_ID` — that was the old default and causes assignment mismatches.
+
+## Registration UI Requirements
+
+Any screen that sends `register_request` must have:
+
+1. **Loading state** — disable the submit button and show a spinner after click
+2. **30-second timeout** — if no response arrives, reset the form and show an error
+3. **`mounted` checks** — before every `Navigator.push`, `setState`, or `ScaffoldMessenger` call
+4. **Double-click prevention** — guard with `if (_isRegistering) return;` at the top
+
+The `SignUpWizard._submitRegistration()` in `main.dart` is the reference implementation.
+
+## Post-Registration Navigation
+
+| Response Type | Client Action | Coach Action |
+|---|---|---|
+| `login_success` | Navigate to `OnboardingTutorialScreen` | Show `_showCoachPendingDialog()` |
+| `register_success` | Auto-send `login_request` with `expected_role` | Show `_showCoachPendingDialog()` |
+| `error` / `registration_failed` | Show error, reset loading state | Show error, reset loading state |
+| Socket closed before send | Show "Connection dropped" error | Show "Connection dropped" error |
+
+Never leave the user on a stuck form. Every code path must either navigate or reset the loading state.

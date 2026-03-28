@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}'; font-src {{cspSource}};" />
+  <link rel="stylesheet" href="{{cssUri}}" />
+  <title>Sovereign Sanctuary</title>
+</head>
+<body>
+  <!-- Mode Bar -->
+  <div class="mode-bar">
+    <button class="mode-btn active" data-mode="ask">ASK</button>
+    <button class="mode-btn" data-mode="plan">PLAN</button>
+    <button class="mode-btn" data-mode="ln_fab">LN-FAB</button>
+    <button class="mode-btn" data-mode="debug">DEBUG</button>
+    <span class="spacer"></span>
+    <button class="clear-btn" id="clearBtn" title="Clear chat">Clear</button>
+  </div>
+
+  <!-- Plan Context Bar -->
+  <div class="plan-bar" id="planBar">
+    <button class="plan-load-btn" id="planLoadBtn" title="Load a Cursor plan as context">Load Plan</button>
+    <div class="plan-info" id="planInfo" style="display:none">
+      <span class="plan-icon">📋</span>
+      <span class="plan-name" id="planName"></span>
+      <span class="plan-progress" id="planProgress"></span>
+      <button class="plan-clear-btn" id="planClearBtn" title="Remove plan context">&times;</button>
+    </div>
+  </div>
+
+  <!-- Chat Log -->
+  <div class="chat-log" id="chatLog"></div>
+
+  <!-- Hypothesis Panel (DEBUG mode) -->
+  <div class="hypothesis-panel" id="hypothesisPanel"></div>
+
+  <!-- Mark Fixed bar (DEBUG mode) -->
+  <div class="mark-fixed-bar" id="markFixedBar">
+    <button class="mark-fixed-btn" id="markFixedBtn">Mark Fixed</button>
+    <button class="clean-logs-btn" id="cleanLogsBtn">Clean Logs</button>
+    <span style="flex:1"></span>
+    <span class="cost-badge" id="sessionCost" style="display:none"></span>
+  </div>
+
+  <!-- Input Area -->
+  <div class="input-area">
+    <textarea id="chatInput" rows="1" placeholder="Ask Little Nate..." autofocus></textarea>
+    <button class="send-btn" id="sendBtn">Send</button>
+  </div>
+
+  <script nonce="{{nonce}}" src="{{jsUri}}"></script>
+</body>
+</html>

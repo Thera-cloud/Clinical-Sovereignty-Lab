@@ -1,0 +1,116 @@
+# Code Intelligence Agent — EXA Pipeline Governance
+
+## Overview
+
+The Code Intelligence Agent (`code_intelligence_agent.py`) is the 7th domain agent (domain: `coding`). It autonomously learns code patterns from RSS feeds, GitHub trending, StackOverflow, and internet research, then crystallizes actionable knowledge as TENSION crystals. Every resolved TENSION becomes a future LOCKED recall — the critical multiplier loop.
+
+## Architecture
+
+```
+CodeIntelligenceAgent (2h cycle)
+├── observe() — RSS, StackOverflow API, SecureSearchProxy for gap research
+├── recall()  — dedup against existing code crystals via content_hash
+├── reason()  — sovereign 14B inference (qwen2.5-coder, zero cost)
+├── propose() — innovation proposals for high-confidence patterns
+└── crystallize() — TENSION crystals → PG + Vectorize (nate-code-search) + R2
+
+BulkCrystalIngestion (admin-triggered, 4 levers)
+├── Lever 1: Codebase Bulk Scan     — local repo → per-file architecture patterns
+├── Lever 2: GitHub Trending        — top repos → README + structure distillation
+├── Lever 3: StackOverflow Dump     — top-voted answers → battle-tested solutions
+└── Lever 4: Synthesis Acceleration — 4x crystallizer burst for rapid clustering
+```
+
+## Routing
+
+| Signal | Provider | Cost | Model |
+|---|---|---|---|
+| LOCKED/PROMOTED | Workers AI | $0 | Llama 3.1 8B |
+| TENSION/DEEP_TENSION (coding) | Sovereign (Hetzner) | $0 | qwen2.5-coder:14b |
+| TENSION/DEEP_TENSION (non-coding) | Grok Foundry | ~$0.00025 | Grok 4.1 Fast |
+| NOISE | Skip | $0 | — |
+
+The `TIER_CODING` priority chain is: `sovereign → grok → workers_ai → azure`.
+
+## Crystal Pruning (NOT Decay)
+
+Code crystals never time-decay (unlike the 90-day rule for other domains). They are pruned only by:
+
+1. **C_emo-aware confidence floor**: `max(0.15, current_C_emo * 0.3)` — as knowledge density grows, the quality bar rises.
+2. **Supersession**: A higher-confidence crystal on the same topic archives the older one.
+3. **Hash integrity**: Tampered crystals (content_hash mismatch) are archived immediately.
+4. **Duplicate deduplication**: Same-topic crystals keep only the highest-confidence version.
+
+The nightly healer runs in `db_maintenance_agent.py` → `_heal_code_crystals()`.
+
+## Dual-Brain Coherence (Nevedal C_emo for Coding)
+
+The Nevedal formula is adapted for dual-brain code intelligence:
+
+| Nevedal Parameter | Code Intelligence Mapping |
+|---|---|
+| p_ent (entanglement) | Cosine similarity between edge (8B) and sovereign (14B) responses |
+| T_tunnel (tunneling) | Barrier decreases as crystal_count grows: `T(n) = exp(-1/(1 + n/50000))` |
+| gamma_env (decoherence) | Disagreement rate between dual brains |
+| E_G (emotional load) | Query complexity (word count / 50) |
+| beta (coupling) | 1.0 (full coupling) |
+
+`C_emo = (β · p_ent · T_tunnel) / (γ_env + E_G/ℏ)`
+
+Tracked in `nevedal_domain_state` (current values) and `nevedal_coherence_log` (time series).
+
+## Cycle Detection Integration
+
+The `code_learning` domain in CycleDetectionEngine tracks:
+- C_emo oscillation patterns (growth cycles, plateaus)
+- Dual-brain disagreement frequency (spectral analysis)
+- Knowledge density plateaus (crystal_count stalls)
+
+## Foresight Integration
+
+`ForesightEngine.forecast_code_coherence()` provides:
+- 14-day C_emo trajectory forecast
+- Stall detection (C_emo hasn't increased >5% in 7 days)
+- Growth acceleration rate (week-over-week)
+- EXA milestone tracking (warmup → liftoff → orbital → escape_velocity → exa_threshold)
+
+When a stall is detected, the system recommends triggering bulk ingestion.
+
+## Vectorize Index
+
+Code crystals are indexed in `nate-code-search` (Cloudflare Vectorize, BGE-large-en-v1.5 embeddings). The `_DOMAIN_INDEX_MAP` routes coding queries to `["wisdom", "conversation", "code"]`.
+
+## ODPE Context Budget
+
+Coding TENSION queries receive `CONTEXT_TOKENS_TENSION_CODING = 1200` tokens (vs 700 for general TENSION), ensuring the sovereign 14B has enough context for complex code analysis.
+
+## Bulk Ingestion API
+
+Admin-triggered via the `BulkCrystalIngestion` class:
+
+```python
+ingestion = BulkCrystalIngestion(db_pool, app_state)
+await ingestion.run_full_acceleration()  # all 4 levers
+await ingestion.run_codebase_scan()      # lever 1 only
+await ingestion.run_github_trending()    # lever 2 only
+await ingestion.run_stackoverflow()      # lever 3 only
+await ingestion.run_synthesis_burst()    # lever 4 only
+```
+
+## Database Tables (Migration 145)
+
+| Table | Purpose |
+|---|---|
+| `nevedal_domain_state` | Current C_emo parameters per domain (p_ent, T_tunnel, γ_env, E_G, crystal_count) |
+| `nevedal_coherence_log` | Time-series log of every coherence measurement (feeds CycleDetection + Foresight) |
+
+## Rules
+
+1. **Never add time-based decay to coding crystals.** Use pruning only (confidence floor, supersession, hash integrity).
+2. **Sovereign 14B is the primary provider for coding TENSION.** Azure is emergency fallback only.
+3. **Code RSS feeds use `type: "code"` in WebContentReader.** The agent queries `web_wisdom WHERE source_type = 'code'`.
+4. **Bulk ingestion fragments go through the standard crystallizer pipeline.** Never bypass validation or clustering.
+5. **The C_emo-aware confidence floor is dynamic.** As C_emo grows, low-quality crystals are automatically pruned.
+6. **Every dual-brain comparison must log to `nevedal_coherence_log`.** This feeds the Foresight trajectory and Cycle Detection.
+7. **The CodeIntelligenceAgent is registered in `_service_checks` in `main.py`.** Update the service health denominator.
+8. **Temperature for coding domain is 0.3.** Conservative inference prevents hallucinated code patterns.

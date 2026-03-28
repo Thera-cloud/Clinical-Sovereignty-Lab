@@ -1,0 +1,88 @@
+# Tiered Voice Pipeline Architecture
+
+## Overview
+
+Voice interactions are routed through two pipelines based on subscription tier. This reduces voice AI costs by ~95% for non-premium users while maintaining premium quality for Sovereign Circle members.
+
+## Pipeline Routing
+
+| Tier | Pipeline | Components | Latency | Cost/min |
+|---|---|---|---|---|
+| Threshold (trial) | Cheap | Whisper STT → Grok 4-1 → Edge TTS | ~2-3s | ~$0.001 |
+| Inner Chamber ($49) | Cheap | Whisper STT → Grok 4-1 → Edge TTS | ~2-3s | ~$0.001 |
+| Sovereign Circle ($149) | Premium | Azure Realtime WebSocket (bundled STT+LLM+TTS) | <500ms | ~$0.08 |
+
+## Cheap Path Components
+
+### 1. Azure Whisper STT (`whisper_stt.py`)
+- Deployment: `nate-whisper` on Azure AI Foundry
+- Endpoint: `{AZURE_WHISPER_ENDPOINT}/openai/deployments/nate-whisper/audio/transcriptions`
+- API version: `2024-06-01`
+- Accepts: audio/webm, audio/wav, audio/mp3, audio/m4a
+- Auto-chunks audio > 25MB
+- Cost: ~$0.006/minute (vs $0.06/min for Realtime bundled)
+
+### 2. Grok 4-1 Fast (Non-Reasoning) via xAI
+- Configured in `nate_ai_config.py`
+- Used for text chat completions on the cheap path
+- Same LLM that powers the text chat — no additional deployment needed
+
+### 3. Edge TTS (`edge_tts_service.py`)
+- Uses Microsoft Edge's Read Aloud service (free, no API key)
+- Default voice: `en-US-GuyNeural` (env: `EDGE_TTS_VOICE`)
+- Supports streaming via `synthesize_streaming()`
+- Package: `edge-tts~=7.2.0` in `requirements.txt`
+- Zero cost — unlimited usage
+
+## Premium Path
+
+- Azure Realtime WebSocket (`gpt-realtime` deployment)
+- Bundled STT + LLM + TTS in a single low-latency connection
+- Sub-500ms response time
+- Natural conversational voice with emotion
+- Only available to Sovereign Circle tier
+
+## VoiceRouter (`voice_router.py`)
+
+| Method | Purpose |
+|---|---|
+| `is_premium(tier)` | Returns True for SOVEREIGN_CIRCLE |
+| `process_voice_message(audio, user_id, tier, ...)` | Routes to cheap or returns `{"pipeline": "premium", "action": "use_realtime_ws"}` |
+| `_stt(audio, content_type)` | Whisper transcription |
+| `_chat(transcript, system_prompt, history)` | Grok text completion |
+| `_tts(text, voice)` | Edge TTS synthesis |
+| `_tts_premium(text, voice)` | Azure gpt-4o-mini-tts (fallback for premium path REST TTS) |
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/voice_router.py` | Tier-based routing orchestrator |
+| `backend/app/services/whisper_stt.py` | Azure Whisper STT client |
+| `backend/app/services/edge_tts_service.py` | Free Microsoft Edge TTS |
+| `backend/app/services/azure_bridge.py` | Premium Realtime WebSocket handler |
+| `backend/app/services/nate_ai_config.py` | Grok/xAI chat config |
+
+## Integration Point
+
+The `VoiceRouter` is registered on `app.state.voice_router` in `main.py` and appears in `_service_checks`. It is a request-response service (no `start()`/`stop()`), similar to `CoachingMeshEngine`.
+
+The bridge's `azure_bridge.py` `_can_use_realtime()` gates non-premium users. For cheap-path users, the bridge should call `voice_router.process_voice_message()` instead of denying access.
+
+## Environment Variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `AZURE_WHISPER_ENDPOINT` | Azure resource for Whisper | (required) |
+| `AZURE_WHISPER_DEPLOYMENT` | Whisper deployment name | `nate-whisper` |
+| `AZURE_WHISPER_API_VERSION` | API version | `2024-06-01` |
+| `EDGE_TTS_VOICE` | Default Edge TTS voice | `en-US-GuyNeural` |
+
+## Rules
+
+1. **Never remove the Edge TTS fallback** — it is the zero-cost safety net. If Whisper or Grok fail, Edge TTS still works for pre-composed responses.
+2. **Premium path returns a signal, not audio** — `process_voice_message()` returns `{"pipeline": "premium", "action": "use_realtime_ws"}` for Sovereign Circle users. The caller (bridge) then uses the existing Realtime WebSocket connection.
+3. **Whisper accepts the Azure API key** (`AZURE_API_KEY`), not a separate key — it's on the same resource as the other deployments.
+4. **Edge TTS is not an Azure service** — it uses Microsoft's public Edge Read Aloud endpoint. No API key, no billing, no quota. The `edge-tts` Python package handles the WebSocket connection to Microsoft's service.
+5. **Voice data is never stored** — audio is transcribed in-memory and discarded. Only the text transcript is persisted to conversation history.
+6. **The cheap path is 3-step** (STT → Chat → TTS), so it has higher latency (~2-3s) than the premium single-connection path (<500ms). This is acceptable for non-premium tiers.

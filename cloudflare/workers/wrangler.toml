@@ -1,0 +1,78 @@
+name = "nate-edge-cache"
+main = "nate-edge-cache.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+# Route: intercept API requests for caching + semantic search
+# Requires Cloudflare DNS proxying (orange cloud) on api.sovereignsanctuary.net
+routes = [
+  { pattern = "api.sovereignsanctuary.net/api/coach/folders/files/*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/dojo/download-*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/client/memory/*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/v1/vault/*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/corp/template/*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/sessions/classroom/*", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/skyeye/platforms", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/skyeye/platform-health", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/edge/semantic-search", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/edge/d1/*", zone_name = "sovereignsanctuary.net" },
+]
+
+# R2 bucket bindings
+[[r2_buckets]]
+binding = "VAULT_BUCKET"
+bucket_name = "nate-vault"
+
+[[r2_buckets]]
+binding = "ANALYTICS_BUCKET"
+bucket_name = "nate-analytics"
+
+# D1 database binding (hot transactional edge cache)
+[[d1_databases]]
+binding = "D1_HOT"
+database_name = "nate-hot"
+database_id = "8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0"
+
+[[d1_databases]]
+binding = "D1_SANDBOX"
+database_name = "cli-chamberofsecrets"
+database_id = "bedabdd5-ab9d-4a56-b29d-362f1c345ada"
+
+# Hyperdrive — PostgreSQL connection pooling + query cache
+# Uncomment after creating via: wrangler hyperdrive create nate-pg-warm --connection-string="..."
+# Requires Cloudflare Tunnel to reach PostgreSQL (port 5432 not publicly exposed)
+# [[hyperdrive]]
+# binding = "HYPERDRIVE"
+# id = "<HYPERDRIVE_CONFIG_ID>"
+
+# Workers AI binding (free embeddings with Workers Paid plan)
+[ai]
+binding = "AI"
+
+# Vectorize indexes — 6 semantic search indexes (384-dim, cosine)
+[[vectorize]]
+binding = "MEMORY_INDEX"
+index_name = "nate-memory-search"
+
+[[vectorize]]
+binding = "VAULT_INDEX"
+index_name = "nate-vault-search"
+
+[[vectorize]]
+binding = "WISDOM_INDEX"
+index_name = "nate-wisdom"
+
+[[vectorize]]
+binding = "ME2ME_INDEX"
+index_name = "nate-me2me"
+
+[[vectorize]]
+binding = "SESSION_INDEX"
+index_name = "nate-sessions"
+
+[[vectorize]]
+binding = "ANNOTATION_INDEX"
+index_name = "nate-annotations"

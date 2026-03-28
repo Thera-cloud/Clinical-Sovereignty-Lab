@@ -1,0 +1,56 @@
+# Check-In Reply Email (SendGrid Inbound Parse)
+
+## Purpose
+
+Replies to Nate check-in emails (e.g. `checkin@reply.sovereignsanctuary.net`) are parsed by SendGrid Inbound Parse and posted to the backend. The `sendgrid_inbound` router stores the reply in `checkin_wisdom` and triggers the check-in follow-up pipeline (Little Nate response, client chat, etc.).
+
+## Prerequisites
+
+1. **DNS** — `reply.sovereignsanctuary.net` must have an MX record pointing to SendGrid.
+2. **SendGrid Inbound Parse** — Host must be configured with our webhook URL.
+3. **Backend** — Router is mounted; optional `SENDGRID_INBOUND_SECRET` for auth.
+
+## 1. DNS (Cloudflare / Registrar)
+
+Add an MX record for the reply subdomain:
+
+| Type | Name | Content | Priority |
+|------|------|---------|----------|
+| MX | `reply` | `mx.sendgrid.net` | 10 |
+
+- **Cloudflare**: DNS → Add record → Type MX, Name `reply`, Mail server `mx.sendgrid.net`, Priority 10.
+- Verify: `dig MX reply.sovereignsanctuary.net` should return `mx.sendgrid.net`.
+
+## 2. SendGrid Inbound Parse
+
+1. Go to **SendGrid → Settings → Inbound Parse**.
+2. Click **Add Host & URL**.
+3. **Receiving Domain**: `reply.sovereignsanctuary.net`
+4. **Destination URL**:
+   - Without secret: `https://api.sovereignsanctuary.net/api/webhooks/sendgrid/inbound`
+   - With secret: `https://api.sovereignsanctuary.net/api/webhooks/sendgrid/inbound?secret=YOUR_SENDGRID_INBOUND_SECRET`
+5. **Check “Post the raw, full MIME message”** if you need full parsing; otherwise the default (parsed) is fine.
+
+## 3. Environment
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `SENDGRID_INBOUND_SECRET` | Optional | If set, webhook rejects requests without `?secret=TOKEN`. Add the same value to the SendGrid destination URL as `?secret=...`. |
+
+Generate: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+
+## 4. Webhook Endpoint
+
+- **Path**: `POST /api/webhooks/sendgrid/inbound`
+- **Router**: `backend/app/routers/sendgrid_inbound.py`
+- **Mount**: `main.py` includes the router at `/api/webhooks/sendgrid`.
+
+## Verification
+
+1. **DNS**: `dig MX reply.sovereignsanctuary.net` → `mx.sendgrid.net`
+2. **SendGrid**: Inbound Parse list shows `reply.sovereignsanctuary.net` with correct destination URL.
+3. **Backend**: Send a test email to `checkin@reply.sovereignsanctuary.net` from a known user email; check `checkin_wisdom` and logs.
+
+## NXDOMAIN
+
+If `checkin@reply.sovereignsanctuary.net` bounces with NXDOMAIN, the MX record for `reply.sovereignsanctuary.net` is missing or not propagated. Add/verify the MX record at the DNS provider.

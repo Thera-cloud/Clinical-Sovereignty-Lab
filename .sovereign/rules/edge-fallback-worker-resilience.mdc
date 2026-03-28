@@ -1,0 +1,94 @@
+# Edge Fallback & Worker Resilience
+
+## Overview
+
+When any component in the dual-brain architecture fails, the system must degrade gracefully — never crash, never lose a user's question, never expose internal errors.
+
+## Fallback Chains
+
+### Summon Request Fallback (Edge → Sovereign → Static)
+
+```
+1. Edge Worker (Cloudflare) — L0 ODPE + Workers AI
+   ↓ If Worker fails or rate-limited
+2. Sovereign Brain (VPS) — /api/nate/summon direct
+   ↓ If VPS unreachable
+3. Static Response — "I'm reflecting deeply. Please try again in a moment."
+```
+
+### Voice Pipeline Fallback (Premium → Standard → Text)
+
+```
+1. Premium (Azure Realtime + XTTS-v2 voice clone)
+   ↓ If Azure/XTTS unavailable
+2. Standard (Whisper STT + Edge TTS)
+   ↓ If Whisper/Edge unavailable
+3. Text-only — disable voice, continue as text chat
+```
+
+### Inference Routing Fallback (per ODPE signal)
+
+| Signal | Primary | Fallback 1 | Fallback 2 | Emergency |
+|---|---|---|---|---|
+| LOCKED | Workers AI | Sovereign Ollama | Azure | Cached response |
+| PROVISIONAL | Workers AI | Sovereign Ollama | Azure | Workers AI retry |
+| TENSION | Sovereign Ollama | Azure (clinical) | — | Never skip |
+| NOISE | Skip LLM | — | — | Return empty |
+
+### Memory Recall Fallback
+
+```
+1. Hot Memory (Redis) — sub-ms
+   ↓ If Redis unavailable
+2. Warm Memory (Vectorize + PostgreSQL) — <100ms
+   ↓ If Vectorize unavailable
+3. Cold Memory (R2/Azure Blob) — <500ms
+   ↓ If all cloud storage unavailable
+4. Local Disk (session files) — <50ms
+```
+
+## Worker Error Handling
+
+The edge Worker (`nate-summon-worker/worker.js`) handles errors at each stage:
+
+| Stage | Error | Behavior |
+|---|---|---|
+| Rate limit | IP over 10 req/min | 429 with `retry_after` header |
+| KV read | SUMMON_CACHE unavailable | Skip cache, proceed to inference |
+| Workers AI | Model timeout/error | Forward to Sovereign Brain |
+| VPS forward | Network error / 5xx | Return cached response if available, else static fallback |
+| D1 logging | Write failure | Swallow error, do not block response |
+
+## Admission Controller Overflow
+
+When the AdmissionController reaches capacity:
+
+| State | `accepting_new` | Behavior |
+|---|---|---|
+| Normal | true | Accept session immediately |
+| Near capacity (>80%) | true | Accept but log warning |
+| At capacity (100%) | false | Queue the session (FIFO) |
+| Queue full | false | Reject with 503 + estimated wait time |
+
+## Rules
+
+1. **TENSION requests must never be served from cache** — clinical/crisis content requires fresh LLM evaluation every time.
+2. **Static fallback responses must never claim capabilities** — they should say "I'm reflecting" not "I'll look that up for you."
+3. **Voice fallback must be seamless** — if premium TTS fails mid-stream, switch to Edge TTS for the remaining text. Never leave the user in silence.
+4. **D1 logging failures must never block responses** — the user gets their answer even if analytics fail to log.
+5. **Admission rejection must include wait time estimate** — `queue_depth * QUEUE_POLL_INTERVAL` gives the minimum expected wait.
+6. **Workers AI retry has a 1-attempt limit** — retrying more than once at the edge adds unacceptable latency.
+7. **All fallback events must be logged** — the Sovereign Brain logs fallback events to `skyeye_activity` for the Trust Enforcer to track sovereignty percentage regressions.
+
+## Monitoring
+
+The following auditors cover fallback resilience:
+
+| Auditor | What It Checks |
+|---|---|
+| EdgeHealthAuditor | Edge Worker health, summon endpoint, cache table, dual-brain components |
+| VoiceInfrastructureAuditor | Admission capacity, voice pool nodes, router readiness |
+| CastleDefenseAuditor | Defense layer initialization, upstream canary health |
+| HeritageVaultAuditor | Multi-cloud storage backends, recovery readiness |
+| InferenceAuditor | Inference routing, provider health, SDH cache |
+| SummonAuditor | Summon endpoint, privacy shield, response quality |

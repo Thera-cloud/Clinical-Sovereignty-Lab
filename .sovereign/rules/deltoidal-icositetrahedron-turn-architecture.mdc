@@ -1,0 +1,76 @@
+# Deltoidal Icositetrahedron Turn Architecture
+
+## Overview
+
+Every AI turn flows through a cache-dump architecture built on the 12-face dodecahedron (SDH compressor) and validated by the 24-face deltoidal icositetrahedron (ODPE engine). The pipeline ensures sub-200ms context assembly on cache hits and bounded memory growth.
+
+## Turn Lifecycle
+
+```
+User message arrives
+  ↓
+1. Prefetch hit check (Hot Memory Redis, key: hot:session:{uid}:prefetch)
+  ↓ HIT → skip context assembly, use pre-computed SDH block
+  ↓ MISS → continue
+2. Hot Memory recall: get_recent_turns(uid, limit=2) — Redis first, PG fallback
+3. Identity prompt: cached in Hot Memory (7200s TTL), skip rebuild on hit
+4. Context assembly: ~15 context blocks (family, relational, wisdom, observer, etc.)
+5. SDH compression: 12-face dodecahedron topology → ~800 token block
+  ↓ >8 turns? Emergency compress older turns via Grok/Workers AI (fire-and-forget)
+6. ODPE evaluation: 24-face icositetragon + 12-face dodecahedron resonance
+7. Streaming response with inter-token gap buffering (300ms threshold, 3-token buffer)
+8. Post-response:
+  a. memorize() → PG conversation_history
+  b. Turn dump → Hot Memory (append_recent_turn, max 12, TTL 7200s)
+  c. Predictive prefetch → pre-compute next turn's SDH block (300s TTL)
+```
+
+## Hot Memory Keys
+
+| Key Pattern | Content | TTL | Written By |
+|---|---|---|---|
+| `hot:session:{uid}:turns` | Last 12 turn summaries (user_text, ai_text, c_emo, mood, shame, themes, odpe_signal) | 7200s | Turn dump hook |
+| `hot:session:{uid}:identity` | Cached identity prompt block | 7200s | process_interaction |
+| `hot:session:{uid}:prefetch` | Pre-computed SDH block + state_hash | 300s | _predictive_prefetch |
+| `hot:session:{uid}:compressed_summary` | Emergency-compressed older turns | 7200s | Emergency compression task |
+
+## Predictive Pre-Fetch
+
+After each turn, `_predictive_prefetch()` runs as a fire-and-forget asyncio task:
+
+1. Reads PMB signals from Nevedal state (crisis_perception_type, shame_index, cycle_phase, reconsolidation_readiness)
+2. Predicts the most likely next topic
+3. Computes a state hash from `uid + predicted_topic`
+4. Runs SDH compress on the predicted context (600 token budget)
+5. Stores result in Hot Memory with 300s TTL
+
+On the next `process_interaction`, if the state hash matches, the pre-computed block is used directly — skipping all context assembly and SDH compression.
+
+## No-Stutter Rule
+
+| Mechanism | Location | Behavior |
+|---|---|---|
+| Typing indicator | bridge_server.py (before generate_streaming) | Sends `{type: "typing_indicator", status: "thinking"}` to client WebSocket |
+| Inter-token gap buffer | bridge_server.py (streaming loop) | If gap > 300ms between tokens, buffers up to 3 tokens before sending — smooths perceived stutter |
+| TTFT logging | sovereign_chat_client.py | Each provider logs first-token time |
+
+## Memory Growth Controls
+
+| Growth Vector | Control | Location |
+|---|---|---|
+| Hot Memory turns | Capped at 12 per user, TTL 7200s | hot.py `append_recent_turn(max_turns=12)` |
+| ACTIVE_TOKENS dict | Background prune every 5 minutes | bridge_server.py `_active_tokens_prune_loop()` |
+| Session memory files | Pruned after 30 days by db_maintenance_agent | db_maintenance_agent.py `_prune_session_memory()` |
+| Emergency compressed summaries | TTL 7200s, overwritten each session | hot.py `store_compressed_summary()` |
+| Prefetch cache | TTL 300s, auto-expires | hot.py via `store()` |
+
+## Rules
+
+1. **Hot Memory is a cache, not a store.** If Redis is unavailable, all operations fall back gracefully — PG is the source of truth for conversation history.
+2. **Prefetch hits are opportunistic.** A miss is the normal path. Never block on prefetch availability.
+3. **Emergency compression must not use Azure.** Only Workers AI or Grok — Azure is the emergency fallback for primary inference, not for background compression tasks.
+4. **Turn dumps are capped at 12.** Each turn summary is ~200 chars of user_text + ai_text. At 12 turns × 200 chars, the Redis list stays under 3KB per user.
+5. **ACTIVE_TOKENS prune runs even without login activity.** The 5-minute background timer ensures expired tokens are cleaned up even if no new logins occur.
+6. **Session memory files are local-disk only.** R2 replication is handled by SessionMemoryStore. The db_maintenance_agent prunes the local copies after 30 days.
+7. **Never increase the inter-token gap threshold above 500ms.** Higher values cause visible latency. The 300ms threshold is tuned for perceived fluency.
+8. **The identity prompt is immutable per session.** Once cached in Hot Memory, it is not rebuilt until the TTL expires (2 hours). Changes to `_IDENTITY_BLOCK` require a bridge restart to take effect for active sessions.

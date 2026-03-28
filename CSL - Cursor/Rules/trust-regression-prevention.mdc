@@ -1,0 +1,120 @@
+---
+description: Master checklist of code patterns that break 100% trust — catch-all routes, middleware in lifespan, empty payloads, env var clobbering, missing deployments
+alwaysApply: true
+---
+
+# Trust Regression Prevention
+
+Every pattern below has caused a production trust failure. This rule fires on every conversation as a guardrail.
+
+## Pattern 1: Catch-All Route Collision
+
+FastAPI matches routes top-down. A parameterized route like `/{assessment_id}` swallows all paths below it.
+
+```python
+# BAD — /health matches {assessment_id}
+@router.get("/{assessment_id}")
+@router.get("/health")
+
+# GOOD — specific routes first
+@router.get("/health")
+@router.get("/{assessment_id}")
+```
+
+**Check**: When adding a specific route to a router that has `/{param}`, place it **before** the catch-all.
+
+## Pattern 2: Middleware in Lifespan
+
+`app.add_middleware()` inside `lifespan()` crashes the entire Hive v4 init block — Starlette raises `RuntimeError: Cannot add middleware after an application has started`.
+
+```python
+# BAD — crashes 27+ services
+async def lifespan(app):
+    app.add_middleware(CORSMiddleware, ...)
+
+# GOOD — module level, before lifespan
+app.add_middleware(CORSMiddleware, ...)
+```
+
+## Pattern 3: Empty Dict Response = WARNING
+
+Auditors classify `200 + {}` as WARNING, not TRUSTED. Endpoints must return structurally non-empty responses.
+
+```python
+# BAD — auditor marks WARNING
+return {}
+
+# GOOD
+return {"status": "ok", "data": []}
+return []  # empty list is fine
+```
+
+## Pattern 4: load_dotenv(override=True)
+
+Clobbers Docker-injected env vars (`REDIS_URL`, `DATABASE_URL`, `POSTGRES_HOST`) with stale `.env` values.
+
+```python
+# BAD
+load_dotenv(override=True)
+
+# GOOD
+load_dotenv()  # default override=False
+```
+
+Capture critical env vars at module scope before imports: `_REDIS_URL = os.getenv("REDIS_URL")`
+
+## Pattern 5: Deploy File Without Dependencies
+
+A new service needs its router and migration deployed too.
+
+| Deployed | Missing | Result |
+|---|---|---|
+| Service file only | Router | Auditor tests return 404 |
+| Service + Router | Migration | Router queries crash with `relation does not exist` |
+| All 3 files | `_service_checks` update | Denominator wrong, health shows N/80 not (N+1)/81 |
+
+## Pattern 6: Auditor Stagger > 300s
+
+Trust Enforcer fires at minute 10 (600s). Auditors with stagger > 300s risk not completing before the enforcer reads results. Max stagger is 290s in 10s increments.
+
+## Pattern 7: Service Health Denominator Drift
+
+Adding to `_service_checks` without deploying the file makes the service `None` on the server, which registers as unhealthy.
+
+After adding any service to `_service_checks`:
+```bash
+ssh root@68.183.168.75 "ls /opt/clinical-sovereignty-lab/backend/app/services/<new_service>.py"
+```
+
+## Pattern 8: Wrong Column Names in SQL
+
+See `sql-schema-verification.mdc` for the full reference. The most common mistakes:
+- `users.user_id` → does not exist (use `users.id` or `users.username`)
+- `login_attempts.username` → use `login_attempts.identifier`
+- `skyeye_activity.action` → use `skyeye_activity.type`
+
+## Pattern 9: Sentinel Freeze Left Uncleared
+
+A Sentinel freeze sets `sentinel_frozen: true` in the DB. The HW Security Auditor's `sentinel_clear` check fails until it's unfreezed via YubiKey tap on the Hardware Security tab.
+
+Backend/bridge restarts clear in-memory state but **not** the DB flag. Only `webauthn/auth-verify` or manual SQL clears it.
+
+## Pattern 10: Backend Restart During Audit Window
+
+Restarting between HH:50 and HH:10 of audit hours (4:50-5:10, 16:50-17:10, 22:50-23:10 UTC) causes phantom failures because auditors haven't completed their staggers when the enforcer fires.
+
+## Quick Verification After Any Change
+
+```bash
+# Health
+curl -s http://localhost:8000/health
+
+# Schema errors
+docker logs nate_backend --since 2m 2>&1 | grep "does not exist"
+
+# Service count
+docker logs nate_backend --since 2m 2>&1 | grep "STARTUP COMPLETE"
+
+# Trigger fresh audit (optional)
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/skyeye-audit/send
+```

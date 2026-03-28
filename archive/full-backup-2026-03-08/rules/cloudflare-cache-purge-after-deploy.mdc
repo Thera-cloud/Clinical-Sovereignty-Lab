@@ -1,0 +1,63 @@
+---
+description: Cloudflare cache purge and nginx no-cache headers for Flutter web deploys
+alwaysApply: true
+---
+
+# Cloudflare Cache Purge After Flutter Deploy
+
+## The Problem (Mar 2026 Incident)
+
+After deploying a new Flutter web build, `main.dart.js` was updated on the server but users still saw the old UI. Root cause: nginx served `main.dart.js` with `cache-control: max-age=14400` (4 hours), Cloudflare cached this at its edge, and even after the file changed on disk, Cloudflare kept serving the stale copy. Clearing browser cache did not help because Cloudflare returned the cached version on re-fetch.
+
+## Required Nginx Headers
+
+Both `coach.sovereignsanctuary.net` and `app.sovereignsanctuary.net` MUST have `no-cache` blocks for ALL Flutter bootstrap files, including `main.dart.js`:
+
+```nginx
+location = /main.dart.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+location = /flutter_service_worker.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+location = /flutter_bootstrap.js {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+location = /index.html {
+  add_header Cache-Control "no-cache, no-store, must-revalidate";
+  add_header Pragma "no-cache";
+}
+```
+
+## After Every Flutter Web Deploy
+
+1. Verify nginx serves the new file directly (bypass Cloudflare):
+   ```bash
+   ssh root@68.183.168.75 "curl -sI --resolve coach.sovereignsanctuary.net:443:127.0.0.1 https://coach.sovereignsanctuary.net/main.dart.js | grep -E 'Content-Length|Cache-Control|Last-Modified'"
+   ```
+   - `Cache-Control` must show `no-cache`
+   - `Content-Length` and `Last-Modified` must match the deployed file
+
+2. **Purge Cloudflare cache** — go to Cloudflare dashboard > Caching > Configuration > Purge Everything (or Custom Purge these URLs):
+   - `https://coach.sovereignsanctuary.net/main.dart.js`
+   - `https://app.sovereignsanctuary.net/main.dart.js`
+   - `https://coach.sovereignsanctuary.net/flutter_service_worker.js`
+   - `https://app.sovereignsanctuary.net/flutter_service_worker.js`
+
+3. After purge, verify via Cloudflare (public URL):
+   ```bash
+   curl -sI https://coach.sovereignsanctuary.net/main.dart.js | grep -E 'Content-Length|Cache-Control'
+   ```
+
+## `sites-enabled` vs `sites-available` Warning
+
+`app.sovereignsanctuary.net` in `sites-enabled` is a **regular file** (not a symlink). Edits to `sites-available/app.sovereignsanctuary.net` do NOT propagate. Always edit the file in `sites-enabled` directly for `app.*`, or replace it with a symlink. `coach.*` IS a symlink and propagates correctly.
+
+## Never Do
+
+- Never deploy a Flutter web build without purging Cloudflare cache afterward
+- Never assume browser cache clear fixes Cloudflare edge caching
+- Never remove the `main.dart.js` no-cache location block from nginx

@@ -1,0 +1,40 @@
+---
+description: Always verify Docker volume mounts before editing data files on the server
+alwaysApply: true
+---
+
+# Docker Volume Awareness
+
+## Rule
+
+Before editing any data file on the production server (68.183.168.75), **always verify where the running container actually reads from** — host bind mounts and Docker named volumes are NOT the same path.
+
+## The Problem
+
+Docker named volumes (e.g. `bridge_data:/app/data`) store data at `/var/lib/docker/volumes/<name>/_data/`, NOT at the host project directory. Edits to `/opt/clinical-sovereignty-lab/data/bridge/` have no effect if the container uses a named volume.
+
+## Required Steps
+
+1. **Before editing any server data file**, run:
+   ```bash
+   docker inspect <container> --format '{{json .Mounts}}' | python3 -m json.tool
+   ```
+2. **Identify the `Source` path** for the mount that covers the file you want to edit
+3. **Edit at that exact path**, not the project directory
+4. **Prefer bind mounts** (`./data/bridge:/app/data`) over named volumes for data that needs to be inspected or edited from the host
+
+## Current Mount Map
+
+| Container | Mount | Type | Actual Host Path |
+|-----------|-------|------|-----------------|
+| nate_bridge | /app/data | bind | ./data/bridge |
+| nate_backend | /app/app | bind (ro) | ./backend/app |
+| nate_postgres | /var/lib/postgresql/data | named volume | postgres_data |
+| nate_redis | /data | named volume | redis_data |
+
+## Quick Check
+
+```bash
+# Find where a container's /app/data actually lives:
+docker inspect nate_bridge --format '{{range .Mounts}}{{.Destination}} -> {{.Source}}{{"\n"}}{{end}}'
+```

@@ -1,0 +1,24 @@
+name = "nate-analytics-edge"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+[[r2_buckets]]
+binding = "ANALYTICS_LAKE"
+bucket_name = "nate-vault"
+
+[[kv_namespaces]]
+binding = "ANALYTICS_STATE"
+id = "9e7c13aca09d489faa5ce30b87333aaa"
+
+[[d1_databases]]
+binding = "D1_HOT"
+database_name = "nate-hot"
+database_id = "8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0"
+
+[vars]
+BATCH_THRESHOLD = "100"
+FLUSH_INTERVAL_MS = "60000"

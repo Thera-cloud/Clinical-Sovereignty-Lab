@@ -1,0 +1,62 @@
+---
+description: Background agent error logging must be visible, not silently swallowed
+alwaysApply: true
+---
+
+# Background Agent Error Visibility
+
+## Rule
+
+Background agents that run on a schedule (Observer, Janitor, Auditors, Digest, etc.) must **never silently swallow exceptions** that prevent their primary function. Use `logger.warning()` or `logger.error()` for failures that affect data output.
+
+## Logging Levels for Background Agents
+
+| Situation | Level | Example |
+|---|---|---|
+| Agent failed its core task (no data produced) | `ERROR` | Observer can't connect to any platform |
+| Individual sub-task failed but others continue | `WARNING` | One platform errored, others polled fine |
+| Expected empty result (no new data to process) | `INFO` | Zero new notifications this cycle |
+| Verbose debugging of internal state | `DEBUG` | "Checking post 12345 for likers" |
+
+## What NOT to Do
+
+```python
+# BAD — silently hides a schema mismatch that breaks the entire agent
+except Exception:
+    return []
+
+# BAD — logger.debug is invisible in production (default level is INFO)
+except Exception as e:
+    logger.debug(f"Query failed: {e}")
+```
+
+## What to Do
+
+```python
+# GOOD — visible in logs, identifies the agent and context
+except Exception as e:
+    logger.warning("NotificationObserver: failed to query connected platforms: %s", e)
+    return []
+```
+
+## Agents Covered by This Rule
+
+All agents in `backend/app/services/` that run in background loops:
+
+| Agent | File | Primary Function |
+|---|---|---|
+| NotificationObserver | `notification_observer.py` | Poll platforms for engagement |
+| ContentQueueJanitor | `content_queue_janitor.py` | Archive failed posts |
+| TokenRenewalAgent | `token_renewal_agent.py` | Renew expiring OAuth tokens |
+| TokenAuditAgent | `token_audit_agent.py` | Audit token health |
+| SessionRecoveryAgent | `session_recovery_agent.py` | Retry failed session summaries |
+| DbMaintenanceAgent | `db_maintenance_agent.py` | Prune old rows |
+| InsightAccumulator | `insight_accumulator.py` | Synthesize learnings |
+| AgentStatusDigest | `agent_status_digest.py` | Email health report |
+| All *Auditor agents | `*_auditor.py` | Trust scorecards |
+
+## After Any Agent Change
+
+1. Grep for `logger.debug` in the modified file — upgrade to `WARNING` if the exception prevents data output
+2. Grep for bare `except Exception:` without logging — add a `logger.warning()` call
+3. Verify the agent logs its cycle completion: `docker logs nate_backend 2>&1 | grep -i '<agent_name>' | tail -10`

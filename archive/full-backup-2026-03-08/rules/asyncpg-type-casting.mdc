@@ -1,0 +1,57 @@
+---
+description: asyncpg requires explicit type casts for PostgreSQL polymorphic functions like to_jsonb(), to_json(), jsonb_build_object(). Without casts, queries fail with DatatypeMismatchError.
+globs: backend/app/routers/*.py, backend/app/services/*.py, backend/app/websocket/*.py
+alwaysApply: false
+---
+
+# asyncpg Polymorphic Type Casting
+
+## The Problem
+
+PostgreSQL functions like `to_jsonb()`, `to_json()`, and `jsonb_build_object()` accept `anyelement` (polymorphic). When asyncpg sends a parameter `$1` to these functions, PostgreSQL cannot infer the type and throws:
+
+```
+asyncpg.exceptions.DatatypeMismatchError:
+  could not determine polymorphic type because input has type unknown
+```
+
+## The Fix
+
+Always add explicit type casts when passing parameters to polymorphic functions:
+
+```python
+# BAD — fails at runtime
+await conn.execute("""
+    UPDATE users SET profile_data = jsonb_set(
+        profile_data, '{token_balance}', to_jsonb($1)
+    ) WHERE username = $2
+""", new_balance, username)
+
+# GOOD — explicit cast
+await conn.execute("""
+    UPDATE users SET profile_data = jsonb_set(
+        profile_data, '{token_balance}', to_jsonb($1::int)
+    ) WHERE username = $2
+""", new_balance, username)
+```
+
+## Common Casts Needed
+
+| Function | Parameter | Cast |
+|---|---|---|
+| `to_jsonb($1)` | integer | `to_jsonb($1::int)` |
+| `to_jsonb($1)` | text | `to_jsonb($1::text)` |
+| `to_jsonb($1)` | boolean | `to_jsonb($1::bool)` |
+| `jsonb_build_object('key', $1)` | any | `jsonb_build_object('key', $1::text)` |
+| `to_json($1)` | any | `to_json($1::int)` etc. |
+
+## When This Bites
+
+- Works fine in `psql` (which infers types from literals)
+- Works fine with SQLAlchemy (which adds type annotations)
+- Fails **only** with asyncpg's binary protocol, which sends parameters without type hints
+- The error appears at runtime, not at import or startup
+
+## Feb 2026 Incident
+
+Token Lab's Quick Adjust button silently failed because `_set_balance()` used `to_jsonb($1)` without a cast. The 500 error was only visible in backend logs, not in the UI.

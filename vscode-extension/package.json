@@ -1,0 +1,115 @@
+{
+  "name": "sovereign-sanctuary",
+  "displayName": "Sovereign Sanctuary — Little Nate",
+  "description": "AI-powered development assistant with multi-mode CLI chat, inline diff review, and debug instrumentation.",
+  "version": "0.1.0",
+  "publisher": "sovereign-sanctuary",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["AI", "Other"],
+  "icon": "media/icon.png",
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "sovereignSanctuary.openChat", "title": "Sovereign Sanctuary: Open Chat" },
+      { "command": "sovereignSanctuary.askAboutSelection", "title": "Sovereign Sanctuary: Ask About Selection" },
+      { "command": "sovereignSanctuary.debugSelection", "title": "Sovereign Sanctuary: Debug Selection" },
+      { "command": "sovereignSanctuary.switchMode", "title": "Sovereign Sanctuary: Switch Mode" },
+      { "command": "sovereignSanctuary.switchBridge", "title": "Sovereign Sanctuary: Switch Bridge" },
+      { "command": "sovereignSanctuary.logout", "title": "Sovereign Sanctuary: Logout" },
+      { "command": "sovereignSanctuary.openPlan", "title": "Sovereign Sanctuary: Open Plan" },
+      { "command": "sovereignSanctuary.markFixed", "title": "Sovereign Sanctuary: Mark Fixed" },
+      { "command": "sovereignSanctuary.acceptDiff", "title": "Sovereign Sanctuary: Accept Proposed Changes" },
+      { "command": "sovereignSanctuary.rejectDiff", "title": "Sovereign Sanctuary: Reject Proposed Changes" },
+      { "command": "sovereignSanctuary.login", "title": "Sovereign Sanctuary: Login" },
+      { "command": "sovereignSanctuary.loadCursorPlan", "title": "Sovereign Sanctuary: Load Cursor Plan" }
+    ],
+    "keybindings": [
+      { "command": "sovereignSanctuary.openChat", "key": "ctrl+shift+l", "mac": "cmd+shift+l" },
+      { "command": "sovereignSanctuary.askAboutSelection", "key": "ctrl+shift+a", "mac": "cmd+shift+a", "when": "editorHasSelection" },
+      { "command": "sovereignSanctuary.debugSelection", "key": "ctrl+shift+d", "mac": "cmd+shift+d", "when": "editorHasSelection" }
+    ],
+    "configuration": {
+      "title": "Sovereign Sanctuary",
+      "properties": {
+        "sovereignSanctuary.bridge": {
+          "type": "string",
+          "enum": ["auto", "local", "cloud"],
+          "default": "auto",
+          "description": "Bridge connection mode. 'auto' tries local first, falls back to cloud. Enterprise deployments can lock to 'cloud'.",
+          "scope": "window"
+        },
+        "sovereignSanctuary.bridgeLocalUrl": {
+          "type": "string",
+          "default": "ws://localhost:8765/ws",
+          "description": "WebSocket URL for the local bridge server."
+        },
+        "sovereignSanctuary.bridgeCloudUrl": {
+          "type": "string",
+          "default": "wss://api.sovereignsanctuary.net/ws",
+          "description": "WebSocket URL for the cloud bridge (must be api.* — /ws is not proxied on app.*)."
+        },
+        "sovereignSanctuary.defaultMode": {
+          "type": "string",
+          "enum": ["ask", "plan", "debug", "ln_fab"],
+          "default": "ask",
+          "description": "Default chat mode when opening the panel."
+        },
+        "sovereignSanctuary.loginRole": {
+          "type": "string",
+          "enum": ["ADMIN", "COACH", "CLIENT"],
+          "default": "ADMIN",
+          "description": "Role to authenticate as when logging in to the bridge."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sovereignSanctuary",
+          "title": "Sovereign Sanctuary",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sovereignSanctuary": [
+        {
+          "id": "sovereignPlans",
+          "name": "Plans",
+          "type": "tree"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        { "command": "sovereignSanctuary.askAboutSelection", "when": "editorHasSelection", "group": "sovereign" },
+        { "command": "sovereignSanctuary.debugSelection", "when": "editorHasSelection", "group": "sovereign" }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "build:prod": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package --no-dependencies",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "@types/node": "^20.0.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "marked": "^12.0.0",
+    "highlight.js": "^11.9.0",
+    "diff2html": "^3.4.0"
+  }
+}

@@ -1,0 +1,48 @@
+name = "nate-summon-worker"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_AE"
+dataset = "sovereign_events_ae"
+
+routes = [
+  { pattern = "api.sovereignsanctuary.net/api/summon", zone_name = "sovereignsanctuary.net" },
+  { pattern = "api.sovereignsanctuary.net/api/summon/*", zone_name = "sovereignsanctuary.net" }
+]
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "SUMMON_CACHE"
+id = "9e7c13aca09d489faa5ce30b87333aaa"
+
+[[kv_namespaces]]
+binding = "SUMMON_RATE"
+id = "25e51962a9bd4e5b877c1d8d161f08d0"
+
+[[d1_databases]]
+binding = "D1_HOT"
+database_name = "nate-hot"
+database_id = "8dcd53ad-a6fb-49f4-8ca9-5a5843489cd0"
+
+[[d1_databases]]
+binding = "D1_SANDBOX"
+database_name = "cli-chamberofsecrets"
+database_id = "bedabdd5-ab9d-4a56-b29d-362f1c345ada"
+
+[[r2_buckets]]
+binding = "CRYSTAL_STORE"
+bucket_name = "nate-vault"
+
+[[vectorize]]
+binding = "WISDOM_INDEX"
+index_name = "nate-wisdom"
+
+[[vectorize]]
+binding = "MEMORY_INDEX"
+index_name = "nate-memory-search"
+
+[vars]
+INTERNAL_TOKEN = ""

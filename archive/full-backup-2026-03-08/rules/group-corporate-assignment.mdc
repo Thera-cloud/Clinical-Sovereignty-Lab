@@ -1,0 +1,46 @@
+---
+description: Group ID and Corporate ID assignment model for clients and coaches
+alwaysApply: true
+---
+
+# Group & Corporate Assignment Model
+
+## Assignment Fields in `profile_data` JSONB
+
+| Field | Who | Purpose |
+|---|---|---|
+| `group_id` | CLIENT, COACH | Membership in a named group (e.g., `AA-Meeting101`) |
+| `group_role` | COACH | `manager` when the coach manages the group |
+| `company_id` | CLIENT, COACH | FK to `corporate_sponsors.id` (UUID) — also set on the `users.company_id` column |
+| `company_name` | CLIENT, COACH | Display name of the company |
+
+## Assignment SQL Pattern
+
+```sql
+UPDATE users SET
+  company_id = 'UUID_HERE',
+  profile_data = jsonb_set(
+    jsonb_set(profile_data, '{company_id}', '"UUID_HERE"'),
+    '{company_name}', '"Company Name"'
+  )
+WHERE username = $1;
+```
+
+For group assignment:
+```sql
+UPDATE users SET
+  profile_data = jsonb_set(
+    jsonb_set(profile_data, '{group_id}', '"GROUP_ID"'),
+    '{group_role}', '"member"'
+  )
+WHERE username = $1;
+```
+
+## Rules
+
+1. **Always restart `nate_bridge` after direct DB updates** — the bridge cache will overwrite stale values otherwise
+2. **`company_id` lives in TWO places** — `users.company_id` column AND `profile_data->>'company_id'` JSONB key. Both must be set consistently.
+3. **`group_id` is profile_data only** — there is no `group_id` column on the `users` table
+4. **`coach_get_clients` returns `group_id`** — added alongside `family_id`, `company_id`, `company_name` in bridge_server.py
+5. **Master Coach + Corporation**: When a coach is assigned to a corporation, they can coach employees and any assistant coaches under that company ID
+6. **Group Manager**: A coach with `group_role: "manager"` for a `group_id` manages that group's sessions and members
