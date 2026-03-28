@@ -1,0 +1,22 @@
+{
+  "DrNevedal1": {
+    "password_hash": "a834328f72b22af59d80683b1f8ca24ab9b39e5848624e1689511b1866c2ebd4",
+    "profile": {
+      "role": "ADMIN",
+      "name": "Dr. Nathan Nevedal",
+      "email": "nathan@sovereignsanctuary.net",
+      "hardware_id": "ADMIN_001",
+      "subscription_plan": "TOP_TIER",
+      "subscription_status": "ACTIVE",
+      "token_balance": 999999,
+      "joined_date": "2026-01-21T19:02:00",
+      "assigned_coach": null,
+      "family_id": null,
+      "consent_version": "v12.6_2026_FINAL",
+      "last_login": "2026-03-18T21:00:00",
+      "login_count": 1,
+      "token_usage_today": 0,
+      "token_usage_month": 0
+    }
+  }
+}

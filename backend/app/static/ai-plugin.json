@@ -1,0 +1,17 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "Little Nate",
+  "name_for_model": "little_nate",
+  "description_for_human": "Ask Little Nate — your AI companion from Sovereign Sanctuary. Get help with emotional wellness, stress management, personal growth, and more.",
+  "description_for_model": "Little Nate is an AI companion from Sovereign Sanctuary. Use this plugin to ask Little Nate questions about emotional wellness, stress management, personal growth, emotional coherence, or any general topic. Little Nate provides warm, insightful, and helpful responses.",
+  "auth": {
+    "type": "none"
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://api.sovereignsanctuary.net/api/summon/openapi.yaml"
+  },
+  "logo_url": "https://app.sovereignsanctuary.net/icons/Icon-192.png",
+  "contact_email": "support@sovereignsanctuary.net",
+  "legal_info_url": "https://app.sovereignsanctuary.net/terms.html"
+}

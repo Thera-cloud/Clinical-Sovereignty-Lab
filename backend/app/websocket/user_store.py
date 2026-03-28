@@ -304,7 +304,10 @@ class UserStore:
                                      'certification_status', 'coach_verified',
                                      'coaching_fee', 'w9_submitted', 'w9_data',
                                      'stripe_customer_id',
-                                     'free_month_start', 'free_month_end'
+                                     'free_month_start', 'free_month_end',
+                                     'token_usage_today', 'token_usage_month',
+                                     'last_token_reset',
+                                     'qb_connected', 'qb_realm_id'
                                  ])),
                                 '{}'::jsonb
                             ),
@@ -458,6 +461,7 @@ class UserStore:
             profile = {}
 
         # Overlay indexed columns (these are the source of truth over profile_data)
+        profile["username"] = username
         profile["role"] = row["role"] or profile.get("role", "CLIENT")
         profile["name"] = row["name"] or profile.get("name", username)
         profile["email"] = row["email"] or profile.get("email", "")

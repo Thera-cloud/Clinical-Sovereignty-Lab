@@ -46,10 +46,11 @@ sendgrid~=6.11.0
 # SMS (Twilio)
 twilio~=9.0.4
 
-# Audio Processing (for Nevedal voice biometrics)
+# Audio Processing (for Nevedal voice biometrics + Neural Mirror)
 numpy~=1.26.3
 scipy~=1.12.0
 librosa~=0.10.1
+praat-parselmouth~=0.4.3
 
 # PDF Processing (for workbook extraction)
 pypdf~=4.0.1
@@ -114,6 +115,10 @@ bleak~=0.21.0
 # Optional — Azure Blob Storage (only if AZURE_STORAGE_CONNECTION_STRING is set)
 # Install manually if needed: pip install azure-storage-blob~=12.19.0
 # azure-storage-blob~=12.19.0
+
+# Neural Mirror — PyTorch CPU for VoiceEEGAutoencoder (Phase 3)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch~=2.2.0
 
 # Optional — Family Sanctuary AI detection (graceful fallback if missing)
 # Install manually if needed: pip install transformers~=4.0.0

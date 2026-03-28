@@ -13,6 +13,15 @@ from typing import Dict, Optional, Set
 
 import httpx
 
+try:
+    from app.websocket.crystal_recall_bridge import (
+        recall_crystals_for_context as _crystal_recall,
+        crystallize_from_conversation as _crystal_forge,
+    )
+except ImportError:
+    _crystal_recall = None
+    _crystal_forge = None
+
 logger = logging.getLogger("nate.call_coaching")
 
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
@@ -172,21 +181,34 @@ class CallCoachingEngine:
         return None
 
     async def _get_user_context(self, user_id: str) -> str:
-        """Pull brief user context for personalized coaching."""
+        """Pull brief user context + crystal memory for personalized coaching."""
+        parts = []
         try:
             async with self.db_pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT profile_data FROM users WHERE user_id = $1 OR username = $1",
+                    "SELECT hardware_id, profile_data FROM users WHERE username = $1 LIMIT 1",
                     user_id,
                 )
                 if row:
                     profile = row.get("profile_data", {}) or {}
+                    if isinstance(profile, str):
+                        import json as _json
+                        try:
+                            profile = _json.loads(profile)
+                        except Exception:
+                            profile = {}
                     themes = profile.get("recent_themes", [])
                     if themes:
-                        return f"Recent themes in user's therapy: {', '.join(themes[:5])}"
-        except Exception:
-            pass
-        return ""
+                        parts.append(f"Recent themes in user's therapy: {', '.join(themes[:5])}")
+
+                    hw_id = row.get("hardware_id") or user_id
+                    if _crystal_recall and self.db_pool:
+                        crystal_ctx = await _crystal_recall(self.db_pool, hw_id, max_results=5, source="call_coaching")
+                        if crystal_ctx:
+                            parts.append(crystal_ctx)
+        except Exception as e:
+            logger.warning("_get_user_context: %s", e)
+        return "\n\n".join(parts)
 
     async def _send_coaching_to_user(self, user_id: str, call_sid: str, coaching: str):
         """Send coaching card to the user's connected WebSocket session."""
@@ -233,6 +255,19 @@ class CallCoachingEngine:
                             """, session["id"], summary)
                 except Exception as e:
                     logger.error("Failed to store call debrief: %s", e)
+
+        if _crystal_forge and self.db_pool and call_state.get("transcript_buffer"):
+            try:
+                transcripts = call_state["transcript_buffer"]
+                for t_chunk in transcripts:
+                    if t_chunk and len(t_chunk) >= 40:
+                        await _crystal_forge(
+                            self.db_pool, user_id, t_chunk, "",
+                            user_name=user_id, domain="clinical",
+                            origin_surface="call_coaching",
+                        )
+            except Exception as e:
+                logger.warning("call coaching crystal forge failed: %s", e)
 
         logger.info(
             "Call finalized: sid=%s chunks=%d coaching_cards=%d",

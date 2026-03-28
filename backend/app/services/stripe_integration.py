@@ -74,6 +74,9 @@ PRICES = {
     "DOJO_TEACHER": os.getenv("STRIPE_PRICE_DOJO_TEACHER"),        # $225/mo
     "DOJO_JUDGE": os.getenv("STRIPE_PRICE_DOJO_JUDGE"),            # $2,100/mo
     "DOJO_COACH_NATE": os.getenv("STRIPE_PRICE_DOJO_COACH_NATE"), # $90/mo
+    # Annual subscription prices
+    "INNER_CHAMBER_ANNUAL": os.getenv("STRIPE_PRICE_INNER_CHAMBER_ANNUAL"),      # $490/yr
+    "SOVEREIGN_CIRCLE_ANNUAL": os.getenv("STRIPE_PRICE_SOVEREIGN_CIRCLE_ANNUAL"),  # $749/6mo
 }
 
 # Canonical pricing reference — source of truth for all product prices.
@@ -517,7 +520,8 @@ class StripeService:
         tier: SubscriptionTier,
         success_url: str,
         cancel_url: str,
-        promo_code: Optional[str] = None
+        promo_code: Optional[str] = None,
+        billing_cycle: str = "monthly"
     ) -> CreateCheckoutResponse:
         """Create Stripe checkout session for subscription."""
         
@@ -525,7 +529,15 @@ class StripeService:
             raise HTTPException(400, "Cannot checkout for trial tier")
         
         customer_id = await self.get_or_create_customer(user_id, email, name)
-        price_id = PRICES[tier.value]
+
+        annual_key_map = {
+            "STANDARD": "INNER_CHAMBER_ANNUAL",
+            "TOP_TIER": "SOVEREIGN_CIRCLE_ANNUAL",
+        }
+        if billing_cycle == "annual" and tier.value in annual_key_map:
+            price_id = PRICES.get(annual_key_map[tier.value]) or PRICES.get(tier.value)
+        else:
+            price_id = PRICES.get(tier.value)
         
         if not price_id:
             raise HTTPException(500, f"Price not configured for {tier.value}")
@@ -583,14 +595,34 @@ class StripeService:
             "metadata": {"user_id": user_id, "tier": tier.value},
             "subscription_data": sub_data,
         }
+        promo_meta: Dict[str, str] = {}
+        full_discount_checkout = False
         if founding_eligible:
             session_params["discounts"] = [{"coupon": FOUNDING_COUPON_ID}]
         elif promo_code:
-            stripe_coupon_id = await self._resolve_promo_coupon(promo_code)
-            if stripe_coupon_id:
-                session_params["discounts"] = [{"coupon": stripe_coupon_id}]
+            promo = await self._resolve_promo_coupon(promo_code, tier.value)
+            if promo and promo.get("stripe_coupon_id"):
+                session_params["discounts"] = [{"coupon": promo["stripe_coupon_id"]}]
+                full_discount_checkout = bool(promo.get("is_full_discount"))
+                promo_meta = {
+                    "applied_promo_code": str(promo.get("code", "")).upper(),
+                    "applied_promo_source": str(promo.get("source", "")),
+                    "applied_promo_id": str(promo.get("id", "")),
+                }
+            elif promo and not promo.get("stripe_coupon_id"):
+                print(f">>> [STRIPE] Promo code '{promo_code}' matched DB but has no Stripe coupon — code cannot be applied")
+                session_params["allow_promotion_codes"] = True
             else:
                 session_params["allow_promotion_codes"] = True
+        if promo_meta:
+            session_params["metadata"] = {
+                **session_params["metadata"],
+                **promo_meta,
+            }
+        if full_discount_checkout:
+            # 100% discounts can produce a zero-dollar initial invoice.
+            # Let Stripe skip payment collection when not required.
+            session_params["payment_method_collection"] = "if_required"
 
         session = stripe.checkout.Session.create(**session_params)
         
@@ -603,26 +635,33 @@ class StripeService:
     # PROMO CODE RESOLUTION
     # -------------------------------------------------------------------------
 
-    async def _resolve_promo_coupon(self, promo_code: str) -> Optional[str]:
-        """Look up a promo code across all discount tables and return the Stripe coupon ID."""
+    async def _resolve_promo_coupon(self, promo_code: str, tier: str) -> Optional[Dict[str, Any]]:
+        """Look up a promo code across all discount tables and return Stripe + tracking metadata."""
         import re
         cleaned = promo_code.strip().upper()[:40]
         if not re.match(r'^[A-Z0-9_\-]{2,40}$', cleaned):
             return None
         try:
             row = await self.db.fetchrow("""
-                SELECT stripe_coupon_id FROM promotional_specials
+                SELECT id, stripe_coupon_id, discount_type, discount_value
+                FROM promotional_specials
                 WHERE promo_code = $1 AND active = TRUE
                   AND starts_at <= NOW() AND ends_at > NOW()
                   AND (max_redemptions IS NULL OR current_redemptions < max_redemptions)
-            """, cleaned)
+                  AND (
+                    applicable_tiers IS NULL
+                    OR cardinality(applicable_tiers) = 0
+                    OR $2 = ANY(applicable_tiers)
+                  )
+            """, cleaned, tier)
             if row and row["stripe_coupon_id"]:
-                await self.db.execute("""
-                    UPDATE promotional_specials
-                    SET current_redemptions = current_redemptions + 1
-                    WHERE promo_code = $1
-                """, cleaned)
-                return row["stripe_coupon_id"]
+                return {
+                    "id": str(row["id"]),
+                    "code": cleaned,
+                    "source": "promotional_specials",
+                    "stripe_coupon_id": row["stripe_coupon_id"],
+                    "is_full_discount": row["discount_type"] == "percent" and int(row["discount_value"] or 0) >= 100,
+                }
 
             row = await self.db.fetchrow("""
                 SELECT stripe_coupon_id FROM school_codes
@@ -630,15 +669,31 @@ class StripeService:
                   AND (max_students IS NULL OR current_students < max_students)
             """, cleaned)
             if row and row.get("stripe_coupon_id"):
-                return row["stripe_coupon_id"]
+                return {
+                    "id": "school_code",
+                    "code": cleaned,
+                    "source": "school_codes",
+                    "stripe_coupon_id": row["stripe_coupon_id"],
+                    "is_full_discount": False,
+                }
 
             row = await self.db.fetchrow("""
-                SELECT stripe_coupon_id FROM corporate_sponsors
+                SELECT stripe_coupon_id, pays_full, discount_type, discount_value
+                FROM corporate_sponsors
                 WHERE sponsor_code = $1 AND active = TRUE
                   AND (max_employees IS NULL OR current_employees < max_employees)
             """, cleaned)
             if row and row.get("stripe_coupon_id"):
-                return row["stripe_coupon_id"]
+                is_full = bool(row.get("pays_full"))
+                if not is_full and row.get("discount_type") == "percent":
+                    is_full = int(row.get("discount_value") or 0) >= 100
+                return {
+                    "id": "corporate_sponsor",
+                    "code": cleaned,
+                    "source": "corporate_sponsors",
+                    "stripe_coupon_id": row["stripe_coupon_id"],
+                    "is_full_discount": is_full,
+                }
         except Exception as e:
             _logger.warning("Promo code resolution failed for %s: %s", cleaned, e)
         return None
@@ -1443,6 +1498,18 @@ class StripeWebhookHandler:
         """Handle successful checkout."""
         
         metadata = session.get('metadata', {})
+
+        # --- Stripe-first registration: pending_signup flow --- # QUANTUM-CRYSTAL-ARCH
+        pending_signup_id = metadata.get("pending_signup_id")
+        if pending_signup_id:
+            await self._handle_pending_signup(session, pending_signup_id)
+            return
+
+        # --- Client-to-Coach upgrade flow --- # QUANTUM-CRYSTAL-ARCH
+        if metadata.get("type") == "coach_upgrade":
+            await self._handle_coach_upgrade(session, metadata)
+            return
+
         user_id = metadata.get('user_id')
         
         if not user_id:
@@ -1476,6 +1543,31 @@ class StripeWebhookHandler:
                 "UPDATE users SET tier = $1, subscription_status = 'ACTIVE' WHERE id = $2",
                 tier, user_id
             )
+
+            # Promo redemption is counted only after a successful checkout completion.
+            # This prevents codes being consumed on abandoned or expired sessions.
+            applied_source = metadata.get("applied_promo_source", "")
+            applied_code = metadata.get("applied_promo_code", "")
+            if applied_source and applied_code:
+                cleaned_code = applied_code.strip().upper()[:40]
+                try:
+                    if applied_source == "promotional_specials":
+                        await self.db.execute(
+                            "UPDATE promotional_specials SET current_redemptions = current_redemptions + 1 WHERE promo_code = $1",
+                            cleaned_code,
+                        )
+                    elif applied_source == "school_codes":
+                        await self.db.execute(
+                            "UPDATE school_codes SET current_students = current_students + 1 WHERE school_code = $1",
+                            cleaned_code,
+                        )
+                    elif applied_source == "corporate_sponsors":
+                        await self.db.execute(
+                            "UPDATE corporate_sponsors SET current_employees = current_employees + 1 WHERE sponsor_code = $1",
+                            cleaned_code,
+                        )
+                except Exception as e:
+                    print(f">>> [STRIPE] Promo redemption update failed ({applied_source}/{applied_code}): {e}")
 
             # Notify bridge to reload this user's cache from PG
             try:
@@ -1738,6 +1830,163 @@ class StripeWebhookHandler:
             except Exception as watchlist_err:
                 print(f">>> [STRIPE] Watchlist integration error: {watchlist_err}")
     
+    async def _handle_pending_signup(self, session: Dict, pending_signup_id: str):
+        """Finalize a Stripe-first registration after payment.""" # QUANTUM-CRYSTAL-ARCH
+        import uuid as _uuid
+        try:
+            signup_uuid = _uuid.UUID(pending_signup_id)
+        except (ValueError, AttributeError):
+            print(f">>> [STRIPE] Invalid pending_signup_id: {pending_signup_id}")
+            return
+        try:
+            row = await self.db.fetchrow(
+                "SELECT * FROM pending_signups WHERE id = $1 AND status = 'pending'",
+                signup_uuid,
+            )
+        except Exception as e:
+            print(f">>> [STRIPE] pending_signups lookup failed: {e}")
+            return
+
+        if not row:
+            expired = await self.db.fetchval(
+                "SELECT status FROM pending_signups WHERE id = $1", signup_uuid
+            )
+            if expired == "expired":
+                print(f">>> [STRIPE] WARNING: Payment for expired pending_signup "
+                      f"{pending_signup_id}. Session {session.get('id')} may need refund.")
+                try:
+                    import sendgrid
+                    from sendgrid.helpers.mail import Mail
+                    sg_key = os.getenv("SENDGRID_API_KEY")
+                    if sg_key:
+                        msg = Mail(
+                            from_email="support@sovereignsanctuary.net",
+                            to_emails="support@sovereignsanctuary.net",
+                            subject="[URGENT] Expired Registration Payment Needs Refund",
+                            html_content=(
+                                f"<p>pending_signup <code>{pending_signup_id}</code> expired "
+                                f"but Stripe session <code>{session.get('id')}</code> completed.</p>"
+                                f"<p>Review in Stripe dashboard and issue refund if needed.</p>"
+                            ),
+                        )
+                        sendgrid.SendGridAPIClient(api_key=sg_key).send(msg)
+                except Exception as _sg_err:
+                    print(f">>> [STRIPE] Expired signup alert email failed: {_sg_err}")
+            return
+
+        payload = row["payload"] if isinstance(row["payload"], dict) else {}
+        dojos = row["selected_dojos"] if isinstance(row["selected_dojos"], list) else []
+
+        try:
+            from app.services.registration_finalize import finalize_signup
+            ok, reason = await finalize_signup(
+                self.db,
+                role=row["role"],
+                username=row["username"],
+                password_hash=row["password_hash"],
+                email=row["email"] or "",
+                profile_fields=payload,
+                tier=row["tier"] or "",
+                selected_dojos=dojos,
+                discount_code=row["discount_code"] or "",
+                stripe_customer_id=session.get("customer", ""),
+                stripe_checkout_session_id=session.get("id", ""),
+            )
+        except Exception as e:
+            print(f">>> [STRIPE] finalize_signup exception: {e}")
+            ok, reason = False, f"EXCEPTION: {e}"
+
+        if ok:
+            await self.db.execute(
+                "UPDATE pending_signups SET status='completed', consumed_at=NOW() WHERE id=$1",
+                signup_uuid,
+            )
+            print(f">>> [STRIPE] Registration finalized for {row['username']}")
+            await self._send_registration_receipt(row)
+        else:
+            await self.db.execute(
+                "UPDATE pending_signups SET status='cancelled' WHERE id=$1",
+                signup_uuid,
+            )
+            print(f">>> [STRIPE] Registration finalize FAILED for {row['username']}: "
+                  f"{reason}. Session {session.get('id')} needs refund.")
+
+    async def _send_registration_receipt(self, signup_row):
+        """Send welcome email after successful Stripe-first registration."""
+        email = signup_row.get("email")
+        username = signup_row.get("username")
+        if not email:
+            return
+        try:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail
+            sg_key = os.getenv("SENDGRID_API_KEY")
+            if not sg_key:
+                return
+            payload = signup_row.get("payload", {})
+            if isinstance(payload, str):
+                import json as _json
+                payload = _json.loads(payload)
+            name = payload.get("name", username)
+            tier = signup_row.get("tier", "")
+            message = Mail(
+                from_email="support@sovereignsanctuary.net",
+                to_emails=email,
+                subject="Welcome to Sovereign Sanctuary — Your account is ready",
+                html_content=(
+                    f"<h2>Welcome, {name}!</h2>"
+                    f"<p>Your <strong>{tier}</strong> account has been created.</p>"
+                    f"<p><strong>Username:</strong> {username}</p>"
+                    f"<p>Sign in at "
+                    f"<a href='https://app.sovereignsanctuary.net'>app.sovereignsanctuary.net</a></p>"
+                    f"<p style='color:#888;font-size:12px'>This is your payment confirmation. "
+                    f"Your password was not stored in this email for security.</p>"
+                ),
+            )
+            sg = sendgrid.SendGridAPIClient(api_key=sg_key)
+            sg.send(message)
+            print(f">>> [STRIPE] Welcome email sent to {email}")
+        except Exception as e:
+            print(f">>> [STRIPE] Welcome email failed: {e}")
+
+    async def _handle_coach_upgrade(self, session: Dict, metadata: Dict):
+        """Handle client-to-coach upgrade after Stripe payment.""" # QUANTUM-CRYSTAL-ARCH
+        username = metadata.get("username", "")
+        hw_id = metadata.get("hardware_id", "")
+        if not username:
+            print(f">>> [STRIPE] Coach upgrade missing username in metadata")
+            return
+        try:
+            import json as _json
+            dojos = _json.loads(metadata.get("selected_dojos", "[]"))
+            coaching_fee = float(metadata.get("coaching_fee", 0))
+            zoom_link = metadata.get("zoom_link", "")
+            email = metadata.get("email", "")
+            phone = metadata.get("phone", "")
+
+            upgrade_data = {
+                "selected_dojos": dojos,
+                "coaching_fee": coaching_fee,
+                "zoom_link": zoom_link,
+                "email": email,
+                "phone": phone,
+                "stripe_subscription_id": session.get("subscription", ""),
+                "stripe_customer_id": session.get("customer", ""),
+            }
+
+            await self.db.execute(
+                """UPDATE users SET profile_data = jsonb_set(
+                    jsonb_set(profile_data, '{upgrade_to_coach_status}', '"PAID_PENDING"'),
+                    '{coach_upgrade_data}', $1::jsonb
+                ) WHERE username = $2""",
+                _json.dumps(upgrade_data),
+                username,
+            )
+            print(f">>> [STRIPE] Coach upgrade payment received for {username}, "
+                  f"status=PAID_PENDING, dojos={dojos}")
+        except Exception as e:
+            print(f">>> [STRIPE] Coach upgrade processing failed for {username}: {e}")
+
     async def _handle_subscription_updated(self, subscription: Dict):
         """Handle subscription changes."""
         

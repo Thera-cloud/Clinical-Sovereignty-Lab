@@ -1,0 +1,102 @@
+openapi: 3.1.0
+info:
+  title: Little Nate — AI Companion API
+  description: |
+    Ask Little Nate anything. He's an AI companion from Sovereign Sanctuary
+    powered by quantum emotional coherence technology.
+
+    Little Nate can help with:
+    - Emotional wellness and self-awareness
+    - Stress management strategies
+    - Understanding emotional coherence
+    - Personal growth questions
+    - General knowledge
+  version: 1.0.0
+servers:
+  - url: https://api.sovereignsanctuary.net
+    description: Production
+paths:
+  /api/summon:
+    post:
+      operationId: askLittleNate
+      summary: Ask Little Nate a question
+      description: |
+        Send a question to Little Nate and receive an AI-generated response.
+        Supports both authenticated users and anonymous "3 Queries in a Bottle" access.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  description: The question or message for Little Nate
+                  maxLength: 2000
+                channel:
+                  type: string
+                  default: chatgpt_custom_gpt
+                  description: The channel this request originates from
+                context:
+                  type: object
+                  description: Optional context about the user's current situation
+                  properties:
+                    topic:
+                      type: string
+                      description: The topic area of the question
+      responses:
+        "200":
+          description: Little Nate's response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                    description: Nate's AI-generated answer
+                  sources_used:
+                    type: array
+                    items:
+                      type: string
+                    description: Sources Nate drew from
+                  access_level:
+                    type: string
+                    description: The access tier of this interaction
+                  queries_remaining:
+                    type: integer
+                    nullable: true
+                    description: Remaining free queries (null for registered users)
+                  powered_by:
+                    type: string
+                    nullable: true
+                    description: Attribution message for public users
+                  channel:
+                    type: string
+                    description: The channel identifier
+        "429":
+          description: Rate limited
+        "503":
+          description: Summon service temporarily unavailable
+  /api/summon/health:
+    get:
+      operationId: checkNateHealth
+      summary: Check if Little Nate is available
+      description: Returns the health status of the summon service.
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  summon_service:
+                    type: boolean
+                  privacy_shield:
+                    type: boolean

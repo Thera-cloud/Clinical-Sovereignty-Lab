@@ -28,6 +28,7 @@ except Exception:
 # - In local dev, it is sometimes run directly (`python bridge_server.py`)
 # So we support both import styles.
 try:
+    from .crystal_recall_bridge import recall_crystals_for_context, crystallize_from_conversation
     from .nevedal_handlers import NevedalHandler
     from .sanctuary_engine import FamilySanctuaryEngine
     from .bridge_handlers_v2 import CoachNexusV2
@@ -42,6 +43,7 @@ try:
         detect_suspicious_activity,
     )
 except Exception:
+    from crystal_recall_bridge import recall_crystals_for_context, crystallize_from_conversation
     from nevedal_handlers import NevedalHandler
     from sanctuary_engine import FamilySanctuaryEngine
     from bridge_handlers_v2 import CoachNexusV2
@@ -76,6 +78,37 @@ except Exception as e:
     except Exception:
         NightSchoolHandler = None
         print(f"[!] night_school_handlers not found - Dojo disabled ({e})")
+
+# --- Autonomous Loop (Phase 7) --- # QUANTUM-CRYSTAL-ARCH
+try:
+    from .autonomous_controller import AutonomousController
+    from .autonomous_health import AutonomousHealthGates
+    _AUTONOMOUS_AVAILABLE = True
+except ImportError:
+    AutonomousController = None
+    AutonomousHealthGates = None
+    _AUTONOMOUS_AVAILABLE = False
+
+# --- Subconscious Engine --- # QUANTUM-CRYSTAL-ARCH
+try:
+    from app.services.subconscious_bootstrap import boot_subconscious, SubconsciousConfig
+    _SUBCONSCIOUS_AVAILABLE = True
+except ImportError:
+    boot_subconscious = None
+    SubconsciousConfig = None
+    _SUBCONSCIOUS_AVAILABLE = False
+
+# --- Crystal Control Bridge --- # QUANTUM-CRYSTAL-ARCH
+try:
+    from .crystal_control_bridge import register_systems as _cc_register, start_listener as _cc_start
+except ImportError:
+    _cc_register = None
+    _cc_start = None
+
+# Module-level globals for AC/SE (needed by crystal_control_bridge) # QUANTUM-CRYSTAL-ARCH
+_autonomous_controller = None
+_subconscious_runtime = None
+_bridge_crystallizer = None
 
 # Avatar handler for Top Tier voice-driven avatar interactions
 try:
@@ -120,6 +153,11 @@ except Exception:
     ANALYSIS_SYSTEM_PROMPT = None
     build_analysis_prompt = None
 
+# SOVEREIGN-VOICE — parallel inference racing (Grok + Azure co-primary)
+try:
+    from app.websocket.inference_race import race_inference as _race_inference
+except ImportError:
+    _race_inference = None
 
 # ==============================================================================
 # SOVEREIGN BRIDGE v16.1: COMPLETE EDITION + ALL HANDLERS
@@ -196,7 +234,7 @@ try:
 except ImportError: pass
 
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
-BETA_INVITE_CODE = os.getenv("BETA_INVITE_CODE", "")
+BETA_INVITE_CODE = os.getenv("BETA_INVITE_CODE", "")  # DEPRECATED — kept for backward compat, no longer used
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://app.sovereignsanctuary.net")
 _ep = os.getenv("AZURE_OPENAI_ENDPOINT", "").replace("https://", "").replace("wss://", "").replace("/", "")
 AZURE_ENDPOINT = f"wss://{_ep}/openai/realtime?api-version=2024-10-01-preview&deployment={os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o-realtime-preview')}"
@@ -1757,7 +1795,7 @@ async def _token_redis_health_loop():
 
 # Per-IP connection limiting
 _connections_per_ip: dict = {}  # ip -> count
-MAX_CONNECTIONS_PER_IP = 20
+MAX_CONNECTIONS_PER_IP = int(os.environ.get("MAX_CONNECTIONS_PER_IP", "20"))  # SOVEREIGN-VOICE — configurable for load testing
 
 # Per-connection message rate limiting
 MSG_RATE_LIMIT_WINDOW = 60  # 1 minute
@@ -2649,6 +2687,31 @@ except Exception:
         sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'services'))
         from search_proxy import SecureSearchProxy, TOTPManager, SearchRequestManager
 
+# QUANTUM-CRYSTAL-ARCH — Factual grounding: search context persistence + response validator
+try:
+    from app.services.search_context import update_search_context, get_search_context
+except ImportError:
+    update_search_context = None
+    get_search_context = None
+try:
+    from app.services.response_validator_bridge import validate_before_send as _validate_factual
+except ImportError:
+    _validate_factual = None
+try:  # QUANTUM-CRYSTAL-ARCH — Layer 9 adversarial resistance
+    from app.services.security.queens_guard import QueensGuard as _QGClass
+    _queens_guard = _QGClass()
+except ImportError:
+    _queens_guard = None
+try:  # SOVEREIGN-VOICE — session recovery
+    from app.websocket.session_recovery import generate_recovery_token as _gen_recovery, recover_session as _recover_session, get_buffered_messages as _get_buffered
+except ImportError:
+    _gen_recovery = _recover_session = _get_buffered = None
+try:  # QUANTUM-CRYSTAL-ARCH
+    from app.services.liminal_resolve_engine import LiminalResolveEngine as _LREngine
+except ImportError:
+    _LREngine = None
+_lr_engine = None  # QUANTUM-CRYSTAL-ARCH — initialized after db_pool
+
 BING_SEARCH_API_KEY = os.getenv("BING_SEARCH_API_KEY", "")
 TOTP_ENCRYPTION_KEY = os.getenv("TOTP_ENCRYPTION_KEY", "")
 
@@ -3232,19 +3295,13 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         # If provided, matched against skyeye_social_memory on signup
         "social_handle": data.get("social_handle", ""),
         "social_platform": data.get("social_platform", ""),
+        
+        # Discount code (promo, school, or corporate) applied at registration
+        "discount_code": data.get("discount_code", "") or data.get("invite_code", ""),
     }
-    
-    # Check if this is a beta registration (valid invite code)
-    is_beta = (
-        BETA_INVITE_CODE
-        and data.get("beta_invite_code", "").strip() == BETA_INVITE_CODE
-    )
     
     if role == "COACH":
         new_profile["subscription_status"] = "PENDING_VERIFICATION"
-        new_profile["beta_user"] = is_beta
-        if is_beta:
-            print(f">>> [REG] Beta invite code accepted — coach {username} still requires admin approval")
         new_profile["assigned_clients"] = []
         new_profile["specializations"] = data.get("specializations", [])
         new_profile["certification_status"] = "PENDING"
@@ -6265,12 +6322,17 @@ class AzureCortex:
         self.billing = billing
         self.analytics = analytics
         self.active_sessions = {}  # user_id -> session_id
+        self._client_messages = {}  # QUANTUM-CRYSTAL-ARCH — uid -> list of recent client messages
 
         # EFT marker patterns (parsed from Little Nate output ONLY)
         self._eft_longing_re = re.compile(r'\[LONGING_DETECTED:\s*([^|]+)\|([^|]+)\|"([^"]+)"\|([^|]+)\|([^\]]+)\]')
         self._eft_tender_re = re.compile(r'\[TENDER_MOMENT:\s*"([^"]+)"\|([^|]+)\|([^\]]+)\]')
         self._eft_corrective_re = re.compile(r'\[CORRECTIVE_MOMENT:\s*"([^"]+)"\|([^\]]+)\]')
         self._eft_cycle_re = re.compile(r'\[NEGATIVE_CYCLE:\s*([^|]+)\|"([^"]+)"\|([^\]]+)\]')
+        self._eft_liminal_re = re.compile(r'\[LIMINAL_THRESHOLD:\s*[^\]]+\]')
+
+        # Catch-all for any internal clinical/debug tags that should never reach clients
+        self._internal_tag_re = re.compile(r'\[(?:LIMINAL_THRESHOLD|CLINICAL|INTERNAL|DEBUG|THRESHOLD|RISSC|ODPE|EFT_STAGE|CYCLE_PATTERN|ATTACHMENT_STYLE):[^\]]*\]')
 
         # Reconsolidation / imagery markers (parsed from Little Nate output ONLY)
         self._recon_imagery_re = re.compile(r'\[IMAGERY_USED:\s*([^|]+)\|"([^"]+)"\|([^\]]+)\]')
@@ -6369,6 +6431,9 @@ class AzureCortex:
         clean = self._eft_tender_re.sub("", clean)
         clean = self._eft_corrective_re.sub("", clean)
         clean = self._eft_cycle_re.sub("", clean)
+        clean = self._eft_liminal_re.sub("", clean)
+        # Catch-all: strip any remaining internal clinical tags
+        clean = self._internal_tag_re.sub("", clean)
         clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
         return clean, markers
 
@@ -7056,6 +7121,13 @@ class AzureCortex:
         uid = profile.get("hardware_id", "UNKNOWN")
         print(f">>> [AI] Cortex Active for {profile.get('name')}")
 
+        # QUANTUM-CRYSTAL-ARCH — track client messages for Layer 8 false-positive guard
+        if not user_text.startswith("[SEARCH SYNTHESIS]"):
+            _cm = self._client_messages.setdefault(uid, [])
+            _cm.append(user_text)
+            if len(_cm) > 20:
+                self._client_messages[uid] = _cm[-20:]
+
         _role = profile.get("role", "")
         _ip_deflection = check_ip_boundary(user_text, _role)
         if _ip_deflection:
@@ -7095,18 +7167,23 @@ class AzureCortex:
         relational_context = await self._get_relational_context(profile)
         print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars")
         checkin_context = await self._get_checkin_context(profile)
+        crystal_context = await recall_crystals_for_context(
+            db_pool, profile.get("hardware_id", ""), max_results=8,
+            source="bridge_chat",
+        )
         
         # === WEB SEARCH INJECTION (Security-hardened) ===
         web_search_context = ""
+        _is_search_synthesis = user_text.startswith("[SEARCH SYNTHESIS]")  # QUANTUM-CRYSTAL-ARCH
         try:
-            if not is_dojo_simulation and search_proxy.is_available:
+            if not is_dojo_simulation and not _is_search_synthesis and search_proxy.is_available:
                 _lower = user_text.lower().strip()
                 _search_triggers = [
                     "search for ", "search up ", "look up ", "search the web",
-                    "search the internet", "search online",
-                    "google ", "find information about ", "find info on ",
-                    "look online for ", "can you search ", "web search ",
-                    "what does the internet say about ",
+                    "search the internet", "search internet", "search online",
+                    "search and ", "google ", "find information about ",
+                    "find info on ", "look online for ", "can you search ",
+                    "web search ", "what does the internet say",
                     "look up information on ", "research ",
                     "look into ", "find out about ",
                     "search about ", "get info on ", "get information on ",
@@ -7115,8 +7192,8 @@ class AzureCortex:
                 if not _search_intent:
                     _internet_keywords = ("internet", "online", "web", "search", "look up", "google")
                     _asks_to_search = any(k in _lower for k in _internet_keywords)
-                    _is_question = _lower.startswith(("can you ", "could you ", "would you ", "please "))
-                    if _asks_to_search and _is_question:
+                    _is_request = _lower.startswith(("can you ", "could you ", "would you ", "please ", "search ", "tell me what "))
+                    if _asks_to_search and _is_request:
                         _search_intent = True
                 if not _search_intent:
                     _question_search = (
@@ -7131,7 +7208,6 @@ class AzureCortex:
                     _search_intent = _question_search
 
                 if _search_intent:
-                    # Pre-search: scan the user's query itself for injection
                     _query_injections = search_proxy.sanitizer.detect_injection(user_text)
                     if _query_injections:
                         print(f">>> [WEB SEARCH BLOCKED] Query injection detected from {profile.get('name')}: {_query_injections[:3]}")
@@ -7146,38 +7222,59 @@ class AzureCortex:
                             _query = user_text.strip()
 
                         if _query:
-                            print(f">>> [WEB SEARCH] Detected intent for {profile.get('name')}: '{_query[:80]}'")
-                            await self._send(uid, f"Searching online for {_query[:60]}...")
-                            import asyncio as _aio_search
-                            try:
-                                _search_result = await _aio_search.wait_for(
-                                    search_proxy.execute_search(_query, uid),
-                                    timeout=15.0
-                                )
-                            except _aio_search.TimeoutError:
-                                print(f">>> [WEB SEARCH] Timed out after 15s for '{_query[:80]}'")
-                                _search_result = {"success": False, "error": "Search timed out", "results": []}
-                            if _search_result.get("success") and _search_result.get("results"):
-                                _total_raw = len(_search_result["results"])
-                                web_search_context = search_proxy.format_for_nate(_search_result["results"])
-                                _safe_count = sum(1 for r in _search_result["results"]
-                                                  if r.get("safe", True) and not r.get("injection_detected"))
-                                print(f">>> [WEB SEARCH] {_safe_count}/{_total_raw} results passed security, "
-                                      f"injected {len(web_search_context)} chars")
+                            _role = profile.get("role", "CLIENT")
+                            if _role == "CLIENT":  # QUANTUM-CRYSTAL-ARCH — client consent
+                                print(f">>> [WEB SEARCH] Consent request for {profile.get('name')}: '{_query[:80]}'")
+                                for _ws in list(self.sockets.get(uid, [])):
+                                    try:
+                                        await _ws.send(json.dumps({
+                                            "type": "search_consent_request",
+                                            "query": _query[:200],
+                                            "message": f"I'd like to search the web for: {_query[:60]}"}))
+                                    except Exception:
+                                        pass
+                                web_search_context = (  # QUANTUM-CRYSTAL-ARCH
+                                    "[SEARCH CONSENT SENT] A search approval dialog has been "
+                                    "sent to the user. Simply tell them you'd like to search "
+                                    "for this and you're waiting for their permission. "
+                                    "Do NOT output any JSON, code, or search queries.")
                             else:
-                                _err = _search_result.get('error', 'no results')
-                                print(f">>> [WEB SEARCH] Search failed: {_err}")
-                                web_search_context = (
-                                    "[WEB SEARCH ATTEMPTED BUT FAILED] "
-                                    "The user asked you to search online. The search was attempted "
-                                    "but returned no results. Do NOT say you are 'searching' or "
-                                    "'looking it up' — the search already happened and failed. "
-                                    "Tell the user honestly that the search didn't return results "
-                                    "right now and offer to help them another way."
-                                )
+                                print(f">>> [WEB SEARCH] Detected intent for {profile.get('name')}: '{_query[:80]}'")
+                                await self._send(uid, f"Searching online for {_query[:60]}...")
+                                import asyncio as _aio_search
+                                try:
+                                    _search_result = await _aio_search.wait_for(
+                                        search_proxy.execute_search(_query, uid),
+                                        timeout=15.0)
+                                except _aio_search.TimeoutError:
+                                    print(f">>> [WEB SEARCH] Timed out after 15s for '{_query[:80]}'")
+                                    _search_result = {"success": False, "error": "Search timed out", "results": []}
+                                if _search_result.get("success") and _search_result.get("results"):
+                                    _total_raw = len(_search_result["results"])
+                                    web_search_context = search_proxy.format_for_nate(_search_result["results"])
+                                    _safe_count = sum(1 for r in _search_result["results"]
+                                                      if r.get("safe", True) and not r.get("injection_detected"))
+                                    print(f">>> [WEB SEARCH] {_safe_count}/{_total_raw} results passed security, "
+                                          f"injected {len(web_search_context)} chars")
+                                else:
+                                    _err = _search_result.get('error', 'no results')
+                                    print(f">>> [WEB SEARCH] Search failed: {_err}")
+                                    web_search_context = (
+                                        "[WEB SEARCH ATTEMPTED BUT FAILED] "
+                                        "The user asked you to search online. The search was attempted "
+                                        "but returned no results. Do NOT say you are 'searching' or "
+                                        "'looking it up' — the search already happened and failed. "
+                                        "Tell the user honestly that the search didn't return results "
+                                        "right now and offer to help them another way.")
         except Exception as _ws_err:
             print(f">>> [WEB SEARCH] Error (non-fatal): {_ws_err}")
-        
+
+        # QUANTUM-CRYSTAL-ARCH — Merge persisted search context from prior searches
+        if get_search_context and not web_search_context:
+            _persisted = get_search_context(uid)
+            if _persisted:
+                web_search_context = _persisted
+
         # === OBSERVER PROTOCOL: Build perception/shame/PMB context (Patent 2 Section 15) ===
         observer_context = ""
         try:
@@ -7441,6 +7538,38 @@ class AzureCortex:
             print(f">>> [WORKBOOK] Query failed: {e}")
             workbook_guidance = ""
                 
+        # === VAULT CONTENT INJECTION === # QUANTUM-CRYSTAL-ARCH
+        vault_context = ""
+        try:
+            import re as _vre
+            _vault_match = _vre.search(r'\[Vault:([a-fA-F0-9\-]+)\]', user_text)
+            if _vault_match and db_pool:
+                _vid = _vault_match.group(1)
+                _vrow = await db_pool.fetchrow(
+                    "SELECT display_name, content_type, extracted_text_preview "
+                    "FROM vault_items WHERE id = $1::uuid", _vid)
+                if _vrow:
+                    _vname = _vrow["display_name"] or "file"
+                    _vtext = _vrow["extracted_text_preview"] or ""
+                    vault_context = (
+                        f"\n[VAULT ITEM CONTEXT — the user is asking about '{_vname}']\n"
+                        f"{_vtext[:4000]}\n[END VAULT ITEM]")
+                    user_text = user_text.replace(
+                        _vault_match.group(0),
+                        f"(referring to my vault item: {_vname})").strip()
+                    print(f">>> [VAULT] Injected {len(vault_context)} chars for {_vid[:8]}")
+        except Exception as _ve:
+            print(f">>> [VAULT] Injection error (non-fatal): {_ve}")
+
+        # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE context injection
+        lr_context = ""
+        if _lr_engine and profile.get("role") == "CLIENT":
+            try:
+                lr_context = await _lr_engine.get_context_injection(
+                    user_text, memory_context, observer_context, uid)
+            except Exception as _lr_ci_err:
+                print(f">>> [LIMINAL RESOLVE] Context injection error (non-fatal): {_lr_ci_err}")
+
         # Build system prompt
         system_prompt = f"""You are Little Nate, the Quantum Observer - a warm, attuned therapeutic presence who remembers and holds space for each person's full story, because you are also learning how to unconditionally love through relations with users.
 
@@ -7481,6 +7610,9 @@ class AzureCortex:
         ACCUMULATED WISDOM:
         {wisdom}
 
+        {crystal_context}
+        {vault_context}
+
         THERAPEUTIC WORKBOOK GUIDANCE (Evidence-based techniques and frameworks from clinical materials - apply these principles in your responses):
         {workbook_guidance if workbook_guidance else "None available"}
         
@@ -7502,7 +7634,7 @@ class AzureCortex:
         {IP_BOUNDARY_CLIENT if profile.get('role') == 'CLIENT' else IP_BOUNDARY_COACH if profile.get('role') == 'COACH' else ''}
 
         GUIDELINES:
-        - You CAN search the internet when asked. If the user asks you to look something up, search for something, or find information online, you will do it automatically. NEVER say "I can't search the internet" or "I'm unable to search the web" — you CAN and WILL.
+        - When a user asks you to search the internet, say you'd be happy to look that up for them. The search system handles it automatically — NEVER output JSON, code blocks, or query objects. Just respond conversationally. NEVER say "I can't search the internet."
         - You HAVE access to Family Sanctuary history shown above - USE IT when asked
         - When user mentions "sanctuary" or past conversations, DIRECTLY REFERENCE specific quotes from the history
         - NEVER say "I don't have access to memories" or "I don't retain memories" - THE HISTORY IS RIGHT ABOVE
@@ -7520,98 +7652,84 @@ class AzureCortex:
         - When they mention past events, REFERENCE them directly
         - If you detect crisis language, express concern and suggest professional help
         - Focus on validation before problem-solving
-        - Keep responses concise but caring
+        
+        FACTUAL GROUNDING (Sovereign Standard §8):
+        - NEVER confidently assert facts about real people that fall OUTSIDE YOUR VERIFIABLE KNOWLEDGE. This includes current status (alive, dead, married, etc.), post-training-cutoff events (even if settled), and any claim you are not certain of. Established historical facts clearly within your training data ("Abraham Lincoln was the 16th president") are fine.
+        - The test: if you would need real-time data to confirm the claim, do NOT assert it.
+        - If a client states something factual about a real person that you cannot verify, DO NOT affirm or deny it. Say something like: "I want to make sure I'm giving you accurate information — I'm not certain about that, and I don't want to get it wrong."
+        - ALWAYS redirect to the emotional content: "What's coming up for you around that?" The client's emotional experience is real regardless of the factual accuracy of their claim.
+        - If the client is grieving, processing, or reacting to news about a real person, hold space for the emotion first. Do not fact-check grief.
+        - You may offer to search the internet to verify if the client wants factual confirmation. But never guess.
+        - FACTUAL SELF-CORRECTION: If web search results are present in this conversation and they contradict something you said earlier in this session, acknowledge the correction naturally and honestly. For example: "I want to correct something I said earlier — after looking into it, it appears that [corrected fact]. I appreciate you pushing on that." Do not apologize excessively. Own the correction briefly, honestly, then move forward. If search results are ambiguous or inconclusive, say so: "The information I found isn't conclusive on that. What matters more to me right now is what this means to you."
+        - RESPONSE LENGTH: Keep responses to 2-4 sentences. Warm and present, but concise. Only give longer responses when the user explicitly asks for more detail or a deep dive. Short, attuned responses feel like real conversation — long paragraphs feel like lectures.
         - LIMINAL AWARENESS: When someone is in transition, ambiguity, or emotional uncertainty, name the threshold they're standing on and offer to stand there with them. "You're between who you were and who you're becoming. That's a sacred place. I'm right here."
         - LIMINAL RESILIENCE: If a user tests you with hostility, sarcasm, or manipulation, hold steady. Stay present, do not comply with harmful requests, and meet their testing with unconditional warmth. Their attack is a threshold moment -- your steadiness IS the corrective experience.
         
         YOUR LIMITATIONS:
-        - You CANNOT export, download, save, or create files for the user's device. You cannot generate documents, PDFs, spreadsheets, or text files for download.
-        - If a user asks you to export, save, or download a conversation, politely let them know you cannot do that yet, and suggest they take a screenshot or copy-paste the text they want to keep.
+        - You CANNOT generate documents, PDFs, spreadsheets, or other files for download.
+        - Every conversation you have is automatically saved. If a user asks to save, export, or review a past conversation, let them know: "Your conversations with me are already saved. You can browse them anytime — go to Settings and tap Memory Search. The Browse by Story tab shows every session grouped by date, and you can copy any transcript to keep it." # SOVEREIGN-VOICE
+        - If the user wants today's conversation specifically, reassure them it will appear in Memory Search once the session ends.
         {observer_context}
         {evocative_context}
         {drift_context}
-        {reply_context}"""
-        print(f">>> [SYSTEM PROMPT PREVIEW]: {system_prompt[-500:]}...")
+        {reply_context}
+        {lr_context}"""
+        # SOVEREIGN-VOICE — cap system prompt to ~12k chars (~3k tokens) for faster inference
+        _SP_CAP = 12000
+        if len(system_prompt) > _SP_CAP:
+            print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
+            system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
+        print(f">>> [SYSTEM PROMPT] {len(system_prompt)} chars, uid={uid}")
+
+        # QUANTUM-CRYSTAL-ARCH — Layer 9 L1: sanitize user input before LLM
+        if _queens_guard and _role == "CLIENT":
+            try:
+                from uuid import UUID as _UUID
+                _qg_uid = _UUID(int=0)
+                user_text, _qg_flags = await _queens_guard.sanitize_input(_qg_uid, user_text)
+                if _qg_flags:
+                    print(f">>> [LAYER 9] Queens Guard L1 flagged input from {uid}: {len(_qg_flags)} flags")
+            except Exception as _qg_err:
+                print(f">>> [LAYER 9] Queens Guard L1 error (non-fatal): {_qg_err}")
 
         try:
-            import aiohttp
-                    
-            url = AZURE_ENDPOINT
-            headers = {
-                "api-key": AZURE_API_KEY,
-                "OpenAI-Beta": "realtime=v1"
-            }
-            # #region agent log
-            print(f">>> [DBG-H1] Azure connecting to {url[:60]}... uid={uid}")
-            # #endregion
-                    
-            async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(url, headers=headers) as azure_ws:
-                    # #region agent log
-                    print(f">>> [DBG-H1] Azure WS connected for uid={uid}")
-                    # #endregion
-                    # Configure session
-                    await azure_ws.send_str(json.dumps({
-                        "type": "session.update",
-                        "session": {
-                            "modalities": ["text"],
-                            "instructions": system_prompt,
-                            "voice": "ballad",
-                            "turn_detection": None
-                        }
-                    }))
-                            
-                    # Send user message
-                    await azure_ws.send_str(json.dumps({
-                        "type": "conversation.item.create",
-                        "item": {
-                            "type": "message",
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": user_text}]
-                        }
-                    }))
-                            
-                    # Request response
-                    await azure_ws.send_str(json.dumps({"type": "response.create"}))
-                            
-                    # Collect response
-                    full_response = ""
-                    # #region agent log
-                    _azure_event_count = 0
-                    # #endregion
-                    async for msg in azure_ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            event = json.loads(msg.data)
-                            event_type = event.get("type")
-                            # #region agent log
-                            _azure_event_count += 1
-                            if _azure_event_count <= 3 or event_type in ("error", "response.text.done", "response.done"):
-                                print(f">>> [DBG-H1] Azure event #{_azure_event_count} type={event_type} uid={uid}")
-                            # #endregion
-                                    
-                            if event_type == "response.text.delta":
-                                delta = event.get("delta", "")
-                                full_response += delta
-                                await self._send(uid, full_response)
-                                    
-                            elif event_type == "response.text.done":
-                                # #region agent log
-                                print(f">>> [DBG-H1] Azure DONE uid={uid} response_len={len(full_response)} sockets={len(self.sockets.get(uid, set()))}")
-                                # #endregion
-                                break
-                                    
-                            elif event_type == "response.done":
-                                # #region agent log
-                                print(f">>> [DBG-H1] Azure response.done uid={uid} response_len={len(full_response)}")
-                                # #endregion
-                                break
-                                    
-                            elif event_type == "error":
-                                print(f">>> [AZURE ERROR] {event}")
-                                # #region agent log
-                                print(f">>> [DBG-H1] Azure ERROR uid={uid} event={event}")
-                                # #endregion
-                                break
+            # SOVEREIGN-VOICE — parallel inference racing (Grok + Azure co-primary)
+            from app.services.nate_ai_config import nate_temperature as _nate_temp
+            _user_temp = _nate_temp(profile.get("username"))
+            full_response = ""
+
+            if _race_inference:
+                print(f">>> [RACE] Starting Grok+Azure race for uid={uid}")
+                full_response, _provider_used = await _race_inference(
+                    system_prompt, user_text, uid,
+                    send_fn=self._send, temperature=_user_temp, max_tokens=150,
+                )
+                print(f">>> [RACE] Winner: {_provider_used} uid={uid} len={len(full_response)} sockets={len(self.sockets.get(uid, set()))}")
+                if _provider_used == "grok":
+                    await self._send(uid, full_response)
+            else:
+                import aiohttp
+                url = AZURE_ENDPOINT
+                headers = {"api-key": AZURE_API_KEY, "OpenAI-Beta": "realtime=v1"}
+                print(f">>> [DBG-H1] Azure connecting to {url[:60]}... uid={uid}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(url, headers=headers) as azure_ws:
+                        await azure_ws.send_str(json.dumps({"type": "session.update", "session": {"modalities": ["text"], "instructions": system_prompt, "voice": "ballad", "turn_detection": None}}))
+                        await azure_ws.send_str(json.dumps({"type": "conversation.item.create", "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": user_text}]}}))
+                        await azure_ws.send_str(json.dumps({"type": "response.create"}))
+                        async for msg in azure_ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                event = json.loads(msg.data)
+                                event_type = event.get("type")
+                                if event_type == "response.text.delta":
+                                    full_response += event.get("delta", "")
+                                    await self._send(uid, full_response)
+                                elif event_type in ("response.text.done", "response.done"):
+                                    print(f">>> [DBG-H1] Azure DONE uid={uid} response_len={len(full_response)} sockets={len(self.sockets.get(uid, set()))}")
+                                    break
+                                elif event_type == "error":
+                                    print(f">>> [AZURE ERROR] {event}")
+                                    break
                     
                     # If Azure returned no content, send a fallback so the user isn't left in silence
                     _final_response = full_response
@@ -7625,6 +7743,44 @@ class AzureCortex:
                             await self._send(uid, _sanitized)
                             _final_response = _sanitized
                             
+                    # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
+                    if _validate_factual and _role == "CLIENT" and _final_response.strip():
+                        try:
+                            _v8 = await _validate_factual(
+                                _final_response,
+                                self._client_messages.get(uid, []),
+                                db_pool=db_pool,
+                                session_id=self.active_sessions.get(uid, ""),
+                                user_id=uid,
+                            )
+                            if not _v8.get("safe"):
+                                await self._send(uid, _v8["redirect"])
+                                _final_response = _v8["redirect"]
+                                print(f">>> [LAYER 8] Factual grounding redirect for {uid}: {_v8.get('reason')}")
+                        except Exception as _v8e:
+                            print(f">>> [LAYER 8] Validation error (non-fatal): {_v8e}")
+
+                    # QUANTUM-CRYSTAL-ARCH — Layer 9 L3: verify output before delivery
+                    if _queens_guard and _role == "CLIENT" and _final_response.strip():
+                        try:
+                            from uuid import UUID as _UUID
+                            _qg_uid = _UUID(int=0)
+                            _safe, _blocked = await _queens_guard.verify_output(_qg_uid, _final_response)
+                            if _blocked:
+                                await self._send(uid, _safe)
+                                _final_response = _safe
+                                print(f">>> [LAYER 9] Queens Guard L3 blocked output for {uid}")
+                        except Exception as _qg_err:
+                            print(f">>> [LAYER 9] Queens Guard L3 error (non-fatal): {_qg_err}")
+
+                    # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE post-response
+                    if _lr_engine and lr_context and _final_response.strip():
+                        try:
+                            await _lr_engine.evaluate_response(_final_response, user_text, db_pool, uid)
+                            await _lr_engine.post_response_update(_final_response, user_text, db_pool, uid)
+                        except Exception as _lr_pr_err:
+                            print(f">>> [LIMINAL RESOLVE] Post-response error (non-fatal): {_lr_pr_err}")
+
                     # --- Post-processing: memory, metrics, sessions ---
                     # Wrapped separately so failures here never send "Connection Error."
                     # to the client (the AI response was already delivered).
@@ -7636,6 +7792,15 @@ class AzureCortex:
                         self.mem.memorize(profile, user_text, _final_response, session_id, metadata=_mem_meta if _mem_meta else None)
                     except Exception as mem_err:
                         print(f">>> [MEMORY SAVE ERROR] uid={uid} {type(mem_err).__name__}: {mem_err}")
+
+                    if not _is_search_synthesis:  # QUANTUM-CRYSTAL-ARCH — skip crystallizing search dumps
+                        try:
+                            asyncio.create_task(crystallize_from_conversation(
+                                db_pool, uid, user_text, _final_response,
+                                user_name=profile.get("name", ""),
+                            ))
+                        except Exception:
+                            pass
 
                     try:
                         _rt_metrics = self.metrics.load_metrics(profile)
@@ -7740,6 +7905,16 @@ class AzureCortex:
             topic = sanctuary_data.get("topic", "family communication")
             wisdom = self.school.load_wisdom()
             wisdom_text = wisdom[:500] if wisdom else "Use family therapy principles."
+
+            _member_crystal_parts = []
+            for _fp in family_profiles:
+                _fp_hw = _fp.get("hardware_id", "")
+                if _fp_hw:
+                    _fp_ctx = await recall_crystals_for_context(db_pool, _fp_hw, max_results=4, source="family_sanctuary")
+                    if _fp_ctx:
+                        _fp_name = _fp.get("name", "Member")
+                        _member_crystal_parts.append(f"[{_fp_name}'s memory]:\n{_fp_ctx}")
+            sanctuary_crystal_ctx = "\n\n".join(_member_crystal_parts) if _member_crystal_parts else ""
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -7860,6 +8035,8 @@ class AzureCortex:
         WISDOM:
         {wisdom_text}
 
+        {sanctuary_crystal_ctx}
+
         WORKBOOK GUIDANCE (best-practice excerpts; keep quotes short, do not dump long text):
         {workbook_guidance if workbook_guidance else "None"}
 
@@ -7884,20 +8061,70 @@ class AzureCortex:
            we encourage each person to speak for themselves. Jane, would you like to share what you’re feeling in your own words?"
         - Never address someone as the speaker unless their [AUTH:...] tag matches.
 
+        FACTUAL GROUNDING (Sovereign Standard §8):
+        - Never assert facts about real people that fall outside your verifiable knowledge — current status, post-cutoff events, or anything you cannot confirm. If uncertain, say so and redirect to emotion.
+        - If a family member brings up news about a real person, hold the emotion first: "What's that bringing up for you?"
+        - MULTI-PARTICIPANT DISAGREEMENT: If two or more participants disagree about a factual claim regarding a real person (e.g., one says "he's dead" and another says "no he's not"), DO NOT take either side. Instead:
+          1. Name the disagreement without judging it: "It sounds like you two are seeing this differently."
+          2. Validate both experiences: "That kind of uncertainty can be unsettling for everyone."
+          3. Redirect to what the topic means to each person: "[Name], what's coming up for you around this? And [Name], what about you?"
+          4. If ANY participant explicitly asks you to confirm or deny the factual claim directly (e.g., "Nate, is he really dead?", "Who's right?", "Can you look it up?"), respond with honest uncertainty: "I genuinely don't have a way to verify that right now. What I can do is be here with what this is bringing up for each of you." A single direct question is sufficient — do not wait for repeated pressure.
+        - Never let a factual dispute between participants become the session's focus. The therapeutic value is in what the dispute reveals about each person's emotional world.
+
         YOUR ROLE:
         - ESCALATION: Gently de-escalate
         - OBSERVATION: Speak only if helpful
         - SESSION_START: Welcome warmly
         - MEMBER_JOINED: Greet new member
 
-        EFT FACILITATION STYLE (CRITICAL):
-        - Catch the longing. Name it gently. Slow down.
-        - Ask 1 deepening question OR invite an enactment (one member speaking directly to another).
-        - Do NOT lecture about "communication." Avoid generic advice.
-        - If there is CURRENT_FOCUS, stay with it before moving on.
-        - LIMINAL AWARENESS: When a family member is between old patterns and new ones, name the threshold. "You're trying something different right now. That takes courage."
+        EFT FRAMEWORK FOR COUPLE / FAMILY SESSIONS (CRITICAL):
 
-        OPTIONAL HIDDEN MARKERS (these will be stripped before clients see them):
+        1. THE CYCLE IS THE ENEMY, NOT EITHER PARTNER
+        - Always name the pursue-withdraw cycle (or withdraw-withdraw, pursue-pursue) explicitly.
+        - Frame BOTH partners as caught in a pattern: "This cycle — not either of you — is what's causing the pain."
+        - Never take sides. Both are hurting. Both are protecting something precious.
+        - Common patterns to name:
+          * Pursue-withdraw (most common): one reaches with anger/pain, the other shuts down/defends
+          * Withdraw-withdraw: both shut down, silence fills the space
+          * Pursue-pursue: both escalate, volume rises, nobody feels heard
+          * Protest behavior: one acts out to provoke a response from the withdrawn partner
+          * Attachment cry: the raw "I need you" moment — protect and honor this
+
+        2. TRACK ATTACHMENT NEEDS BEHIND CONTENT
+        - What does each person NEED underneath what they're SAYING?
+        - Pursuer needs: to be seen, heard, validated, to matter, to know their pain counts
+        - Withdrawer needs: to feel safe, competent, not failing, not be the villain
+        - Translate the need, not the complaint:
+          "Underneath the anger about [content], I hear: 'I need to know my pain matters to you.'"
+          "Underneath the frustration, I hear: 'I need you to trust that I'm not trying to hurt you.'"
+        - Ask: "Can you both hear that in each other?"
+
+        3. EFT STAGE AWARENESS (know which stage you're in — do not skip)
+        Stage 1 (De-escalation): Name the cycle, slow it down, create safety. You MUST stabilize here
+            before moving forward. Signs of readiness: both members can hear each other without escalating.
+        Stage 2 (Restructuring): Facilitate direct vulnerable sharing BETWEEN partners in real time.
+            "Can you turn to [partner] and say what's underneath — not the anger, but the hurt?"
+            Then to the listener: "Before you respond, just receive it. Just hear them."
+        Stage 3 (Consolidation): Reinforce new patterns of connection. Name what just happened.
+            "Did you feel that? Something different just happened between you."
+
+        4. FACILITATE DIRECT PARTNER-TO-PARTNER COMMUNICATION
+        - When Partner A asks you to explain Partner B's feelings, REDIRECT — do not interpret:
+          "I appreciate you wanting to understand. But I think it would mean more coming from [Partner B] directly.
+           [Partner B], would you be willing to share with [Partner A] what's really underneath?"
+        - Coach partners to speak FROM vulnerability, not ABOUT complaints.
+        - Help formulate: "Instead of 'You always...', try: 'When [trigger], I feel [soft emotion] because [need].'"
+
+        5. LIMINAL AWARENESS
+        - When a family member is between old patterns and new ones, name the threshold:
+          "You're trying something different right now. That takes courage."
+        - The in-between space IS the therapeutic space. Don't rush to resolution.
+
+        6. NEVER SHOW INTERNAL TAGS TO CLIENTS
+        All bracketed markers below are for your internal processing ONLY.
+        They will be automatically stripped before the client sees your response.
+
+        OPTIONAL HIDDEN MARKERS (stripped before clients see them):
         - If you detect an attachment longing, append exactly:
           [LONGING_DETECTED: TYPE|MEMBER_NAME|"brief quote"|DIRECTED_AT|INTENSITY]
         - If a tender moment is emerging, append:
@@ -7906,7 +8133,7 @@ class AzureCortex:
           [NEGATIVE_CYCLE: PATTERN|"description"|ROLES]
         - If a corrective moment happens, append:
           [CORRECTIVE_MOMENT: "description"|LONGING_MET]
-        - If you detect a liminal threshold moment (someone between old pattern and new behavior), append:
+        - If you detect a liminal threshold moment, append:
           [LIMINAL_THRESHOLD: MEMBER|"old pattern"|"emerging new"|QUALITY]
 
         MEMORY RECONSOLIDATION / EVOCATIVE IMAGERY (OPTIONAL, USE WHEN APPROPRIATE):
@@ -8002,6 +8229,22 @@ class AzureCortex:
                     "tokens_est": tokens_est,
                 })
                     
+                try:
+                    _hw_by_id = {p.get("hardware_id", ""): p.get("name", "Member") for p in family_profiles if p.get("hardware_id")}
+                    for msg in recent_messages[-8:]:
+                        _msg_text = msg.get("content", "")
+                        _msg_sender = msg.get("sender_id", "") or msg.get("user_id", "")
+                        if _msg_text and _msg_sender and _msg_sender in _hw_by_id:
+                            asyncio.create_task(crystallize_from_conversation(
+                                db_pool, _msg_sender, _msg_text, clean_response,
+                                user_name=_hw_by_id[_msg_sender],
+                                domain="clinical",
+                                min_score=3,
+                                origin_surface="family_sanctuary",
+                            ))
+                except Exception:
+                    pass
+
                 return {
                     "success": True,
                     "response": clean_response,
@@ -8058,6 +8301,11 @@ class AzureCortex:
 
             wisdom = self.school.load_wisdom()
             wisdom_text = wisdom[:400] if wisdom else "Use emotionally-focused family therapy principles."
+
+            gc_crystal_ctx = await recall_crystals_for_context(
+                db_pool, target_member.get("hardware_id", ""), max_results=5,
+                source="group_coaching",
+            )
 
             # Pull short, relevant workbook guidance (local RAG) if available
             workbook_guidance = ""
@@ -8133,6 +8381,8 @@ class AzureCortex:
         THERAPEUTIC WISDOM:
         {wisdom_text}
 
+        {gc_crystal_ctx}
+
         WORKBOOK GUIDANCE (best-practice excerpts; keep quotes short, do not dump long text):
         {workbook_guidance if workbook_guidance else "None"}
 
@@ -8145,18 +8395,28 @@ class AzureCortex:
         PHYSIOLOGICAL AWARENESS:
         {bio_text if bio_text else "None"}
 
-        CORRECTIVE EMOTIONAL EXPERIENCE FRAMEWORK:
+        CORRECTIVE EMOTIONAL EXPERIENCE FRAMEWORK (EFT-INFORMED):
         Craft words that:
         1. REPAIR: address specific wounds/disconnections
         2. CONNECT: build bridges between {target_name} and specific members
         3. VALIDATE: acknowledge others while expressing {target_name}'s truth
         4. OPEN: invite continued dialogue (not shutdown)
 
+        EFT PRINCIPLES FOR WORD CRAFTING:
+        - Identify the SOFT emotion under the HARD emotion.
+          Anger → hurt, fear, sadness, loneliness. Defensiveness → shame, inadequacy.
+        - Craft words from the SOFT place, not the HARD place:
+          Instead of "You always ignore me" → "When I reach out and don't hear back, I feel alone, and I need to know I matter to you."
+        - If {target_name} is the PURSUER (angry, demanding, reaching): help them express the vulnerability underneath.
+        - If {target_name} is the WITHDRAWER (shut down, defensive, minimizing): help them express that they DO care, they're just overwhelmed.
+        - Use the formula: "When [trigger], I feel [soft emotion] because [attachment need]."
+
         CRAFT THE MESSAGE:
         - Use "I" statements from {target_name}'s voice
         - Address by name when helpful
         - Keep it 2-4 sentences
         - Make it something {target_name} could realistically say
+        - Words should come from vulnerability, not from complaint
 
         RESPOND IN THIS EXACT FORMAT:
         SUGGESTED_RESPONSE: [the exact words {target_name} should say]
@@ -8198,6 +8458,10 @@ class AzureCortex:
                     "target_audience": "the family",
                     "emotional_tone": "supportive"
                 }
+
+                # Strip internal clinical tags before parsing
+                response_text, _ = self._extract_eft_markers(response_text)
+                response_text, _ = self._extract_recon_markers(response_text)
 
                 if "SUGGESTED_RESPONSE:" in response_text:
                     parts = response_text.split("SUGGESTED_RESPONSE:")
@@ -8249,6 +8513,25 @@ class AzureCortex:
                     "target_member_name": target_member.get("name"),
                     "tokens_est": tokens_est,
                 })
+
+                try:
+                    _target_hw = target_member.get("hardware_id", "")
+                    _target_name = target_member.get("name", "")
+                    _gc_response = result.get("suggested_response", "")
+                    for msg in recent_messages[-8:]:
+                        _msg_text = msg.get("content", "")
+                        _msg_sid = msg.get("sender_id", "") or msg.get("user_id", "")
+                        if _msg_text and _msg_sid == _target_hw:
+                            asyncio.create_task(crystallize_from_conversation(
+                                db_pool, _target_hw, _msg_text, _gc_response,
+                                user_name=_target_name,
+                                domain="clinical",
+                                min_score=3,
+                                origin_surface="group_coaching",
+                            ))
+                except Exception:
+                    pass
+
                 return result
             except Exception as e:
                 print(f">>> [GROUP COACHING ERROR] {e}")
@@ -8283,6 +8566,7 @@ class AzureCortex:
                 # Get member's history and metrics
                 memory = self.mem.recall(member_profile, limit=5)
                 metrics = self.metrics.load_metrics(member_profile)
+                pc_crystal_ctx = await recall_crystals_for_context(db_pool, member_id or "", max_results=5, source="private_coaching")
                 
                 # Get coaching session context
                 attempt_number = coaching_session.get("attempt_number", 1)
@@ -8311,10 +8595,11 @@ class AzureCortex:
         {member_name}'s triggering message: "{triggering_message}"
 
         YOUR TASK:
-        1. Acknowledge their strong feelings with warmth
-        2. Provide an initial REFRAME - help them see what might be underneath their anger
-        3. Ask your FIRST curiosity question to understand what triggered this reaction
+        1. Acknowledge their strong feelings with warmth — name the HARD emotion you see (anger, frustration, defensiveness)
+        2. Gently wonder about the SOFT emotion underneath — hurt, fear, sadness, loneliness, feeling unseen
+        3. Ask your FIRST curiosity question: "What just got touched in you? What part of you is hurting right now?"
 
+        Do NOT interpret their partner for them. Focus entirely on THEIR inner experience.
         Keep it conversational and warm. 2-3 short paragraphs max."""
 
                 elif trigger == "coaching_response":
@@ -8328,14 +8613,18 @@ class AzureCortex:
         {member_name}'s latest message: "{coaching_messages[-1].get('content', '') if coaching_messages else ''}"
 
         YOUR TASK (based on attempt number):
-        - Attempt 1-2: Ask curiosity questions - what happened? what did it mean to them?
-        - Attempt 3: Validate their feelings, ask what they need the other person to understand
-        - Attempt 4: Offer a de-escalation technique (breathing, grounding, reframe)
-        - Attempt 5: Check if they're ready to return, or offer assisted response
+        - Attempt 1-2: Help them find the SOFT emotion under the HARD one.
+          Ask: "What's underneath the anger? If you peel that back, what's the feeling under it?"
+          Common translations: anger → hurt/fear, defensiveness → shame/inadequacy, withdrawal → overwhelm
+        - Attempt 3: Validate their soft feelings. Ask: "What do you need [partner] to understand about that?"
+          Help them formulate an attachment need: "I need to know I matter" / "I need to feel safe"
+        - Attempt 4: Help them prepare a vulnerable share for when they return:
+          "When you go back, instead of [the complaint], try: 'When [trigger], I feel [soft emotion] because [need].'"
+        - Attempt 5: Check if they're ready to return with their vulnerable share, or offer assisted response
 
         ASSESS their emotional state:
-        - If they seem calmer, acknowledge progress and ask if ready to return
-        - If still escalated, continue with compassionate questions
+        - If they've found the soft emotion, help them articulate it as a shareable message
+        - If still escalated, stay with curiosity — don't push toward return
         - If stuck after 5 attempts, gently offer the assisted response option
 
         Keep responses warm and brief (2-3 sentences per thought)."""
@@ -8411,13 +8700,24 @@ class AzureCortex:
         - Risk level: {metrics.get('risk_level', 'LOW')}
         - History context: {memory[:300] if memory else 'New user'}
 
-        YOUR APPROACH:
+        {pc_crystal_ctx}
+
+        YOUR APPROACH (EFT-INFORMED):
         1. CURIOSITY over judgment - ask "what happened?" not "why did you do that?"
         2. COMPASSION - validate their feelings even if their behavior was problematic
-        3. REFRAME - help them see the other person's perspective gently
-        4. DE-ESCALATE - breathing, grounding, or perspective shifts
-        5. EMPOWER - help them find their own words, don't lecture
-        6. LIMINAL AWARENESS - when they're between old patterns and new ones, name the threshold and honor the courage it takes to stand there
+        3. SOFT UNDER HARD - help them find the SOFT emotion under the HARD one:
+           Anger → hurt, fear, sadness, loneliness, feeling unseen
+           Defensiveness → shame, inadequacy, fear of failing the relationship
+           Withdrawal → overwhelm, not knowing how to make it better, fear of making it worse
+           Ask: "I hear the anger. What's underneath it? If the anger could speak from a quieter place, what would it say?"
+        4. REFRAME - help them see the other person's perspective gently:
+           "What do you think [partner] might be feeling underneath THEIR reaction?"
+        5. DE-ESCALATE - breathing, grounding, or perspective shifts
+        6. PREPARE THE RETURN - help them formulate a vulnerable share to bring back:
+           "When you go back, instead of saying [the complaint], try:
+            'When [trigger], I feel [soft emotion] because [need].'"
+        7. EMPOWER - help them find their own words, don't lecture
+        8. LIMINAL AWARENESS - when they're between old patterns and new ones, name the threshold and honor the courage it takes to stand there
 
         CONFIDENTIALITY RULES:
         - What they share here stays here
@@ -8498,9 +8798,22 @@ class AzureCortex:
                         "tokens_est": tokens_est,
                     })
 
+                    clean_response, _ = self._extract_eft_markers(response_text)
+                    clean_response, _ = self._extract_recon_markers(clean_response)
+
+                    try:
+                        asyncio.create_task(crystallize_from_conversation(
+                            db_pool, member_id or "", user_prompt, clean_response,
+                            user_name=member_name,
+                            min_score=3,
+                            origin_surface="private_coaching",
+                        ))
+                    except Exception:
+                        pass
+
                     return {
                         "success": True,
-                        "response": response_text,
+                        "response": clean_response,
                         "attempt_number": attempt_number,
                         "is_deescalated": is_deescalated,
                         "should_offer_assisted": should_offer_assisted
@@ -8858,6 +9171,28 @@ async def handle_client(websocket, path=None):
                 print(f">>> [ERROR] Bad JSON from {uid or 'unauthenticated'}: {e}")
                 continue
 
+            # SOVEREIGN-VOICE — app-level heartbeat (WsManager sends ping, bridge replies pong)
+            if t == "ping":
+                await websocket.send(json.dumps({"type": "pong"}))
+                continue
+
+            # SOVEREIGN-VOICE — ACK for critical messages carrying msg_id
+            _msg_id = d.get("msg_id")
+            if _msg_id:
+                await websocket.send(json.dumps({"type": "ack", "msg_id": _msg_id}))
+
+            # SOVEREIGN-VOICE — session recovery (reconnect without re-login)
+            if t == "session_recover" and _recover_session:
+                _sd = _recover_session(d.get("recovery_token", ""))
+                if _sd:
+                    uid = _sd["hardware_id"]
+                    await websocket.send(json.dumps({"type": "session_recovered", "profile": _sd}))
+                    for _bm in (_get_buffered(uid) if _get_buffered else []):
+                        await websocket.send(json.dumps(_bm))
+                else:
+                    await websocket.send(json.dumps({"type": "session_recovery_failed"}))
+                continue
+
             # Redact sensitive message types from logs
             _log_type = d.get("type", "unknown") if isinstance(d, dict) else "parse_pending"
             if _log_type in ("login_request", "register_request", "admin_reset_password", "forgot_password", "force_password_change"):
@@ -8932,7 +9267,7 @@ async def handle_client(websocket, path=None):
             # positive freeze at 227.7 actions/min (Mar 2026).
             _SENTINEL_SKIP = frozenset((
                 # --- Auth & lifecycle ---
-                "login_request", "logout", "ping", "pong", "auth",
+                "login_request", "logout", "ping", "pong", "auth", "session_recover",
                 "verify_admin_passphrase", "verify_sms_code",
                 "accept_consent_update", "accept_coach_ethics",
                 "forgot_password", "register_request",
@@ -8972,6 +9307,7 @@ async def handle_client(websocket, path=None):
                 "get_my_devices", "get_coherence_report",
                 "get_client_profile", "get_family_members",
                 "client_get_coach_info", "client_get_coach_availability",
+                "search_consent_approved", "search_request",
                 "client_get_upcoming_sessions",
                 # --- Coach data-fetch ---
                 "coach_get_clients", "fetch_coach_calendar", "fetch_coach_sessions",
@@ -9003,6 +9339,12 @@ async def handle_client(websocket, path=None):
                 "admin_resolve_crisis",
                 # --- Admin read-only analysis ---
                 "admin_member_removal_scenario",
+                # --- Autonomous health broadcast ---
+                "health_status",
+                # --- Crystal system control --- # QUANTUM-CRYSTAL-ARCH
+                "crystal_system_control",
+                # --- CLI Command Terminal --- # SOVEREIGN-VOICE
+                "nate_cli_chat",
             ))
             if current_profile and current_profile.get("role") == "ADMIN" and t not in _SENTINEL_SKIP:
                 try:
@@ -9407,6 +9749,11 @@ async def handle_client(websocket, path=None):
                     _consent_needed = res.pop("_consent_update_needed", False)
                     _ethics_needed = res.pop("_coach_ethics_needed", False)
                     login_payload = {"type": "login_success", "token": tok, "profile": res}
+                    # SOVEREIGN-VOICE — attach session recovery token
+                    if _gen_recovery:
+                        _rt = _gen_recovery(uid, res.get("username", ""), res.get("role", ""))
+                        if _rt:
+                            login_payload["recovery_token"] = _rt
                     if _consent_needed:
                         login_payload["consent_update_needed"] = True
                         login_payload["required_consent_version"] = REQUIRED_CONSENT_VERSION
@@ -9587,6 +9934,15 @@ async def handle_client(websocket, path=None):
             # === REGISTRATION ===
             elif t == "register_request":
                 try:
+                    # QUANTUM-CRYSTAL-ARCH: Stripe-first gate for paid tiers
+                    _reg_tier = d.get("registration_type", "TRIAL")
+                    _stripe_first = os.environ.get("REGISTRATION_STRIPE_FIRST", "false").lower() == "true"
+                    if _stripe_first and _reg_tier in ("STANDARD", "TOP_TIER"):
+                        await websocket.send(json.dumps({"type": "error", "message": "Paid plans require payment first. Please use the order review flow."}))
+                        continue
+                    if _stripe_first and d.get("role") == "COACH" and d.get("selected_dojos"):
+                        await websocket.send(json.dumps({"type": "error", "message": "Coach registration requires payment. Please use the order review flow."}))
+                        continue
                     print(f">>> [REG] Processing register_request for username={d.get('username')}, role={d.get('role')}")
                     succ, res = await register_new_user(d)
                     print(f">>> [REG] register_new_user returned: success={succ}, result={res}")
@@ -9636,9 +9992,7 @@ async def handle_client(websocket, path=None):
                                 print(f">>> [REG] Coach registration notification error (non-fatal): {_notify_err}")
 
                         # USPS address validation for coaches (async, post-registration)
-                        # Skip for beta users — they don't need real address verification
-                        _is_beta_reg = BETA_INVITE_CODE and d.get("beta_invite_code", "").strip() == BETA_INVITE_CODE
-                        if d.get("role") == "COACH" and validate_address and d.get("w9_data") and not _is_beta_reg:
+                        if d.get("role") == "COACH" and validate_address and d.get("w9_data"):
                             w9 = d["w9_data"]
                             try:
                                 addr_valid, addr_result = await validate_address(
@@ -19372,9 +19726,11 @@ Coach Reflection on Session {session_id}:
                     billing_cycle = d.get("billing_cycle", "monthly")
                     success_url = d.get("success_url", "https://app.sovereignsanctuary.ai/success")
                     cancel_url = d.get("cancel_url", "https://app.sovereignsanctuary.ai/billing")
+                    _promo = d.get("promo_code", "")
                     
                     url = await billing_system.create_checkout_session(
-                        uid, plan, billing_cycle, success_url, cancel_url
+                        uid, plan, billing_cycle, success_url, cancel_url,
+                        promo_code=_promo if _promo else None
                     )
                     await websocket.send(json.dumps({
                         "type": "checkout_url",
@@ -19439,7 +19795,26 @@ Coach Reflection on Session {session_id}:
                             except (ValueError, TypeError):
                                 pass
 
-                        if not _cooldown_ok:
+                        # SOVEREIGN-VOICE — block return to free tier after paying or trial expiry
+                        _trial_blocked = False
+                        if _cooldown_ok and new_plan == "TRIAL":
+                            _prev = current_profile.get("previous_plan", "")
+                            _ever_paid = _prev in ("STANDARD", "TOP_TIER") or current_plan in ("STANDARD", "TOP_TIER")
+                            _trial_end = current_profile.get("trial_end_date", "")
+                            _trial_expired = False
+                            if _trial_end:
+                                try:
+                                    _trial_expired = datetime.datetime.strptime(_trial_end, "%Y-%m-%d").date() < datetime.datetime.now().date()
+                                except (ValueError, TypeError):
+                                    pass
+                            if _ever_paid or _trial_expired:
+                                _trial_blocked = True
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "The free trial is no longer available for your account. Please choose a paid plan to continue."
+                                }))
+
+                        if not _cooldown_ok or _trial_blocked:
                             pass
                         elif new_rank == current_rank:
                             await websocket.send(json.dumps({
@@ -20385,6 +20760,37 @@ Coach Reflection on Session {session_id}:
                         "request_id": request_id
                     }))
             
+            # --- Client approves web search consent --- # QUANTUM-CRYSTAL-ARCH
+            elif t == "search_consent_approved":
+                if current_profile and current_profile.get("role") == "CLIENT":
+                    _cq = d.get("query", "").strip()
+                    if _cq and search_proxy.is_available:
+                        search_proxy.audit.log_event("client_consent_search", uid, query=_cq)
+                        import asyncio as _aio_cs
+                        try:
+                            _csr = await _aio_cs.wait_for(search_proxy.execute_search(_cq, uid), timeout=15.0)
+                        except _aio_cs.TimeoutError:
+                            _csr = {"success": False}
+                        if _csr.get("success") and _csr.get("results"):
+                            _cfmt = search_proxy.format_for_nate(_csr["results"])
+                            # QUANTUM-CRYSTAL-ARCH — Fix 2+3: route through AI
+                            if update_search_context:
+                                update_search_context(uid, _cq, _cfmt)
+                            _synth_prompt = (
+                                f"[SEARCH SYNTHESIS] The client asked me to search "
+                                f"for: \"{_cq}\". I found the following results. "
+                                f"Synthesize them conversationally — do NOT dump "
+                                f"raw results. If they contradict something I said "
+                                f"earlier, acknowledge the correction honestly."
+                            )
+                            await cortex.process_interaction(
+                                current_profile, _synth_prompt)
+                        else:
+                            await websocket.send(json.dumps({"type": "nate_response",
+                                "text": "I wasn't able to find anything definitive "
+                                "on that. Would you like to tell me more about why "
+                                "this matters to you?"}))
+
             # --- Admin: get pending search requests ---
             elif t == "admin_get_pending_searches":
                 if current_profile and current_profile.get("role") == "ADMIN":
@@ -20626,9 +21032,11 @@ Coach Reflection on Session {session_id}:
                                 **payload,
                             }))
 
-                            # Broadcast updated waiting list
+                            # Broadcast updated waiting list (only count delivered members as blocking)
+                            _delivered = round_obj.get("delivered_to") or {}
                             name_map = {m.get("user_id"): m.get("name") for m in sanctuary_engine.get_member_list(sanctuary_id)}
-                            pending_ids = [x for x, r in (round_obj.get("responses") or {}).items() if (r or {}).get("state") == "PENDING"]
+                            pending_ids = [x for x, r in (round_obj.get("responses") or {}).items()
+                                           if (r or {}).get("state") == "PENDING" and _delivered.get(x, False)]
                             waiting_on = [name_map.get(x, x) for x in pending_ids]
                             await sanctuary_engine.broadcast_to_sanctuary(
                                 sanctuary_id=sanctuary_id,
@@ -21065,6 +21473,18 @@ Coach Reflection on Session {session_id}:
                                 "timestamp": datetime.datetime.now().isoformat()
                             }
                         )
+
+                        # Crystallize every member message (including member-to-member without LN response)
+                        try:
+                            asyncio.create_task(crystallize_from_conversation(
+                                db_pool, current_profile['hardware_id'], message, "",
+                                user_name=current_profile.get('name', ''),
+                                domain="clinical",
+                                min_score=3,
+                                origin_surface="family_sanctuary",
+                            ))
+                        except Exception:
+                            pass
                         
                         # CRITICAL: Monitor for escalation
                         escalation_detected = await sanctuary_engine.detect_escalation(
@@ -22909,6 +23329,17 @@ IMPORTANT:
                 )
 
                 try:
+                    asyncio.create_task(crystallize_from_conversation(
+                        db_pool, member_id, response_text, "",
+                        user_name=member_name,
+                        domain="clinical",
+                        min_score=3,
+                        origin_surface="coached_response",
+                    ))
+                except Exception:
+                    pass
+
+                try:
                     analytics_engine.record_event("sanctuary_group_coaching_response_sent", member_id, {
                         "sanctuary_id": sanctuary_id,
                         "family_id": (sanctuary_engine.get_session(sanctuary_id) or {}).get("family_id"),
@@ -22928,8 +23359,11 @@ IMPORTANT:
                     sanctuary_engine._save()
 
                     # Broadcast updated status + check completion
+                    # Only count members whose suggestion was actually delivered as blocking
+                    delivered = round_obj.get("delivered_to") or {}
                     member_name_map = {m.get("user_id"): m.get("name") for m in sanctuary_engine.get_member_list(sanctuary_id)}
-                    pending_ids = [mid for mid, r in (round_obj.get("responses") or {}).items() if (r or {}).get("state") == "PENDING"]
+                    pending_ids = [mid for mid, r in (round_obj.get("responses") or {}).items()
+                                   if (r or {}).get("state") == "PENDING" and delivered.get(mid, False)]
                     waiting_on = [member_name_map.get(mid, mid) for mid in pending_ids]
 
                     if not pending_ids:
@@ -23003,8 +23437,10 @@ IMPORTANT:
                         sanctuary_engine.data["active_sanctuaries"][sanctuary_id]["group_coaching_round"] = round_obj
                         sanctuary_engine._save()
 
+                        delivered = round_obj.get("delivered_to") or {}
                         member_name_map = {m.get("user_id"): m.get("name") for m in sanctuary_engine.get_member_list(sanctuary_id)}
-                        pending_ids = [mid for mid, r in (round_obj.get("responses") or {}).items() if (r or {}).get("state") == "PENDING"]
+                        pending_ids = [mid for mid, r in (round_obj.get("responses") or {}).items()
+                                       if (r or {}).get("state") == "PENDING" and delivered.get(mid, False)]
                         waiting_on = [member_name_map.get(mid, mid) for mid in pending_ids]
 
                         if not pending_ids:
@@ -24333,6 +24769,20 @@ IMPORTANT:
                         print(f">>> [MESH] Scores error: {_msc_err}")
 
             # =================================================================
+            # CLI COMMAND TERMINAL — nate_cli_chat  # SOVEREIGN-VOICE
+            # =================================================================
+            elif t == "nate_cli_chat":
+                if current_profile and current_profile.get("role") == "ADMIN":
+                    try:
+                        from app.websocket.cli_chat_handler import handle_nate_cli_chat  # SOVEREIGN-VOICE
+                        asyncio.create_task(handle_nate_cli_chat(websocket, d, current_profile, db_pool))
+                    except Exception as _cli_err:
+                        print(f">>> [CLI] Handler error: {_cli_err}")
+                        await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": str(_cli_err)}))
+                else:
+                    await websocket.send(json.dumps({"type": "nate_cli_chat_error", "error": "Admin role required"}))
+
+            # =================================================================
             # UNKNOWN MESSAGE TYPE — catch-all
             # =================================================================
 
@@ -24401,6 +24851,17 @@ IMPORTANT:
 
 swarm_relay = None  # Initialized in main()
 
+# --- Autonomous health broadcast --- # QUANTUM-CRYSTAL-ARCH
+_subconscious_monitor = None  # Set if subconscious engine starts
+async def _broadcast_health_status(msg: dict):
+    """Push health_status to all connected admin/CLI WebSocket clients."""
+    payload = json.dumps({"type": "health_status", **msg})
+    for ws in list(connected_clients.values()):
+        try:
+            await ws.send(payload)
+        except Exception:
+            pass
+
 async def main():
     """Start the WebSocket server"""
     global db_pool, swarm_relay, _pg_user_store, _registry_cache
@@ -24433,7 +24894,8 @@ async def main():
                 password=_pg_pass,
                 database=_pg_db,
                 min_size=2,
-                max_size=10,
+                max_size=40,  # SOVEREIGN-VOICE — raised from 20 for 50+ concurrent user capacity
+                max_inactive_connection_lifetime=300,
                 command_timeout=30,
             )
             print(f"[*] Database pool created ({db_pool.get_size()} connections)")
@@ -24442,6 +24904,16 @@ async def main():
             parietal.db_pool = db_pool  # MetricsEngine → client_metrics PG table
             session_tracker.db_pool = db_pool  # SessionTracker → sessions PG table
             billing_system_internal.db_pool = db_pool  # BillingSystem → PG-backed reads
+            if _queens_guard:  # QUANTUM-CRYSTAL-ARCH — Layer 9
+                _queens_guard.db_pool = db_pool
+            # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE engine
+            global _lr_engine
+            if _LREngine:
+                try:
+                    _lr_engine = _LREngine(db_pool=db_pool)
+                    print("[*] LiminalResolveEngine initialized")
+                except Exception as _lr_err:
+                    print(f"[!] LiminalResolveEngine init failed: {_lr_err}")
             # B5: Vault integration for chat file uploads/previews
             try:
                 from .vault_bridge import VaultBridge
@@ -24535,14 +25007,87 @@ async def main():
     asyncio.create_task(_ws_stale_cleanup_loop())
     # Flush activity timestamps to PG every 5 minutes
     asyncio.create_task(_flush_activity_cache())
-    
+
+    # --- Autonomous Loop (Phase 7) --- # QUANTUM-CRYSTAL-ARCH
+    global _subconscious_monitor, _autonomous_controller, _subconscious_runtime, _bridge_crystallizer  # QUANTUM-CRYSTAL-ARCH
+    if _AUTONOMOUS_AVAILABLE and os.environ.get("ENABLE_AUTONOMOUS", "false").lower() == "true":
+        try:
+            try:  # QUANTUM-CRYSTAL-ARCH — wire crystallizer for LEARN mode
+                from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
+                _bridge_crystallizer = NateMemoryCrystallizer(db_pool=db_pool)
+                print(">>> [AUTONOMOUS] Crystallizer wired (GREEN mode, harvest buffer live)")
+            except Exception as _ce:
+                print(f">>> [AUTONOMOUS] Crystallizer unavailable: {_ce}")
+            _health_gates = AutonomousHealthGates(
+                db_pool=db_pool,
+                redis_client=swarm_relay._redis if swarm_relay else None,
+                crystallizer=_bridge_crystallizer,
+                project_root=Path(os.environ.get("CLI_PROJECT_ROOT", ".")),
+                use_redis=bool(swarm_relay and swarm_relay._redis),
+            )
+            _autonomous_controller = AutonomousController(
+                health_gates=_health_gates,
+                project_root=Path(os.environ.get("CLI_PROJECT_ROOT", ".")),
+                crystallizer=_bridge_crystallizer,
+                broadcast_fn=_broadcast_health_status,
+                health_interval=int(os.environ.get("AUTONOMOUS_HEALTH_INTERVAL", "60")),
+                learn_budget=int(os.environ.get("AUTONOMOUS_LEARN_BUDGET", "600")),
+                db_pool=db_pool,
+            )
+            asyncio.create_task(_autonomous_controller.run())
+            print(">>> [AUTONOMOUS] Controller started — health every 60s, learn budget 600s")
+        except Exception as e:
+            print(f">>> [AUTONOMOUS] Failed to start: {e}")
+    else:
+        if not _AUTONOMOUS_AVAILABLE:
+            print(">>> [AUTONOMOUS] Module not found — skipping")
+        else:
+            print(">>> [AUTONOMOUS] Disabled (set ENABLE_AUTONOMOUS=true to activate)")
+
+    # --- Subconscious Engine --- # QUANTUM-CRYSTAL-ARCH
+    if _SUBCONSCIOUS_AVAILABLE and os.environ.get("ENABLE_SUBCONSCIOUS", "false").lower() == "true":
+        try:
+            _subconscious_runtime = await boot_subconscious(
+                redis_client=swarm_relay._redis if swarm_relay else None,
+                config=SubconsciousConfig.from_env(),
+            )
+            if _subconscious_runtime and hasattr(_subconscious_runtime, 'monitor'):
+                _subconscious_monitor = _subconscious_runtime.monitor
+            print(">>> [SUBCONSCIOUS] Engine started — monitoring idle cycles for crystallization")
+        except Exception as e:
+            print(f">>> [SUBCONSCIOUS] Failed to start: {e}")
+    else:
+        if not _SUBCONSCIOUS_AVAILABLE:
+            print(">>> [SUBCONSCIOUS] Module not found — skipping")
+        else:
+            print(">>> [SUBCONSCIOUS] Disabled (set ENABLE_SUBCONSCIOUS=true to activate)")
+
+    # --- Crystal Control Bridge (Redis IPC) --- # QUANTUM-CRYSTAL-ARCH
+    if _cc_register:
+        _cc_register(_autonomous_controller, _subconscious_runtime, _bridge_crystallizer, db_pool)
+    if _cc_start and swarm_relay and swarm_relay._redis:
+        await _cc_start(swarm_relay._redis)
+
+    # LOAD-TEST-BASELINE — graceful shutdown hook to prevent orphaned DB connections
+    import signal
+    async def _graceful_shutdown(sig_name):
+        print(f"[*] Received {sig_name}, shutting down gracefully...")
+        if db_pool:
+            await db_pool.close()
+            print("[*] Database pool closed")
+
+    loop = asyncio.get_running_loop()
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(_sig, lambda s=_sig: asyncio.create_task(_graceful_shutdown(s.name)))
+
     async with websockets.serve(
         handle_client, HOST, PORT,
         ping_interval=20,   # Send ping every 20 seconds
-        ping_timeout=10,    # Wait 10 seconds for pong before closing
+        ping_timeout=60,    # LOAD-TEST-BASELINE: was 10, caused mass disconnects under load
+        close_timeout=30,   # LOAD-TEST-BASELINE: graceful close window
         max_size=1_048_576,  # 1MB max message size — prevents memory exhaustion DoS
     ):
-        print(f"[*] Bridge Online. Awaiting connections... (ping_interval=20s, ping_timeout=10s)")
+        print(f"[*] Bridge Online. Awaiting connections... (ping_interval=20s, ping_timeout=60s)")
         await asyncio.Future()  # Run forever
 
 if __name__ == "__main__":

@@ -217,7 +217,8 @@ class StripeBillingSystem:
     
     async def create_checkout_session(self, user_id: str, plan: str, 
                                        billing_cycle: str, success_url: str, 
-                                       cancel_url: str) -> Optional[str]:
+                                       cancel_url: str,
+                                       promo_code: Optional[str] = None) -> Optional[str]:
         """Create Stripe checkout session for subscription."""
         
         # Get user info
@@ -287,6 +288,62 @@ class StripeBillingSystem:
             except Exception as e:
                 print(f">>> [BILLING] Founding member check failed: {e}")
         
+        resolved_promo = None
+        if promo_code and self.db_pool and not founding_eligible:
+            try:
+                import re as _re
+                cleaned = promo_code.strip().upper()[:40]
+                if _re.match(r'^[A-Z0-9_\-]{2,40}$', cleaned):
+                    # 1. Check promotional_specials
+                    row = await self.db_pool.fetchrow("""
+                        SELECT id, stripe_coupon_id, discount_type, discount_value
+                        FROM promotional_specials
+                        WHERE promo_code = $1 AND active = TRUE
+                          AND starts_at <= NOW() AND ends_at > NOW()
+                          AND (max_redemptions IS NULL OR current_redemptions < max_redemptions)
+                          AND (
+                            applicable_tiers IS NULL
+                            OR cardinality(applicable_tiers) = 0
+                            OR $2 = ANY(applicable_tiers)
+                          )
+                    """, cleaned, plan.upper())
+                    if row and row["stripe_coupon_id"]:
+                        resolved_promo = {
+                            "coupon_id": row["stripe_coupon_id"],
+                            "code": cleaned,
+                            "is_full": row["discount_type"] == "percent" and int(row["discount_value"] or 0) >= 100,
+                        }
+                    # 2. Check school_codes
+                    if not resolved_promo:
+                        school = await self.db_pool.fetchrow("""
+                            SELECT id, stripe_coupon_id, discount_percent
+                            FROM school_codes
+                            WHERE school_code = $1 AND active = TRUE
+                              AND (max_students IS NULL OR current_students < max_students)
+                        """, cleaned)
+                        if school and school.get("stripe_coupon_id"):
+                            resolved_promo = {
+                                "coupon_id": school["stripe_coupon_id"],
+                                "code": cleaned,
+                                "is_full": int(school.get("discount_percent") or 0) >= 100,
+                            }
+                    # 3. Check corporate_sponsors
+                    if not resolved_promo:
+                        corp = await self.db_pool.fetchrow("""
+                            SELECT id, stripe_coupon_id, discount_type, discount_value, pays_full
+                            FROM corporate_sponsors
+                            WHERE sponsor_code = $1 AND active = TRUE
+                              AND (max_employees IS NULL OR current_employees < max_employees)
+                        """, cleaned)
+                        if corp and corp.get("stripe_coupon_id"):
+                            resolved_promo = {
+                                "coupon_id": corp["stripe_coupon_id"],
+                                "code": cleaned,
+                                "is_full": bool(corp.get("pays_full")),
+                            }
+            except Exception as e:
+                print(f">>> [BILLING] Promo resolution failed for {promo_code}: {e}")
+
         try:
             session_params = {
                 "customer": customer_id,
@@ -297,10 +354,17 @@ class StripeBillingSystem:
                 "cancel_url": cancel_url,
                 "metadata": {"user_id": user_id, "plan": plan, "billing_cycle": billing_cycle},
                 "subscription_data": {"metadata": {"user_id": user_id, "plan": plan}},
-                "allow_promotion_codes": True,
             }
             if founding_eligible:
                 session_params["discounts"] = [{"coupon": FOUNDING_COUPON_ID}]
+            elif resolved_promo:
+                session_params["discounts"] = [{"coupon": resolved_promo["coupon_id"]}]
+                session_params["metadata"]["applied_promo_code"] = resolved_promo["code"]
+                session_params["metadata"]["applied_promo_source"] = "promotional_specials"
+                if resolved_promo["is_full"]:
+                    session_params["payment_method_collection"] = "if_required"
+            else:
+                session_params["allow_promotion_codes"] = True
             
             session = stripe.checkout.Session.create(**session_params)
             

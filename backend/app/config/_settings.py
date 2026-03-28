@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     ENABLE_SKYEYE_SESSIONS: bool = True  # Auto session engine — autonomous posting enabled
     ENABLE_SOVEREIGN_SWARM: bool = True   # Sovereign Swarm Intelligence Framework
     ENABLE_NATE_NUDGE: bool = True        # Nate the Nudge proactive notification system
+    # QUANTUM-CRYSTAL-ARCH: progressive rollout flags default OFF
+    ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR: bool = False
+    ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION: bool = False
+    ENABLE_TIME_CRYSTAL_FORGE: bool = False
     
     # User Registry backend
     USE_POSTGRES_REGISTRY: bool = True    # When True, bridge stores users in PostgreSQL (recommended)

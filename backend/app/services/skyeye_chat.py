@@ -33,6 +33,18 @@ from app.config import settings
 
 logger = logging.getLogger("skyeye_chat")
 
+# QUANTUM-CRYSTAL-ARCH — Hallucination defense layers 3 + 9
+try:
+    from app.services.nate_response_validator import NateResponseValidator
+    _skyeye_validator = NateResponseValidator()
+except ImportError:
+    _skyeye_validator = None
+
+try:
+    from app.services.security.queens_guard import QueensGuard as _QGClass
+except ImportError:
+    _QGClass = None
+
 
 # =============================================================================
 # CHAT MODES
@@ -354,7 +366,7 @@ YOUR PLATFORM CAPABILITIES:
 - Facebook: Page posts with text. No long-form articles. No comment replies yet.
 - YouTube: Video descriptions. No direct posting yet.
 - NONE of your platforms currently support "releasing articles in sections" or threaded multi-part posting. That feature does not exist.
-- You CANNOT export, download, or save files to the user's device. You cannot create documents, PDFs, spreadsheets, or text files for download. If asked to export content, suggest they take a screenshot or copy-paste the text from the chat.
+- You CANNOT generate documents, PDFs, spreadsheets, or other files for download. Client conversations are automatically saved and accessible via Settings > Memory Search in the app.
 - COMMENT REPLIES — EXECUTION PROTOCOL:
   When Big Nate asks you to reply to a comment, follow this EXACT sequence:
   1. Check your [RECENT COMMENTS ON YOUR POSTS] context for the comment.
@@ -582,6 +594,8 @@ class SkyEyeChatService:
             "OpenAI-Beta": "realtime=v1"
         }
         self.current_mode = ChatMode.STRATEGY
+        # QUANTUM-CRYSTAL-ARCH — Layer 9 adversarial resistance
+        self._queens_guard = _QGClass(db_pool=db_pool) if _QGClass and db_pool else None
 
     _COACH_IP_RESTRICTED = {
         "sovereign command", "admin dashboard", "admin portal", "admin console",
@@ -868,8 +882,52 @@ RULES:
         recent_comments = await self._get_recent_comments_context()
         conversation_text = conversation_text + marketing_context + mode_context + archived_wisdom + unified_insights + posting_history + activity_timeline + liminal_presence + recent_comments + url_reply_context
 
+        # QUANTUM-CRYSTAL-ARCH — Layer 9: sanitize admin input before LLM
+        if self._queens_guard:
+            try:
+                from uuid import UUID as _UUID
+                _qg_uid = _UUID(int=0)
+                user_message_for_llm, _qg_flags = await self._queens_guard.sanitize_input(
+                    _qg_uid, user_message,
+                )
+                if _qg_flags:
+                    logger.warning("Queens Guard L1 flagged Big Nate input: %s", _qg_flags)
+                    conversation_text = conversation_text.replace(user_message, user_message_for_llm)
+            except Exception as exc:
+                logger.warning("Queens Guard L1 error (non-fatal): %s", exc)
+
         # Call Azure OpenAI Realtime API
         response_text = await self._call_azure_chat(conversation_text)
+
+        # QUANTUM-CRYSTAL-ARCH — Layer 3: validate response before delivery
+        if _skyeye_validator and response_text:
+            try:
+                _validated, _warnings = await _skyeye_validator.validate(
+                    response_text, context={"client_message": user_message},
+                )
+                if _warnings and _skyeye_validator.is_high_severity(_warnings):
+                    logger.warning("Layer 3 high-severity in SkyEye Chat — regenerating")
+                    response_text = await self._call_azure_chat(
+                        conversation_text
+                        + "\n\n[SYSTEM: Your previous response contained an unverifiable factual "
+                        "claim. Rephrase without asserting unverifiable facts.]"
+                    )
+            except Exception as exc:
+                logger.warning("Layer 3 validation error (non-fatal): %s", exc)
+
+        # QUANTUM-CRYSTAL-ARCH — Layer 9: verify output before delivery
+        if self._queens_guard and response_text:
+            try:
+                from uuid import UUID as _UUID
+                _qg_uid = _UUID(int=0)
+                _safe_resp, _blocked = await self._queens_guard.verify_output(
+                    _qg_uid, response_text, question_type="skyeye_chat",
+                )
+                if _blocked:
+                    logger.warning("Queens Guard L3 blocked SkyEye Chat output")
+                    response_text = _safe_resp
+            except Exception as exc:
+                logger.warning("Queens Guard L3 error (non-fatal): %s", exc)
 
         # Parse any proposals from Little Nate's response
         proposal_actions = await self._parse_proposals(response_text)

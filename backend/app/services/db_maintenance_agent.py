@@ -20,7 +20,11 @@ logger = logging.getLogger("skyeye.db_maintenance")
 
 ACTIVITY_RETENTION_DAYS = 90
 CONTENT_RETENTION_DAYS = 60
-IMMUTABLE_TYPES = ("audit_log",)
+IMMUTABLE_TYPES = (
+    "audit_log",
+    "factual_grounding_redirect",
+    "nate_accuracy_warning",
+)
 
 
 class DatabaseMaintenanceAgent:
@@ -62,11 +66,13 @@ class DatabaseMaintenanceAgent:
     async def _cycle(self):
         pruned_activity = await self._prune_activity()
         pruned_content = await self._prune_content()
+        expired_signups = await self._expire_pending_signups()
         stats = await self._collect_stats()
 
         summary = (
             f"Pruned {pruned_activity} old activity rows ({ACTIVITY_RETENTION_DAYS}d retention), "
-            f"{pruned_content} old content rows ({CONTENT_RETENTION_DAYS}d retention). "
+            f"{pruned_content} old content rows ({CONTENT_RETENTION_DAYS}d retention), "
+            f"{expired_signups} expired pending signups. "
             f"DB size: {stats.get('db_size', 'unknown')}. "
             f"Tables: activity={stats.get('activity_rows', '?')}, "
             f"content_queue={stats.get('content_rows', '?')}, "
@@ -104,6 +110,18 @@ class DatabaseMaintenanceAgent:
             return int(result.split()[-1]) if result else 0
         except Exception as e:
             logger.error("DatabaseMaintenanceAgent: content prune failed: %s", e)
+            return 0
+
+    async def _expire_pending_signups(self) -> int:
+        try:
+            async with self.db_pool.acquire() as conn:
+                result = await conn.execute(
+                    "UPDATE pending_signups SET status='expired' "
+                    "WHERE status='pending' AND expires_at < NOW()"
+                )
+            return int(result.split()[-1]) if result else 0
+        except Exception as e:
+            logger.warning("DatabaseMaintenanceAgent: pending_signups expire failed: %s", e)
             return 0
 
     async def _collect_stats(self) -> dict:

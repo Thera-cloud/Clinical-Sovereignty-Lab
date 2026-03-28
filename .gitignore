@@ -6,8 +6,8 @@
 # Environment & Secrets (CRITICAL - NEVER COMMIT)
 # -----------------------------------------------------------------------------
 .env
-.env.local
-.env.production
+.env.*
+!.env.template
 *.pem
 *.key
 secrets/

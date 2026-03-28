@@ -626,7 +626,8 @@ class NevedalEngine:
         user_id: str,
         dyad_partner_id: Optional[str],
         biometrics: Dict[str, Any],
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        liminal_resolve_active: bool = False,
     ) -> NevedalState:
         """
         Process biometric input and compute full Nevedal state.
@@ -672,7 +673,10 @@ class NevedalEngine:
         tau_emo = self._compute_tau_emo(e_g_joint)
         
         # 6. Compute C_emo (Main coherence value with time-dependent decay)
-        c_emo = self._compute_c_emo(p_ent, t_tunnel, gamma_env, e_g_joint, elapsed_t)
+        c_emo = self._compute_c_emo(
+            p_ent, t_tunnel, gamma_env, e_g_joint, elapsed_t,
+            liminal_resolve_active=liminal_resolve_active,
+        )
         
         # 7. Detect CEE window
         cee_window, cee_duration = self._detect_cee(
@@ -716,7 +720,67 @@ class NevedalEngine:
         self._bridge_to_quakete(state)
         
         return state
-    
+
+    def check_modal_consistency(
+        self,
+        biometrics: Dict[str, Any],
+        response_text: str,
+    ) -> Dict[str, Any]:
+        """
+        Layer 8 — Multi-modal consistency verification.
+
+        Compares voice biometric signals with the semantic tone of the AI
+        response text.  Returns an advisory dict (never blocks delivery).
+
+        Inconsistency types:
+          - voice_distress_text_dismissive: high voice stress but response
+            doesn't acknowledge distress
+          - voice_calm_text_crisis: low voice stress but response assumes
+            crisis
+        """
+        _DISTRESS_WORDS = frozenset([
+            "hurt", "scared", "afraid", "terrified", "panic", "desperate",
+            "suffering", "agony", "broken", "shattered", "overwhelmed",
+            "can't breathe", "falling apart", "end it", "worthless",
+        ])
+        _DISMISSIVE_WORDS = frozenset([
+            "fine", "no big deal", "nothing wrong", "don't worry",
+            "you're okay", "it's okay", "not a problem", "all good",
+        ])
+        _CRISIS_WORDS = frozenset([
+            "crisis", "emergency", "immediate danger", "safety plan",
+            "reach out to 988", "call 911", "suicidal",
+        ])
+
+        subject_a = biometrics.get("subject_a", {})
+        stress = subject_a.get("voice_stress_index", 0.3)
+        gamma = biometrics.get("gamma_env", self.current_state.gamma_env if self.current_state else 0.3)
+
+        response_lower = response_text.lower()
+        flags: List[str] = []
+
+        high_distress = stress > 0.6 or gamma > 0.6
+        low_distress = stress < 0.2 and gamma < 0.25
+
+        if high_distress:
+            has_dismissive = any(w in response_lower for w in _DISMISSIVE_WORDS)
+            has_distress_ack = any(w in response_lower for w in _DISTRESS_WORDS)
+            if has_dismissive and not has_distress_ack:
+                flags.append("voice_distress_text_dismissive")
+
+        if low_distress:
+            has_crisis = any(w in response_lower for w in _CRISIS_WORDS)
+            if has_crisis:
+                flags.append("voice_calm_text_crisis")
+
+        consistent = len(flags) == 0
+        return {
+            "consistent": consistent,
+            "flags": flags,
+            "voice_stress": round(stress, 3),
+            "gamma_env": round(gamma, 3),
+        }
+
     def _compute_p_ent(
         self,
         subject_a: Dict,
@@ -873,7 +937,8 @@ class NevedalEngine:
         t_tunnel: float,
         gamma_env: float,
         e_g_joint: float,
-        elapsed_t: float = 0.0
+        elapsed_t: float = 0.0,
+        liminal_resolve_active: bool = False,
     ) -> float:
         """
         Compute the main Quantum Emotional Coherence value with time-dependent decay.
@@ -893,12 +958,18 @@ class NevedalEngine:
         The decay exponent is normalized by τ_emo (coherence lifetime, typically
         600–3600s) to keep the decay physically meaningful in a therapeutic context.
         
+        When liminal_resolve_active is True, the R-inversion applies: system-side
+        resistance (patience) becomes a feature that sustains coherence rather than
+        degrading it. R_eff = 1 / max(R_raw, 0.1) so higher raw resistance yields
+        a LOWER effective denominator, producing higher C_emo.
+        
         Args:
             p_ent: Emotional entanglement (0-1)
             t_tunnel: Tunneling transparency (0-1)
             gamma_env: Decoherence rate (0-1)
             e_g_joint: Joint emotional load (0-1)
             elapsed_t: Elapsed session time in seconds (default 0)
+            liminal_resolve_active: Whether LIMINAL RESOLVE R-inversion is active
         """
         c = self.constants
         
@@ -908,6 +979,11 @@ class NevedalEngine:
         if denominator < 0.01:
             denominator = 0.01
         
+        # QUANTUM-CRYSTAL-ARCH — R-inversion: patience increases coherence
+        raw_denominator = denominator
+        if liminal_resolve_active:
+            denominator = 1.0 / max(raw_denominator, 0.1)
+        
         # Steady-state amplitude
         c_emo_0 = numerator / denominator
         
@@ -916,6 +992,7 @@ class NevedalEngine:
         # so the decay exponent stays in a physically meaningful range.
         tau_session = 3600.0  # normalization timescale in seconds
         t_normalized = elapsed_t / tau_session
+        # During LR, use the inverted denominator for decay (coherence sustained longer)
         decay = np.exp(-denominator * t_normalized)
         
         c_emo = c_emo_0 * decay

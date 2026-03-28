@@ -1,0 +1,71 @@
+{
+  "nevedal_state": {
+    "C_emo": 0.5,
+    "E_warmth": 0.3,
+    "T_tunnel": 0.2,
+    "GAP": 0.3,
+    "Velocity": 0.0,
+    "Quantum": 0.5,
+    "anxiety_level": 0.0,
+    "depression_indicators": 0.0,
+    "stress_level": 0.0,
+    "engagement": 0.5,
+    "session_count": 0,
+    "breakthrough_count": 0,
+    "homework_completion_rate": 0.0,
+    "risk_level": "LOW",
+    "last_risk_assessment": "",
+    "crisis_count": 0,
+    "mood_current": "neutral",
+    "mood_trend": "stable",
+    "mood_history": [],
+    "sleep_quality": "unknown",
+    "sleep_issues_mentioned": 0,
+    "crisis_perception": {
+      "distress_discrepancy": 0.0,
+      "minimization_score": 0.0,
+      "sensitivity_score": 0.0,
+      "normalization_index": 0.0,
+      "perception_baseline": "CALIBRATING",
+      "calibration_count": 0,
+      "discrepancy_history": []
+    },
+    "shame_profile": {
+      "shame_index": 0.0,
+      "shame_baseline": 0.0,
+      "core_beliefs": [],
+      "shame_map": [],
+      "shame_indicators_history": [],
+      "shame_masking_pattern": "UNKNOWN"
+    },
+    "pmb": {
+      "cyclical_patterns": [],
+      "crisis_precursors": [],
+      "trigger_map": [],
+      "reactivity_type": "MIXED",
+      "reactivity_indicators": {
+        "fight": 0.0,
+        "flight": 0.0,
+        "freeze": 0.0,
+        "fawn": 0.0
+      },
+      "reconsolidation_readiness": 0.0,
+      "reconsolidation_targets": [],
+      "legacy_patterns": [],
+      "predictions": [],
+      "last_pmb_update": "",
+      "pmb_version": 1
+    },
+    "drift_periods": [
+      {
+        "left_at": "2026-02-01 21:48:55.370334",
+        "returned_at": "2026-03-18 04:38:43.687369",
+        "gap_days": 44,
+        "explored": false
+      }
+    ]
+  },
+  "history": [],
+  "last_updated": "2026-03-18 04:38:43.688459",
+  "created_at": "2026-03-18 04:38:43.687705"
+}

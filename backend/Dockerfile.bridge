@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     libpq-dev \
     ffmpeg \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -21,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+COPY assets/ ./assets/
 
 # Create directories with proper permissions
 RUN mkdir -p /app/logs /app/data/Vaults/Admin /app/data/Vaults/Coaches /app/data/Vaults/Clients /app/data/Vaults/Guests

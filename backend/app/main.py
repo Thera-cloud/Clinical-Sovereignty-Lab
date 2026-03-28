@@ -84,8 +84,9 @@ async def get_db_pool() -> asyncpg.Pool:
             user=settings.POSTGRES_USER,
             password=settings.POSTGRES_PASSWORD,
             database=settings.POSTGRES_DB,
-            min_size=10,
-            max_size=50
+            min_size=5,
+            max_size=30,
+            max_inactive_connection_lifetime=300,
         )
     return db_pool
 
@@ -117,8 +118,9 @@ async def lifespan(app: FastAPI):
         user=settings.POSTGRES_USER,
         password=settings.POSTGRES_PASSWORD,
         database=settings.POSTGRES_DB,
-        min_size=10,
-        max_size=50
+        min_size=5,
+        max_size=30,
+        max_inactive_connection_lifetime=300,
     )
     print(f"   ✅ Database connected (host={_db_host})")
     
@@ -2695,6 +2697,49 @@ async def lifespan(app: FastAPI):
     else:
         print("   ⚠️  SKYEYE_AUDIT_TOKEN not set — auditors will fall back to Redis scan")
 
+    # QUANTUM-CRYSTAL-ARCH: optional orchestrator wiring (feature-flagged)
+    _quantum_orchestrator = None
+    if getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False):
+        try:
+            from app.services.quantum_crystal_orchestrator import QuantumCrystalOrchestrator
+            _quantum_orchestrator = QuantumCrystalOrchestrator(db_pool=db_pool)
+            app.state.quantum_crystal_orchestrator = _quantum_orchestrator
+            if getattr(settings, "ENABLE_TIME_CRYSTAL_FORGE", False):
+                await _quantum_orchestrator.start_forge_scheduler()
+            print("   ✅ QuantumCrystalOrchestrator initialized")
+        except Exception as _qc_err:
+            print(f"   ⚠️  QuantumCrystalOrchestrator init failed: {_qc_err}")
+
+    # QUANTUM-CRYSTAL-ARCH: wire cognitive stack services (Gaps 6/7/9)
+    try:
+        from app.services.nate_memory_crystallizer import NateMemoryCrystallizer
+        from app.services.helix_orchestrator import HelixOrchestrator
+        from app.services.littlenate_inference import LittleNateInference
+        app.state.nate_memory_crystallizer = NateMemoryCrystallizer(db_pool=db_pool, app_state=app.state)
+        app.state.helix_orchestrator = HelixOrchestrator(
+            db_pool=db_pool, app_state=app.state,
+            fibre_manager=getattr(app.state, 'fibre_manager', None),
+        )
+        _lni = LittleNateInference(app_state=app.state, db_pool=db_pool)
+        _lni.bind(app.state)
+        app.state.littlenate_inference = _lni
+        from app.services.quantum_knowledge_field import FederatedSearchCoordinator
+        app.state.federated_search = FederatedSearchCoordinator(db_pool=db_pool, app_state=app.state)
+        print("   ✅ NateMemoryCrystallizer + HelixOrchestrator + LittleNateInference + FederatedSearch wired")
+    except Exception as _cog_err:
+        print(f"   ⚠️  Cognitive stack wiring failed: {_cog_err}")
+
+    # SOVEREIGN-VOICE: prepaid voice billing system
+    _voice_billing = None
+    try:
+        from app.services.voice_billing import VoiceBillingSystem
+        _voice_billing = VoiceBillingSystem(db_pool=db_pool)
+        await _voice_billing.start()
+        app.state.voice_billing = _voice_billing
+        print("   ✅ VoiceBillingSystem started (PAUSED cleanup loop)")
+    except Exception as _vb_err:
+        print(f"   ⚠️  VoiceBillingSystem init failed: {_vb_err}")
+
     # ── HIVE DEFENSE v4.3: Startup Health Summary ──
     _healthy_count = 0
     _degraded_list = []
@@ -2766,6 +2811,8 @@ async def lifespan(app: FastAPI):
         ("warm_memory", getattr(app.state, "warm_memory", None) is not None),
         ("cold_memory", getattr(app.state, "cold_memory", None) is not None),
         ("sentinel_orchestrator", _sentinel_orchestrator is not None),
+        ("quantum_crystal_orchestrator", (not getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False)) or (_quantum_orchestrator is not None)),
+        ("voice_billing", _voice_billing is not None),  # SOVEREIGN-VOICE
     ]
     _hv4 = getattr(app.state, "hive_v4", {})
     _hive_services = [
@@ -2798,6 +2845,15 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("👋 Shutting down...")
+
+    # QUANTUM-CRYSTAL-ARCH: stop optional forge scheduler cleanly
+    _quantum_orchestrator = getattr(app.state, "quantum_crystal_orchestrator", None)
+    if _quantum_orchestrator and hasattr(_quantum_orchestrator, "stop_forge_scheduler"):
+        try:
+            await _quantum_orchestrator.stop_forge_scheduler()
+            print("   ✅ QuantumCrystalOrchestrator forge scheduler stopped")
+        except Exception as _qco_stop_err:
+            print(f"   ⚠️  QuantumCrystalOrchestrator shutdown: {_qco_stop_err}")
 
     # Stop Upstream Canary Network
     _hive_v4 = getattr(app.state, "hive_v4", {})
@@ -3094,6 +3150,14 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass
 
+    # SOVEREIGN-VOICE: stop voice billing cleanup loop
+    _vb_ref = getattr(app.state, "voice_billing", None)
+    if _vb_ref:
+        try:
+            await _vb_ref.stop()
+        except Exception:
+            pass
+
     if db_pool:
         await db_pool.close()
     print("   ✅ Database disconnected")
@@ -3162,6 +3226,15 @@ app.include_router(sessions_api.router)
 app.include_router(admin_api.router)
 app.include_router(coach_api.router)
 app.include_router(billing_api.router)
+app.include_router(billing_api.public_router)
+try:
+    from app.routers.registration_checkout import public_router as registration_checkout_router
+    from app.routers.registration_checkout import upgrade_router as registration_upgrade_router
+    app.include_router(registration_checkout_router)
+    app.include_router(registration_upgrade_router)
+    print("   ✅ Registration checkout + upgrade router registered")
+except Exception as _reg_err:
+    print(f"   ⚠️  Registration checkout router failed: {_reg_err}")
 try:
     from app.routers.scholarship_api import router as scholarship_router
     app.include_router(scholarship_router)
@@ -3286,8 +3359,27 @@ except Exception as _rv_err:
 try:
     from app.routers.twilio_voice import router as twilio_voice_router
     app.include_router(twilio_voice_router)
+    # Register /api/voice/* aliases when available (same handlers as /api/calls/*)
+    from app.routers.twilio_voice import voice_alias_router as twilio_voice_alias_router
+    app.include_router(twilio_voice_alias_router)
 except Exception as _tv_err:
     print(f"   ⚠️  Twilio Voice router failed: {_tv_err}")
+
+# Twilio Media Stream WebSocket — /ws/nate-media-stream
+try:
+    from app.routers.littlenate_api import twilio_ws_router
+    app.include_router(twilio_ws_router)
+except Exception as _tws_err:
+    print(f"   ⚠️  Twilio WS Media Stream router failed: {_tws_err}")
+
+# Nate Agent API — crystal network push/status + CLI governance
+try:
+    from app.routers.nate_agent_api import router as nate_agent_router, cli_router as nate_cli_router, exa_public_router as nate_exa_router
+    app.include_router(nate_agent_router)
+    app.include_router(nate_cli_router)
+    app.include_router(nate_exa_router)
+except Exception as _na_err:
+    print(f"   ⚠️  Nate Agent router failed: {_na_err}")
 
 # PMB Reports — Globe Command Center
 try:
@@ -3392,6 +3484,44 @@ try:
     app.include_router(corporate_command_router)
 except Exception as _cc_err:
     print(f"   ⚠️  Corporate Command API router failed: {_cc_err}")
+
+try:
+    from app.routers.access_control_api import router as access_control_router
+    app.include_router(access_control_router)
+except Exception as _ac_err:
+    print(f"   ⚠️  Access Control API router failed: {_ac_err}")
+
+# QUANTUM-CRYSTAL-ARCH — Universal Summon doorways (3 Queries in a Bottle)
+try:
+    from app.routers.summon_api import router as summon_router
+    app.include_router(summon_router)
+except Exception as _sm_err:
+    print(f"   ⚠️  Summon API router failed: {_sm_err}")
+
+try:
+    from app.routers.voice_assistant_api import router as voice_assistant_router
+    app.include_router(voice_assistant_router)
+except Exception as _va_err:
+    print(f"   ⚠️  Voice Assistant API router failed: {_va_err}")
+
+try:
+    from app.routers.telegram_webhook import router as telegram_router
+    app.include_router(telegram_router)
+except Exception as _tg_err:
+    print(f"   ⚠️  Telegram webhook router failed: {_tg_err}")
+
+try:
+    from app.routers.mcp_server import router as mcp_router
+    app.include_router(mcp_router)
+except Exception as _mcp_err:
+    print(f"   ⚠️  MCP server router failed: {_mcp_err}")
+
+# SOVEREIGN-VOICE: voice billing inbound call + Stripe webhook + balance API
+try:
+    from app.routers.voice_billing_api import router as voice_billing_router
+    app.include_router(voice_billing_router)
+except Exception as _vbr_err:
+    print(f"   ⚠️  Voice billing router failed: {_vbr_err}")
 
 
 # =============================================================================

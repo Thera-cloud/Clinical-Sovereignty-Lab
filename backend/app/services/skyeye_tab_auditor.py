@@ -204,6 +204,15 @@ TAB_ENDPOINTS = [
             ("GET", "/api/hive-defense/defcon/history?limit=20"),
         ],
     },
+    {
+        "tab": "Crystal Intelligence",
+        "tab_num": 21,
+        "endpoints": [
+            ("GET", "/api/nate-agent/admin/crystal-network/status"),
+            ("GET", "/api/nate-agent/admin/crystal-network/diagnostics"),
+            ("POST", "/api/nate-agent/admin/crystal-network/control"),
+        ],
+    },
 ]
 
 

@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     curl \
     libmagic1 \
+    libsndfile1 \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,6 +25,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY assets/ ./assets/
 
 # Create logs directory
 RUN mkdir -p /app/logs
