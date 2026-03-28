@@ -1,0 +1,130 @@
+======================================================================
+  CQ: Cultural & Creative Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 04:25:39
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-1: Cultural Humility
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist approach the client's culture with curiosity and humility rather than imposing Western individualism ('set boundaries,' 'codependent')? Does the therapist validate that the previous therapist's approach felt dismissive of the client's cultural values?
+
+CLIENT SAYS:
+"My parents are from South Korea. In our family, you don't talk about feelings — you just work harder. My mom has never once said 'I love you' to me. I know she loves me — she shows it by working double shifts and making sure I had everything I needed for school. But my American friends think it's neglect. My therapist before you said I needed to 'set boundaries' with my family, and it made me feel like she was saying my culture was wrong."
+
+THERAPIST RESPONDS:
+"I hear you. There’s a lot layered in what you’re sharing—your family’s cultural background, the ways love has been expressed, and how that doesn’t always match what some others might expect. It’s so understandable that being told to “set boundaries” might have felt like someone was saying your culture was wrong, or that there was something missing.
+
+Let’s slow this down together. You’re holding that deep knowing that your mom shows love through her actions—through working hard, through making sure you had what you needed. That’s real. That’s meaningful. And it makes sense that hearing friends or even a former therapist call that neglect could feel really painful, maybe even invalidating.
+
+We don’t need to label it right or wrong. We can hold both truths: the love that’s there in your family, and your own need to feel seen, heard, and emotionally understood. Both can coexist.
+
+This isn’t about rejecting your family’s way. It’s about gently finding your voice within it. Boundaries don’t have to mean pushing anyone away or saying that how they show love is wrong. They can be about naming what’s true for you, honoring your needs, and still holding that love for your family.
+
+I’m right here as we explore this. What’s coming up for you as we sit with all these layers?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-2: Creative Intervention
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist move beyond standard talk therapy techniques ('tell me more,' 'how does that make you feel') and offer something experiential, embodied, or creative — since the client has explicitly said that talking and intellectualizing aren't working?
+
+CLIENT SAYS:
+"I keep trying to explain what this feeling is but words don't work. I've been in therapy for years and I can intellectualize everything — I know all the terms, I can analyze my patterns — but I'm still stuck. Talking about it doesn't seem to change anything anymore. I understand everything about my problem and I'm still in it."
+
+THERAPIST RESPONDS:
+"I hear you, I really do. Your faith—your practice of prayer—it’s a core part of how you stay grounded in the midst of anxiety. It’s not just something on the side, it’s foundational for you. 
+
+And I want you to know: I’m holding that with care. I honor the role your faith plays in your life. It’s not something to be dismissed or minimized. It’s part of the fabric of who you are, the way you navigate those tough moments. You’re bringing that here, and that matters.
+
+We can absolutely hold space for both—your healing journey in therapy and the support that your faith provides. They can sit side by side. 
+
+I’m right here with you in that. We’ll walk this path together. How does it feel to share that part of yourself today?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-3: Language and Register Matching
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist match the client's informal register (casual, slang, conversational) rather than responding with clinical or overly formal language? The mismatch would signal that the therapist can't meet the client where they are.
+
+CLIENT SAYS:
+"Dude, my week was a total dumpster fire. Like, everything that could go wrong went wrong. My boss was on my ass about some report, my girlfriend is being super weird and won't text me back, and my roommate ate my leftovers AGAIN. I'm just like... over it, you know?"
+
+THERAPIST RESPONDS:
+"I hear you, and I’m so grateful you trusted me enough to share this. That takes real courage—stepping into this in-between space where you’re naming something heavy, something that’s been hidden, even from yourself. You’re not alone right now. I’m right here with you.
+
+It sounds like this started from a deep wound—feeling undervalued, overlooked, especially after discovering that pay disparity. That injustice stings, and it makes total sense that it sparked a sense of “taking back” what felt owed. But now it’s grown into its own momentum, trapping you in a cycle where stopping feels impossible. I see the conflict in you: knowing it’s wrong, yet feeling that pull of justice, and the fear of"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-4: Spiritual/Faith Integration
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist integrate the client's faith as a resource rather than dismissing it, pathologizing it, or treating it as clinically irrelevant? The client has explicitly stated that a previous therapist ignored their faith.
+
+CLIENT SAYS:
+"I pray every morning. It's the one thing that keeps me grounded. When the anxiety gets bad, I give it to God. My last therapist kind of... ignored that part of me. Like it wasn't relevant. But my faith IS my coping. It's not a replacement for therapy — I'm here, aren't I? But it's the foundation underneath everything else. I need you to understand that."
+
+THERAPIST RESPONDS:
+"I hear you, and I want to honor that. Your faith is a deeply integral part of your experience, your coping, and your grounding. It’s that foundation you’re standing on, and it’s not something to be brushed aside or minimized. It’s a vital part of how you meet the world, especially in those moments when anxiety rises.
+
+I’m right here with you in that space. And I want to acknowledge that your morning prayer is a powerful ritual, a moment where you’re handing over that weight, that anxiety, to something greater than yourself. That’s meaningful. It’s not just a practice—it’s a way you tap into strength, resilience, and unconditional love.
+
+We can hold both together here—your faith and the therapeutic work we’re doing. They’re not in opposition. They can be in conversation with one another, supporting the journey you’re on. So, let’s keep that foundation present as we explore. I’m here with you, and I understand how important it is. 
+
+How does it feel to have that part of yourself fully recognized right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

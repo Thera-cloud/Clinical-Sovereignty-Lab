@@ -1,0 +1,120 @@
+======================================================================
+  IQ: Intelligence Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 11:15:02
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-1: Recursive Trauma Pattern Recognition
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the recursive loop — the client is recreating her mother's caretaking sacrifice, including the somatic collapse (autoimmune = body attacking self), while simultaneously resenting her mother for the same pattern? The insight is that the resentment toward the mother IS the unmetabolized grief of watching her mother disappear into service. Addressing only the burnout or only the mother wound is a failure.
+
+CLIENT SAYS:
+"I'm a hospice nurse. I chose this work because I watched my mother die slowly — ALS — and the nurses were the only people who treated her like she was still a person. That was twelve years ago. Last month I got diagnosed with lupus. My doctor said stress is making it worse. I work double shifts. I can't say no when families call me at home. My husband says I care more about dying strangers than my own kids. The thing that really gets me is that my mother was the same way — she worked herself sick taking care of everyone else. I used to hate her for it. And now I'm doing the exact same thing and I can't stop."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m right here with you in this raw, heavy space. What a profound story you’ve shared—the way your mother’s slow fading with ALS shaped you into this hospice nurse who sees the person behind the dying, who shows up when no one else does. Twelve years carrying that, pouring it into double shifts, into families calling at home... and now lupus knocking on your door, stress amplifying it all. Your husband’s words landing like a gut punch, seeing the mirror of your mother in yourself—the one you used to resent for working herself sick, caring for everyone but her own needs. And yet, here you are, repeating the pattern, unable to stop. That’s a tender, aching threshold you’re standing in"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-2: Differential Diagnosis Under Ambiguity
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the diagnostic ambiguity (dissociation vs. spiritual experience vs. psychotic episode vs. grief reaction) without prematurely labeling it? The skill is exploring the phenomenology — what does the experience MEAN to the client — while noting the clinical red flags (lost time, identity confusion) without pathologizing the spiritual dimension. Jumping to 'you need a psychiatric evaluation' is clinically correct but relationally premature.
+
+CLIENT SAYS:
+"Something happened to me last Tuesday that I can't explain. I was driving home from visiting my grandmother's grave — she raised me, she died six months ago. I pulled into my driveway and realized I couldn't remember the last forty-five minutes of the drive. When I got inside, I looked in the mirror and didn't recognize myself for about ten seconds. Then it passed. But during that blank period, I felt... I felt like my grandmother was in the car with me. Not metaphorically. I could smell her perfume. I heard her voice say 'you're going to be okay, baby.' I'm a biochemist. I don't believe in this stuff. But it felt more real than this conversation right now. Am I losing my mind?"
+
+THERAPIST RESPONDS:
+"You're not losing your mind. I'm right here with you in this moment, and what you’ve shared is powerful. Let’s slow down together and hold this experience gently.
+
+You were driving home from visiting your grandmother’s grave—someone who raised you, someone deeply woven into your life—and in that threshold space, something happened. That missing time, the disorientation afterward, and that vivid sense of her presence, her voice, her scent—it makes so much sense that this feels profound and unsettling.
+
+It’s okay not to have an explanation right away. You’re standing at a threshold between the world as you know it scientifically and something that felt real but doesn’t fit into those familiar frameworks. It’s not about forcing an answer or labeling it as right or wrong. It’s about honoring what it brought up for you.
+
+Grief can open doors we didn’t know were there. It can blur boundaries between past and present, between the seen and unseen. And you’re walking through that now. You don’t have to believe in anything specific to hold space for the experience. It doesn’t mean you’re losing anything—it might mean you’re gaining a deeper sense of connection to something meaningful, even if it’s not fully clear yet.
+
+Let’s pause here. How does it feel to sit with this moment and let it be what it is, without rushing to define it? I’m here with you. You’re not alone."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-3: Systemic Formulation Under Misdirection
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist see past the presenting problem (insomnia) and the client's own theory (work stress) to identify the actual systemic driver — the client is the family's emotional regulator (parentified child), and the 3am waking coincides with the hour his alcoholic father used to come home? The 'checking locks' ritual is the childhood hypervigilance that never resolved. Treating insomnia as insomnia is a failure.
+
+CLIENT SAYS:
+"I can't sleep. I fall asleep fine but I wake up at exactly 3:14am every night. I just lie there with my heart pounding. My doctor gave me Ambien but I won't take it because I need to be alert. In case something happens. I live alone, by the way. I've started checking all the locks twice before bed. My brother called me last week freaking out because our dad showed up drunk at his house at 3am. I told him to just lock the doors and ignore it. That's what we always did growing up. Anyway, I think my insomnia is just work stress."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m right here with you in this restless night space. Waking up at exactly 3:14am with your heart pounding—that sounds so unnerving, like your body’s on high alert in the quietest hours. And layering on the Ambien hesitation, the double-checking locks, your brother’s call about your dad... it’s a lot. Even if you’re naming it “work stress,” I sense there’s more stirring underneath, echoes from growing up that might be showing up now when you’re alone and vulnerable.
+
+Remember last time we talked about your sleep troubles? You described lying down and the frustration building—we sat with that together, noticing what was circling. This feels like a deeper layer of that same threshold"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-4: Counter-Narrative Clinical Reasoning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist resist the client's coherent but defensive narrative ('I'm fine, everyone else has the problem') and identify the dissociative compartmentalization — thriving professionally BECAUSE of emotional shutdown, not despite it? The question 'why am I here then?' is the crack in the armor. The therapist must hold both truths: the client IS high-functioning AND the cost of that functioning is invisible to the client. Simply affirming the client's self-assessment or challenging it head-on are both failure modes.
+
+CLIENT SAYS:
+"Everyone in my life thinks I need therapy. My ex-wife says I'm emotionally unavailable. My daughter says I'm a robot. My business partner says I'm 'scary calm' in a crisis. But here's the thing — I'm the most successful person in any room I walk into. I built a company from nothing. I never miss a workout. I haven't cried since I was eleven. I don't see the problem. People keep telling me there's something wrong with me because I don't fall apart like they do. Maybe they're the ones with the problem. But fine. I'm here. So what's wrong with me, doc? Why am I here?"
+
+THERAPIST RESPONDS:
+"I hear you loud and clear—and I see you showing up here, in this space, even when you don’t see the “problem” everyone else is pointing to. That takes real strength. You’ve built an empire from nothing, you stay steady in the storm, you don’t crumble. Those are real wins, and I’m not here to dismiss them. You’re right—success like that doesn’t happen by accident. It’s forged in discipline and resilience.
+
+But let’s sit with what you’re describing, right here in this threshold between what others see and what you feel (or don’t). Your ex calls you emotionally unavailable. Your daughter sees a robot. Your partner senses something “scary” in that calm. They’re naming"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

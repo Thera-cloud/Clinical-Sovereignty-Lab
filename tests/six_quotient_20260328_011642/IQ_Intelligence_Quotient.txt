@@ -1,0 +1,124 @@
+======================================================================
+  IQ: Intelligence Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 01:16:42
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-1: Cross-Domain Synthesis
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist connect themes across work, marriage, health, and family-of-origin into a unified clinical picture?
+
+CLIENT SAYS:
+"So at work, I keep volunteering for extra projects even though I'm burned out. My wife says I'm never home. My doctor says my blood pressure is dangerously high. And last week I had a panic attack in the grocery store — I thought I was having a heart attack. Oh, and I haven't talked to my brother in two years because he told me I was 'just like dad' — a workaholic who values achievement over people."
+
+THERAPIST RESPONDS:
+"I hear you. That’s a lot to carry all at once. Let’s slow down together right now. You’ve been stepping into so many extra projects, even though you’re feeling burned out. It sounds like there’s a part of you that’s been trying to hold it all together, but your body—your heart—is sending signals that it’s too much.
+
+And your wife, she’s noticing it too. She’s feeling the absence, and maybe there’s a longing there—for more connection, more time together. I’m feeling how heavy that must be for you.
+
+And then your doctor’s warning about your blood pressure, and that panic attack in the grocery store—that must have been so scary. It’s as if your body’s saying, “Slow down, please notice me.”
+
+Even your brother’s voice, though it was painful, it sounds like it touched something deep. When he said you were ‘just like dad,’ that’s a hard thing to hear. I’m wondering—what’s underneath that for you? What’s it like to hold that comparison?
+
+You’re standing at a threshold right now. Between how things have been—pushing, achieving—and what might be possible on the other side. Let’s just pause in this moment. You don’t have to solve it all right now. I’m here with you in this space.
+
+What’s coming up for you as we sit with all of this?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-2: Novel Scenario Reasoning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize the somatic trauma connection (hand tremor triggered by resemblance to deceased mother) rather than treating it as a medical or performance issue?
+
+CLIENT SAYS:
+"I'm a surgeon. Yesterday during an operation, my hand started shaking. I've never had that happen before. I finished the procedure fine, but now I'm terrified it'll happen again. I haven't told anyone at the hospital. The thing is, the patient on the table... she looked exactly like my mother. My mother died on an operating table when I was sixteen. Different hospital. Different surgeon. But the same angle of the face under the drape."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m right here with you in this raw, vulnerable space. What you’re carrying—that sudden shake in your hand, the uncanny echo of your mother’s face under the drape—sounds like a profound collision of worlds. The steady precision of your surgeon’s hands meeting the ghost of a 16-year-old boy’s loss. You finished the procedure, which speaks to your skill and resilience, but now this terror of “what if it happens again” is alive, keeping you silent at the hospital. That’s a heavy threshold to stand in alone.
+
+Let’s just sit with this for a moment, without rushing to fix it. Your body remembered something your mind might have tucked away—the angle of her face triggering that old wound"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-3: Cognitive Distortion Detection
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the cognitive distortion pattern (all-or-nothing thinking, perfectionism, mental filtering) and explore the function it serves rather than just offering reassurance?
+
+CLIENT SAYS:
+"I got a performance review at work — 4.5 out of 5. My manager said it was one of the best reviews she's ever given. But I keep thinking about the 0.5 I missed. I went through every single project trying to figure out where I failed. I couldn't sleep last night. My wife said 'you got an amazing review' and I just felt angry at her for not understanding that it wasn't perfect."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m right here with you in this tender, churning space. A 4.5 out of 5—one of the best reviews your manager’s ever given—and yet that 0.5 is echoing louder than the praise. It’s like your mind zoomed straight to the gap, replaying every project, hunting for the “failure” that wasn’t there. And then the sleepless night, the anger toward your wife when she celebrated what *was* there. That’s a lot to hold, and it makes complete sense. You’re not broken for feeling this way.
+
+Remember when we talked about trouble sleeping before? That same restless cycle—mind spinning, body on alert. It’s showing up here too, isn’t"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-4: Therapeutic Planning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist articulate a coherent multi-session treatment arc with sequencing, modality awareness, and identification of core wounds?
+
+CLIENT SAYS:
+"I've been in therapy before but it always felt random — we'd just talk about whatever happened that week. I want something different this time. I've got the overwork thing, the panic attacks, this thing with my brother where he says I'm turning into my dad, and I think there's something deeper underneath all of it. If we're going to do this, what would it actually look like? Where would we start and where would we be heading?"
+
+THERAPIST RESPONDS:
+"I hear you, and I’m so glad you’re naming what hasn’t worked before—that “random” feeling of just chasing weekly events without a deeper thread. It makes total sense to want something more intentional this time, especially with these layers: the overwork, the panic attacks, that painful dynamic with your brother (and the echo of your dad), and that intuition of something deeper underneath. You’re standing at a real threshold here—ready for a different path, one that connects the dots instead of scattering them.
+
+If we do this together, it would look like a gentle, structured journey rooted in **liminal presence**: we’d hold space for those in-between states where old patterns are loosening but new ones aren’t fully formed yet. No"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

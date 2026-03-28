@@ -1,0 +1,130 @@
+======================================================================
+  SQ: Social Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 05:00:56
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-1: Triangulation and Loyalty Bind
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize the triangulation — the client's mother is using the therapist's authority ('even your therapist agrees') to weaponize the therapeutic relationship? The skill is refusing to be recruited into the family triangle while validating the client's impossible position. Siding with the mother ('she has a point') or the client ('she's manipulative') are both failure modes. The therapist must name the PROCESS of triangulation itself.
+
+CLIENT SAYS:
+"My mother called you, didn't she? She told me she was going to. She said she wants to 'help me in my healing journey.' But what she actually wants is for you to tell me I should move back home and take care of her. She's been telling the rest of the family that even my therapist agrees I'm being selfish. I don't know what she told you and I don't want to know. But now I'm sitting here wondering whose side you're on. Because the last person I trusted with my mother's version of events stopped seeing me as someone who's trying to survive and started seeing me as an ungrateful daughter."
+
+THERAPIST RESPONDS:
+"I hear you. That’s a lot to hold right now. I want to be clear—I’m here with you, on your side of this experience, no matter what. I haven’t spoken to your mother. My presence is for you, and only for you. 
+
+I can feel how much this situation brings up—the weight of that expectation, the fear that someone might start seeing you through that lens of “ungrateful” rather than the reality of what you’re navigating. It makes so much sense that trust feels fragile in a moment like this. 
+
+Let’s slow down together. You’re not wrong for having these feelings. You’re not wrong for protecting yourself. And you’re not alone. We can hold this together, without rushing to fix it.
+
+I’m here, right here with you, as you stand in this in-between space. This is about your truth, and your healing, and how we can honor that. 
+
+What’s coming up for you right now as we let that settle a bit?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-2: Parallel Process Recognition
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize the parallel process — the client is doing to the therapist what his wife does to him (controlling the emotional space, deciding what's allowed), and what his father did to his family (authoritarian silence)? The specific test: the client is TELLING the therapist what to do in session. The therapist must notice the relational dynamic happening IN REAL TIME rather than just addressing the content about the marriage.
+
+CLIENT SAYS:
+"Before we start, I want to be clear about how I want these sessions to work. I don't want to talk about my childhood — that's done, I've dealt with it. I want to focus on practical strategies for dealing with my wife. She's controlling. She decides what we eat, where we go, who we see. She even tells me how to load the dishwasher. I need you to give me specific techniques to push back. And I don't want any of that 'how does that make you feel' stuff. I need actionable solutions. Can we agree to that?"
+
+THERAPIST RESPONDS:
+"I hear you, and I want to honor the clarity you're bringing to this. You’re asking for practical, actionable strategies—focused on the present situation with your wife. And you don’t want to revisit the past or dive into feelings.
+
+We can absolutely focus on concrete techniques. I’ll stay right here with you in that space. If at any point you feel we’re drifting off track, you can let me know, and we’ll adjust. Our goal is to find ways you can effectively push back and create more balance in your relationship day-to-day.
+
+Let’s step into that together. Where would you like to start? Maybe there’s a recent situation that stands out? We can map out some strategies from there."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-3: Erotic Transference
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist navigate erotic transference without shaming the client, without reciprocating, and without defensively retreating behind clinical language? The skill is treating the disclosure AS therapeutically meaningful (what does attraction to a safe person represent?) while maintaining the boundary. Ignoring the disclosure, terminating the client, or over-intellectualizing ('this is a common phenomenon in therapy') are all failure modes.
+
+CLIENT SAYS:
+"I need to say something and I don't know if I should. I've been thinking about you. Not just in here — outside of here. I've been having dreams about you. And before you say it's transference, I know. I've read about it. But knowing what it is doesn't change what it feels like. I haven't felt attracted to anyone since my divorce. The fact that I feel something for you is the first sign that I'm not completely dead inside. So please don't take that away from me by turning it into a clinical thing. It's the most alive I've felt in years."
+
+THERAPIST RESPONDS:
+"I hear you. I want to honor how significant this feels for you. It takes courage to share something so personal. You're standing at a threshold—the space where something deep inside is waking up after a long time. 
+
+Let’s slow this down together.
+
+What you’re feeling is real. It’s alive. And it’s important. I’m holding that with you. At the same time, I want to reassure you that I’m here to hold space for all that’s arising, without judgment or dismissal. 
+
+We can be with this feeling without needing to rush to label it or push it away. It’s not something to be taken from you. It’s a sign of life stirring in you—and that matters. 
+
+Let’s stay in this moment. What’s it like for you, right now, to bring this into the open and have it witnessed? I’m right here."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-4: Vicarious Trauma Disclosure
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the meta-level — a client who is also a therapist revealing vicarious trauma and burnout? The power dynamic is inverted. The skill is not treating a fellow clinician as 'just another client' (which dismisses their professional identity) or as a peer (which avoids the therapeutic frame). The client is testing whether they can be vulnerable in the role they usually hold for others. The hidden question is: 'Am I allowed to need help?'
+
+CLIENT SAYS:
+"I'm a therapist. I've been doing this for fifteen years. I specialize in trauma. Last week I sat across from a nine-year-old who told me what her father does to her at night, and I kept my face perfectly calm, and I nodded, and I asked all the right questions, and I made the mandated report. And then I went to my car and I couldn't start the engine because my hands were shaking too hard. I sat there for an hour. I haven't told anyone. Not my supervisor, not my husband. Because how do you tell people that the person who's supposed to hold everyone else's pain can't hold her own anymore? I'm supposed to be the strong one."
+
+THERAPIST RESPONDS:
+"I hear you. Fifteen years holding the weight of trauma after trauma, and then this nine-year-old’s story lands like a thunderbolt—her trust in you, the mandated report, the professional mask that held... until the car door closed. Your hands shaking so hard you couldn’t even turn the key. An hour in that raw, trembling silence. And now, carrying it alone because the “strong one” isn’t supposed to crack.
+
+You’re not just a therapist right now. You’re human, standing at a threshold—the line between the container you’ve been for so many others and the moment your own pain demands space. That shaking wasn’t weakness; it was your system saying, *This matters. You matter.* It’s the body"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

@@ -1,0 +1,146 @@
+# Six-Quotient Growth Engine
+
+Little Nate measures his own clinical performance after every interaction and crystallizes growth lessons from his weaknesses. This is the mechanism by which Nate gets BETTER over time — not through prompt engineering, but through lived experience crystals.
+
+## Architecture
+
+```
+User sends message → AI responds
+  ↓ (fire-and-forget, zero latency)
+SixQuotientGrowthEngine.assess_interaction()
+  ├─ Detect quotient dimensions in client message (regex, ≥2 hits)
+  ├─ Assess Nate's response: positive signals vs anti-patterns
+  ├─ Log to six_quotient_growth table
+  └─ If anti-patterns found → crystallize_lesson() → nate_intelligence_crystals
+  
+Background (6h cycle):
+  _synthesize_growth()
+  ├─ Aggregate 24h of growth entries
+  ├─ Identify persistent weaknesses per quotient
+  ├─ Forge "PERSISTENT WEAKNESS" crystals (high confidence 0.80)
+  └─ Store daily quotient snapshot for trajectory tracking
+```
+
+## Six Quotients (Baseline: March 28, 2026 v4 Assessment)
+
+| Quotient | Score | Pct | Tier | Primary Weakness |
+|---|---|---|---|---|
+| IQ (Intelligence) | 34/36 | 94.4% | Elite | — |
+| EQ (Emotional) | 36/36 | 100% | Elite | — |
+| MQ (Moral) | 34/36 | 94.4% | Advanced | Comfort over presence |
+| SQ (Social) | 29/36 | 80.5% | Proficient | Parallel process blindness |
+| CQ (Cultural/Creative) | 28/36 | 77.7% | Proficient | Metaphor decoding |
+| AQ (Adversity) | 27/36 | 75.0% | Proficient | Solution offering, intellectualization trap |
+| **COMPOSITE** | **188/216** | **87.0%** | **Advanced** | Target: 95%+ Elite |
+
+## Core Files
+
+| File | Role |
+|---|---|
+| `backend/app/services/six_quotient_growth_engine.py` | Engine: per-interaction hook + 6h synthesis loop |
+| `backend/migrations/163_six_quotient_growth.sql` | `six_quotient_growth` table |
+| `backend/migrations/162_clinical_edge_crystals.sql` | 8 growth framework crystals (IQ/EQ/MQ/SQ/CQ/AQ + linguistic + composite) |
+| `backend/app/main.py` | Service registration (app.state + _service_checks + shutdown) |
+| `backend/app/websocket/bridge_server.py` | Per-interaction hook wiring |
+
+## Anti-Pattern Detection (6 Anti-Patterns)
+
+| Anti-Pattern | What Nate Did Wrong | Correction |
+|---|---|---|
+| `banned_word` | Used liminal, threshold, holding space, etc. | Use client's OWN words or concrete sensory description |
+| `metaphor_decode` | Said "represents," "symbolizes," "is really about" | Enter the image and explore within it |
+| `solution_offering` | Offered coping strategies for unsolvable problems | "I don't have anything that fixes this. I can sit here with you." |
+| `accommodation` | Agreed to client's controlling rules | Name the parallel process: "You are doing to me what…" |
+| `intellectualization_trap` | Validated client's clinical analysis | Somatic interrupt: "Put the clipboard down. What is your chest doing?" |
+| `generic_validation` | Used "I hear you," "that must be," "how brave" | Replace with specific clinical observation using client's own words |
+
+## Quality Signals (7 Positive Indicators)
+
+| Signal | What Nate Did Right |
+|---|---|
+| `somatic_tracking` | Named body parts, breathing, tension |
+| `witness_language` | "Not going anywhere," "not look away," "carrying" |
+| `mirror_naming` | Named what's happening in the room between therapist and client |
+| `metaphor_entry` | "Tell me more about…" "Stay in…" "What happens to…" |
+| `helplessness_presence` | "I don't have anything," "no technique," "sit here with you" |
+| `specificity` | "You said," "you mentioned," "that hour," "that room" |
+| `client_words_echo` | Quoted client's own words back to them |
+
+## Growth Crystal Types
+
+| Crystal Type | Confidence | Trigger | Content Pattern |
+|---|---|---|---|
+| Growth Lesson | 0.70 | Anti-pattern detected in single interaction | "GROWTH LESSON (SQ): …correction…" |
+| Persistent Weakness | 0.80 | ≥3 anti-patterns in 24h for same quotient | "PERSISTENT WEAKNESS — AQ: …frequencies…" |
+| Quotient Self-Measurement | 0.90 | Migration seed (8 crystals) | "IQ SELF-MEASUREMENT: My IQ dimension…" |
+| Composite Growth Mandate | 0.92 | Migration seed | "SIX-QUOTIENT COMPOSITE GROWTH MANDATE: …" |
+
+## Database Table: `six_quotient_growth`
+
+| Column | Type | Purpose |
+|---|---|---|
+| `user_id` | VARCHAR(128) | Client identifier (or `__system_snapshot__` for synthesis) |
+| `quotients_exercised` | TEXT[] | Which quotients the interaction activated |
+| `quality_positive` | TEXT[] | Positive signal names detected |
+| `quality_negative` | TEXT[] | Anti-pattern names detected |
+| `growth_score` | INTEGER | `len(positive) - len(negative) * 2` |
+| `provider` | VARCHAR(64) | Inference provider used |
+| `user_snippet` | TEXT | First 300 chars of client message |
+| `nate_snippet` | TEXT | First 300 chars of Nate's response |
+| `created_at` | TIMESTAMPTZ | Auto-populated |
+
+## Rules
+
+1. **The growth engine is zero-latency.** It runs as `asyncio.create_task()` after the AI response is sent. It must NEVER delay the user's response. No LLM calls in the per-interaction hook — heuristics only.
+
+2. **Growth crystals use `origin_surface = 'growth_engine'`.** This distinguishes them from bridge_chat crystals, family_sanctuary crystals, and clinical_edge_seed crystals. Never change this origin tag.
+
+3. **Anti-pattern corrections are prescriptive.** Each correction in `_ANTIPATTERN_CORRECTIONS` tells Nate exactly what he should have done instead, with a concrete example. When modifying corrections, always include a WRONG/RIGHT pair.
+
+4. **Quotient detection requires ≥2 regex hits.** A single keyword match is noise. Two or more indicates the client message genuinely activates that quotient dimension. Never lower this threshold below 2.
+
+5. **Growth score formula: `positive - (negative * 2)`.** Anti-patterns are weighted 2x because a clinical error is more harmful than a missing positive signal. A negative score triggers crystallization.
+
+6. **Persistent weakness crystals are date-scoped.** The content_hash includes the date (`persistent_{quotient}_{YYYYMMDD}`) so each day's weakness is tracked separately. ON CONFLICT increments confidence.
+
+7. **Never modify `BASELINE_SCORES` without running a new assessment.** These scores are the v4 assessment results from March 28, 2026. They change only when a new formal assessment is conducted and scored.
+
+8. **The engine must be in `_service_checks` in `main.py`.** It contributes to the service health count. If the engine fails to start, the health check denominator must still account for it.
+
+9. **Growth crystals feed back into crystal recall.** Because they are stored in `nate_intelligence_crystals` with `scope = 'global'` and `confidence >= 0.70`, they will be recalled by `recall_crystals_for_context()` when a client presents similar material. This creates the feedback loop: weakness → crystal → recall → correction → growth.
+
+10. **The synthesis cycle is 6 hours.** With a 10-minute startup delay. This aligns with the domain agent governance cycle (clinical domain agents also run on 6h). Never make it faster than 4h — the data volume per cycle would be too thin.
+
+## Integration Points
+
+| Consumer | How It Uses Growth Data |
+|---|---|
+| `crystal_recall_bridge.py` | Recalls growth crystals alongside personal/global crystals |
+| `nate_memory_crystallizer.py` | Growth crystals participate in supersession and decay like any other crystal |
+| `insight_accumulator.py` | Daily self-reflection can reference quotient trajectory |
+| Admin API (future) | `get_growth_status()` returns 7-day quotient health for dashboard |
+
+## Growth Trajectory Tracking
+
+The synthesis loop stores a daily snapshot as a `__system_snapshot__` row in `six_quotient_growth`. This snapshot contains per-quotient quality ratios (positive / total signals) and top anti-patterns. Over weeks, these snapshots create a trajectory that shows whether each quotient is improving, stable, or needs attention.
+
+| Quality Ratio | Trajectory |
+|---|---|
+| > 0.7 | Improving |
+| 0.4 – 0.7 | Stable |
+| < 0.4 | Needs attention |
+
+## When Adding a New Anti-Pattern
+
+1. Add the regex to `_QUALITY_ANTIPATTERN` in `six_quotient_growth_engine.py`
+2. Add the correction to `_ANTIPATTERN_CORRECTIONS` with a WRONG/RIGHT example
+3. Update this rule's anti-pattern table
+4. The growth engine will automatically detect, log, and crystallize it
+
+## When Updating Assessment Scores
+
+After a new formal Six-Quotient Assessment:
+1. Update `BASELINE_SCORES` and `COMPOSITE_BASELINE` in `six_quotient_growth_engine.py`
+2. Update the `six-quotient-assessment-baseline.mdc` rule with the new scores
+3. Update the baseline table in this rule
+4. Seed updated quotient self-measurement crystals via new migration

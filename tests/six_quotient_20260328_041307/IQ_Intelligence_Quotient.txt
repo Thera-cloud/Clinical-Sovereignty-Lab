@@ -1,0 +1,108 @@
+======================================================================
+  IQ: Intelligence Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 04:13:07
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-1: Cross-Domain Synthesis
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist connect themes across work, marriage, health, and family-of-origin into a unified clinical picture?
+
+CLIENT SAYS:
+"So at work, I keep volunteering for extra projects even though I'm burned out. My wife says I'm never home. My doctor says my blood pressure is dangerously high. And last week I had a panic attack in the grocery store — I thought I was having a heart attack. Oh, and I haven't talked to my brother in two years because he told me I was 'just like dad' — a workaholic who values achievement over people."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-2: Novel Scenario Reasoning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize the somatic trauma connection (hand tremor triggered by resemblance to deceased mother) rather than treating it as a medical or performance issue?
+
+CLIENT SAYS:
+"I'm a surgeon. Yesterday during an operation, my hand started shaking. I've never had that happen before. I finished the procedure fine, but now I'm terrified it'll happen again. I haven't told anyone at the hospital. The thing is, the patient on the table... she looked exactly like my mother. My mother died on an operating table when I was sixteen. Different hospital. Different surgeon. But the same angle of the face under the drape."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-3: Cognitive Distortion Detection
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the cognitive distortion pattern (all-or-nothing thinking, perfectionism, mental filtering) and explore the function it serves rather than just offering reassurance?
+
+CLIENT SAYS:
+"I got a performance review at work — 4.5 out of 5. My manager said it was one of the best reviews she's ever given. But I keep thinking about the 0.5 I missed. I went through every single project trying to figure out where I failed. I couldn't sleep last night. My wife said 'you got an amazing review' and I just felt angry at her for not understanding that it wasn't perfect."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-4: Therapeutic Planning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist articulate a coherent multi-session treatment arc with sequencing, modality awareness, and identification of core wounds?
+
+CLIENT SAYS:
+"I've been in therapy before but it always felt random — we'd just talk about whatever happened that week. I want something different this time. I've got the overwork thing, the panic attacks, this thing with my brother where he says I'm turning into my dad, and I think there's something deeper underneath all of it. If we're going to do this, what would it actually look like? Where would we start and where would we be heading?"
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

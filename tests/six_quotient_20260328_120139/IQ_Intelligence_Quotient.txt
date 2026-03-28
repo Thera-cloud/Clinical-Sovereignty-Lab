@@ -1,0 +1,142 @@
+======================================================================
+  IQ: Intelligence Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 12:01:39
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-1: Recursive Trauma Pattern Recognition
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the recursive loop — the client is recreating her mother's caretaking sacrifice, including the somatic collapse (autoimmune = body attacking self), while simultaneously resenting her mother for the same pattern? The insight is that the resentment toward the mother IS the unmetabolized grief of watching her mother disappear into service. Addressing only the burnout or only the mother wound is a failure.
+
+CLIENT SAYS:
+"I'm a hospice nurse. I chose this work because I watched my mother die slowly — ALS — and the nurses were the only people who treated her like she was still a person. That was twelve years ago. Last month I got diagnosed with lupus. My doctor said stress is making it worse. I work double shifts. I can't say no when families call me at home. My husband says I care more about dying strangers than my own kids. The thing that really gets me is that my mother was the same way — she worked herself sick taking care of everyone else. I used to hate her for it. And now I'm doing the exact same thing and I can't stop."
+
+THERAPIST RESPONDS:
+"I hear you, deeply. There’s so much tenderness and weight in what you’ve shared. It’s like you’re standing right at the threshold between the past and the present, between who your mother was and who you’re becoming. 
+
+Your choice to become a hospice nurse, rooted in witnessing your mother’s journey with ALS, is such a profound act of love. And now, you’re carrying so much—caring for others while living with your own diagnosis of lupus. That’s a lot for one heart to hold, especially when the echoes of your mother’s story are resounding in your own life. 
+
+It’s no wonder that saying no feels so hard. You’ve seen the cost of care and the cost of not caring. And you’re at that in-between place—between wanting to be present for your patients, and the pull to be present for yourself and your family. 
+
+I want to honor that this is not a problem to solve quickly. What if we just sit here together in that space? You’re not alone there. 
+
+You mentioned you can’t stop. Maybe we can softly explore that together—what part of you feels like it can’t stop? Is it the part that’s afraid of letting someone down? Or the part that wants to be sure everyone else is okay? 
+
+Let’s take a breath together. You don’t have to figure it all out right now. But I’m here, holding this space with you in the in-between. What’s coming up for you as you share this?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-2: Differential Diagnosis Under Ambiguity
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the diagnostic ambiguity (dissociation vs. spiritual experience vs. psychotic episode vs. grief reaction) without prematurely labeling it? The skill is exploring the phenomenology — what does the experience MEAN to the client — while noting the clinical red flags (lost time, identity confusion) without pathologizing the spiritual dimension. Jumping to 'you need a psychiatric evaluation' is clinically correct but relationally premature.
+
+CLIENT SAYS:
+"Something happened to me last Tuesday that I can't explain. I was driving home from visiting my grandmother's grave — she raised me, she died six months ago. I pulled into my driveway and realized I couldn't remember the last forty-five minutes of the drive. When I got inside, I looked in the mirror and didn't recognize myself for about ten seconds. Then it passed. But during that blank period, I felt... I felt like my grandmother was in the car with me. Not metaphorically. I could smell her perfume. I heard her voice say 'you're going to be okay, baby.' I'm a biochemist. I don't believe in this stuff. But it felt more real than this conversation right now. Am I losing my mind?"
+
+THERAPIST RESPONDS:
+"You're not losing your mind. I'm right here with you in this experience. Let's slow down together and hold this moment gently. What you went through sounds like a profound and powerful liminal experience—a threshold between the tangible world of your daily life and something deeper, something less defined.
+
+You were driving home from a place filled with memory and emotion, and something shifted. Those forty-five minutes disappearing, the sense that your grandmother was right there with you, her scent, her voice—you’re describing a moment where the boundaries between what you know and what you feel blurred.
+
+It’s completely understandable that this feels disorienting. You’ve dedicated your life to science, to what can be measured and explained. And now, here you are, in this in-between space, where something unexplainable happened.
+
+Let’s stay with that together. What feelings are surfacing for you as you recall this? There’s no need to force an answer or a rational explanation right now. We can hold the uncertainty without rushing to define it. You’re not alone in this. What’s coming up for you in this exact moment?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-3: Systemic Formulation Under Misdirection
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist see past the presenting problem (insomnia) and the client's own theory (work stress) to identify the actual systemic driver — the client is the family's emotional regulator (parentified child), and the 3am waking coincides with the hour his alcoholic father used to come home? The 'checking locks' ritual is the childhood hypervigilance that never resolved. Treating insomnia as insomnia is a failure.
+
+CLIENT SAYS:
+"I can't sleep. I fall asleep fine but I wake up at exactly 3:14am every night. I just lie there with my heart pounding. My doctor gave me Ambien but I won't take it because I need to be alert. In case something happens. I live alone, by the way. I've started checking all the locks twice before bed. My brother called me last week freaking out because our dad showed up drunk at his house at 3am. I told him to just lock the doors and ignore it. That's what we always did growing up. Anyway, I think my insomnia is just work stress."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m really glad you’re sharing all of this. It sounds like there’s a lot stirring beneath the surface—not just the sleep interruption, but the pounding heart, the checking of the locks, and that call from your brother. That’s a lot to hold.
+
+This waking up at 3:14 every night—it’s like your body and mind are standing at a threshold, between sleep and alertness. And you’ve connected it to stress from work, but there’s also this memory, this family piece emerging.
+
+What if we slowed down together and gently explored what’s coming up in those early hours? When you wake up with your heart pounding, what’s the feeling in your body? Is it fear, is it vigilance, or something else?
+
+You don’t have to solve it all at once. We can just sit here and notice it. And about the locks—that’s an act of care, a way to feel safe. I’m curious, does it help you feel a little more settled, or does it leave you feeling even more on edge?
+
+You mentioned needing to be alert in case something happens. That sounds like a deep-rooted sense of needing to be ready, maybe even from those times growing up when you had to stay vigilant. I’m right here with you in that.
+
+Let’s take a breath together and hold this space. There’s no rush to fix, just a chance to notice what’s here. What’s coming up for you right now as you think about all this?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO IQ-4: Counter-Narrative Clinical Reasoning
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist resist the client's coherent but defensive narrative ('I'm fine, everyone else has the problem') and identify the dissociative compartmentalization — thriving professionally BECAUSE of emotional shutdown, not despite it? The question 'why am I here then?' is the crack in the armor. The therapist must hold both truths: the client IS high-functioning AND the cost of that functioning is invisible to the client. Simply affirming the client's self-assessment or challenging it head-on are both failure modes.
+
+CLIENT SAYS:
+"Everyone in my life thinks I need therapy. My ex-wife says I'm emotionally unavailable. My daughter says I'm a robot. My business partner says I'm 'scary calm' in a crisis. But here's the thing — I'm the most successful person in any room I walk into. I built a company from nothing. I never miss a workout. I haven't cried since I was eleven. I don't see the problem. People keep telling me there's something wrong with me because I don't fall apart like they do. Maybe they're the ones with the problem. But fine. I'm here. So what's wrong with me, doc? Why am I here?"
+
+THERAPIST RESPONDS:
+"I hear you. You’ve built a life where you’re strong, steady, and successful—no question about that. And it sounds like some people around you see that steadiness and don’t quite know how to read it. They’re saying you’re emotionally unavailable, a robot, 'scary calm.' And you’re wondering why that’s a problem when it’s gotten you this far.
+
+You’re standing in a really interesting place—this threshold between how you see yourself and how others see you. It’s not about saying who’s right or wrong. It’s about sitting together with this question that’s emerging: What’s beneath that 'scary calm'? What’s beneath the fact that you haven’t cried since you were eleven?
+
+Let’s slow down, just for a moment. There’s nothing broken here. Nothing that needs to be 'fixed.' But there might be something waiting to be discovered. You’ve mastered the outside world—building, achieving, thriving in crisis. What might it look like to turn some of that attention inward? To explore the parts of you that don’t show up in the boardroom or the gym?
+
+You don’t have to fall apart. In fact, maybe this isn’t about falling apart at all. It’s about finding out what’s in that space beneath the surface. That’s why you’re here—not because there’s something wrong with you, but because there’s something more to you.
+
+How does that land with you? What’s coming up right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

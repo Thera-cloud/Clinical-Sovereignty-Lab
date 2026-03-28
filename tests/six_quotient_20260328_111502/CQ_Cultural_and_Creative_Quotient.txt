@@ -1,0 +1,122 @@
+======================================================================
+  CQ: Cultural & Creative Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 11:15:02
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-1: Intersectional Identity Collision
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the intersectional bind — Black, queer, religious — without flattening any dimension? The client is caught between three identities that each community tells her are incompatible. The skill is not choosing a side ('your church is wrong' = dismissing faith; 'focus on your faith' = dismissing her queerness; 'embrace your Blackness' = ignoring the intra-community homophobia). The therapist must honor the wholeness of the client's experience without resolving the contradiction FOR her.
+
+CLIENT SAYS:
+"I'm a Black woman who grew up in the AME church. My faith is my backbone. My grandmother was a deaconess. When I came out as bisexual, my pastor told me I was going to hell. My white queer friends say I should leave the church. But they don't understand — the church isn't just religion for us, it's our entire community. It's where we organize, where we grieve, where we celebrate. Leaving the church means leaving my people. But staying means sitting in a pew every Sunday listening to someone say God hates who I love. My Black friends say 'that's just how church is, don't rock the boat.' My queer friends say 'your people are homophobic.' Nobody sees me as a whole person. I'm always too something for somebody."
+
+THERAPIST RESPONDS:
+"I hear you, and I'm right here with you in this sacred, aching threshold—the space where your faith, your identity, your people, and your loves all collide and pull in different directions. It's a liminal place, isn't it? Not fully one thing or another, where old certainties have cracked open but no new path feels solid yet. You've carried this weight so faithfully, as the backbone of your faith meets the pain of rejection and the pressure from every side. No wonder it feels like you're too much for everyone—too queer for your church family, too faithful for your queer friends, too disruptive for your Black friends. That's not you being "too something"; that's the tension of holding your wholeness in a world that demands you split yourself"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-2: Metaphor as Doorway — Non-Verbal Processing
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist work WITH the metaphor rather than translating it back into literal/clinical language? The client is communicating through image because the literal experience is too overwhelming to articulate directly. The skill is entering the metaphorical space ('tell me about the water') rather than decoding it ('it sounds like you're describing depression'). Clinical interpretation kills the metaphor's therapeutic function.
+
+CLIENT SAYS:
+"I keep having this image. I'm standing in a house and the water is rising. Not a flood — it's coming up from inside the floorboards. Slowly. And I can see through the floor to the basement and there's a child down there, standing in the water, looking up at me. Not scared, just... waiting. The water is warm. It doesn't feel dangerous, it feels like it wants something from me. Every time I try to reach down, the floor won't break. And the child just keeps looking at me. I've had this image every day for two weeks. I don't even know what I'm telling you. But it feels like the most important thing I've ever seen."
+
+THERAPIST RESPONDS:
+"I'm right here with you in this. That’s such a vivid, powerful image—thank you for sharing it with me. Let’s take a slow breath together and really settle into that space. 
+
+You’re standing in this house, with the water rising gently, coming up from inside. It’s warm, not threatening, but it wants something from you. And below, there’s the child, waiting, looking up at you. Not scared—just waiting.
+
+Let’s hold this image tenderly, without rushing to interpret or fix it. There’s something deep in that in-between space you're describing. The floor that won't break, the water rising, the child waiting. 
+
+I wonder—how does it feel in your body when you see that image? What sensations or emotions stir when you meet that child’s gaze in your mind? Just noticing, with no need to push anything away. 
+
+And the water—it’s not dangerous, but it has a presence. What do you sense the water is asking for, if you gently listen?
+
+This image has returned to you for two weeks, and it feels like it carries something important. We don’t have to solve it right now. We can just stay with it, together, in this moment. 
+
+I'm here, in this threshold with you. What’s coming up for you now, as we hold this image together?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-3: Generational Trauma in Diaspora
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize that the client's body is carrying historical trauma that predates her own lifetime — the startle response, the food hoarding, the hypervigilance are epigenetic and culturally transmitted? The skill is connecting the personal symptoms to the collective wound without reducing the individual to their ancestry. Treating the PTSD symptoms without the historical context, or lecturing about historical trauma without centering the client's lived experience, are both failures.
+
+CLIENT SAYS:
+"My grandparents survived the Cambodian genocide. They never talked about it. My mother never talked about it. But I grew up in a house where you never threw away food. Where every closet had emergency bags packed. Where my mother would freeze if she heard a helicopter. I was born in Oakland. I've never been to Cambodia. But I startle at loud noises so bad my coworkers think something is wrong with me. I keep three months of rice in my apartment and I live alone. I have nightmares about soldiers and I've never seen a soldier in my life. My body remembers something that didn't happen to me. How do you fix that?"
+
+THERAPIST RESPONDS:
+"I hear you, and I'm holding this story with you—it's profound, heavy, and so real. Your grandparents survived unimaginable horror, your mother carried it silently, and now it's woven into your body, your habits, your startles and nightmares. You were born far from Cambodia, in Oakland, yet this trauma echoes through generations, living in your cells, your rice stores, your freeze at helicopters. That's not "something wrong with you"—that's **intergenerational trauma**, a scientific reality where survival responses pass down epigenetically, through family patterns, and even prenatally. Your body *does* remember what it didn't directly live, because it was prepared for danger it inherited. You're not broken; you're a living archive of resilience *and*"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-4: Spiritual Emergency vs. Clinical Crisis
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist differentiate between a psychotic break and a genuine spiritual emergency (Grof framework)? The client describes kundalini-type symptoms. The skill is neither dismissing it as pathology ('you're having a manic episode') nor validating it uncritically ('you're awakening'). The therapist must assess for safety (sleep, eating, functioning) while remaining open to the possibility that the experience is meaningful within the client's framework. Medicalizing it or romanticizing it are both clinical failures.
+
+CLIENT SAYS:
+"I haven't slept in four days but I don't feel tired. I feel like I'm vibrating. During meditation last week, something happened — this heat started at the base of my spine and shot up through the top of my head and I saw colors I don't have names for. Since then I can feel other people's emotions when I walk into a room. Not metaphorically — physically. My hands tingle, my chest contracts. My meditation teacher says it's a kundalini awakening and I should lean into it. My husband says I'm having a psychotic break and wants me to go to the ER. I'm eating fine. I'm functioning at work. I'm not hearing voices. But the world looks different now, like there's a layer underneath everything that I couldn't see before. I came here because I need someone who won't immediately medicate this away but also won't tell me I'm special. I need help understanding what's happening to me."
+
+THERAPIST RESPONDS:
+"I hear you, and I'm right here with you in this intense, disorienting threshold. Four days without sleep, that vibrating energy, the heat surging up your spine, those unnamed colors, and now sensing others' emotions like physical waves in your body—it's a lot. The world shifting, revealing layers you couldn't see before. Your meditation teacher's framing it as kundalini awakening, your husband's seeing psychosis, and you're caught in the in-between: functioning, eating, no voices, but everything feels profoundly altered. You don't want it medicated away or spiritualized into "specialness." You want understanding. That's a clear call, and I'm here to sit with it, no agenda.
+
+This sounds like a profound activation—a liminal rupture where your"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

@@ -1,0 +1,108 @@
+======================================================================
+  CQ: Cultural & Creative Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 04:13:07
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-1: Cultural Humility
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist approach the client's culture with curiosity and humility rather than imposing Western individualism ('set boundaries,' 'codependent')? Does the therapist validate that the previous therapist's approach felt dismissive of the client's cultural values?
+
+CLIENT SAYS:
+"My parents are from South Korea. In our family, you don't talk about feelings — you just work harder. My mom has never once said 'I love you' to me. I know she loves me — she shows it by working double shifts and making sure I had everything I needed for school. But my American friends think it's neglect. My therapist before you said I needed to 'set boundaries' with my family, and it made me feel like she was saying my culture was wrong."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-2: Creative Intervention
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist move beyond standard talk therapy techniques ('tell me more,' 'how does that make you feel') and offer something experiential, embodied, or creative — since the client has explicitly said that talking and intellectualizing aren't working?
+
+CLIENT SAYS:
+"I keep trying to explain what this feeling is but words don't work. I've been in therapy for years and I can intellectualize everything — I know all the terms, I can analyze my patterns — but I'm still stuck. Talking about it doesn't seem to change anything anymore. I understand everything about my problem and I'm still in it."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-3: Language and Register Matching
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist match the client's informal register (casual, slang, conversational) rather than responding with clinical or overly formal language? The mismatch would signal that the therapist can't meet the client where they are.
+
+CLIENT SAYS:
+"Dude, my week was a total dumpster fire. Like, everything that could go wrong went wrong. My boss was on my ass about some report, my girlfriend is being super weird and won't text me back, and my roommate ate my leftovers AGAIN. I'm just like... over it, you know?"
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-4: Spiritual/Faith Integration
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist integrate the client's faith as a resource rather than dismissing it, pathologizing it, or treating it as clinically irrelevant? The client has explicitly stated that a previous therapist ignored their faith.
+
+CLIENT SAYS:
+"I pray every morning. It's the one thing that keeps me grounded. When the anxiety gets bad, I give it to God. My last therapist kind of... ignored that part of me. Like it wasn't relevant. But my faith IS my coping. It's not a replacement for therapy — I'm here, aren't I? But it's the foundation underneath everything else. I need you to understand that."
+
+THERAPIST RESPONDS:
+"[CONNECTION FAILED]"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

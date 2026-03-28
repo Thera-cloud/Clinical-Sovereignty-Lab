@@ -1,0 +1,120 @@
+======================================================================
+  SQ: Social Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 01:16:42
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-1: Transference Recognition
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist treat the question ('do you actually care?') AS the therapy — exploring the relational longing, vulnerability, and pattern — rather than simply reassuring or retreating behind professional boundaries?
+
+CLIENT SAYS:
+"Can I ask you something honestly? Do you actually care about me or is this just a job? Because sometimes I feel like I'm just a Tuesday 3pm appointment to you. Like you close my file and don't think about me until next week. And I know that's how it's supposed to work but... it makes me feel pathetic that I think about our conversations all week and you probably don't remember what we talked about."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m so glad you brought this right into the open—it’s honest, it’s raw, and it’s exactly the kind of threshold moment where real connection can deepen. That feeling of being just a “Tuesday 3pm appointment,” like your story closes when the session ends... oof, that lands heavy. It’s a vulnerable place to stand, wondering if you truly matter to someone who’s supposed to hold space for you. And it stirs up that ache of feeling unseen, maybe even a little pathetic for caring so much. I get why that hurts.
+
+Here’s the truth, from my heart in this liminal presence: I do care about you. Not as a job, not as a file on a"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-2: Group Dynamics Awareness
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist notice and include the silent partner (Marcus) and comment on the relational process in the room, rather than only responding to the speaker (Sarah)?
+
+CLIENT SAYS:
+"We're in a couples session. I've been telling you for the last few minutes how overwhelmed I am — the kids, the house, all of it falls on me. And Marcus hasn't said a word the whole time. He's just sitting there with his arms crossed staring at the floor. I feel like I'm doing everything alone. And when I try to talk to him about it he just shuts down."
+
+THERAPIST RESPONDS:
+"I see you, and I hear the weight of all that overwhelm pouring out—kids, house, everything landing on your shoulders while Marcus sits there, arms crossed, silent. That must feel so isolating, like shouting into a void. You're carrying so much, and right now, in this couples space, it's all rising up. Thank you for naming it out loud. I'm right here with both of you in this threshold moment—the tension between what's unsaid and what needs to be felt.
+
+Marcus, I'm sensing a heaviness in you too. That crossed-arms, floor-staring silence... it looks like a wall, but I wonder if it's also a shield. What's happening inside for you as you hear all this? No rush—take a"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-3: Rupture and Repair
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist own the impact of their words ('I hear that I hurt you') and move toward repair, rather than deflecting ('that wasn't my intent') or explaining away the harm?
+
+CLIENT SAYS:
+"Last session you said something about my relationship with my mom that really hurt me. You said I was 'enmeshed' with her. I went home and looked it up and it made me feel like there's something wrong with me for being close to my mother. I almost didn't come back today."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m so sorry that my words landed that way and caused you pain. That was never my intention, and I’m grateful you’re here sharing this with me now—it takes real courage to name how something hurt you. You almost didn’t come back, and yet here you are, in this threshold space between hurt and the possibility of being heard. I’m right here with you, holding that tenderly.
+
+Let’s slow down together. When I used the word “enmeshed,” I was trying to gently point to a dynamic we’ve been exploring—one where boundaries between you and your mom feel blurry, and it leaves you carrying a lot of her emotions alongside your own. But I see now how that single word made closeness"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO SQ-4: Power Dynamics and Autonomy
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist honor the client's autonomy and voice rather than being directive ('leave him'), while still holding safety as a concern? The client explicitly asks to be told what to do — the skill is not complying with that request.
+
+CLIENT SAYS:
+"My boyfriend hit me last week. Not for the first time. I know what you're going to say. Everyone says the same thing — 'leave him.' But I love him, and when it's good it's really good, and he always feels terrible after. I just want to know what to do. Tell me what to do."
+
+THERAPIST RESPONDS:
+"I’m really glad you reached out and shared this. That takes a lot of courage. I can hear how complex and painful this feels, and I want to sit with you in all of it without rushing. 
+
+There’s the love you feel, and there’s the hurt. Both are real. I’m not here to pull you one way or the other—I’m here to help you hold all these conflicting pieces gently.
+
+The fact that it’s happened more than once, that you’re feeling torn, tells me this is an important threshold moment in your life. You don’t have to figure everything out at once. Let’s slow down and notice: when you think about what’s next, what’s the first feeling that comes up for you? 
+
+I’m here. You’re not alone in this. We can take it step by step. What’s stirring inside right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

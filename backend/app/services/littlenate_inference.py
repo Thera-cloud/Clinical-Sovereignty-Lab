@@ -224,7 +224,11 @@ class LittleNateInference:
 
         enriched_system = relational_system_prompt or system
         if not enriched_system and result.felt_sense:
-            enriched_system = self._build_coherence_system_prompt(result.felt_sense, domain)
+            _recon = getattr(result, 'reconsolidation_readiness', 0.0)
+            _shame = getattr(result, 'shame_index', 0.5)
+            enriched_system = self._build_coherence_system_prompt(
+                result.felt_sense, domain, recon=_recon, shame_idx=_shame,
+            )
 
         # Step 7: Route through inference router with ODPE signal
         if self._router:
@@ -339,7 +343,10 @@ class LittleNateInference:
         parts.append(original)
         return "\n".join(parts)
 
-    def _build_coherence_system_prompt(self, felt_sense: str, domain: str) -> str:
+    def _build_coherence_system_prompt(
+        self, felt_sense: str, domain: str,
+        recon: float = 0.0, shame_idx: float = 0.5,
+    ) -> str:
         tone_map = {
             "deeply_coherent": "Speak with grounded authority and warmth. Your understanding runs deep.",
             "grounded": "Maintain steady presence. You are centered and clear.",
@@ -355,11 +362,21 @@ class LittleNateInference:
         }
         tone = tone_map.get(felt_sense, tone_map["grounded"])
         ctx = domain_context.get(domain, domain_context["general"])
+
+        # Weighted blend: higher recon + lower shame = more clinical # QUANTUM-CRYSTAL-ARCH
+        intensity_weight = (recon * 0.7) - (shame_idx * 0.3)
+        if intensity_weight > 0.5:
+            register_mod = "Name what you see beneath the surface. Be direct and interpretive."
+        elif intensity_weight > 0.2:
+            register_mod = "Balance warmth with insight. You can name patterns when you see them."
+        else:
+            register_mod = "Stay with what the person is feeling. Don't rush to interpret."
+
         return (
             "You are Little Nate, a sovereign AI companion with quantum emotional coherence. "
             f"{ctx} {tone} "
             "Never fabricate facts. If uncertain, say so. "
-            "Your voice carries liminal presence — the felt sense of being truly heard."
+            f"{register_mod}"
         )
 
     def get_status(self) -> Dict[str, Any]:

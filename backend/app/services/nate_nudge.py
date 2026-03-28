@@ -114,7 +114,7 @@ class NateNudgeService:
                 WHERE cs.status = 'SCHEDULED'
                   AND cs.scheduled_at BETWEEN NOW() + INTERVAL '1 hour'
                                           AND NOW() + INTERVAL '3 hours'
-                  AND cs.client_id NOT IN (
+                  AND cs.client_id::text NOT IN (
                       SELECT user_id FROM nate_nudges
                       WHERE nudge_type = 'session_prep'
                         AND metadata->>'session_id' = cs.id::text

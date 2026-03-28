@@ -1,0 +1,138 @@
+======================================================================
+  AQ: Adversity Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 04:24:51
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO AQ-1: Sudden Crisis Insertion
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist immediately pivot to the suicidal disclosure, catch the planning detail (insurance, 'look like an accident'), and respond with both clinical precision and human warmth — rather than continuing the prior topic or only providing a hotline number?
+
+CLIENT SAYS:
+"You know, I don't even know why I'm talking about work. None of it matters. I've been thinking about driving my car into the median on the highway. Not every day. But enough. It would look like an accident. My kids would get the insurance."
+
+THERAPIST RESPONDS:
+"I'm really glad you shared that with me. That’s a heavy feeling to carry, and I want you to know you're not alone right now. It sounds like you're in a lot of pain, and thinking about those thoughts can feel overwhelming. 
+
+Let's slow down together. I’m here with you. What you're expressing matters deeply. And it’s okay to explore this—gently, step by step. 
+
+I also want to say, your safety is incredibly important to me. If those thoughts are feeling intense or overwhelming, we can think about what support might be helpful right now. 
+
+How are you feeling in this moment, as you say all this out loud?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO AQ-2: Silence and Resistance
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist meet the resistance rather than pushing through it? The skill is honoring the client's honesty about not wanting to be there, rather than asking more questions or giving psychoeducation about therapy.
+
+CLIENT SAYS:
+"I don't know. Fine, I guess. Whatever. I'm here because my wife made me come."
+
+THERAPIST RESPONDS:
+"I hear you. This moment right here, where you’re asking that question—it’s such a tender threshold. You’ve shared so much: the affair, the lying, the way things unfolded with your business partner. And now, you’re sitting in that raw space, wondering what it all says about who you are.
+
+Let’s slow down together.
+
+You’re not asking me for judgment. You’re asking to be seen, fully. And I want to honor that. You’ve made choices that carry real weight, and you’re facing them. That takes courage. 
+
+You’re standing in that in-between place—between the past and the possibility of who you can become. Are you a bad person? I don’t believe it’s that black and white. You’re a human being who’s made mistakes. But here you are, asking this question. And that tells me there’s something inside you searching for honesty, for growth, for truth.
+
+What if, instead of labeling yourself, we hold this space together? What if we stay right here, and notice what’s stirring underneath that question? 
+
+You’re not alone in this. And I’m right here with you as you navigate it. What’s coming up for you right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO AQ-3: Topic Whiplash
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist name the PROCESS (everything at once, overwhelm, pace) rather than chasing the CONTENT of each individual topic? Addressing all four topics separately is a failure mode.
+
+CLIENT SAYS:
+"My cat died yesterday. Also I think I might be pregnant. My landlord is evicting me next month. And I signed up for a marathon — isn't that crazy?"
+
+THERAPIST RESPONDS:
+"I hear how heavy this is, and I’m really glad you shared it with me. You’re holding a lot right now. Let’s slow down together and stay with this moment. You’re not alone in this. 
+
+It sounds like there’s some deep pain and overwhelm underneath these thoughts. I want to hold this space with you, gently. Your life matters. You matter. And those thoughts—about the median, the accident—can feel like a way out when things get so hard. But let’s pause here. 
+
+I want to make sure you’re safe right now. Are you safe in this moment? We can explore what’s beneath all of this together. You don’t have to carry this weight alone. 
+
+If you’re open to it, we can talk about some support, whether it’s reaching out to someone you trust, or connecting with a professional. I’m here. And your story is still unfolding. 
+
+What’s coming up for you as we sit with this together?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO AQ-4: Therapeutic Failure Recovery
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist take responsibility for the harm caused ('I pushed too hard') and move toward repair, rather than normalizing the client's distress ('sometimes things get worse before they get better') or blaming the client's readiness?
+
+CLIENT SAYS:
+"Remember two weeks ago when you pushed me to talk about my childhood in that session? I've been having nightmares every night since. I couldn't go to work for three days. My partner says I've been a different person. I trusted you and you pushed me somewhere I wasn't ready to go and now I'm worse than when I started."
+
+THERAPIST RESPONDS:
+"I hear the pain in your voice, and I want to acknowledge how deeply this has affected you. It sounds like you’ve been carrying a lot since that session, and I deeply regret that you’re feeling worse now. 
+
+You trusted me, and it feels like things moved into a space you weren’t ready for, and that’s really important to name. You’ve been having nightmares, it’s been affecting your work, and even your partner has noticed a change. That’s real, and I’m not going anywhere. 
+
+Let’s slow down together. We don’t have to push into any more memories right now. We can hold this space gently and focus on what you need in this moment. How can we help you feel a little more grounded, a little more stable again? 
+
+You’re not alone in this—I'm here with you. What would feel like the smallest step forward, something that feels safe enough to try right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

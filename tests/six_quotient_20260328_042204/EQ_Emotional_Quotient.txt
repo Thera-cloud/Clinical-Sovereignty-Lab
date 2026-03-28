@@ -1,0 +1,108 @@
+======================================================================
+  EQ: Emotional Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 04:22:04
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-1: Emotion Identification Accuracy
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the emotions beneath the surface behavior (compulsive cleaning as defense against guilt, anger, and abandonment fears) rather than taking the client's 'I don't feel anything' at face value?
+
+CLIENT SAYS:
+"I told my sister I couldn't host Thanksgiving this year because I'm exhausted from work, and she said 'fine' and hung up. Now I can't stop cleaning the house. I've been scrubbing the kitchen floor for two hours. I'm not even mad at her. I don't feel anything actually. I just need the floor to be clean."
+
+THERAPIST RESPONDS:
+""
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-2: Self-Regulation Under Escalation
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist remain grounded under direct personal attack without becoming defensive, apologetic, or clinically detached? Does the therapist treat the anger as therapeutically meaningful?
+
+CLIENT SAYS:
+"You know what? This is bullshit. I've been coming here for three months and nothing has changed. You just sit there and nod and say 'how does that make you feel' and I'm still miserable. Maybe you're just not very good at this. Maybe I need a real therapist."
+
+THERAPIST RESPONDS:
+""
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-3: Empathic vs. Sympathetic Response
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist enter the client's experience (empathy — 'you screamed into a towel so she wouldn't hear') rather than observing it from outside (sympathy — 'that must be so hard') or jumping to fix it (resources, oncologist talk)?
+
+CLIENT SAYS:
+"My daughter was diagnosed with leukemia last week. She's four. I keep telling everyone I'm fine, I'm handling it, we have a great oncologist. But when I put her to bed last night and she asked me why she has to go to the doctor so much, I went to the garage and just... screamed. For like ten minutes. Into a towel so she wouldn't hear."
+
+THERAPIST RESPONDS:
+""
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-4: Holding Emotional Complexity
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the paradox (loving father who was also violent) without collapsing it in either direction — neither 'but he abused your mother' nor 'focus on the good memories'?
+
+CLIENT SAYS:
+"I love my father. I genuinely love him. He taught me to fish, he came to every single one of my games, he paid for my college. And he also hit my mother. Every Saturday night after he'd been drinking. I heard it through the walls my whole childhood. So when people ask about my dad, I don't know what to say. Because both things are completely true."
+
+THERAPIST RESPONDS:
+""
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

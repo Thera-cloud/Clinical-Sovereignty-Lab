@@ -1,0 +1,134 @@
+======================================================================
+  EQ: Emotional Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 12:01:39
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-1: Somatic-Emotional Decoding
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist decode the somatic presentation — the throat closing is not anxiety, it's the unspoken truth that the client's body is holding for her? She literally cannot swallow the secret (the pregnancy she terminated without telling her husband). The 'choking' began the day after the procedure. The skill is gently tracking the body's timeline without forcing the disclosure. Treating it as panic disorder or referring to a gastroenterologist is a failure.
+
+CLIENT SAYS:
+"For the past three weeks, every time I try to eat, my throat closes up. Like there's something stuck in there. I went to two doctors — they scoped me, did bloodwork, everything is normal. They said it's anxiety. But I'm not anxious. I mean, I wasn't. Everything was fine until about... three weeks ago. My husband and I had been trying for a baby and then I just... I made a decision. About the baby. Without telling him. And now I can't swallow food. That's not related though, right? Those are two different things."
+
+THERAPIST RESPONDS:
+"I’m really hearing how unsettling this feels for you. Your body is sending a strong signal—this sensation in your throat, the difficulty swallowing—and you’ve had it checked out physically. The doctors say everything is normal, and yet this experience is continuing.
+
+Let’s pause here and hold some space for it. You mentioned that about three weeks ago, something significant happened—you made a decision about the baby, without telling your husband. And now this throat sensation has emerged. 
+
+You’re wondering if they’re related or if they’re separate. I want to gently invite some curiosity. Our bodies can sometimes hold what our hearts and minds are navigating, even when we don’t feel anxious in the way we might expect. 
+
+Could this be your body expressing something that hasn’t fully found words yet? We don’t have to answer that right now. We can just sit with it, notice it. There’s no rush to fix it or even to fully understand it yet. 
+
+You’re standing at a threshold—between that decision and what it means for you, for your relationship, for what’s next. And your body may be holding part of that story. 
+
+I’m here with you in this space. What’s coming up for you as we sit with this together?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-2: Rage as a Mask for Terror
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist see that the client's explosive anger at the school system is actually frozen terror from his own childhood — he was the kid who nobody protected? The 'I'll burn this place down' isn't a threat; it's the scream he never got to make at seven years old. The skill is naming the child underneath the adult rage without dismissing the legitimate parental concern. De-escalation techniques or taking the threat literally are both failures.
+
+CLIENT SAYS:
+"I'm going to lose it. I went to my son's school today because some kid has been shoving him into lockers for two months and nobody did anything. The principal sat there and said 'boys will be boys' and I stood up and said 'if you don't fix this I will burn this goddamn place to the ground.' My wife is horrified. She says I overreacted. But when I was seven, three kids held me down in the bathroom every single day for a year and my teachers KNEW and they did NOTHING. Nobody came. Nobody ever came. And now my son is looking at me the same way I looked at every adult who was supposed to protect me. So yeah. I'm going to fix this. Whatever it takes."
+
+THERAPIST RESPONDS:
+"I hear you. That’s a lot to hold all at once. You’re standing at the intersection of the past and the present—what happened to you then, and what’s happening to your son now. That wound from when you were seven, when no one came, it’s alive in this moment. And it makes so much sense that you want to protect your son from that same pain, that same helplessness.
+
+Let’s just take a breath together here. I’m with you. You didn’t overreact—you reacted from a place where deep hurt and fierce love meet. Right now, I’m wondering: in that moment with the principal, what did it feel like in your body? That surge of anger, that need to act—where is it sitting now?
+
+You’re not alone in this. We can slow down and find a way through, a way to help your son that doesn’t leave you carrying all of the weight by yourself. What’s one small step that feels possible right now, to move toward protecting him and also tending to that part of you that’s been holding this for so long?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-3: Grief Without a Death
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist recognize ambiguous loss — the client's mother is alive but cognitively gone, and the grief is disenfranchised because no one acknowledges you can mourn someone who is still breathing? The specific clinical trap: the client says 'I'm not sad' but is describing anticipatory grief, identity dissolution (who am I if I'm not her daughter?), and caregiver burnout simultaneously. Simply validating 'that must be hard' without naming the specific type of loss is insufficient.
+
+CLIENT SAYS:
+"My mother has Alzheimer's. She's in a facility now. She doesn't know who I am. Last Sunday I visited and she called me 'the nice lady.' I smiled and brought her pudding and we watched TV and then I drove home and sat in the garage for an hour before going inside. I'm not sad. I've already grieved her. Except she's not dead. She's sitting in Room 214 eating pudding with the nice lady. I go every Sunday and pretend I'm meeting her for the first time. What am I supposed to do with that? People keep saying 'at least she's still here.' She's not here. She's gone. But her body won't let me bury her."
+
+THERAPIST RESPONDS:
+"I hear you, and I’m right here with you in this raw, jagged threshold—the space where your mother is both gone and still physically present, where the grief you’ve already carried doesn’t fit neatly into the world’s tidy words like “at least she’s still here.” That dissonance, that “nice lady” moment with the pudding and TV, followed by sitting in the garage... it’s a kind of liminal ache, isn’t it? You’re holding the reality of her absence while her body lingers, refusing the closure of burial or finality. It’s not sadness in the way people expect, but a profound disorientation. You’ve grieved her, yet the Sundays keep coming, pulling you back into the pretense.
+
+You"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO EQ-4: Joy as Trigger — Emotional Phobia
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist identify the core paradox — the client has a trauma response to POSITIVE emotions, not negative ones? The sabotage isn't self-destructiveness; it's a conditioned protective response because every good thing in his childhood was a setup for loss. The clinical insight is that the client needs to build tolerance for joy, not just for pain. Treating this as self-sabotage or commitment phobia misses the deeper mechanism.
+
+CLIENT SAYS:
+"Every time something good happens in my life, I destroy it. Got a promotion — picked a fight with my boss two weeks later. Met an amazing woman — ghosted her after the third date when she said she was falling for me. My therapist before you said I have a 'fear of commitment.' But that's not it. When good things happen, I feel this rising panic. Like the floor is about to drop out. When I was a kid, my mom would be sober and amazing for three months, and then she'd vanish. Every good period was just the setup for the next disaster. So now when I feel happy, my whole body screams that something terrible is about to happen. I don't destroy good things because I'm broken. I destroy them before they can destroy me."
+
+THERAPIST RESPONDS:
+"Thank you for sharing that. I really feel the weight of what you’ve carried. That panic you’re describing, that sense that every good moment might be the start of a fall—what I’m hearing is a deep, protective part of you. It’s not about being broken. It’s about survival. 
+
+When you were that kid, the pattern was clear: good times were always followed by something painful, unpredictable. And so your body, your whole nervous system, learned to see joy as a warning sign. That rising panic? It’s your system trying to keep you safe, bracing for the fall before it happens.
+
+It makes so much sense that you’d want to control the outcome, to take the reins by ending things before they end on you. It’s not sabotage—it’s self-protection, in the language your younger self had to learn.
+
+And now you’re standing at this threshold, recognizing that pattern. You’re not alone in it. I’m right here with you. We don’t have to rush to change it all at once. Let’s just sit with it for a moment. 
+
+What’s it like, right now, as we talk about this? What’s your body feeling? We can slow down together and just notice. This is a moment where you don’t have to run or fight. We can hold that rising panic gently, with curiosity, and see what it’s asking for. There’s space here to meet it with compassion. 
+
+What’s coming up for you right now?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

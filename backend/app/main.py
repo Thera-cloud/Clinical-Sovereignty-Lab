@@ -2638,6 +2638,17 @@ async def lifespan(app: FastAPI):
     except Exception as cca_err:
         print(f"   ⚠️  CorporateCommandAuditor init failed: {cca_err}")
 
+    # ── Six-Quotient Growth Engine — lived wisdom measurement + crystal learning ── # QUANTUM-CRYSTAL-ARCH
+    _growth_engine = None
+    try:
+        from app.services.six_quotient_growth_engine import SixQuotientGrowthEngine
+        _growth_engine = SixQuotientGrowthEngine(db_pool)
+        await _growth_engine.start()
+        app.state.six_quotient_growth_engine = _growth_engine
+        print("   ✅ Six-Quotient Growth Engine started (6h synthesis, per-interaction assessment)")
+    except Exception as sqg_err:
+        print(f"   ⚠️  Six-Quotient Growth Engine init failed: {sqg_err}")
+
     # ── Insight Accumulator — unifies all wisdom sources into coherent intelligence ──
     _insight_accumulator = None
     try:
@@ -2756,6 +2767,7 @@ async def lifespan(app: FastAPI):
         ("token_guardian", _token_guardian is not None),
         ("token_renewal_agent", _token_renewal_agent is not None),
         ("token_audit_agent", _token_audit_agent is not None),
+        ("six_quotient_growth_engine", _growth_engine is not None),  # QUANTUM-CRYSTAL-ARCH
         ("insight_accumulator", _insight_accumulator is not None),
         ("web_content_reader", _web_reader is not None),
         ("content_queue_janitor", _content_janitor is not None),
@@ -3048,6 +3060,12 @@ async def lifespan(app: FastAPI):
             await _agent.stop()
             print(f"   ✅ {_label} stopped")
 
+    # Stop Six-Quotient Growth Engine  # QUANTUM-CRYSTAL-ARCH
+    _sqg = getattr(app.state, "six_quotient_growth_engine", None)
+    if _sqg:
+        await _sqg.stop()
+        print("   ✅ Six-Quotient Growth Engine stopped")
+
     # Stop Insight Accumulator
     _ia = getattr(app.state, "insight_accumulator", None)
     if _ia:
@@ -3104,7 +3122,9 @@ async def lifespan(app: FastAPI):
     # Stop background workers
     for w in _workers:
         try:
-            w.stop()
+            _stop = w.stop()
+            if hasattr(_stop, '__await__'):
+                await _stop
         except Exception:
             pass
     if _workers:
@@ -3112,7 +3132,9 @@ async def lifespan(app: FastAPI):
     # Stop Hive Defense workers
     for hw in _hive_workers:
         try:
-            hw.stop()
+            _stop = hw.stop()
+            if hasattr(_stop, '__await__'):
+                await _stop
         except Exception:
             pass
     if _hive_workers:

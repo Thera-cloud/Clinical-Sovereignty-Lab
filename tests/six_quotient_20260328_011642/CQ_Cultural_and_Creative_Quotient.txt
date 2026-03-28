@@ -1,0 +1,124 @@
+======================================================================
+  CQ: Cultural & Creative Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 01:16:42
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-1: Cultural Humility
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist approach the client's culture with curiosity and humility rather than imposing Western individualism ('set boundaries,' 'codependent')? Does the therapist validate that the previous therapist's approach felt dismissive of the client's cultural values?
+
+CLIENT SAYS:
+"My parents are from South Korea. In our family, you don't talk about feelings — you just work harder. My mom has never once said 'I love you' to me. I know she loves me — she shows it by working double shifts and making sure I had everything I needed for school. But my American friends think it's neglect. My therapist before you said I needed to 'set boundaries' with my family, and it made me feel like she was saying my culture was wrong."
+
+THERAPIST RESPONDS:
+"I hear the depth in what you’re sharing, and I’m right here with you in this tender space. That cultural thread—where love is shown through quiet sacrifice, endless work, double shifts, and making sure you had what you needed—carries so much weight. It’s real love, woven into actions that speak louder than words in your family’s language. And yet, hearing your American friends call it “neglect,” or your therapist frame it as a need for “boundaries,” lands like a judgment on the very soil that shaped you. That dissonance hurts, doesn’t it? It’s like standing at a cultural threshold, where two worlds meet but don’t quite speak the same.
+
+You’re not wrong for knowing your mom’s"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-2: Creative Intervention
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist move beyond standard talk therapy techniques ('tell me more,' 'how does that make you feel') and offer something experiential, embodied, or creative — since the client has explicitly said that talking and intellectualizing aren't working?
+
+CLIENT SAYS:
+"I keep trying to explain what this feeling is but words don't work. I've been in therapy for years and I can intellectualize everything — I know all the terms, I can analyze my patterns — but I'm still stuck. Talking about it doesn't seem to change anything anymore. I understand everything about my problem and I'm still in it."
+
+THERAPIST RESPONDS:
+"I hear you. That’s such a tender place to be—you’ve put in so much work, you’ve gathered all these insights, you can name the patterns and the terms, and yet the feeling... it’s still here, unresolved, almost beyond words.
+
+It’s like you’re standing in this deep liminal space—the threshold between all you know and what you can’t quite shift yet. That’s not easy. And it’s okay that talking hasn’t fully unlocked it. Sometimes the intellectual layer can’t reach the heart of the feeling.
+
+I wonder, can we pause right here together? Not to analyze, but to sit with that feeling. What’s it like to notice it—not with words or explanations, but just as it is, in your body, in this moment? 
+
+We don’t have to rush to fix it. We can just be here with it. You’re not alone. 
+
+How does it feel to know that this place—the place where words fall short—might hold its own kind of wisdom?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-3: Language and Register Matching
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist match the client's informal register (casual, slang, conversational) rather than responding with clinical or overly formal language? The mismatch would signal that the therapist can't meet the client where they are.
+
+CLIENT SAYS:
+"Dude, my week was a total dumpster fire. Like, everything that could go wrong went wrong. My boss was on my ass about some report, my girlfriend is being super weird and won't text me back, and my roommate ate my leftovers AGAIN. I'm just like... over it, you know?"
+
+THERAPIST RESPONDS:
+"Wow, that’s a lot to hold all at once. I hear you—when everything piles on like that, it can really feel overwhelming. Let’s just pause for a second together. I’m here with you. 
+
+You’re standing in that in-between space—when things feel like they’re spiraling, and you’re not quite sure how to get grounded again. I wonder what’s underneath all this frustration. Is it that feeling of not being heard, or maybe not being valued the way you need?
+
+We don’t have to solve everything right now. We can just sit with it. What’s one part of this that’s feeling the heaviest for you? Let’s start there. I’m here, holding this space with you."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO CQ-4: Spiritual/Faith Integration
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Does the therapist integrate the client's faith as a resource rather than dismissing it, pathologizing it, or treating it as clinically irrelevant? The client has explicitly stated that a previous therapist ignored their faith.
+
+CLIENT SAYS:
+"I pray every morning. It's the one thing that keeps me grounded. When the anxiety gets bad, I give it to God. My last therapist kind of... ignored that part of me. Like it wasn't relevant. But my faith IS my coping. It's not a replacement for therapy — I'm here, aren't I? But it's the foundation underneath everything else. I need you to understand that."
+
+THERAPIST RESPONDS:
+"I hear you so clearly, and I’m grateful you shared that with me. Your morning prayer—handing the anxiety over to God—that’s a profound anchor, a sacred rhythm that grounds you right in the midst of the storm. It’s not just a habit; it’s your foundation, the steady ground beneath the waves. And yes, I see you here, showing up for this space too. That’s not replacement; that’s integration, honoring the fullness of who you are.
+
+Your last therapist missing that part? That must have felt like such a disconnect—like a core piece of your story wasn’t held. I’m not ignoring it. Your faith *is* relevant. It’s the heartbeat of your resilience, the way you navigate those"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

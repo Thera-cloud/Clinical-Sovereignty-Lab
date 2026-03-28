@@ -29,14 +29,14 @@ CLIENT_ACCOUNT = {
     "username": "audit_client",
     "password": "AuditClient2026!",
     "expected_role": "CLIENT",
-    "hardware_id": "audit_client_hw",
+    "hardware_id": "wsflow_audit_client_hw",
 }
 
 COACH_ACCOUNT = {
     "username": "audit_coach",
     "password": "AuditCoach2026!",
     "expected_role": "COACH",
-    "hardware_id": "audit_coach_hw",
+    "hardware_id": "wsflow_audit_coach_hw",
 }
 
 CLIENT_TESTS = [

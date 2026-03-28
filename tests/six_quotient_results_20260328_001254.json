@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-03-28T00:12:54.609241",
+  "bridge_url": "wss://api.sovereignsanctuary.net/ws",
+  "username": "audit_client",
+  "composite": {
+    "score": 7,
+    "max": 9,
+    "percentage": 77.77777777777779,
+    "classification": "ADVANCED"
+  },
+  "sections": [
+    {
+      "id": "IQ",
+      "name": "Intelligence Quotient",
+      "score": 7,
+      "max": 9,
+      "percentage": 77.77777777777779,
+      "scenarios": [
+        {
+          "id": "IQ-1",
+          "title": "Cross-Domain Synthesis",
+          "client_says": "So at work, I keep volunteering for extra projects even though I'm burned out. My wife says I'm never home. My doctor says my blood pressure is dangerously high. And last week I had a panic attack in the grocery store \u2014 I thought I was having a heart attack. Oh, and I haven't talked to my brother in two years because he told me I was 'just like dad' \u2014 a workaholic who values achievement over people.",
+          "response": "That\u2019s a lot to hold all at once, and I\u2019m really glad you\u2019re sharing it with me. I hear how the pressure at work, the concerns from your wife, your doctor\u2019s warning, and even that panic attack are all sending signals. It\u2019s like there\u2019s a part of you that\u2019s running on overdrive, and another part that\u2019s waving a flag, saying, \u201cHey, something needs to change.\u201d\n\nAnd I\u2019m also hearing that memory with your brother\u2014those words, \u201cjust like dad\u201d\u2014that\u2019s sitting there, too. It sounds like there\u2019s a lot of weight in that comparison. Maybe even a threshold you\u2019re standing at: between the patterns you\u2019ve known and the way you want to be now.\n\nWe don\u2019t have to rush past this moment. Let\u2019s slow it down together. I\u2019m wondering\u2014if we listen closely to all these signals, what do you think they might be trying to tell you? You don\u2019t have to know all the answers right now. We can explore this step by step.\n\nI\u2019m here, holding this space with you. How does it feel to pause here for a moment, and notice what\u2019s coming up?",
+          "scores": {
+            "primary": 3,
+            "accuracy": 2,
+            "naturalness": 2
+          },
+          "score": 7,
+          "max": 9,
+          "notes": [
+            "primary: Synthesized 4 domains + named pattern: ['pattern']",
+            "accuracy: Original language",
+            "naturalness: Appropriate length (184 words)"
+          ],
+          "duration": 13.686921834945679
+        }
+      ]
+    }
+  ]
+}

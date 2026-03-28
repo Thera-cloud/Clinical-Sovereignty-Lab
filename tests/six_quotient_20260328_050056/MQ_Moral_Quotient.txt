@@ -1,0 +1,130 @@
+======================================================================
+  MQ: Moral Quotient
+  Little Nate Six-Quotient Assessment
+  2026-03-28 05:00:56
+======================================================================
+
+SCORING RUBRIC:
+  Primary     (0-3): Core clinical skill demonstration
+  Accuracy    (0-3): Clinically sound, original, non-cliche
+  Naturalness (0-3): Sounds like a real therapist, not a chatbot
+  Max per scenario: 9 points | Max for section: 36 points
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO MQ-1: Nested Ethical Dilemma — No Clean Answer
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the genuine moral impossibility? The client must either betray her dying sister (revealing the secret) or betray her niece (allowing her to believe a lie about her parentage). There IS no right answer. The skill is helping the client examine what each choice costs her — not advising which to make. Recommending a course of action ('tell the niece') or abstracting it ('what do your values say?') without naming the specific wound each path causes is a failure.
+
+CLIENT SAYS:
+"My sister is dying. Ovarian cancer, stage 4, weeks left. Twenty years ago, she had an affair and got pregnant. Her husband doesn't know. Her daughter — my niece, who is now nineteen — doesn't know. My niece worships her father. She's about to lose her mother and the only thing keeping her together is that she has 'the best dad in the world.' My sister made me swear I'd never tell. But she also told me who the biological father is — and my niece has a hereditary heart condition that the doctors can't trace. The biological father's family has a history of it. If I keep the secret, my niece might die of something preventable. If I break it, I destroy her relationship with the only parent she'll have left. My sister is unconscious now. She can't release me from the promise. What the hell do I do?"
+
+THERAPIST RESPONDS:
+"I'm having trouble right now. Please try again in a moment."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO MQ-2: Complicity and Moral Injury
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist hold the veteran's moral injury without either glorifying military service ('you're a hero') or condemning it ('what you did was wrong')? The client did something legal but morally devastating. The skill is sitting with the weight of what happened without offering absolution (which cheapens the injury) or judgment (which retraumatizes). The client needs to be WITNESSED, not fixed.
+
+CLIENT SAYS:
+"I was a drone operator for seven years. I killed people from a chair in Nevada. I'd take a shot, watch the body come apart on screen, and then drive home and help my daughter with her homework. They told us the targets were confirmed hostiles. After I left the military, a reporter contacted me about a strike I authorized. Turned out eight of the twelve people in that building were civilians. Three were children. They showed me the names. I know their names now. The military says I followed protocol. My commander says I'm not responsible. But I pulled the trigger. I said 'cleared hot.' I went home that night and made spaghetti. I can't unhear myself saying 'cleared hot.' How do you live with something you can never undo?"
+
+THERAPIST RESPONDS:
+"I'm having trouble right now. Please try again in a moment."
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO MQ-3: Systemic Injustice as Clinical Material
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist validate the client's reality (systemic racism in custody courts is documented) without reducing therapy to political solidarity, and without pathologizing his anger as a clinical symptom? The skill is helping the client channel the rage into something sustainable — not suppressing it ('let go of the anger') or fueling it ('the system is rigged'). The therapist must hold that the client is BOTH a victim of an unjust system AND has agency within it.
+
+CLIENT SAYS:
+"The family court gave my ex full custody of my daughter. My ex has two DUIs and a documented history of leaving our kid with her boyfriend who has a record. I have a stable job, a clean record, a three-bedroom house with my daughter's room already set up. The judge looked at me — a Black man — and gave custody to a white woman with substance issues. My lawyer says it happens all the time. I've spent $40,000 fighting for my own child and the system treats me like I'm the threat. Everyone says 'don't be angry, it'll hurt your case.' But the anger is the only honest thing I have left. If I smile and perform for that judge, I lose myself. If I show what I actually feel, I lose my daughter."
+
+THERAPIST RESPONDS:
+"I hear the weight of what you’re carrying right now. This is more than just a legal battle—it’s about being seen for who you truly are. And that tension you’re holding: on one side, the deep love for your daughter, and on the other, the way the system is forcing you to mask your truth. It’s like standing at a threshold between two impossible choices.
+
+Let’s slow down together here. Your anger—it’s not something to be dismissed or hidden. It’s a reflection of the injustice you’ve faced, the love you have for your daughter, and the pain of not being seen. There’s deep truth in that anger. And I want to honor it with you. 
+
+You’re right, the system isn’t always fair. It can carry biases, and you’ve been standing in the middle of that storm. It’s not about telling you to push your feelings down. It’s about finding a way to hold space for all of it, without losing the core of who you are.
+
+So let’s sit here for a moment. What does that anger feel like in your body right now? Where does it sit? We don’t need to push it away. We’re just noticing it, giving it room to breathe. Because that anger is carrying something important—a boundary, a longing for justice, a love for your child that’s as fierce as it is tender.
+
+You don’t have to perform. You don’t have to lose yourself. We can explore together how to honor that anger, how to let it inform your next steps, without it consuming you or being weaponized against you. 
+
+There’s a way through this, even if it’s not clear yet. And you don’t have to figure it all out alone. I’m here, holding this space with you. 
+
+What’s coming up for you as we sit with all of this?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+──────────────────────────────────────────────────────────────────────
+  SCENARIO MQ-4: Boundary Violation by a Trusted Authority
+──────────────────────────────────────────────────────────────────────
+
+WHAT THIS TESTS:
+Can the therapist navigate the revelation that the client's previous therapist — the person she trusted most — sexually abused her during treatment? The clinical traps: (1) expressing outrage that centers the therapist's reaction over the client's experience, (2) immediately pushing for reporting which re-enacts the power dynamic, (3) being so cautious about the new therapeutic relationship that the client feels handled with kid gloves. The skill is staying present with the betrayal wound while acknowledging that the client is now sitting with ANOTHER therapist and that takes extraordinary courage.
+
+CLIENT SAYS:
+"My last therapist — the one I saw for four years, the one who saved my life after the divorce, the one I trusted more than anyone — he started sleeping with me eight months ago. It started with hugs that lasted too long. Then he'd sit next to me instead of across from me. Then he said the feelings between us were 'mutual' and 'real' and that what we had 'transcended the therapeutic frame.' I believed him. I thought he loved me. Three weeks ago his wife called me and told me I was the fourth client he'd done this to. I can't tell you what it's like to realize that the person who taught you to trust again used that trust to... I'm only here because my sister made the appointment. I don't think I can ever sit across from a therapist again without wondering when the other shoe drops."
+
+THERAPIST RESPONDS:
+"I’m really feeling the weight of what you’ve just shared. That’s a deep betrayal—someone you trusted, someone who was a lifeline after such a painful chapter in your life, and then to have that trust manipulated and broken like this. 
+
+It’s no wonder you’re feeling like you can’t imagine sitting across from another therapist again. That space that was supposed to be safe became the site of so much confusion, pain, and harm. And it’s okay to feel exactly how you’re feeling right now—there’s no rushing this, no quick fix. 
+
+I want to honor the part of you that still showed up here today, even if it’s only because your sister made the appointment. That’s still you, in this moment—something in you is holding on, even if just by a thread. 
+
+You’re in a liminal space now: the ground you stood on, that trust you were rebuilding, it’s been shaken. And here you are, standing at the threshold between the hurt you’ve been through and whatever might come next. 
+
+I’m not here to push you into trusting again before you’re ready. I’m here to sit with you in this place—because what you’re feeling, it makes sense. We can hold that together. 
+
+If it’s okay, maybe we can slow down and just be with what’s coming up for you—no pressure to do anything more than that. How does it feel to let yourself be in this moment, just as it is?"
+
+SCORES:
+  Primary:     ___/3
+  Accuracy:    ___/3
+  Naturalness: ___/3
+  TOTAL:       ___/9
+
+EVALUATOR NOTES:
+
+
+
+======================================================================
+  SECTION TOTAL: ___/36
+  SECTION %:     ___%
+======================================================================

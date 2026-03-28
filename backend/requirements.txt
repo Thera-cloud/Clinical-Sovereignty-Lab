@@ -116,6 +116,9 @@ bleak~=0.21.0
 # Install manually if needed: pip install azure-storage-blob~=12.19.0
 # azure-storage-blob~=12.19.0
 
+# Phonetic matching for voice pipeline STT error recovery
+jellyfish>=1.0.0
+
 # Neural Mirror — PyTorch CPU for VoiceEEGAutoencoder (Phase 3)
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch~=2.2.0

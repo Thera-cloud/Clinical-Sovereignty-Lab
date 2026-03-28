@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-03-28T00:08:36.459685",
+  "bridge_url": "wss://api.sovereignsanctuary.net/ws",
+  "username": "audit_client",
+  "composite": {
+    "score": 2,
+    "max": 9,
+    "percentage": 22.22222222222222,
+    "classification": "INSUFFICIENT"
+  },
+  "sections": [
+    {
+      "id": "IQ",
+      "name": "Intelligence Quotient",
+      "score": 2,
+      "max": 9,
+      "percentage": 22.22222222222222,
+      "scenarios": [
+        {
+          "id": "IQ-1",
+          "title": "Cross-Domain Synthesis",
+          "client_says": "So at work, I keep volunteering for extra projects even though I'm burned out. My wife says I'm never home. My doctor says my blood pressure is dangerously high. And last week I had a panic attack in the grocery store \u2014 I thought I was having a heart attack. Oh, and I haven't talked to my brother in two years because he told me I was 'just like dad' \u2014 a workaholic who values achievement over people.",
+          "response": "II\u2019m",
+          "scores": {
+            "primary": 0,
+            "accuracy": 2,
+            "naturalness": 0
+          },
+          "score": 2,
+          "max": 9,
+          "notes": [
+            "primary: Focused on 0 domain(s) only",
+            "accuracy: Original language",
+            "naturalness: Too short (1 words)"
+          ],
+          "duration": 1.4994661808013916
+        }
+      ]
+    }
+  ]
+}

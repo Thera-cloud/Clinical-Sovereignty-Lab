@@ -2004,7 +2004,7 @@ async def get_daily_analytics(request: Request, days: int = 30):
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """SELECT date, logins, registrations, messages_sent, sessions_started,
-                              tokens_used, unique_users
+                              tokens_used, active_users
                        FROM daily_analytics
                        WHERE date >= (CURRENT_DATE - $1::int)
                        ORDER BY date ASC""",
@@ -2013,7 +2013,7 @@ async def get_daily_analytics(request: Request, days: int = 30):
                 if rows:
                     result = []
                     for r in rows:
-                        unique = r.get("unique_users")
+                        unique = r.get("active_users")
                         if isinstance(unique, list):
                             unique_count = len(unique)
                         elif isinstance(unique, int):
@@ -2494,10 +2494,10 @@ async def get_revenue_metrics(request: Request):
         try:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """SELECT COALESCE(SUM(amount), 0) as total
+                    """SELECT COALESCE(SUM(amount_cents), 0) as total
                        FROM payment_history
                        WHERE status = 'succeeded'
-                         AND description ILIKE '%coaching%'"""
+                         AND event_type ILIKE '%coaching%'"""
                 )
                 if rows:
                     billing = {"_pg_coaching_revenue": float(rows[0]["total"]) / 100}
