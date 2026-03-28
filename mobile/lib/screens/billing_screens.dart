@@ -11,12 +11,14 @@
 // =============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import '../main.dart' show defaultApiBaseUrl;
+import '../main.dart' show defaultApiBaseUrl, isNativeIOS;
+import '../services/payment_service.dart';
 
 /// Build standard auth headers for REST API calls.
 /// Backend auth accepts X-User-Id as a fallback for service/internal calls.
@@ -41,6 +43,7 @@ class _D {
   static const purple = Color(0xFF9D4EDD);
   static const textPrimary = Color(0xFFFFFFFF);
   static const textSecondary = Color(0xFF888888);
+  static const textMuted = Color(0xFF888888);
   static const border = Color(0xFF252525);
 }
 
@@ -67,6 +70,14 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
   bool _showComparison = false;
   bool _loading = false;
   String? _error;
+  final _promoCtrl = TextEditingController();
+  String? _verifiedPromo;
+
+  @override
+  void dispose() {
+    _promoCtrl.dispose();
+    super.dispose();
+  }
 
   String get _currentPlan =>
       (widget.currentUserProfile['subscription_plan'] ?? 'TRIAL')
@@ -101,6 +112,154 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
           backgroundColor: _D.red,
         ));
       }
+    }
+  }
+
+  Widget _buildPromoInput() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _D.bgCard,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _verifiedPromo != null
+              ? _D.green.withOpacity(0.4)
+              : _D.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Have a promo code?',
+              style: TextStyle(
+                  color: _D.textSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _promoCtrl,
+                enabled: _verifiedPromo == null,
+                style: const TextStyle(
+                    color: _D.textPrimary,
+                    fontSize: 13,
+                    fontFamily: 'JetBrains Mono'),
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  hintText: 'ENTER CODE',
+                  hintStyle: const TextStyle(color: _D.textMuted, fontSize: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  filled: true,
+                  fillColor: _D.bgElevated,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: _D.border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: _D.border),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (_verifiedPromo != null)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _D.red.withOpacity(0.15),
+                  foregroundColor: _D.red,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+                onPressed: () => setState(() {
+                  _verifiedPromo = null;
+                  _promoCtrl.clear();
+                }),
+                child: const Text('Remove', style: TextStyle(fontSize: 12)),
+              )
+            else
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _D.gold,
+                  foregroundColor: Colors.black,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                ),
+                onPressed: _promoCtrl.text.trim().isEmpty
+                    ? null
+                    : () async {
+                        final code = _promoCtrl.text.trim().toUpperCase();
+                        final uid = widget.currentUserProfile['hardware_id'] ??
+                            widget.currentUserProfile['username'] ?? '';
+                        try {
+                          final plan = Uri.encodeComponent(_currentPlan);
+                          final resp = await http.get(
+                            Uri.parse(
+                              '$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}?tier=$plan',
+                            ),
+                            headers: _authHeaders(uid),
+                          );
+                          if (resp.statusCode == 200) {
+                            setState(() => _verifiedPromo = code);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Promo $code applied!'),
+                                  backgroundColor: _D.green,
+                                ),
+                              );
+                            }
+                          } else {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content:
+                                      Text('Invalid or expired code: $code'),
+                                  backgroundColor: _D.red,
+                                ),
+                              );
+                            }
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Connection error'),
+                                backgroundColor: _D.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child:
+                    const Text('Apply', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ),
+          ]),
+          if (_verifiedPromo != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                const Icon(Icons.check_circle, color: _D.green, size: 14),
+                const SizedBox(width: 6),
+                Text('Code $_verifiedPromo applied',
+                    style: const TextStyle(color: _D.green, fontSize: 11)),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String? _planKeyToIapId(String planKey) {
+    switch (planKey) {
+      case 'STANDARD':
+        return PaymentService.innerChamberMonthly;
+      case 'TOP_TIER':
+        return PaymentService.sovereignCircleMonthly;
+      default:
+        return null;
     }
   }
 
@@ -186,13 +345,29 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
 
     setState(() => _loading = true);
 
-    // Request checkout URL via WebSocket
-    _sendWs({
+    if (isNativeIOS) {
+      final iapId = _planKeyToIapId(planKey);
+      if (iapId != null) {
+        final uid = widget.currentUserProfile['hardware_id'] ??
+            widget.currentUserProfile['username'] ?? '';
+        final token = widget.currentUserProfile['token'] as String?;
+        PaymentService.instance.setAuthContext(uid, token);
+        await PaymentService.instance.purchase(iapId);
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+    }
+
+    final wsMsg = <String, dynamic>{
       'type': 'get_checkout_url',
       'plan': planKey,
       'success_url': 'https://app.sovereignsanctuary.net/billing/success',
       'cancel_url': 'https://app.sovereignsanctuary.net/billing/cancel',
-    });
+    };
+    if (_verifiedPromo != null && _verifiedPromo!.isNotEmpty) {
+      wsMsg['promo_code'] = _verifiedPromo;
+    }
+    _sendWs(wsMsg);
 
     // Also attempt REST upgrade/downgrade
     try {
@@ -287,6 +462,10 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     ),
                   ),
                 ),
+                if (kIsWeb) ...[
+                  _buildPromoInput(),
+                  const SizedBox(height: 14),
+                ],
                 if (_showComparison)
                   _buildComparisonTable()
                 else ...[
@@ -1286,8 +1465,10 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
         title: Text('Purchase $label',
             style: const TextStyle(color: _D.gold, fontFamily: 'Cormorant Garamond')),
         content: Text(
-          'You are purchasing the $label for \$$price. '
-          'You will be redirected to Stripe to complete payment.',
+          isNativeIOS
+              ? 'You are purchasing the $label for \$$price.'
+              : 'You are purchasing the $label for \$$price. '
+                'You will be redirected to Stripe to complete payment.',
           style: const TextStyle(color: _D.textSecondary, fontSize: 13),
         ),
         actions: [
@@ -1300,18 +1481,34 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: _D.gold),
             onPressed: () {
               Navigator.pop(ctx);
-              _sendWs({
-                'type': 'get_checkout_url',
-                'pack_type': packType,
-                'success_url':
-                    'https://app.sovereignsanctuary.net/coaching/success',
-                'cancel_url':
-                    'https://app.sovereignsanctuary.net/coaching/cancel',
-              });
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Opening Stripe checkout...'),
-                backgroundColor: _D.bgElevated,
-              ));
+              if (isNativeIOS) {
+                final iapMap = <String, String>{
+                  'single': PaymentService.tokenLight,
+                  'pack_4': PaymentService.tokenStandard,
+                  'pack_8': PaymentService.tokenPower,
+                };
+                final iapId = iapMap[packType];
+                if (iapId != null) {
+                  final uid = widget.currentUserProfile['hardware_id'] ??
+                      widget.currentUserProfile['username'] ?? '';
+                  final token = widget.currentUserProfile['token'] as String?;
+                  PaymentService.instance.setAuthContext(uid, token);
+                  PaymentService.instance.purchase(iapId);
+                }
+              } else {
+                _sendWs({
+                  'type': 'get_checkout_url',
+                  'pack_type': packType,
+                  'success_url':
+                      'https://app.sovereignsanctuary.net/coaching/success',
+                  'cancel_url':
+                      'https://app.sovereignsanctuary.net/coaching/cancel',
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Opening checkout...'),
+                  backgroundColor: _D.bgElevated,
+                ));
+              }
             },
             child: const Text('Continue to Payment',
                 style: TextStyle(color: Colors.black)),
@@ -1639,10 +1836,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
   bool _addingBank = false;
   String? _appliedSchoolName;
   String? _appliedCompanyName;
+  String? _appliedPromoCode;
   String? _discountCodeError;
   String? _discountCodeSuccess;
   final _schoolCodeCtrl = TextEditingController();
   final _corporateCodeCtrl = TextEditingController();
+  final _promoCodeCtrl = TextEditingController();
 
   String get _userId =>
       widget.currentUserProfile['hardware_id']?.toString() ?? '';
@@ -1661,6 +1860,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     _tabCtrl.dispose();
     _schoolCodeCtrl.dispose();
     _corporateCodeCtrl.dispose();
+    _promoCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -1836,6 +2036,38 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         setState(() => _discountCodeError = err['detail'] ?? 'Failed to apply');
       }
     } catch (e) {
+      setState(() => _discountCodeError = 'Connection error');
+    }
+  }
+
+  Future<void> _applyPromoCode(String code) async {
+    setState(() {
+      _discountCodeError = null;
+      _discountCodeSuccess = null;
+    });
+    try {
+      final plan = (widget.currentUserProfile['subscription_plan'] ?? '').toString().toUpperCase();
+      final verifyResp = await http.get(
+        Uri.parse(
+          '$defaultApiBaseUrl/api/billing/verify-promo/${Uri.encodeComponent(code)}'
+          '?tier=${Uri.encodeComponent(plan)}',
+        ),
+        headers: _authHeaders(_userId),
+      );
+      if (verifyResp.statusCode != 200) {
+        final err = jsonDecode(verifyResp.body);
+        setState(() => _discountCodeError = err['detail'] ?? 'Invalid or expired promo code');
+        return;
+      }
+      final data = jsonDecode(verifyResp.body);
+      final value = data['discount_value'] ?? 0;
+      final type = (data['discount_type'] ?? 'percent').toString();
+      final formatted = type == 'percent' ? '$value% off' : '\$${(value / 100).toStringAsFixed(2)} off';
+      setState(() {
+        _appliedPromoCode = code.trim().toUpperCase();
+        _discountCodeSuccess = 'Promo ${_appliedPromoCode!} verified: $formatted';
+      });
+    } catch (_) {
       setState(() => _discountCodeError = 'Connection error');
     }
   }
@@ -2032,28 +2264,42 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                     ),
                     const SizedBox(height: 16),
 
-                    // Add Payment Method buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _AddPaymentButton(
-                            icon: Icons.credit_card,
-                            label: 'Add Card',
-                            loading: _addingCard,
-                            onTap: () => _addPaymentMethod('card'),
-                          ),
+                    if (isNativeIOS)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: _D.cyan.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: _D.cyan.withOpacity(0.25)),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _AddPaymentButton(
-                            icon: Icons.account_balance,
-                            label: 'Add Bank Account',
-                            loading: _addingBank,
-                            onTap: () => _addPaymentMethod('bank'),
-                          ),
+                        child: const Text(
+                          'Payments on iOS are managed through your Apple ID. '
+                          'Go to Settings > Apple ID > Subscriptions to manage.',
+                          style: TextStyle(color: _D.cyan, fontSize: 12),
                         ),
-                      ],
-                    ),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _AddPaymentButton(
+                              icon: Icons.credit_card,
+                              label: 'Add Card',
+                              loading: _addingCard,
+                              onTap: () => _addPaymentMethod('card'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _AddPaymentButton(
+                              icon: Icons.account_balance,
+                              label: 'Add Bank Account',
+                              loading: _addingBank,
+                              onTap: () => _addPaymentMethod('bank'),
+                            ),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 16),
 
                     if (_methods.isEmpty)
@@ -2243,7 +2489,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   ],
                 ),
 
-          // Discounts tab
+          // Discounts tab — code inputs hidden on iOS per Apple Guideline 3.1.1
           ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -2251,47 +2497,99 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 _discountBadge(Icons.school, 'Student Discount', _appliedSchoolName!),
               if (_appliedCompanyName != null)
                 _discountBadge(Icons.business, 'Corporate Plan', _appliedCompanyName!),
-              if (_discountCodeSuccess != null) ...[
+              if (_appliedPromoCode != null)
+                _discountBadge(Icons.local_offer, 'Promo Code', _appliedPromoCode!),
+              if (isNativeIOS) ...[
                 Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: _D.green.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _D.green.withOpacity(0.3)),
+                    color: _D.bgCard,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _D.border),
                   ),
-                  child: Text(_discountCodeSuccess!, style: const TextStyle(color: _D.green, fontSize: 13)),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.language, color: _D.gold, size: 32),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Discount and promo codes can be applied at\nsovereignsanctuary.net',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _D.textSecondary, fontSize: 13, height: 1.5),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                if (_discountCodeSuccess != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _D.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _D.green.withOpacity(0.3)),
+                    ),
+                    child: Text(_discountCodeSuccess!, style: const TextStyle(color: _D.green, fontSize: 13)),
+                  ),
+                ],
+                if (_discountCodeError != null) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _D.red.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _D.red.withOpacity(0.3)),
+                    ),
+                    child: Text(_discountCodeError!, style: const TextStyle(color: _D.red, fontSize: 13)),
+                  ),
+                ],
+                _discountCodeSection(
+                  icon: Icons.school,
+                  title: 'Student Discount',
+                  subtitle: 'Enter your school code for a student discount',
+                  hintText: 'School code (e.g. STANFORD2026)',
+                  controller: _schoolCodeCtrl,
+                  onApply: _applySchoolCode,
+                ),
+                const SizedBox(height: 12),
+                _discountCodeSection(
+                  icon: Icons.business,
+                  title: 'Corporate Sponsor',
+                  subtitle: 'Enter your employer code for corporate benefits',
+                  hintText: 'Corporate code (e.g. ACME100)',
+                  controller: _corporateCodeCtrl,
+                  onApply: _applyCorporateCode,
+                ),
+                const SizedBox(height: 12),
+                if (!kIsWeb && !isNativeIOS) ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _D.cyan.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _D.cyan.withOpacity(0.25)),
+                    ),
+                    child: const Text(
+                      'Promo codes are applied through web checkout. Native Google Play purchases do not honor promo codes directly.',
+                      style: TextStyle(color: _D.cyan, fontSize: 12),
+                    ),
+                  ),
+                ],
+                _discountCodeSection(
+                  icon: Icons.local_offer,
+                  title: 'Promotional Code',
+                  subtitle: kIsWeb
+                      ? 'Enter a promo code for web checkout pricing'
+                      : 'Web checkout only',
+                  hintText: 'Promo code (e.g. WELCOME20)',
+                  controller: _promoCodeCtrl,
+                  onApply: _applyPromoCode,
+                  enabled: kIsWeb,
                 ),
               ],
-              if (_discountCodeError != null) ...[
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: _D.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _D.red.withOpacity(0.3)),
-                  ),
-                  child: Text(_discountCodeError!, style: const TextStyle(color: _D.red, fontSize: 13)),
-                ),
-              ],
-              _discountCodeSection(
-                icon: Icons.school,
-                title: 'Student Discount',
-                subtitle: 'Enter your school code for a student discount',
-                hintText: 'School code (e.g. STANFORD2026)',
-                controller: _schoolCodeCtrl,
-                onApply: _applySchoolCode,
-              ),
-              const SizedBox(height: 12),
-              _discountCodeSection(
-                icon: Icons.business,
-                title: 'Corporate Sponsor',
-                subtitle: 'Enter your employer code for corporate benefits',
-                hintText: 'Corporate code (e.g. ACME100)',
-                controller: _corporateCodeCtrl,
-                onApply: _applyCorporateCode,
-              ),
             ],
           ),
 
@@ -2417,6 +2715,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
     required String hintText,
     required TextEditingController controller,
     required Future<void> Function(String) onApply,
+    bool enabled = true,
   }) {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -2440,6 +2739,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             Expanded(
               child: TextField(
                 controller: controller,
+                enabled: enabled,
                 style: const TextStyle(color: _D.textPrimary, fontSize: 13),
                 decoration: InputDecoration(
                   hintText: hintText,
@@ -2456,11 +2756,16 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
             ),
             const SizedBox(width: 8),
             ElevatedButton(
-              onPressed: () {
-                if (controller.text.trim().isNotEmpty) onApply(controller.text.trim());
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: _D.bgElevated),
-              child: const Text('Apply', style: TextStyle(color: _D.gold, fontSize: 12)),
+              onPressed: enabled && controller.text.trim().isNotEmpty
+                  ? () => onApply(controller.text.trim())
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _D.bgElevated,
+                disabledBackgroundColor: _D.bgElevated.withOpacity(0.4),
+              ),
+              child: Text('Apply',
+                  style: TextStyle(
+                      color: enabled ? _D.gold : _D.textMuted, fontSize: 12)),
             ),
           ]),
         ],
@@ -2632,14 +2937,34 @@ class _TrialExpiredBanner extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _planButton('Inner Chamber', '\$49/mo', _D.cyan, onUpgrade),
-              const SizedBox(width: 12),
-              _planButton('Sovereign Circle', '\$149/mo', _D.gold, onUpgrade),
-            ],
-          ),
+          if (isNativeIOS)
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: onUpgrade,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _D.gold,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('View Upgrade Options',
+                    style: TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14)),
+              ),
+            )
+          else
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _planButton('Inner Chamber', '\$49/mo', _D.cyan, onUpgrade),
+                const SizedBox(width: 12),
+                _planButton(
+                    'Sovereign Circle', '\$149/mo', _D.gold, onUpgrade),
+              ],
+            ),
         ],
       ),
     );

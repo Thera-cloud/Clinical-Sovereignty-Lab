@@ -5,9 +5,9 @@
     <key>NSFaceIDUsageDescription</key>
 	<string>Sovereign Sanctuary uses Face ID to protect your therapeutic data and authenticate sensitive actions.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>We need access to your microphone for speech-to-text</string>
+	<string>Sovereign Sanctuary uses your microphone for voice conversations with your AI companion and real-time emotional coherence analysis.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>We need access to speech recognition for accessibility</string>
+	<string>Sovereign Sanctuary uses speech recognition to transcribe your voice sessions for personalized therapeutic insights.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Sovereign Sanctuary uses Bluetooth to maintain the ZEFCP solidarity mesh and Quakete emotional support network.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>

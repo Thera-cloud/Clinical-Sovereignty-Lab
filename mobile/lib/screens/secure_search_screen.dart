@@ -189,6 +189,28 @@ class _SecureSearchScreenState extends State<SecureSearchScreen>
     Navigator.pop(context, {'push_entries': entries});
   }
 
+  void _copySessionTranscript(String date, List<Map<String, dynamic>> entries) {
+    final buf = StringBuffer();
+    buf.writeln('Sovereign Sanctuary \u2014 Conversation Transcript');
+    buf.writeln('Date: ${_formatDate(date)}');
+    buf.writeln('\u2014' * 40);
+    for (final e in entries) {
+      final ts = _formatTimestamp(e['timestamp'] as String? ?? '');
+      buf.writeln('\n[$ts]');
+      buf.writeln('You: ${e['user'] ?? ''}');
+      buf.writeln('Nate: ${e['ai'] ?? ''}');
+    }
+    buf.writeln('\n${'=' * 40}');
+    buf.writeln('sovereignsanctuary.net');
+    Clipboard.setData(ClipboardData(text: buf.toString()));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Transcript copied to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
   String _formatTimestamp(String raw) {
     try {
       final dt = DateTime.parse(raw);
@@ -536,6 +558,23 @@ class _SecureSearchScreenState extends State<SecureSearchScreen>
         ),
         if (isExpanded) ...[
           Container(height: 1, color: _Design.goldDim.withOpacity(0.15)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                SizedBox(
+                  height: 30,
+                  child: TextButton.icon(
+                    onPressed: () => _copySessionTranscript(date, entries),
+                    icon: const Icon(Icons.copy_all, size: 14, color: _Design.gold),
+                    label: const Text('Copy Transcript',
+                      style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ],
+            ),
+          ),
           ...entries.asMap().entries.map((mapEntry) {
             final ei = mapEntry.key;
             final e = mapEntry.value;

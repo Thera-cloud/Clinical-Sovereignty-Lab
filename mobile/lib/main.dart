@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 // 1. ADDED: Permission Handler (Required for Vagus v2.6.1)
@@ -36,6 +36,10 @@ import 'widgets/upload_progress_indicator.dart';
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
 void debugLog(Object? message) { if (kDebugMode) print(message); }
+
+/// True when running as a native iOS app (not web on Safari).
+/// Used to gate IAP-only flows per Apple Guideline 3.1.1.
+bool get isNativeIOS => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
 // =============================================================================
 
@@ -282,6 +286,23 @@ class _InitialRouteWidget extends StatelessWidget {
       if (familyCode != null) {
         return FamilyInviteAcceptScreen(inviteCode: familyCode);
       }
+
+      // --- Stripe Registration Return ---
+      try {
+        final regStatus = Uri.base.queryParameters['registration'];
+        if (regStatus == null || regStatus.isEmpty) {
+          final frag = Uri.base.fragment;
+          if (frag.contains('registration=')) {
+            final p = Uri(query: frag.replaceFirst(RegExp(r'^[/?]+'), '')).queryParameters;
+            if (p['registration'] == 'success') {
+              return const LobbyScreen(registrationSuccess: true);
+            }
+          }
+        }
+        if (regStatus == 'success') {
+          return const LobbyScreen(registrationSuccess: true);
+        }
+      } catch (_) {}
     }
     return const LobbyScreen();
   }
@@ -1634,10 +1655,10 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
         String reply = data['text'] ?? "";
         setState(() {
           // Update last NATE message if it exists, otherwise add new one
-          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("[NATE]:")) {
-            _chatHistory[_chatHistory.length - 1] = "[NATE]: $reply";
+          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("Little Nate:")) {
+            _chatHistory[_chatHistory.length - 1] = "Little Nate: $reply";
           } else {
-            _chatHistory.add("[NATE]: $reply");
+            _chatHistory.add("Little Nate: $reply");
           } 
           _scrollToBottom();
         });
@@ -1686,7 +1707,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
           final text = speechData['text'] as String? ?? '';
           if (text.isNotEmpty) {
             setState(() {
-              _chatHistory.add("[NATE]: $text");
+              _chatHistory.add("Little Nate: $text");
               _scrollToBottom();
             });
           }
@@ -1805,7 +1826,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
     }));
 
     setState(() {
-      _chatHistory.add("[YOU]: $text");
+      _chatHistory.add("You: $text");
       _chatController.clear();
       _scrollToBottom();
     });
@@ -1963,7 +1984,7 @@ class _NeuralInterfaceState extends State<NeuralInterface> with WidgetsBindingOb
                       itemCount: _chatHistory.length,
                       itemBuilder: (ctx, i) => Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                        child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("[YOU]") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
+                        child: Text(_chatHistory[i], style: TextStyle(fontFamily: "Courier", color: _chatHistory[i].startsWith("You:") ? Colors.grey : (_chatHistory[i].startsWith("[SYSTEM]") ? Colors.yellow : Colors.white), fontSize: 14)),
                       ),
                     ),
                   ),
@@ -2647,6 +2668,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   int _coachingAttempt = 0;
   final TextEditingController _coachingController = TextEditingController();
   bool _sanctuaryPaused = false;
+  bool _pendingAssistedReturn = false;
   bool _showSessionSummary = false;
   bool _generatingSummary = false;
   Map<String, dynamic>? _sessionSummary;
@@ -2742,6 +2764,23 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
       "password": widget.password ?? "",
       "expected_role": "CLIENT"
     }));
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final bottomInset = WidgetsBinding.instance.platformDispatcher.views.first.viewInsets.bottom;
+    if (bottomInset > 0) {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   @override
@@ -3268,14 +3307,19 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
   void _postAssistedResponse() {
     final assisted = _assistedResponse;
     if (assisted != null && assisted.isNotEmpty) {
-      _channel?.sink.add(jsonEncode({
+      if (_channel == null) {
+        _showError('Connection lost. Reconnecting...');
+        return;
+      }
+      _channel!.sink.add(jsonEncode({
         "type": "sanctuary_post_assisted_response",
         "sanctuary_id": _sanctuaryId,
         "assisted_response": assisted
       }));
       setState(() {
-        _assistedResponse = null; // Clear after posting
+        _assistedResponse = null;
       });
+      _showSuccess('Shared to family!');
     }
   }
 
@@ -3748,6 +3792,8 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
             } else {
               _groupCoachingRoundActive = false;
               _groupCoachingWaitingOn = [];
+              _hasSuggestedResponse = false;
+              _groupCoachingMyState = '';
             }
           }
 
@@ -3902,6 +3948,8 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
             }
             _groupCoachingRoundActive = false;
             _groupCoachingWaitingOn = [];
+            _hasSuggestedResponse = false;
+            _groupCoachingMyState = '';
           } else if (state == 'ACTIVE') {
             _groupCoachingPendingBy = null;
             _groupCoachingRoundActive = true;
@@ -4034,8 +4082,10 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
         debugLog('>>> SANCTUARY: Assisted response received');
         final assistedResponse = data['assisted_response'] ?? data['response'] ?? '';
         if (assistedResponse.isNotEmpty) {
+          final shouldReturn = _pendingAssistedReturn;
           setState(() {
             _assistedResponse = assistedResponse;
+            _pendingAssistedReturn = false;
             final total = (data['total_charges'] as num?)?.toDouble();
             if (total != null) {
               _totalCharges = total;
@@ -4049,15 +4099,14 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
               'is_assisted': true,
             });
           });
+          if (shouldReturn) {
+            _completeCoaching();
+          }
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('Assisted response ready!'),
+              content: const Text('Assisted response ready! Tap "Share to Family" below.'),
               backgroundColor: Colors.green,
-              action: SnackBarAction(
-                label: 'Share',
-                textColor: Colors.white,
-                onPressed: _postAssistedResponse,
-              ),
+              duration: const Duration(seconds: 6),
             ),
           );
         }
@@ -4319,6 +4368,7 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
     }));
 
     _messageController.clear();
+    _scrollToBottom();
   }
 
   void _acceptCoaching({bool assistedResponse = false}) {
@@ -5028,10 +5078,10 @@ void _showCoachingLimitDialog(Map<String, dynamic> data) {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _requestAssistedResponse();
-              Future.delayed(const Duration(seconds: 2), () {
-                _completeCoaching();
+              setState(() {
+                _pendingAssistedReturn = true;
               });
+              _requestAssistedResponse();
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber[700]),
             child: Text('Get Help + Return (\$${assistedCost.toStringAsFixed(0)})'),
@@ -5356,6 +5406,11 @@ void _syncSanctuaryState() {
                       child: TextField(
                         controller: _coachingController,
                         style: const TextStyle(color: Colors.white),
+                        minLines: 1,
+                        maxLines: 5,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        scrollPhysics: const BouncingScrollPhysics(),
                         decoration: InputDecoration(
                           hintText: 'Share with Little Nate (confidential)...',
                           hintStyle: TextStyle(color: Colors.grey[500]),
@@ -5363,7 +5418,6 @@ void _syncSanctuaryState() {
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         ),
-                        onSubmitted: (_) => _sendCoachingMessage(),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -5380,12 +5434,24 @@ void _syncSanctuaryState() {
                       label: const Text('Return to Sanctuary'),
                       style: TextButton.styleFrom(foregroundColor: Colors.grey[400]),
                     ),
-                    if (_coachingAttempt >= 3)
+                    if (_coachingAttempt >= 3 && !_pendingAssistedReturn)
                       TextButton.icon(
-                        onPressed: _requestAssistedResponse,
+                        onPressed: () {
+                          setState(() { _pendingAssistedReturn = true; });
+                          _requestAssistedResponse();
+                        },
                         icon: const Icon(Icons.auto_fix_high, size: 18),
                         label: const Text('Get Help (+\$3)'),
                         style: TextButton.styleFrom(foregroundColor: Colors.amber),
+                      ),
+                    if (_pendingAssistedReturn)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber)),
+                          const SizedBox(width: 8),
+                          Text('Generating response...', style: TextStyle(color: Colors.amber.shade200, fontSize: 13)),
+                        ],
                       ),
                   ],
                 ),
@@ -5549,11 +5615,13 @@ void _syncSanctuaryState() {
               _costRow("Threshold (Trial)", "Free 14 days", "50K tokens, 300 AI min"),
               _costRow("Inner Chamber", "\$49/mo", "Yearly: \$490 (17% savings)"),
               _costRow("Sovereign Circle", "\$149/mo", "Yearly: \$1,490 (17% savings)"),
-              const Divider(color: Colors.white10, height: 24),
-              const Text("Payment Methods", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
-              const SizedBox(height: 8),
-              _costRow("Credit/Debit Card", "2.9% + \$0.30", "Standard processing"),
-              _costRow("ACH Bank Debit", "0.8% (max \$5)", "Lower fees, 4-5 day settlement"),
+              if (!isNativeIOS) ...[
+                const Divider(color: Colors.white10, height: 24),
+                const Text("Payment Methods", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 8),
+                _costRow("Credit/Debit Card", "2.9% + \$0.30", "Standard processing"),
+                _costRow("ACH Bank Debit", "0.8% (max \$5)", "Lower fees, 4-5 day settlement"),
+              ],
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerRight,
@@ -5598,6 +5666,7 @@ void _syncSanctuaryState() {
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.of(context).size.width < 420;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E1E1E),
@@ -5692,7 +5761,11 @@ void _syncSanctuaryState() {
                     if (_hasSuggestedResponse) _buildSuggestedResponseUI(),
                     if (_groupCoachingRoundActive && !_hasSuggestedResponse && (_groupCoachingMyState.isEmpty || _groupCoachingMyState.toUpperCase() == 'PENDING'))
                       _buildGroupCoachingSuggestionLoading(),
-                    _groupCoachingRoundActive ? _buildGroupCoachingLockedFooter() : _buildInputArea(),
+                    if (!_inPrivateCoaching && _assistedResponse != null && _assistedResponse!.isNotEmpty)
+                      _buildAssistedShareBanner(),
+                    (_groupCoachingRoundActive && (_groupCoachingMyState.isEmpty || _groupCoachingMyState.toUpperCase() == 'PENDING'))
+                        ? _buildGroupCoachingLockedFooter()
+                        : _buildInputArea(),
                   ],
                 ),
           
@@ -5983,6 +6056,49 @@ void _syncSanctuaryState() {
     return vaultTiers.contains(tier) || vaultTiers.contains(plan);
   }
 
+  Widget _buildAssistedShareBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade900.withOpacity(0.2),
+        border: Border(top: BorderSide(color: Colors.amber.shade700, width: 1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.auto_awesome, color: Colors.amber, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Little Nate prepared a response for you',
+              style: TextStyle(color: Colors.amber.shade200, fontSize: 13),
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton.icon(
+            onPressed: _postAssistedResponse,
+            icon: const Icon(Icons.send, size: 16),
+            label: const Text('Share to Family'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber.shade700,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            onPressed: () {
+              setState(() { _assistedResponse = null; });
+            },
+            icon: const Icon(Icons.close, size: 18, color: Colors.white54),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInputArea() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -6033,7 +6149,11 @@ void _syncSanctuaryState() {
                 child: TextField(
                   controller: _messageController,
                   style: const TextStyle(color: Colors.white),
-                  maxLines: null,
+                  minLines: 1,
+                  maxLines: 5,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  scrollPhysics: const BouncingScrollPhysics(),
                   decoration: InputDecoration(
                     hintText: _isListening ? 'Listening...' : 'Type your message...',
                     hintStyle: TextStyle(
@@ -6066,7 +6186,8 @@ void _syncSanctuaryState() {
 // =============================================================================
 
 class LobbyScreen extends StatefulWidget {
-  const LobbyScreen({super.key});
+  final bool registrationSuccess;
+  const LobbyScreen({super.key, this.registrationSuccess = false});
 
   @override
   _LobbyScreenState createState() => _LobbyScreenState();
@@ -6117,6 +6238,16 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
     super.initState();
     _connectToBridge();
     _checkBiometricLogin();
+    if (widget.registrationSuccess) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Payment received! Sign in with the username you created.'),
+          backgroundColor: Color(0xFF22C55E),
+          duration: Duration(seconds: 8),
+        ));
+      });
+    }
   }
 
   /// Check if saved biometric credentials exist for quick login.
@@ -7500,7 +7631,7 @@ class SignUpWizard extends StatefulWidget {
 }
 
 class _SignUpWizardState extends State<SignUpWizard> {
-  int _step = 0; // 0: consent+role, 1: tier/dojo, 2: form
+  int _step = 0; // 0: consent+role, 1: tier/dojo, 2: form, 3: order review (paid only)
   bool _consentGiven = false;
   String? _selectedRole; // CLIENT or COACH
   String _selectedTier = 'TRIAL'; // COACH_ONLY, TRIAL, STANDARD, TOP_TIER
@@ -7541,9 +7672,14 @@ class _SignUpWizardState extends State<SignUpWizard> {
   // JUDGE is excluded from multi-DOJO volume discounts
   static const List<int> _dojoDiscounts = [0, 0, 10, 15, 20, 25, 30, 35]; // index = count (excl. JUDGE)
 
-  // Beta invite code
-  final _betaCodeCtrl = TextEditingController();
-  bool get _isBetaCodeEntered => _betaCodeCtrl.text.trim().isNotEmpty;
+  // Discount code (replaces old invite code for both client and coach)
+  final _inviteCodeCtrl = TextEditingController();
+  final _discountCodeCtrl = TextEditingController();
+  bool _discountValidated = false;
+  bool _discountValidating = false;
+  String? _discountError;
+  Map<String, dynamic> _discountDetails = {};
+  bool get _isInviteCodeEntered => _inviteCodeCtrl.text.trim().isNotEmpty;
 
   // Coach invite token (from URL ?invite=TOKEN when client arrives via coach invite link)
   String? _coachInviteToken;
@@ -7585,6 +7721,15 @@ class _SignUpWizardState extends State<SignUpWizard> {
   }
 
   String get _effectiveRole => _selectedRole ?? widget.role ?? "CLIENT";
+
+  bool get _isPaidTier {
+    if (isNativeIOS) return false; // Apple Guideline 3.1.1 — no Stripe on iOS
+    if (_effectiveRole == 'COACH') return _selectedDojos.isNotEmpty;
+    return _selectedTier == 'STANDARD' || _selectedTier == 'TOP_TIER';
+  }
+
+  bool _isLaunchingStripe = false;
+  String? _stripeError;
 
   @override
   void initState() {
@@ -7648,8 +7793,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enter the Head of Household username, or turn off the Dependent toggle.")));
        return;
     }
-    // Coach-specific validations (skipped when beta invite code is provided)
-    if (_effectiveRole == "COACH" && !_isBetaCodeEntered) {
+    // Coach-specific validations (always required for production)
+    if (_effectiveRole == "COACH") {
       if (_emailCtrl.text.trim().isEmpty || !_emailCtrl.text.contains('@') || !_emailCtrl.text.contains('.')) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("A valid email address is required")));
         return;
@@ -7702,8 +7847,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
       "dob": DateFormat('yyyy-MM-dd').format(_dob!),
       "modality": "General",
       "parent_username": _isDependent ? _parentCtrl.text.trim() : null,
-      // Beta invite code (if provided, skips verification)
-      "beta_invite_code": _betaCodeCtrl.text.trim(),
+      "invite_code": _inviteCodeCtrl.text.trim(),
+      "discount_code": _discountCodeCtrl.text.trim().isNotEmpty ? _discountCodeCtrl.text.trim() : (_inviteCodeCtrl.text.trim().isNotEmpty ? _inviteCodeCtrl.text.trim() : null),
       // Contact info
       "email": _emailCtrl.text.trim(),
       "phone": _phoneCtrl.text.trim(),
@@ -7992,6 +8137,42 @@ class _SignUpWizardState extends State<SignUpWizard> {
     return double.parse((discountedTotal + judgeTotal).toStringAsFixed(2));
   }
 
+  Future<void> _verifyDiscountCode() async {
+    final code = _discountCodeCtrl.text.trim();
+    if (code.isEmpty) return;
+    setState(() { _discountValidating = true; _discountError = null; _discountValidated = false; _discountDetails = {}; });
+    try {
+      final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final tierParam = _effectiveRole == 'CLIENT' ? '?tier=$_selectedTier' : '';
+      final uri = Uri.parse('$base/api/billing/verify-discount-code/${Uri.encodeComponent(code)}$tierParam');
+      final resp = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _discountValidated = true;
+          _discountDetails = Map<String, dynamic>.from(data);
+          _discountError = null;
+        });
+      } else {
+        final body = jsonDecode(resp.body);
+        setState(() {
+          _discountValidated = false;
+          _discountDetails = {};
+          _discountError = body['detail'] ?? 'Invalid or expired code';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _discountValidated = false;
+        _discountError = 'Could not verify code. Please try again.';
+      });
+    } finally {
+      if (mounted) setState(() => _discountValidating = false);
+    }
+  }
+
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -8024,6 +8205,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
     if (_step == 1) {
       return _effectiveRole == "COACH" ? "SELECT DOJOS" : "SELECT PLAN";
     }
+    if (_step == 3) return "REVIEW ORDER";
     return "NEW ${_effectiveRole}";
   }
 
@@ -8051,7 +8233,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
           ? _buildConsentAndRoleStep()
           : _step == 1
             ? (_effectiveRole == "COACH" ? _buildCoachDojoSelection() : _buildClientTierSelection())
-            : _buildForm(),
+            : _step == 3
+              ? _buildOrderReview()
+              : _buildForm(),
       ),
     );
   }
@@ -8169,7 +8353,6 @@ class _SignUpWizardState extends State<SignUpWizard> {
         children: [
           const Text("SELECT YOUR TIER", style: TextStyle(color: Colors.white, fontFamily: 'Courier', fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 2)),
           const SizedBox(height: 6),
-          Text("All tiers start free during beta", style: TextStyle(color: Colors.grey[500], fontSize: 13)),
           const SizedBox(height: 20),
           _buildTierOption(
             "COACH-ONLY",
@@ -8190,42 +8373,166 @@ class _SignUpWizardState extends State<SignUpWizard> {
             Colors.blueAccent,
             ["Limited AI conversations", "Basic emotional tracking", "7-day trial period"],
           ),
-          const SizedBox(height: 12),
-          _buildTierOption(
-            "INNER CHAMBER",
-            "STANDARD",
-            "\$49/mo",
-            "Unlimited AI access with voice mode and full biometric metrics.",
-            Icons.favorite,
-            const Color(0xFF9D4EDD),
-            ["Unlimited AI conversations", "Voice mode", "Full emotional metrics", "Session history"],
-          ),
-          const SizedBox(height: 12),
-          _buildTierOption(
-            "SOVEREIGN CIRCLE",
-            "TOP_TIER",
-            "\$149/mo",
-            "Everything plus Avatar Mode, Family Sanctuary, and live coaching.",
-            Icons.diamond,
-            const Color(0xFFFFD700),
-            ["Everything in Inner Chamber", "Avatar Mode", "Family Sanctuary", "Live coaching sessions", "Priority support"],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blueAccent.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+          // Paid tiers hidden on native iOS — Apple Guideline 3.1.1 requires IAP.
+          // Users register free and upgrade via In-App Purchase after login.
+          if (!isNativeIOS) ...[
+            const SizedBox(height: 12),
+            _buildTierOption(
+              "INNER CHAMBER",
+              "STANDARD",
+              "\$49/mo",
+              "Unlimited AI access with voice mode and full biometric metrics.",
+              Icons.favorite,
+              const Color(0xFF9D4EDD),
+              ["Unlimited AI conversations", "Voice mode", "Full emotional metrics", "Session history"],
             ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline, color: Colors.blueAccent, size: 18),
-                const SizedBox(width: 10),
-                Expanded(child: Text("Beta: No charge during testing period", style: TextStyle(color: Colors.blueAccent[100], fontSize: 12))),
-              ],
+            const SizedBox(height: 12),
+            _buildTierOption(
+              "SOVEREIGN CIRCLE",
+              "TOP_TIER",
+              "\$149/mo",
+              "Everything plus Avatar Mode, Family Sanctuary, and live coaching.",
+              Icons.diamond,
+              const Color(0xFFFFD700),
+              ["Everything in Inner Chamber", "Avatar Mode", "Family Sanctuary", "Live coaching sessions", "Priority support"],
             ),
-          ),
+          ],
+
+          if (isNativeIOS) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Color(0xFFC9A962), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "Premium plans (Inner Chamber & Sovereign Circle) can be unlocked after sign-up from your account settings.",
+                      style: TextStyle(color: Colors.grey[400], fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Discount code section — hidden on iOS per Apple Guideline 3.1.1
+          if (!isNativeIOS) ...[
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _discountValidated ? const Color(0xFF22C55E) : const Color(0xFFC9A962).withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.local_offer, color: const Color(0xFFC9A962), size: 20),
+                      const SizedBox(width: 8),
+                      const Text("DISCOUNT CODE", style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Courier', fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text("Have a promo, school, or corporate discount code?", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _discountCodeCtrl,
+                          style: const TextStyle(color: Colors.white, fontFamily: 'Courier', letterSpacing: 1),
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: InputDecoration(
+                            labelText: "Discount Code (optional)",
+                            labelStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
+                            filled: true,
+                            fillColor: const Color(0xFF111111),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.white12)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.white12)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFC9A962))),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          ),
+                          onChanged: (_) {
+                            if (_discountValidated) setState(() { _discountValidated = false; _discountDetails = {}; _discountError = null; });
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _discountValidating ? null : _verifyDiscountCode,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFC9A962),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: _discountValidating
+                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                              : const Text("APPLY", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_discountValidated && _discountDetails.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF22C55E).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF22C55E).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _discountDetails['discount_type'] == 'pays_full'
+                                  ? "${_discountDetails['name']} — Fully sponsored"
+                                  : _discountDetails['discount_type'] == 'percent'
+                                      ? "${_discountDetails['name']} — ${_discountDetails['discount_value']}% off"
+                                      : "${_discountDetails['name']} — \$${((_discountDetails['discount_value'] ?? 0) / 100).toStringAsFixed(2)} off",
+                              style: const TextStyle(color: Color(0xFF22C55E), fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (_discountError != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_discountError!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13))),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -8471,7 +8778,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
                   children: [
                     const Icon(Icons.info_outline, color: Color(0xFFFFD700), size: 18),
                     const SizedBox(width: 10),
-                    Expanded(child: Text("BETA: No charge during testing period", style: TextStyle(color: const Color(0xFFFFD700).withOpacity(0.9), fontSize: 12, fontWeight: FontWeight.bold))),
+                    Expanded(child: Text("SUBSCRIPTION TERMS", style: TextStyle(color: const Color(0xFFFFD700).withOpacity(0.9), fontSize: 12, fontWeight: FontWeight.bold))),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -8579,56 +8886,112 @@ class _SignUpWizardState extends State<SignUpWizard> {
             ),
             const SizedBox(height: 20),
 
-            // 2.4 BETA INVITE CODE (Coaches only)
-            if (_effectiveRole == "COACH") ...[
+            // 2.4 DISCOUNT CODE (Coaches only — hidden on iOS per Apple Guideline 3.1.1)
+            if (_effectiveRole == "COACH" && !isNativeIOS) ...[
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.5)),
+                  border: Border.all(color: _discountValidated ? const Color(0xFF22C55E) : const Color(0xFFC9A962).withOpacity(0.3)),
                   borderRadius: BorderRadius.circular(12),
-                  color: const Color(0xFF9D4EDD).withOpacity(0.06),
+                  color: const Color(0xFF1A1A1A),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.science, color: Color(0xFF9D4EDD), size: 20),
+                        const Icon(Icons.local_offer, color: Color(0xFFC9A962), size: 20),
                         const SizedBox(width: 8),
-                        const Text("BETA ACCESS", style: TextStyle(color: Color(0xFF9D4EDD), fontWeight: FontWeight.bold, fontFamily: 'Courier', fontSize: 13)),
+                        const Text("DISCOUNT CODE", style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.bold, fontFamily: 'Courier', fontSize: 13, letterSpacing: 1.5)),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      "Have a beta invite code? Enter it below to skip identity verification during testing.",
+                      "Have a promo, school, or corporate discount code?",
                       style: TextStyle(color: Colors.grey[500], fontSize: 12),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: _betaCodeCtrl,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: "Beta Invite Code (optional)",
-                        prefixIcon: const Icon(Icons.vpn_key, color: Color(0xFF9D4EDD)),
-                        suffixIcon: _isBetaCodeEntered
-                            ? const Icon(Icons.check_circle, color: Color(0xFF9D4EDD), size: 20)
-                            : null,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    if (_isBetaCodeEntered) ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.info_outline, color: Color(0xFF9D4EDD), size: 14),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              "Beta mode: contact info, W-9, and document upload are optional.",
-                              style: TextStyle(color: Colors.grey[400], fontSize: 11, fontStyle: FontStyle.italic),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _discountCodeCtrl,
+                            style: const TextStyle(color: Colors.white, fontFamily: 'Courier', letterSpacing: 1),
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: InputDecoration(
+                              labelText: "Discount Code (optional)",
+                              labelStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
+                              filled: true,
+                              fillColor: const Color(0xFF111111),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.white12)),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.white12)),
+                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFC9A962))),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                             ),
+                            onChanged: (_) {
+                              if (_discountValidated) setState(() { _discountValidated = false; _discountDetails = {}; _discountError = null; });
+                            },
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          height: 48,
+                          child: ElevatedButton(
+                            onPressed: _discountValidating ? null : _verifyDiscountCode,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFC9A962),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: _discountValidating
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                : const Text("APPLY", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_discountValidated && _discountDetails.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF22C55E).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF22C55E).withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle, color: Color(0xFF22C55E), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _discountDetails['discount_type'] == 'pays_full'
+                                    ? "${_discountDetails['name']} — Fully sponsored"
+                                    : _discountDetails['discount_type'] == 'percent'
+                                        ? "${_discountDetails['name']} — ${_discountDetails['discount_value']}% off"
+                                        : "${_discountDetails['name']} — \$${((_discountDetails['discount_value'] ?? 0) / 100).toStringAsFixed(2)} off",
+                                style: const TextStyle(color: Color(0xFF22C55E), fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (_discountError != null) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(_discountError!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13))),
+                          ],
+                        ),
                       ),
                     ],
                   ],
@@ -8917,7 +9280,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
             
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: _isRegistering ? null : _submitRegistration, 
+              onPressed: _isRegistering ? null : (_isPaidTier ? _goToOrderReview : _submitRegistration), 
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isRegistering ? Colors.grey : Colors.blueAccent,
                 minimumSize: const Size(double.infinity, 50),
@@ -8928,13 +9291,235 @@ class _SignUpWizardState extends State<SignUpWizard> {
                     SizedBox(width: 12),
                     Text("CREATING ACCOUNT...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   ])
-                : const Text("CREATE ACCOUNT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                : Text(_isPaidTier ? "REVIEW ORDER" : "CREATE ACCOUNT",
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
             )
           ],
         ),
       ), 
     );
-  }  
+  }
+
+  void _goToOrderReview() {
+    if (_nameCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Full Name is required")));
+      return;
+    }
+    if (_dob == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Date of Birth is required")));
+      return;
+    }
+    if (_calculateAge(_dob!) < 18) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Primary Account Holder must be 18+.")));
+      return;
+    }
+    if (_userCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Username and Password are required")));
+      return;
+    }
+    if (_effectiveRole == "COACH") {
+      if (_emailCtrl.text.trim().isEmpty || !_emailCtrl.text.contains('@')) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("A valid email is required")));
+        return;
+      }
+      final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+      if (phoneDigits.length < 10) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("A valid phone number is required")));
+        return;
+      }
+    }
+    setState(() { _step = 3; _stripeError = null; });
+  }
+
+  Widget _buildOrderReview() {
+    final role = _effectiveRole;
+    final isCoach = role == 'COACH';
+    String planName;
+    double monthlyTotal;
+
+    if (isCoach) {
+      planName = '${_selectedDojos.length} DOJO${_selectedDojos.length > 1 ? 's' : ''}';
+      monthlyTotal = _calculateDojoPrice();
+    } else {
+      planName = _selectedTier == 'TOP_TIER' ? 'Sovereign Circle' : 'Inner Chamber';
+      monthlyTotal = _selectedTier == 'TOP_TIER' ? 149.0 : 49.0;
+    }
+
+    final discountPct = _discountValidated ? (_discountDetails['discount_pct'] ?? 0) : 0;
+    final discountedTotal = discountPct > 0
+        ? double.parse((monthlyTotal * (1 - discountPct / 100)).toStringAsFixed(2))
+        : monthlyTotal;
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('ORDER SUMMARY', style: TextStyle(color: Color(0xFFC9A962), fontSize: 18,
+              fontWeight: FontWeight.bold, fontFamily: 'Courier', letterSpacing: 2)),
+          const SizedBox(height: 20),
+          _reviewRow('Name', _nameCtrl.text.trim()),
+          _reviewRow('Username', _userCtrl.text.trim()),
+          _reviewRow('Role', role),
+          const Divider(color: Colors.white24, height: 32),
+          _reviewRow('Plan', planName),
+          if (isCoach) ...[
+            for (final d in _selectedDojos)
+              _reviewRow('  ${_dojoLabels[d] ?? d}', '\$${_dojoPrices[d]?.toStringAsFixed(0) ?? "?"}/mo'),
+          ],
+          if (discountPct > 0) ...[
+            _reviewRow('Discount', '-$discountPct%', valueColor: const Color(0xFF22C55E)),
+            _reviewRow('Monthly Total', '\$${discountedTotal.toStringAsFixed(2)}',
+                valueColor: const Color(0xFFC9A962)),
+          ] else
+            _reviewRow('Monthly Total', '\$${monthlyTotal.toStringAsFixed(2)}',
+                valueColor: const Color(0xFFC9A962)),
+          if (_emailCtrl.text.trim().isNotEmpty)
+            _reviewRow('Receipt Email', _emailCtrl.text.trim()),
+          const Divider(color: Colors.white24, height: 32),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A2E),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.lock, color: Color(0xFFC9A962), size: 18),
+                SizedBox(width: 8),
+                Expanded(child: Text(
+                  'You will be redirected to Stripe to complete payment securely. '
+                  'Your account is created after payment confirms.',
+                  style: TextStyle(color: Colors.white60, fontSize: 12),
+                )),
+              ],
+            ),
+          ),
+          if (_stripeError != null) ...[
+            const SizedBox(height: 12),
+            Text(_stripeError!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+          ],
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _isLaunchingStripe ? null : _launchStripeCheckout,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isLaunchingStripe ? Colors.grey : const Color(0xFFC9A962),
+              minimumSize: const Size(double.infinity, 50),
+            ),
+            child: _isLaunchingStripe
+              ? const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)),
+                  SizedBox(width: 12),
+                  Text('PREPARING PAYMENT...', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ])
+              : const Text('CONTINUE TO PAYMENT', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton(
+              onPressed: _isLaunchingStripe ? null : () => setState(() => _step = 2),
+              child: const Text('← Back to Edit', style: TextStyle(color: Colors.white54)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewRow(String label, String value, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white60, fontSize: 14)),
+          Text(value, style: TextStyle(color: valueColor ?? Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _launchStripeCheckout() async {
+    if (_isLaunchingStripe) return;
+    setState(() { _isLaunchingStripe = true; _stripeError = null; });
+
+    try {
+      final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      final uri = Uri.parse('$base/api/registration/checkout/prepare');
+
+      final body = <String, dynamic>{
+        'role': _effectiveRole,
+        'username': _userCtrl.text.trim(),
+        'password': _passCtrl.text.trim(),
+        'email': _emailCtrl.text.trim(),
+        'name': _nameCtrl.text.trim(),
+        'dob': _dob != null ? DateFormat('yyyy-MM-dd').format(_dob!) : '',
+        'phone': _phoneCtrl.text.trim(),
+      };
+
+      if (_effectiveRole == 'CLIENT') {
+        body['tier'] = _selectedTier;
+      } else {
+        body['selected_dojos'] = _selectedDojos;
+      }
+
+      if (_discountValidated && _discountCodeCtrl.text.trim().isNotEmpty) {
+        body['discount_code'] = _discountCodeCtrl.text.trim();
+      }
+
+      if (_coachInviteToken != null) {
+        body['coach_invite_token'] = _coachInviteToken;
+      }
+
+      if (_isDependent && _parentCtrl.text.trim().isNotEmpty) {
+        body['parent_username'] = _parentCtrl.text.trim();
+      }
+
+      if (_effectiveRole == 'COACH' && _w9LegalNameCtrl.text.trim().isNotEmpty) {
+        body['w9_data'] = {
+          'legal_name': _w9LegalNameCtrl.text.trim(),
+          'business_name': _w9BusinessNameCtrl.text.trim(),
+          'tax_classification': _w9TaxClass,
+          'street': _w9StreetCtrl.text.trim(),
+          'city': _w9CityCtrl.text.trim(),
+          'state': _w9StateCtrl.text.trim(),
+          'zip': _w9ZipCtrl.text.trim(),
+          'tin': _w9TinCtrl.text.trim(),
+          'certified': _w9Certified,
+          'signature': _w9SignatureCtrl.text.trim(),
+          'signed_date': DateTime.now().toIso8601String(),
+        };
+      }
+
+      final resp = await http.post(uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final checkoutUrl = data['checkout_url'] as String?;
+        if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+          final launched = await launchUrl(Uri.parse(checkoutUrl), mode: LaunchMode.externalApplication);
+          if (!launched && mounted) {
+            setState(() => _stripeError = 'Could not open payment page. Please try again.');
+          }
+        } else {
+          setState(() => _stripeError = 'No checkout URL received.');
+        }
+      } else {
+        final errBody = jsonDecode(resp.body);
+        setState(() => _stripeError = errBody['detail'] ?? 'Payment preparation failed (${resp.statusCode})');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _stripeError = 'Connection error: ${e.toString().split('\n').first}');
+    } finally {
+      if (mounted) setState(() => _isLaunchingStripe = false);
+    }
+  }
 }
 
 // =============================================================================

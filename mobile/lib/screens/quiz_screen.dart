@@ -669,6 +669,19 @@ class _QuizScreenState extends State<QuizScreen> {
 
   // ─── QUESTION TYPES ─────────────────────────────────────────────────────
 
+  List<Map<String, dynamic>> _parseOptions(dynamic raw) {
+    if (raw is List) {
+      return raw.whereType<Map<String, dynamic>>().toList();
+    }
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) return parsed.whereType<Map<String, dynamic>>().toList();
+      } catch (_) {}
+    }
+    return [];
+  }
+
   Widget _buildScaleQuestion(Map<String, dynamic> q, _AssessmentTheme theme) {
     final min = (q['scale_min'] ?? 1).toDouble();
     final max = (q['scale_max'] ?? 10).toDouble();
@@ -701,7 +714,7 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   Widget _buildMultipleChoiceQuestion(Map<String, dynamic> q, _AssessmentTheme theme) {
-    final options = (q['options'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final options = _parseOptions(q['options']);
     final selected = _answers[_currentIndex];
     return Column(
       children: options.map((opt) {
@@ -737,7 +750,7 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   Widget _buildMultiSelectQuestion(Map<String, dynamic> q, _AssessmentTheme theme) {
-    final options = (q['options'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final options = _parseOptions(q['options']);
     final selected = (_answers[_currentIndex] as List?) ?? [];
     return Column(
       children: options.map((opt) {

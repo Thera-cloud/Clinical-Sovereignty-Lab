@@ -104,18 +104,44 @@ class PaymentService {
       if (response.productDetails.isEmpty) {
         _logger.w('PaymentService: No products loaded from store');
       }
+
+      // Drain any unfinished transactions after relaunch/background kill.
+      // StoreKit/Play billing can replay pending purchases on next session.
+      try {
+        await _iap!.restorePurchases();
+      } catch (e) {
+        _logger.w('PaymentService: Pending purchase recovery skipped: $e');
+      }
     } catch (e, st) {
       _logger.e('PaymentService: Initialize failed', error: e, stackTrace: st);
     }
   }
 
   /// Initiate purchase. On native: IAP flow. On web: redirect to Stripe Checkout.
-  Future<void> purchase(String productId, {String? userId, String? authToken}) async {
+  Future<void> purchase(
+    String productId, {
+    String? userId,
+    String? authToken,
+    String? promoCode,
+  }) async {
     final uid = userId ?? _userId;
     final token = authToken ?? _authToken;
 
     if (kIsWeb) {
-      await _purchaseViaStripe(productId, uid: uid, token: token);
+      await _purchaseViaStripe(productId, uid: uid, token: token, promoCode: promoCode);
+      return;
+    }
+
+    // Native IAP providers do not support server-side Stripe promo codes.
+    // If a promo code is entered, route through web checkout explicitly.
+    if (promoCode != null && promoCode.trim().isNotEmpty) {
+      _logger.i('PaymentService: Promo code detected on native; routing to web checkout');
+      await _purchaseViaStripe(
+        productId,
+        uid: uid,
+        token: token,
+        promoCode: promoCode.trim(),
+      );
       return;
     }
 
@@ -177,7 +203,7 @@ class PaymentService {
     _purchaseUpdates.close();
   }
 
-  void _handlePurchaseUpdate(List<PurchaseDetails> purchases) {
+  void _handlePurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       switch (purchase.status) {
         case PurchaseStatus.pending:
@@ -188,9 +214,17 @@ class PaymentService {
           break;
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
-          _verifyReceipt(purchase);
+          final verified = await _verifyReceipt(purchase);
           if (purchase.pendingCompletePurchase) {
             _iap?.completePurchase(purchase);
+          }
+          if (!verified) {
+            _purchaseUpdates.add(PurchaseStatusResult(
+              productId: purchase.productID,
+              status: PaymentStatus.error,
+              error: 'Receipt verification failed. Please restore purchases.',
+            ));
+            break;
           }
           _purchaseUpdates.add(PurchaseStatusResult(
             productId: purchase.productID,
@@ -216,11 +250,11 @@ class PaymentService {
     }
   }
 
-  Future<void> _verifyReceipt(PurchaseDetails purchase) async {
+  Future<bool> _verifyReceipt(PurchaseDetails purchase) async {
     final uid = _userId;
     if (uid == null || uid.isEmpty) {
       _logger.w('PaymentService: No user ID — skipping server verification');
-      return;
+      return false;
     }
 
     final token = _authToken;
@@ -229,7 +263,7 @@ class PaymentService {
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
 
-    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'));
+    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
     final base = '$baseUrl/api/billing';
 
     try {
@@ -247,8 +281,10 @@ class PaymentService {
         );
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
           _logger.i('PaymentService: Apple receipt verified for ${purchase.productID}');
+          return true;
         } else {
           _logger.w('PaymentService: Apple receipt verify failed: ${resp.statusCode} ${resp.body}');
+          return false;
         }
       } else if (purchase.verificationData.source == 'Google Play') {
         final purchaseToken = purchase.verificationData.serverVerificationData;
@@ -265,16 +301,25 @@ class PaymentService {
         );
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
           _logger.i('PaymentService: Google receipt verified for ${purchase.productID}');
+          return true;
         } else {
           _logger.w('PaymentService: Google receipt verify failed: ${resp.statusCode} ${resp.body}');
+          return false;
         }
       }
     } catch (e, st) {
       _logger.e('PaymentService: Receipt verification failed', error: e, stackTrace: st);
+      return false;
     }
+    return false;
   }
 
-  Future<void> _purchaseViaStripe(String productId, {String? uid, String? token}) async {
+  Future<void> _purchaseViaStripe(
+    String productId, {
+    String? uid,
+    String? token,
+    String? promoCode,
+  }) async {
     if (uid == null || token == null || token.isEmpty) {
       _logger.e('PaymentService: Web checkout requires auth context');
       _purchaseUpdates.add(PurchaseStatusResult(
@@ -288,7 +333,7 @@ class PaymentService {
     const successUrl = 'https://app.sovereignsanctuary.net/billing/success';
     const cancelUrl = 'https://app.sovereignsanctuary.net/billing/cancel';
 
-    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'));
+    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
 
     try {
       if (tokenPackIds.contains(productId)) {
@@ -355,6 +400,8 @@ class PaymentService {
             'tier': tier,
             'success_url': successUrl,
             'cancel_url': cancelUrl,
+            if (promoCode != null && promoCode.trim().isNotEmpty)
+              'promo_code': promoCode.trim(),
           }),
         );
         if (resp.statusCode >= 200 && resp.statusCode < 300) {
@@ -412,7 +459,7 @@ class PaymentService {
       return;
     }
 
-    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'));
+    final baseUrl = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
 
     try {
       final resp = await http.post(

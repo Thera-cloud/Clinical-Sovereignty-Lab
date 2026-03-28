@@ -21,7 +21,7 @@ import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 
 import 'shared_widgets.dart';
 import 'services/nevedal_flutter.dart';
-import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen;
+import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS;
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
@@ -1493,10 +1493,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
         setState(() {
-          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("[NATE]:")) {
-            _chatHistory[_chatHistory.length - 1] = "[NATE]: $reply";
+          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("Little Nate:")) {
+            _chatHistory[_chatHistory.length - 1] = "Little Nate: $reply";
           } else {
-            _chatHistory.add("[NATE]: $reply");
+            _chatHistory.add("Little Nate: $reply");
           } 
           _scrollToBottom();
         });
@@ -1512,6 +1512,44 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         if (_avatarModeEnabled && _canUseAvatarMode()) {
           final sentiment = data['sentiment'] ?? data['mood'] ?? _metrics['mood_current'];
           _updateAvatarFromSentiment(sentiment, reply);
+        }
+      }
+      else if (data['type'] == 'search_consent_request') {
+        final query = data['query'] ?? '';
+        if (query.isNotEmpty && mounted) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1A1A2E),
+              title: const Text('Web Search Request',
+                style: TextStyle(color: Color(0xFFC9A962), fontFamily: 'Cormorant Garamond')),
+              content: Text(
+                'Nate would like to search the web for:\n\n"$query"\n\nAllow this search?',
+                style: const TextStyle(color: Colors.white70, fontFamily: 'DM Sans'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Deny', style: TextStyle(color: Colors.white54)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4ECDC4)),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _socket?.sink.add(jsonEncode({
+                      'type': 'search_consent_approved',
+                      'query': query,
+                    }));
+                    setState(() {
+                      _chatHistory.add('[SYSTEM]: Searching the web...');
+                      _scrollToBottom();
+                    });
+                  },
+                  child: const Text('Allow Search', style: TextStyle(color: Colors.black)),
+                ),
+              ],
+            ),
+          );
         }
       }
       // === CONVERSATION EXPORT READY ===
@@ -2946,7 +2984,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     }));
 
     setState(() {
-      _chatHistory.add("[YOU]: $text");
+      _chatHistory.add("You: $text");
       _chatController.clear();
       _scrollToBottom();
     });
@@ -3507,7 +3545,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
             icon: const Icon(Icons.settings, color: Color(0xFFC9A962)),
             tooltip: 'Settings',
             onPressed: () {
-              Navigator.push(context, MaterialPageRoute(
+              Navigator.push<dynamic>(context, MaterialPageRoute(
                 builder: (_) => ClientSettingsScreen(
                   profile: widget.currentUserProfile ?? {},
                   socket: _socket,
@@ -3515,7 +3553,13 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                     _socket?.sink.close();
                   },
                 ),
-              ));
+              )).then((result) {
+                if (result is Map && result['askNateVault'] != null && mounted) {
+                  final itemId = result['askNateVault'].toString();
+                  _chatController.text = '${_chatController.text}[Vault:$itemId] '.trim();
+                  FocusScope.of(context).requestFocus(FocusNode());
+                }
+              });
             },
           ),
           IconButton(
@@ -3583,8 +3627,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           itemBuilder: (ctx, i) {
                             final msg = _chatHistory[i];
-                            final isNate = msg.startsWith("[NATE]");
-                            final isYou = msg.startsWith("[YOU]");
+                            final isNate = msg.startsWith("Little Nate:");
+                            final isYou = msg.startsWith("You:");
                             final isSystem = msg.startsWith("[SYSTEM]");
                             final textColor = isYou 
                                 ? Colors.grey.shade400
@@ -3602,7 +3646,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                               ),
                             );
                             if (isNate && _canUseTtsReadAloud()) {
-                              final nateText = msg.replaceFirst("[NATE]: ", "");
+                              final nateText = msg.replaceFirst("Little Nate: ", "");
                               return Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                                 child: Row(
@@ -12733,45 +12777,67 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                           icon: const Icon(Icons.cancel_outlined, size: 16),
                           label: const Text("Cancel Subscription", style: TextStyle(fontSize: 12)),
                           onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (ctx) => AlertDialog(
-                                backgroundColor: const Color(0xFF0A0A0F),
-                                title: Text("Cancel $label DOJO?", style: const TextStyle(color: Color(0xFFFFD700))),
-                                content: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      "30-day cancellation notice applies.",
-                                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      "You will retain access to the $label DOJO for 30 days after cancellation. "
-                                      "Your multi-DOJO discount will be recalculated.",
-                                      style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                            if (isNativeIOS) {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: const Color(0xFF0A0A0F),
+                                  title: Text("Cancel $label DOJO?", style: const TextStyle(color: Color(0xFFFFD700))),
+                                  content: Text(
+                                    "To cancel your $label DOJO subscription, go to:\n\n"
+                                    "Settings > Apple ID > Subscriptions\n\n"
+                                    "Find Sovereign Sanctuary and manage from there.",
+                                    style: TextStyle(color: Colors.grey[400], fontSize: 13, height: 1.5),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text("OK", style: TextStyle(color: Color(0xFFFFD700))),
                                     ),
                                   ],
                                 ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(ctx),
-                                    child: const Text("Keep Subscription", style: TextStyle(color: Colors.grey)),
+                              );
+                            } else {
+                              showDialog(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: const Color(0xFF0A0A0F),
+                                  title: Text("Cancel $label DOJO?", style: const TextStyle(color: Color(0xFFFFD700))),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        "30-day cancellation notice applies.",
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        "You will retain access to the $label DOJO for 30 days after cancellation. "
+                                        "Your multi-DOJO discount will be recalculated.",
+                                        style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                                      ),
+                                    ],
                                   ),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.redAccent,
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(ctx),
+                                      child: const Text("Keep Subscription", style: TextStyle(color: Colors.grey)),
                                     ),
-                                    onPressed: () {
-                                      Navigator.pop(ctx);
-                                      _cancelDojoSubscription(dojoKey);
-                                    },
-                                    child: const Text("Confirm Cancel"),
-                                  ),
-                                ],
-                              ),
-                            );
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.redAccent,
+                                      ),
+                                      onPressed: () {
+                                        Navigator.pop(ctx);
+                                        _cancelDojoSubscription(dojoKey);
+                                      },
+                                      child: const Text("Confirm Cancel"),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
                           },
                         ),
                       ),
