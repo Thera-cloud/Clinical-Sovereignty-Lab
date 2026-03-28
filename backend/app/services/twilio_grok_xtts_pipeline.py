@@ -111,7 +111,13 @@ def _default_phone_instructions(username: str, db_pool=None, user_id=None) -> st
         f"Speak naturally and conversationally. Do not monologue. Pause and let the client react."
         f"{ANTI_CONFABULATION}"
         f"\nIf you do not have specific information about {who}'s life, "
-        f"ask open questions rather than assuming or inventing details."
+        f"ask open questions rather than assuming or inventing details.\n\n"
+        "INTERNET SEARCH CAPABILITY:\n"
+        "You CAN search the internet when the caller asks. When they ask you to look something up, "
+        "search for something, or ask a factual question you're unsure about, just say something like "
+        "'Let me look that up for you' — the system will automatically search and provide you results. "
+        "You will receive the search results as a follow-up message. Summarize them conversationally. "
+        "Never say you cannot search the internet.\n"
     )
 
 
@@ -195,7 +201,13 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
         "- Only reference details that appear in PRIOR SESSION MEMORY.\n"
         "- If the user mentions someone not in your memory, say 'Tell me about them.'\n"
         "- If uncertain, ask: 'I want to make sure I'm remembering correctly — did you mention...?'\n"
-        "- Never invent names, events, or details not in your memory.\n"
+        "- Never invent names, events, or details not in your memory.\n\n"
+        "INTERNET SEARCH CAPABILITY:\n"
+        "You CAN search the internet when the caller asks. When they ask you to look something up, "
+        "search for something, or ask a factual question you're unsure about, just say something like "
+        "'Let me look that up for you' — the system will automatically search and provide you results. "
+        "You will receive the search results as a follow-up message. Summarize them conversationally. "
+        "Never say you cannot search the internet.\n"
     )
 
 
@@ -537,7 +549,7 @@ class WebSearchTrigger:
         if any(p.search(text) for p in self._EXCLUSION_PATTERNS):
             return False
         matches = sum(1 for p in self._PATTERNS if p.search(text))
-        return matches >= 1 and "?" in text
+        return matches >= 1
 
 
 _web_trigger = WebSearchTrigger()
@@ -1331,6 +1343,7 @@ async def run_twilio_grok_xtts_bridge(
                     await _on_grok_text(txt)
                 user_txt = _extract_user_text(ev)
                 if user_txt:
+                    print(f"[VOICE-USER] '{user_txt[:120]}'")
                     user_turns.append({"text": user_txt, "ts": datetime.now(timezone.utc).isoformat()})
                     if _bc_engine and not _bc_engine._enabled and _greeting_spoken:
                         _bc_engine.enable()
