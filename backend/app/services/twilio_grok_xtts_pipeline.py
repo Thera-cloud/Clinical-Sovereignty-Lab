@@ -59,6 +59,11 @@ try:
 except ImportError:
     NeuralMirrorSession = None  # type: ignore[assignment,misc]
 
+try:
+    from app.services.search_proxy import SecureSearchProxy
+except ImportError:
+    SecureSearchProxy = None  # type: ignore[assignment,misc]
+
 logger = logging.getLogger("nate.twilio_grok_xtts")
 
 XAI_REALTIME_URL = os.getenv("XAI_REALTIME_URL", "wss://api.x.ai/v1/realtime")
@@ -471,6 +476,98 @@ def _is_memory_query(text: str) -> bool:
     return _memory_trigger.should_trigger(text)
 
 
+# ---------------------------------------------------------------------------
+# WEB SEARCH — Internet lookup during live voice calls
+# Patent 8: voice-initiated web search with sanitized injection into session
+# ---------------------------------------------------------------------------
+
+_WEB_SEARCH_FILLER_PHRASES = [
+    "Let me look that up for you...",
+    "Give me a moment, I'm searching for that...",
+    "One second, checking the internet...",
+    "Let me find some information on that...",
+]
+_web_filler_idx = 0
+
+_web_search_dedup = MemorySearchDedup(ttl_seconds=45.0)
+
+_voice_search_proxy: Optional["SecureSearchProxy"] = None
+
+
+def _get_voice_search_proxy() -> Optional["SecureSearchProxy"]:
+    """Lazy-init the search proxy so import-time failures are non-fatal."""
+    global _voice_search_proxy
+    if _voice_search_proxy is not None:
+        return _voice_search_proxy
+    if SecureSearchProxy is None:
+        return None
+    data_dir = os.getenv("DATA_DIR", "/tmp/nate_data")
+    _voice_search_proxy = SecureSearchProxy(data_dir=data_dir)
+    if not _voice_search_proxy.is_available:
+        logger.warning("[VOICE-WEB-SEARCH] No search backend (Bing/DuckDuckGo) available")
+    return _voice_search_proxy
+
+
+class WebSearchTrigger:
+    """Detect when a caller is asking Nate to search the internet.
+    Requires explicit search intent AND a searchable noun phrase."""
+
+    _PATTERNS: List[re.Pattern] = [
+        re.compile(r"\b(search|look\s*up|google|find out|look\s*into)\b", re.I),
+        re.compile(r"\b(what (is|are|does|do|was|were|causes?))\b", re.I),
+        re.compile(r"\b(can you (find|check|search|look))\b", re.I),
+        re.compile(r"\b(tell me about|info(rmation)? (on|about))\b", re.I),
+        re.compile(r"\b(how (do|does|to|can|should))\b", re.I),
+        re.compile(r"\b(is (it|there) true (that)?)\b", re.I),
+        re.compile(r"\b(research|explore|investigate)\b", re.I),
+        re.compile(r"\b(latest|recent|current|new|up.?to.?date)\b.*\b(on|about|regarding|for)\b", re.I),
+    ]
+
+    _EXCLUSION_PATTERNS: List[re.Pattern] = [
+        re.compile(r"\b(do you remember|you remember|last (time|call|session))\b", re.I),
+        re.compile(r"\b(we (talked|discussed|spoke) about)\b", re.I),
+        re.compile(r"\b(i told you|i mentioned|i said)\b", re.I),
+    ]
+
+    _MIN_QUERY_LENGTH = 12
+
+    def should_trigger(self, text: str) -> bool:
+        if not text or len(text) < self._MIN_QUERY_LENGTH:
+            return False
+        if any(p.search(text) for p in self._EXCLUSION_PATTERNS):
+            return False
+        matches = sum(1 for p in self._PATTERNS if p.search(text))
+        return matches >= 1 and "?" in text
+
+
+_web_trigger = WebSearchTrigger()
+
+
+def _is_web_search_query(text: str) -> bool:
+    """Detect if the caller is asking Nate to search the internet."""
+    if _is_memory_query(text):
+        return False
+    return _web_trigger.should_trigger(text)
+
+
+def _extract_web_query(text: str) -> str:
+    """Extract a clean search query from the caller's question.
+    Strips conversational filler, keeps the searchable core."""
+    filler = [
+        r"^(hey|hi|ok|okay|so|um|uh|well|like|you know|nate|little nate)\b[,\s]*",
+        r"\b(can you|could you|would you|please)\b\s*",
+        r"\b(search|google|look up|find out|look into)\b\s*(for me|for us|real quick)?\s*",
+        r"\b(tell me about|give me info on|i want to know about)\b\s*",
+    ]
+    q = text.strip()
+    for pattern in filler:
+        q = re.sub(pattern, "", q, flags=re.I).strip()
+    q = q.rstrip("?").strip()
+    if len(q) < 5:
+        q = text.strip()
+    return q[:200]
+
+
 class SearchTermExtractor:
     """Extract therapeutically significant search terms from memory queries.
     Returns 3-8 terms ordered by relevance: clinical terms first, then nouns, then verbs."""
@@ -734,6 +831,79 @@ async def _inject_memory_context(grok_ws, username: str, memory_context: str) ->
         return True
     except Exception as e2:
         logger.warning("session.update fallback also failed: %s", e2)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# WEB SEARCH — execute + inject
+# ---------------------------------------------------------------------------
+
+async def _web_search(query_text: str, username: str) -> str:
+    """Run a sanitized internet search and return formatted context for Grok."""
+    proxy = _get_voice_search_proxy()
+    if proxy is None or not proxy.is_available:
+        print("[VOICE-WEB-SEARCH] search proxy unavailable")
+        return ""
+
+    clean_query = _extract_web_query(query_text)
+    print(f"[VOICE-WEB-SEARCH] query='{clean_query}' user={username}")
+
+    try:
+        result = await asyncio.wait_for(
+            proxy.execute_search(clean_query, coach_id=username, num_results=3),
+            timeout=8.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[VOICE-WEB-SEARCH] search timed out after 8s")
+        return ""
+    except Exception as e:
+        logger.warning("[VOICE-WEB-SEARCH] search failed: %s", e)
+        return ""
+
+    if not result.get("success") or not result.get("results"):
+        print(f"[VOICE-WEB-SEARCH] no results: {result.get('error', 'empty')}")
+        return ""
+
+    safe_results = [r for r in result["results"] if r.get("safe", False)]
+    if not safe_results:
+        print("[VOICE-WEB-SEARCH] all results filtered by security")
+        return ""
+
+    formatted = proxy.format_for_nate(safe_results)
+    print(f"[VOICE-WEB-SEARCH] {len(safe_results)} safe results, {len(formatted)} chars")
+    return formatted
+
+
+async def _inject_web_context(grok_ws, username: str, web_context: str) -> bool:
+    """Inject internet search results into the live Grok session."""
+    if not grok_ws or not web_context:
+        return False
+
+    context_msg = (
+        f"[INTERNET SEARCH RESULTS — USE THIS TO ANSWER {username}'s QUESTION]\n"
+        "The following information was found via internet search. "
+        "Summarize the key points conversationally — keep it brief and natural for a phone call. "
+        "Do NOT read URLs aloud. Reference the source topic, not the domain name. "
+        "If the information is clinical/medical, remind them this is general information "
+        "and they should discuss specifics with their healthcare provider.\n\n"
+        f"{web_context}\n\n"
+        "[END SEARCH RESULTS — Respond naturally using this information.]"
+    )
+
+    try:
+        await grok_ws.send(json.dumps({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": context_msg}],
+            },
+        }))
+        await grok_ws.send(json.dumps({"type": "response.create"}))
+        print(f"[VOICE-WEB-SEARCH] injected {len(context_msg)} chars into session")
+        return True
+    except Exception as e:
+        logger.warning("[VOICE-WEB-SEARCH] injection failed: %s", e)
         return False
 
 
@@ -1191,6 +1361,30 @@ async def run_twilio_grok_xtts_bridge(
                                 print("[VOICE-DEEP-SEARCH] no results — Grok will respond with existing context")
                         except Exception as e:
                             logger.warning("Deep memory search pipeline failed (non-fatal): %s", e)
+
+                    elif _is_web_search_query(user_txt) and _web_search_dedup.should_search(user_txt) and session_username:
+                        print(f"[VOICE-WEB-SEARCH] web query detected: '{user_txt[:80]}'")
+                        try:
+                            global _web_filler_idx
+                            wfiller = _WEB_SEARCH_FILLER_PHRASES[_web_filler_idx % len(_WEB_SEARCH_FILLER_PHRASES)]
+                            _web_filler_idx += 1
+                            wfiller_task = asyncio.create_task(
+                                _synthesize_with_fallback(wfiller, "connect", xtts_to_mulaw_state)
+                            )
+                            wsearch_task = asyncio.create_task(
+                                _web_search(user_txt, session_username)
+                            )
+                            wfiller_audio = await wfiller_task
+                            if wfiller_audio:
+                                await _send_mulaw_to_twilio(wfiller_audio)
+
+                            web_context = await wsearch_task
+                            if web_context:
+                                await _inject_web_context(grok_ws, session_username, web_context)
+                            else:
+                                print("[VOICE-WEB-SEARCH] no results — Grok will respond naturally")
+                        except Exception as e:
+                            logger.warning("Web search pipeline failed (non-fatal): %s", e)
 
         except asyncio.CancelledError:
             raise

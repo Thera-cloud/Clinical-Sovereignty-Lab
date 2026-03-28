@@ -75,6 +75,52 @@ The `BackchannelEngine` is set to `None` in the pipeline. Backchannel clips ("mm
 
 When Grok returns `UNAVAILABLE`, a `_delayed_recovery` task waits 3 seconds. If Grok recovers and sends text within that window, the recovery is cancelled. If not, Little Nate says a recovery message. Never make this instant — it collides with Grok's retry.
 
+## Voice-Initiated Internet Search
+
+Callers can ask Little Nate to search the internet during a live call. The search pipeline mirrors the existing memory search architecture.
+
+### Flow
+
+```
+Caller asks question with search intent
+→ WebSearchTrigger detects (requires ? and explicit search pattern)
+→ Memory search is checked FIRST (if _is_memory_query, skip web search)
+→ Filler phrase speaks: "Let me look that up for you..."
+→ SecureSearchProxy runs in parallel (Bing → DuckDuckGo fallback)
+→ Results sanitized (injection detection, domain blocklist, content truncation)
+→ Injected into Grok via conversation.item.create + response.create
+→ Grok summarizes results conversationally for the caller
+```
+
+### Trigger Patterns
+
+`WebSearchTrigger` fires when ALL conditions are met:
+1. At least 1 search-intent pattern matches (e.g., "search", "look up", "what is", "how do", "find out")
+2. The utterance contains a question mark
+3. The utterance is NOT a memory query (memory takes priority)
+4. The query has not been asked in the last 45 seconds (dedup)
+
+### Safety
+
+- `SecureSearchProxy` handles injection detection, domain blocking, SSRF prevention
+- Results limited to 3 (voice-friendly; 5 is too much to summarize on a call)
+- 8-second timeout — if search takes longer, Grok responds naturally without it
+- Unsafe results (injection detected, blocked domain) are silently dropped
+- The injection prompt tells Grok to summarize briefly and never read URLs aloud
+- Clinical/medical results include a disclaimer reminder
+
+### Key Differences from Memory Search
+
+| Aspect | Memory Search | Web Search |
+|---|---|---|
+| Trigger | `_is_memory_query` (2+ category gates) | `_is_web_search_query` (search intent + ?) |
+| Priority | Higher (checked first) | Lower (only if not a memory query) |
+| Source | PostgreSQL + Vectorize + Crystals | Bing/DuckDuckGo via SecureSearchProxy |
+| Timeout | None (DB queries are fast) | 8 seconds |
+| Results | Up to 12 | Up to 3 (voice-friendly) |
+| Dedup TTL | 30 seconds | 45 seconds |
+| Filler phrases | "Let me check my notes..." | "Let me look that up..." |
+
 ## Rules
 
 1. **Never re-add a Grok greeting prompt.** Polly handles the greeting. Grok listens.
@@ -86,3 +132,7 @@ When Grok returns `UNAVAILABLE`, a `_delayed_recovery` task waits 3 seconds. If 
 7. **After any voice pipeline change**, test with a live call before considering the deploy complete.
 8. **VAD silence_duration_ms must stay between 500-900ms.** Below 500 causes mid-sentence interruptions. Above 900 adds perceptible lag.
 9. **Recovery delay must stay between 2-4 seconds.** Below 2 collides with Grok retries. Above 4 feels like dead air.
+10. **Memory search takes priority over web search.** If `_is_memory_query` returns true, web search is skipped. Never reverse this priority — personal memory is more therapeutically relevant than internet data.
+11. **Web search timeout must stay at 8 seconds or below.** A slow search creates dead air. If search exceeds timeout, Grok answers naturally without results.
+12. **Web search results limited to 3.** More than 3 produces verbose summaries unsuitable for voice. Never increase above 5.
+13. **Never inject raw URLs into the Grok prompt.** The injection template instructs Grok to reference topics, not domains. Reading "w-w-w-dot-healthline-dot-com" on a therapy call breaks immersion.
