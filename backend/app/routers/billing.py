@@ -1456,6 +1456,7 @@ async def get_active_specials(request: Request):
 
 @router.get("/verify-promo/{code}")
 async def verify_promo_code(code: str, request: Request,
+                            tier: Optional[str] = None,
                             caller: str = Depends(get_current_user_id)):
     """Verify a promotional code and return discount details."""
     if _rate_check_verify(f"promo:{caller}"):
@@ -1478,13 +1479,31 @@ async def verify_promo_code(code: str, request: Request,
         raise HTTPException(404, "Invalid or expired code")
     if row["max_redemptions"] and row["current_redemptions"] >= row["max_redemptions"]:
         raise HTTPException(404, "Invalid or expired code")
+    allowed_tiers = row["applicable_tiers"] or []
+    if isinstance(allowed_tiers, str):
+        try:
+            allowed_tiers = json.loads(allowed_tiers)
+        except Exception:
+            allowed_tiers = []
+    if not isinstance(allowed_tiers, list):
+        allowed_tiers = []
+    allowed_norm = {_normalize_tier(str(t)) for t in allowed_tiers if str(t).strip()}
+    if allowed_norm:
+        if not tier or not str(tier).strip():
+            raise HTTPException(
+                400,
+                "This promo code is limited to specific subscription tiers; open billing from the app with your current plan, or contact support.",
+            )
+        norm_tier = _normalize_tier(str(tier))
+        if norm_tier not in allowed_norm:
+            raise HTTPException(400, "Promo code is not valid for this subscription tier")
 
     return {
         "valid": True,
         "name": row["name"],
         "discount_type": row["discount_type"],
         "discount_value": row["discount_value"],
-        "applicable_tiers": row["applicable_tiers"] or [],
+        "applicable_tiers": allowed_tiers,
         "expires": row["ends_at"].isoformat(),
     }
 
@@ -2185,3 +2204,121 @@ async def dojo_checkout(body: DojoCheckoutRequest, request: Request, user: dict 
         return {"checkout_url": session.url, "session_id": session.id}
     except stripe.error.StripeError as e:
         raise HTTPException(400, f"Stripe checkout error: {e}")
+
+
+# =============================================================================
+# PUBLIC ROUTER — No auth required (pre-registration discount verification)
+# =============================================================================
+
+public_router = APIRouter(
+    prefix="/api/billing",
+    tags=["billing-public"],
+)
+
+_public_rate_limiter: Dict[str, list] = {}
+_PUBLIC_WINDOW = 60
+_PUBLIC_MAX = 10
+
+
+def _rate_check_ip(ip: str) -> bool:
+    now = _time_billing.time()
+    window = _public_rate_limiter.setdefault(ip, [])
+    _public_rate_limiter[ip] = [t for t in window if now - t < _PUBLIC_WINDOW]
+    if len(_public_rate_limiter[ip]) >= _PUBLIC_MAX:
+        return True
+    _public_rate_limiter[ip].append(now)
+    return False
+
+
+@public_router.get("/verify-discount-code/{code}")
+async def verify_discount_code(code: str, request: Request,
+                               tier: Optional[str] = None):
+    """Public endpoint to verify any discount code (promo, school, or corporate).
+    Used during registration before the user has an account."""
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_check_ip(client_ip):
+        raise HTTPException(429, "Too many verification attempts")
+
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    safe_code = _sanitize_code(code)
+
+    async with pool.acquire() as conn:
+        # 1. Check promotional_specials
+        promo = await conn.fetchrow("""
+            SELECT id, name, discount_type, discount_value, applicable_tiers,
+                   ends_at, max_redemptions, current_redemptions
+            FROM promotional_specials
+            WHERE promo_code = $1 AND active = TRUE
+              AND starts_at <= NOW() AND ends_at > NOW()
+        """, safe_code)
+
+        if promo:
+            if promo["max_redemptions"] and promo["current_redemptions"] >= promo["max_redemptions"]:
+                raise HTTPException(404, "Invalid or expired code")
+            allowed_tiers = promo["applicable_tiers"] or []
+            if isinstance(allowed_tiers, str):
+                try:
+                    allowed_tiers = json.loads(allowed_tiers)
+                except Exception:
+                    allowed_tiers = []
+            if not isinstance(allowed_tiers, list):
+                allowed_tiers = []
+            allowed_norm = {_normalize_tier(str(t)) for t in allowed_tiers if str(t).strip()}
+            if allowed_norm and tier:
+                norm_tier = _normalize_tier(str(tier))
+                if norm_tier not in allowed_norm:
+                    raise HTTPException(400, "Code is not valid for this subscription tier")
+            return {
+                "valid": True,
+                "source": "promotional_specials",
+                "name": promo["name"],
+                "discount_type": promo["discount_type"],
+                "discount_value": promo["discount_value"],
+                "applicable_tiers": allowed_tiers,
+            }
+
+        # 2. Check school_codes
+        school = await conn.fetchrow("""
+            SELECT id, school_name, school_code, discount_percent,
+                   max_students, current_students, active
+            FROM school_codes
+            WHERE school_code = $1 AND active = TRUE
+        """, safe_code)
+
+        if school:
+            if school["max_students"] and school["current_students"] >= school["max_students"]:
+                raise HTTPException(404, "Invalid or expired code")
+            return {
+                "valid": True,
+                "source": "school_codes",
+                "name": school["school_name"],
+                "discount_type": "percent",
+                "discount_value": school["discount_percent"],
+                "applicable_tiers": [],
+            }
+
+        # 3. Check corporate_sponsors
+        corp = await conn.fetchrow("""
+            SELECT id, company_name, discount_type, discount_value,
+                   pays_full, max_employees, current_employees, active
+            FROM corporate_sponsors WHERE sponsor_code = $1 AND active = TRUE
+        """, safe_code)
+
+        if corp:
+            if corp["max_employees"] and corp["current_employees"] >= corp["max_employees"]:
+                raise HTTPException(404, "Invalid or expired code")
+            d_type = "pays_full" if corp["pays_full"] else corp["discount_type"]
+            d_value = 100 if corp["pays_full"] else corp["discount_value"]
+            return {
+                "valid": True,
+                "source": "corporate_sponsors",
+                "name": corp["company_name"],
+                "discount_type": d_type,
+                "discount_value": d_value,
+                "applicable_tiers": [],
+            }
+
+    raise HTTPException(404, "Invalid or expired code")

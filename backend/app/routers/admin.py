@@ -2408,6 +2408,7 @@ class CreatePromoRequest(BaseModel):
     code: str = Field(..., min_length=2, max_length=40)
     discount_type: str = "percent"
     discount_value: int = Field(..., ge=1)
+    coach_id: Optional[str] = Field(None, min_length=1, max_length=128)
     applicable_tiers: List[str] = []
     starts_at: Optional[str] = None
     ends_at: str
@@ -2916,7 +2917,7 @@ def _create_stripe_coupon(code: str, discount_type: str, discount_value: int,
     try:
         kwargs: Dict[str, Any] = {"id": code, "duration": duration}
         if name:
-            kwargs["name"] = name[:200]
+            kwargs["name"] = name[:40]
         if discount_type == "percent":
             kwargs["percent_off"] = max(1, min(discount_value, 100))
         else:
@@ -2926,11 +2927,24 @@ def _create_stripe_coupon(code: str, discount_type: str, discount_value: int,
             kwargs["duration_in_months"] = max(1, min(duration_in_months, 36))
         if max_redemptions:
             kwargs["max_redemptions"] = max(1, max_redemptions)
-        coupon = _stripe.Coupon.create(**kwargs)
+        try:
+            coupon = _stripe.Coupon.create(**kwargs)
+        except Exception as ce:
+            if "already exists" in str(ce).lower():
+                coupon = _stripe.Coupon.retrieve(code)
+                logger.info("Reusing existing Stripe coupon %s", code)
+            else:
+                raise
         promo_kwargs = {"coupon": coupon.id, "code": code, "active": True}
         if max_redemptions:
             promo_kwargs["max_redemptions"] = max(1, max_redemptions)
-        promo = _stripe.PromotionCode.create(**promo_kwargs)
+        try:
+            promo = _stripe.PromotionCode.create(**promo_kwargs)
+        except Exception as pe:
+            if "already been used" in str(pe).lower() or "already exists" in str(pe).lower():
+                logger.info("Stripe promotion code %s already exists, using coupon ID", code)
+                return coupon.id, None, None
+            raise
         return coupon.id, promo.id, None
     except Exception as e:
         logger.warning("Stripe coupon creation failed for %s: %s", code, e)
@@ -2944,6 +2958,45 @@ def _create_stripe_coupon(code: str, discount_type: str, discount_value: int,
 
 
 # ---- Promotional Specials (Promo Codes) ----
+
+@router.get("/discounts/status")
+async def discount_system_status(request: Request):
+    """Overview of discount system: Stripe connection, table counts, plan pricing."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    async with pool.acquire() as conn:
+        promo_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM promotional_specials") or 0
+        promo_active = await conn.fetchval(
+            "SELECT COUNT(*) FROM promotional_specials WHERE active = true") or 0
+        promo_stripe_synced = await conn.fetchval(
+            "SELECT COUNT(*) FROM promotional_specials WHERE stripe_coupon_id IS NOT NULL AND stripe_coupon_id != ''") or 0
+        school_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM school_codes") or 0
+        school_active = await conn.fetchval(
+            "SELECT COUNT(*) FROM school_codes WHERE active = true") or 0
+        corp_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM corporate_sponsors") or 0
+        corp_active = await conn.fetchval(
+            "SELECT COUNT(*) FROM corporate_sponsors WHERE active = true") or 0
+        corp_stripe_synced = await conn.fetchval(
+            "SELECT COUNT(*) FROM corporate_sponsors WHERE stripe_coupon_id IS NOT NULL AND stripe_coupon_id != ''") or 0
+        total_employees_sponsored = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE company_id IS NOT NULL") or 0
+
+    return {
+        "stripe_connected": _STRIPE_AVAILABLE,
+        "plan_pricing": {k: f"${v}/mo" for k, v in PLAN_PRICES.items()},
+        "tier_labels": PLAN_LABELS,
+        "tier_features": TIER_FEATURES,
+        "promo_codes": {"total": promo_count, "active": promo_active, "stripe_synced": promo_stripe_synced},
+        "school_codes": {"total": school_count, "active": school_active},
+        "corporate_sponsors": {"total": corp_count, "active": corp_active, "stripe_synced": corp_stripe_synced,
+                               "total_employees": total_employees_sponsored},
+    }
+
 
 @router.post("/discounts/promo")
 async def create_promo_code(req: CreatePromoRequest, request: Request):
@@ -2962,12 +3015,27 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
         raise HTTPException(400, "duration must be 'once', 'repeating', or 'forever'")
     if req.duration == "repeating" and not req.duration_in_months:
         raise HTTPException(400, "duration_in_months required when duration is 'repeating'")
+    if req.discount_type == "percent" and req.discount_value == 100:
+        if not req.max_redemptions:
+            raise HTTPException(400, "100% promo codes require max_redemptions")
+        if not req.ends_at:
+            raise HTTPException(400, "100% promo codes require ends_at")
     for tier in req.applicable_tiers:
         if tier not in _VALID_TIERS:
             raise HTTPException(400, f"Invalid tier: {tier}")
 
     safe_code = _validate_admin_code(req.code)
-    starts = req.starts_at or datetime.now(timezone.utc).isoformat()
+    coach_id = req.coach_id.strip()[:128] if req.coach_id else None
+    starts_dt = datetime.now(timezone.utc)
+    if req.starts_at:
+        try:
+            starts_dt = datetime.fromisoformat(req.starts_at.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            starts_dt = datetime.now(timezone.utc)
+    try:
+        ends_dt = datetime.fromisoformat(req.ends_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        raise HTTPException(400, "Invalid ends_at datetime format")
     coupon_id, promo_id, stripe_err = _create_stripe_coupon(
         code=safe_code,
         discount_type=req.discount_type,
@@ -2981,17 +3049,19 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             INSERT INTO promotional_specials
-                (name, discount_type, discount_value, applicable_tiers,
+                (name, discount_type, discount_value, coach_id, applicable_tiers,
                  starts_at, ends_at, promo_code, max_redemptions,
-                 stripe_coupon_id, active)
-            VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7, $8, $9, TRUE)
+                 stripe_coupon_id, duration, duration_in_months, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE)
             RETURNING id, name, promo_code, discount_type, discount_value,
+                      coach_id,
                       starts_at, ends_at, max_redemptions, current_redemptions,
-                      stripe_coupon_id, active, created_at
-        """, req.name[:200], req.discount_type, req.discount_value,
+                      stripe_coupon_id, duration, duration_in_months, active, created_at
+        """, req.name[:200], req.discount_type, req.discount_value, coach_id,
              req.applicable_tiers or [],
-             starts, req.ends_at,
-             safe_code, req.max_redemptions, coupon_id)
+             starts_dt, ends_dt,
+             safe_code, req.max_redemptions, coupon_id,
+             req.duration, req.duration_in_months)
 
     result = {
         "id": str(row["id"]),
@@ -2999,12 +3069,15 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
         "promo_code": row["promo_code"],
         "discount_type": row["discount_type"],
         "discount_value": row["discount_value"],
+        "coach_id": row["coach_id"],
         "starts_at": row["starts_at"].isoformat() if row["starts_at"] else None,
         "ends_at": row["ends_at"].isoformat() if row["ends_at"] else None,
         "max_redemptions": row["max_redemptions"],
         "current_redemptions": row["current_redemptions"],
         "stripe_coupon_id": row["stripe_coupon_id"],
         "stripe_synced": coupon_id is not None,
+        "duration": row["duration"],
+        "duration_in_months": row["duration_in_months"],
         "active": row["active"],
     }
     if stripe_err:
@@ -3013,18 +3086,35 @@ async def create_promo_code(req: CreatePromoRequest, request: Request):
 
 
 @router.get("/discounts/promos")
-async def list_promo_codes(request: Request):
+async def list_promo_codes(request: Request, coach_id: Optional[str] = None):
     """List all promo codes (active and expired)."""
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         return {"promos": []}
+    coach_filter = coach_id.strip()[:128] if coach_id else None
+    _cols = """id, name, discount_type, discount_value, coach_id, applicable_tiers,
+               starts_at, ends_at, promo_code, max_redemptions, current_redemptions,
+               stripe_coupon_id, duration, duration_in_months, active, created_at"""
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT id, name, discount_type, discount_value, applicable_tiers,
-                   starts_at, ends_at, promo_code, max_redemptions, current_redemptions,
-                   stripe_coupon_id, active, created_at
-            FROM promotional_specials ORDER BY created_at DESC
-        """)
+        if coach_filter:
+            rows = await conn.fetch(f"""
+                SELECT {_cols}
+                FROM promotional_specials
+                WHERE coach_id = $1
+                ORDER BY created_at DESC
+            """, coach_filter)
+        else:
+            rows = await conn.fetch(f"""
+                SELECT {_cols}
+                FROM promotional_specials ORDER BY created_at DESC
+            """)
+
+    def _dur(r):
+        d = r["duration"] or "once"
+        if d == "repeating" and r["duration_in_months"]:
+            return f"repeating ({r['duration_in_months']} mo)"
+        return d
+
     return {"promos": [
         {
             "id": str(r["id"]),
@@ -3032,6 +3122,7 @@ async def list_promo_codes(request: Request):
             "promo_code": r["promo_code"],
             "discount_type": r["discount_type"],
             "discount_value": r["discount_value"],
+            "coach_id": r["coach_id"],
             "applicable_tiers": r["applicable_tiers"] or [],
             "starts_at": r["starts_at"].isoformat() if r["starts_at"] else None,
             "ends_at": r["ends_at"].isoformat() if r["ends_at"] else None,
@@ -3039,6 +3130,8 @@ async def list_promo_codes(request: Request):
             "current_redemptions": r["current_redemptions"],
             "stripe_coupon_id": r["stripe_coupon_id"],
             "stripe_synced": bool(r["stripe_coupon_id"]),
+            "duration": _dur(r),
+            "duration_in_months": r["duration_in_months"],
             "active": r["active"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         }
@@ -3179,6 +3272,11 @@ async def create_corporate_sponsor(req: CreateCorporateRequest, request: Request
         raise HTTPException(400, "discount_type must be 'percent', 'amount', or 'full'")
     if req.discount_type == "percent" and req.discount_value > 100:
         raise HTTPException(400, "Percent discount cannot exceed 100")
+    if not req.pays_full and req.discount_value <= 0:
+        raise HTTPException(
+            400,
+            "Enter a discount amount/percent greater than zero, or enable company pays full subscription.",
+        )
 
     code_upper = _validate_admin_code(req.sponsor_code)
     coupon_id = None
@@ -3285,6 +3383,102 @@ async def toggle_corporate_sponsor(corp_id: str, request: Request):
             "UPDATE corporate_sponsors SET active = $1 WHERE id = $2::uuid",
             new_active, corp_id)
     return {"status": "toggled", "id": corp_id, "active": new_active}
+
+
+@router.post("/discounts/corporate/{corp_id}/sync-stripe")
+async def sync_corporate_to_stripe(corp_id: str, request: Request):
+    """Sync an existing corporate sponsor to Stripe (create coupon if missing)."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT sponsor_code, company_name, discount_type, discount_value,
+                      pays_full, stripe_coupon_id, max_employees
+               FROM corporate_sponsors WHERE id = $1::uuid""", corp_id)
+        if not row:
+            raise HTTPException(404, "Corporate sponsor not found")
+        if row["stripe_coupon_id"]:
+            return {"status": "already_synced", "stripe_coupon_id": row["stripe_coupon_id"]}
+        dv = row["discount_value"] or 0
+        if not row["pays_full"] and dv <= 0:
+            raise HTTPException(400, "Cannot sync a 0% discount to Stripe — set discount_value first")
+        if row["pays_full"]:
+            coupon_id, _, stripe_err = _create_stripe_coupon(
+                code=f"CORP_{row['sponsor_code']}",
+                discount_type="percent", discount_value=100,
+                duration="repeating", duration_in_months=12,
+                name=f"Corporate: {row['company_name']} (Full)")
+        else:
+            coupon_id, _, stripe_err = _create_stripe_coupon(
+                code=f"CORP_{row['sponsor_code']}",
+                discount_type=row["discount_type"], discount_value=dv,
+                duration="repeating", duration_in_months=12,
+                name=f"Corporate: {row['company_name']}")
+        if not coupon_id:
+            raise HTTPException(502, f"Stripe sync failed: {stripe_err}")
+        await conn.execute(
+            "UPDATE corporate_sponsors SET stripe_coupon_id = $1 WHERE id = $2::uuid",
+            coupon_id, corp_id)
+    return {"status": "synced", "stripe_coupon_id": coupon_id}
+
+
+@router.post("/discounts/school/{school_id}/sync-stripe")
+async def sync_school_to_stripe(school_id: str, request: Request):
+    """Sync an existing school code to Stripe (create coupon if missing)."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT school_code, school_name, discount_percent, stripe_coupon_id
+               FROM school_codes WHERE id = $1::uuid""", school_id)
+        if not row:
+            raise HTTPException(404, "School code not found")
+        if row["stripe_coupon_id"]:
+            return {"status": "already_synced", "stripe_coupon_id": row["stripe_coupon_id"]}
+        coupon_id, _, stripe_err = _create_stripe_coupon(
+            code=f"SCHOOL_{row['school_code']}",
+            discount_type="percent", discount_value=row["discount_percent"],
+            duration="repeating", duration_in_months=12,
+            name=f"School: {row['school_name']}")
+        if not coupon_id:
+            raise HTTPException(502, f"Stripe sync failed: {stripe_err}")
+        await conn.execute(
+            "UPDATE school_codes SET stripe_coupon_id = $1 WHERE id = $2::uuid",
+            coupon_id, school_id)
+    return {"status": "synced", "stripe_coupon_id": coupon_id}
+
+
+@router.post("/discounts/promo/{promo_id}/sync-stripe")
+async def sync_promo_to_stripe(promo_id: str, request: Request):
+    """Sync an existing promo code to Stripe (create coupon if missing)."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT promo_code, name, discount_type, discount_value,
+                      max_redemptions, stripe_coupon_id, duration, duration_in_months
+               FROM promotional_specials WHERE id = $1::uuid""", promo_id)
+        if not row:
+            raise HTTPException(404, "Promo code not found")
+        if row["stripe_coupon_id"]:
+            return {"status": "already_synced", "stripe_coupon_id": row["stripe_coupon_id"]}
+        coupon_id, _, stripe_err = _create_stripe_coupon(
+            code=row["promo_code"],
+            discount_type=row["discount_type"],
+            discount_value=row["discount_value"],
+            duration=row["duration"] or "once",
+            duration_in_months=row["duration_in_months"],
+            max_redemptions=row["max_redemptions"],
+            name=row["name"][:200] if row["name"] else None)
+        if not coupon_id:
+            raise HTTPException(502, f"Stripe sync failed: {stripe_err}")
+        await conn.execute(
+            "UPDATE promotional_specials SET stripe_coupon_id = $1 WHERE id = $2::uuid",
+            coupon_id, promo_id)
+    return {"status": "synced", "stripe_coupon_id": coupon_id}
 
 
 @router.post("/billing/retry-payment")
@@ -3673,7 +3867,7 @@ class CreateSchoolCodeRequest(BaseModel):
 
 
 @router.post("/billing/school-codes")
-async def create_school_code(req: CreateSchoolCodeRequest, request: Request):
+async def create_school_code_legacy(req: CreateSchoolCodeRequest, request: Request):
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         raise HTTPException(503, "Database unavailable")
@@ -3695,7 +3889,7 @@ async def create_school_code(req: CreateSchoolCodeRequest, request: Request):
 
 
 @router.get("/billing/school-codes")
-async def list_school_codes(request: Request):
+async def list_school_codes_legacy(request: Request):
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         return {"school_codes": []}
@@ -3750,7 +3944,7 @@ class CreateCorporateSponsorRequest(BaseModel):
 
 
 @router.post("/billing/corporate-sponsors")
-async def create_corporate_sponsor(req: CreateCorporateSponsorRequest, request: Request):
+async def create_corporate_sponsor_legacy(req: CreateCorporateSponsorRequest, request: Request):
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         raise HTTPException(503, "Database unavailable")
@@ -3779,7 +3973,7 @@ async def create_corporate_sponsor(req: CreateCorporateSponsorRequest, request: 
 
 
 @router.get("/billing/corporate-sponsors")
-async def list_corporate_sponsors(request: Request):
+async def list_corporate_sponsors_legacy(request: Request):
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
         return {"sponsors": []}

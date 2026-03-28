@@ -42,7 +42,7 @@ async def initiate_call(body: CallInitiateRequest, request: Request, user: Dict 
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT profile_data FROM users WHERE user_id = $1 OR username = $1",
+            "SELECT profile_data FROM users WHERE username = $1",
             body.user_id,
         )
         if not row:
@@ -124,61 +124,67 @@ async def call_status_webhook(
     logger.info("Call status: sid=%s status=%s duration=%s", CallSid, CallStatus, CallDuration)
 
     if CallStatus == "completed":
-        pool = request.app.state.db_pool
+        pool = getattr(request.app.state, "db_pool", None)
+        if not pool:
+            logger.warning("call_status_webhook: no db_pool, skipping deduction for %s", CallSid)
+            return {"status": "received"}
         duration_seconds = int(CallDuration or 0)
         duration_minutes = max(1, (duration_seconds + 59) // 60)
         tokens_to_deduct = duration_minutes * LIMINAL_CALL_TOKEN_RATE
 
-        async with pool.acquire() as conn:
-            session = await conn.fetchrow(
-                "SELECT id, user_id FROM liminal_sessions WHERE call_sid = $1",
-                CallSid,
-            )
-            if session:
-                await conn.execute("""
-                    UPDATE liminal_sessions
-                    SET ended_at = NOW(),
-                        call_duration_seconds = $1,
-                        tokens_consumed = $2
-                    WHERE call_sid = $3
-                """, duration_seconds, tokens_to_deduct, CallSid)
-
-                await conn.execute("""
-                    UPDATE users SET profile_data = jsonb_set(
-                        profile_data,
-                        '{token_balance}',
-                        to_jsonb(GREATEST(0,
-                            COALESCE((profile_data->>'token_balance')::int, 0) - $1
-                        ))
-                    )
-                    WHERE user_id = $2 OR username = $2
-                """, tokens_to_deduct, session["user_id"])
-
-                await conn.execute("""
-                    INSERT INTO skyeye_activity (action, platform, details, timestamp)
-                    VALUES ('call_completed', 'twilio', $1, NOW())
-                """, f"call_sid={CallSid} duration={duration_seconds}s tokens={tokens_to_deduct}")
-
-                new_bal = await conn.fetchval(
-                    "SELECT COALESCE((profile_data->>'token_balance')::int, 0) FROM users WHERE user_id = $1 OR username = $1",
-                    session["user_id"],
+        try:
+            async with pool.acquire() as conn:
+                session = await conn.fetchrow(
+                    "SELECT id, user_id FROM liminal_sessions WHERE call_sid = $1",
+                    CallSid,
                 )
+                if session:
+                    await conn.execute("""
+                        UPDATE liminal_sessions
+                        SET ended_at = NOW(),
+                            call_duration_seconds = $1,
+                            tokens_consumed = $2
+                        WHERE call_sid = $3
+                    """, duration_seconds, tokens_to_deduct, CallSid)
 
-                logger.info(
-                    "Call completed: sid=%s duration=%ds tokens_deducted=%d user=%s",
-                    CallSid, duration_seconds, tokens_to_deduct, session["user_id"],
-                )
-
-                try:
-                    from app.services.api_server import _get_auth_redis
-                    r = await _get_auth_redis()
-                    if r and new_bal is not None:
-                        await r.publish(
-                            "nate:balance_sync",
-                            json.dumps({"username": session["user_id"], "token_balance": int(new_bal)}),
+                    await conn.execute("""
+                        UPDATE users SET profile_data = jsonb_set(
+                            profile_data,
+                            '{token_balance}',
+                            to_jsonb(GREATEST(0,
+                                COALESCE((profile_data->>'token_balance')::int, 0) - $1
+                            ))
                         )
-                except Exception:
-                    pass
+                        WHERE username = $2
+                    """, tokens_to_deduct, session["user_id"])
+
+                    await conn.execute("""
+                        INSERT INTO skyeye_activity (type, platform, content, created_at)
+                        VALUES ('call_completed', 'twilio', $1, NOW())
+                    """, f"call_sid={CallSid} duration={duration_seconds}s tokens={tokens_to_deduct}")
+
+                    new_bal = await conn.fetchval(
+                        "SELECT COALESCE((profile_data->>'token_balance')::int, 0) FROM users WHERE username = $1",
+                        session["user_id"],
+                    )
+
+                    logger.info(
+                        "Call completed: sid=%s duration=%ds tokens_deducted=%d user=%s",
+                        CallSid, duration_seconds, tokens_to_deduct, session["user_id"],
+                    )
+
+                    try:
+                        from app.services.api_server import _get_auth_redis
+                        r = await _get_auth_redis()
+                        if r and new_bal is not None:
+                            await r.publish(
+                                "nate:balance_sync",
+                                json.dumps({"username": session["user_id"], "token_balance": int(new_bal)}),
+                            )
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning("call_status_webhook: DB error for %s: %s", CallSid, e)
 
     return {"status": "received"}
 

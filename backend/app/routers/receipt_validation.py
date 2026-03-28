@@ -6,6 +6,7 @@ updates user subscription plans, and logs to skyeye_activity.
 
 import json as _json_mod
 import logging
+import asyncio
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -23,6 +24,12 @@ APPLE_PRODUCTION_URL = "https://buy.itunes.apple.com/verifyReceipt"
 APPLE_SANDBOX_URL = "https://sandbox.itunes.apple.com/verifyReceipt"
 
 PRODUCT_TO_PLAN = {
+    # Current app-store style IDs
+    "net.sovereignsanctuary.inner_chamber_monthly": "STANDARD",
+    "net.sovereignsanctuary.inner_chamber_annual": "STANDARD",
+    "net.sovereignsanctuary.sovereign_circle_monthly": "TOP_TIER",
+    "net.sovereignsanctuary.sovereign_circle_annual": "TOP_TIER",
+    # Legacy IDs (kept for backward compatibility)
     "sanctuary_inner_chamber_monthly": "STANDARD",
     "sanctuary_inner_chamber_annual": "STANDARD",
     "sanctuary_sovereign_circle_monthly": "TOP_TIER",
@@ -35,6 +42,17 @@ PRODUCT_TO_PLAN = {
 PLAN_TOKEN_ALLOC = {
     "STANDARD": 50_000,
     "TOP_TIER": 200_000,
+}
+
+CONSUMABLE_PRODUCTS = {
+    "net.sovereignsanctuary.token_light3": {"tokens": 15000, "type": "token_pack"},
+    "net.sovereignsanctuary.token_standard7": {"tokens": 50000, "type": "token_pack"},
+    "net.sovereignsanctuary.token_power": {"tokens": 150000, "type": "token_pack"},
+    "net.sovereignsanctuary.token_ultimate": {"tokens": 1000000, "type": "token_pack"},
+    "net.sovereignsanctuary.sanctuary_charge_base_fee": {"amount_cents": 2000, "type": "sanctuary_charge"},
+    "net.sovereignsanctuary.sanctuary_charge_assisted_response": {"amount_cents": 300, "type": "sanctuary_charge"},
+    "net.sovereignsanctuary.sanctuary_charge_group_coaching": {"amount_cents": 2000, "type": "sanctuary_charge"},
+    "net.sovereignsanctuary.sanctuary_charge_individual_coaching": {"amount_cents": 500, "type": "sanctuary_charge"},
 }
 
 
@@ -51,9 +69,40 @@ class GoogleReceiptRequest(BaseModel):
     package_name: str = "net.sovereignsanctuary.littlenate"
 
 
+async def _post_apple_verify(client: httpx.AsyncClient, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Call Apple verify endpoint with retries for transient network outages."""
+    attempts = 3
+    for idx in range(1, attempts + 1):
+        try:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            return resp.json()
+        except (httpx.TransportError, httpx.TimeoutException) as e:
+            if idx >= attempts:
+                logger.error("Apple verify endpoint unavailable after %d attempts (%s): %s", attempts, url, e)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Apple receipt verification temporarily unavailable. Please retry restore purchases.",
+                )
+            await asyncio.sleep(0.5 * idx)
+        except httpx.HTTPStatusError as e:
+            logger.error("Apple verify returned HTTP %d (%s): %s", e.response.status_code, url, e)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Apple verification returned {e.response.status_code}",
+            )
+
+
 @router.post("/verify-receipt/apple")
-async def verify_apple_receipt(body: AppleReceiptRequest, request: Request):
+async def verify_apple_receipt(body: AppleReceiptRequest, request: Request,
+                               current_user: Dict = Depends(get_current_user)):
     """Validate an Apple StoreKit receipt and activate the subscription."""
+    auth_uid = current_user.get("user_id", current_user.get("username", ""))
+    if body.user_id and body.user_id != auth_uid:
+        logger.warning("Apple receipt user_id mismatch: body=%s auth=%s", body.user_id, auth_uid)
+        raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
+    effective_user_id = auth_uid or body.user_id
+
     import os
     shared_secret = os.getenv("APPLE_SHARED_SECRET", "")
 
@@ -64,16 +113,13 @@ async def verify_apple_receipt(body: AppleReceiptRequest, request: Request):
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(APPLE_PRODUCTION_URL, json=payload)
-        data = resp.json()
-
+        data = await _post_apple_verify(client, APPLE_PRODUCTION_URL, payload)
         if data.get("status") == 21007:
-            resp = await client.post(APPLE_SANDBOX_URL, json=payload)
-            data = resp.json()
+            data = await _post_apple_verify(client, APPLE_SANDBOX_URL, payload)
 
     status = data.get("status", -1)
     if status != 0:
-        logger.warning("Apple receipt validation failed: status=%d user=%s", status, body.user_id)
+        logger.warning("Apple receipt validation failed: status=%d user=%s", status, effective_user_id)
         raise HTTPException(status_code=400, detail=f"Receipt validation failed (status {status})")
 
     latest = data.get("latest_receipt_info", [])
@@ -90,24 +136,44 @@ async def verify_apple_receipt(body: AppleReceiptRequest, request: Request):
     if not active_product and body.product_id:
         active_product = body.product_id
 
+    if not active_product:
+        for txn in latest:
+            pid = txn.get("product_id", "")
+            if pid in CONSUMABLE_PRODUCTS:
+                active_product = pid
+                break
+
+    consumable = CONSUMABLE_PRODUCTS.get(active_product)
+    if consumable:
+        await _credit_consumable(request, effective_user_id, active_product, consumable, "apple")
+        return {"status": "verified", "type": consumable["type"], "product_id": active_product}
+
     plan = PRODUCT_TO_PLAN.get(active_product)
     if not plan:
         raise HTTPException(status_code=400, detail=f"Unknown product: {active_product}")
 
-    await _activate_plan(request, body.user_id, plan, "apple", active_product)
+    await _activate_plan(request, effective_user_id, plan, "apple", active_product)
 
     return {"status": "verified", "plan": plan, "product_id": active_product}
 
 
 @router.post("/verify-receipt/google")
-async def verify_google_receipt(body: GoogleReceiptRequest, request: Request):
+async def verify_google_receipt(body: GoogleReceiptRequest, request: Request,
+                                current_user: Dict = Depends(get_current_user)):
     """Validate a Google Play Billing purchase and activate the subscription."""
+    auth_uid = current_user.get("user_id", current_user.get("username", ""))
+    if body.user_id and body.user_id != auth_uid:
+        logger.warning("Google receipt user_id mismatch: body=%s auth=%s", body.user_id, auth_uid)
+        raise HTTPException(status_code=403, detail="user_id does not match authenticated user")
+    effective_user_id = auth_uid or body.user_id
+
     import os
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
+    consumable = CONSUMABLE_PRODUCTS.get(body.product_id)
     plan = PRODUCT_TO_PLAN.get(body.product_id)
-    if not plan:
+    if not plan and not consumable:
         raise HTTPException(status_code=400, detail=f"Unknown product: {body.product_id}")
 
     try:
@@ -118,7 +184,8 @@ async def verify_google_receipt(body: GoogleReceiptRequest, request: Request):
         )
         service = build("androidpublisher", "v3", credentials=credentials)
 
-        if "coaching" in body.product_id:
+        is_one_time = consumable is not None or "coaching" in body.product_id
+        if is_one_time:
             result = service.purchases().products().get(
                 packageName=body.package_name,
                 productId=body.product_id,
@@ -142,7 +209,11 @@ async def verify_google_receipt(body: GoogleReceiptRequest, request: Request):
         logger.error("Google receipt validation error: %s", e)
         raise HTTPException(status_code=500, detail="Google verification failed")
 
-    await _activate_plan(request, body.user_id, plan, "google", body.product_id)
+    if consumable:
+        await _credit_consumable(request, effective_user_id, body.product_id, consumable, "google")
+        return {"status": "verified", "type": consumable["type"], "product_id": body.product_id}
+
+    await _activate_plan(request, effective_user_id, plan, "google", body.product_id)
 
     return {"status": "verified", "plan": plan, "product_id": body.product_id}
 
@@ -176,6 +247,60 @@ async def restore_purchases(request: Request, user: Dict = Depends(get_current_u
     }
 
 
+async def _credit_consumable(request: Request, user_id: str,
+                             product_id: str, consumable: Dict[str, Any],
+                             source: str):
+    """Credit tokens or record a sanctuary charge for a consumable IAP."""
+    pool = request.app.state.db_pool
+
+    if consumable["type"] == "token_pack":
+        tokens = consumable["tokens"]
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE users SET
+                    token_balance = COALESCE(token_balance, 0) + $2,
+                    profile_data = jsonb_set(
+                        profile_data,
+                        '{token_balance}',
+                        to_jsonb((COALESCE((profile_data->>'token_balance')::int, 0) + $2)::int)
+                    )
+                WHERE username = $1
+            """, user_id, tokens)
+
+            await conn.execute("""
+                INSERT INTO token_transactions (username, action, amount, balance_before, balance_after, source, created_at)
+                SELECT $1, 'credit', $2,
+                    COALESCE((profile_data->>'token_balance')::int, 0) - $2,
+                    COALESCE((profile_data->>'token_balance')::int, 0),
+                    'iap_token_pack', NOW()
+                FROM users WHERE username = $1
+            """, user_id, tokens)
+
+            await conn.execute("""
+                INSERT INTO skyeye_activity (type, platform, content, created_at)
+                VALUES ('iap_consumable_credited', $1, $2, NOW())
+            """, source, f"user={user_id} tokens={tokens} product={product_id}")
+
+        logger.info("IAP token pack credited: user=%s tokens=%d product=%s source=%s",
+                     user_id, tokens, product_id, source)
+
+    elif consumable["type"] == "sanctuary_charge":
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO payment_history (user_id, amount_cents, payment_type, product_id, source, status, created_at)
+                SELECT id, $2, 'sanctuary_charge', $3, $4, 'completed', NOW()
+                FROM users WHERE username = $1
+            """, user_id, consumable["amount_cents"], product_id, source)
+
+            await conn.execute("""
+                INSERT INTO skyeye_activity (type, platform, content, created_at)
+                VALUES ('iap_consumable_credited', $1, $2, NOW())
+            """, source, f"user={user_id} charge_cents={consumable['amount_cents']} product={product_id}")
+
+        logger.info("IAP sanctuary charge recorded: user=%s cents=%d product=%s source=%s",
+                     user_id, consumable["amount_cents"], product_id, source)
+
+
 async def _activate_plan(request: Request, user_id: str, plan: str,
                          source: str, product_id: str):
     """Update the user's subscription plan in the database."""
@@ -197,7 +322,7 @@ async def _activate_plan(request: Request, user_id: str, plan: str,
             datetime.now(timezone.utc).isoformat(), tokens)
 
         await conn.execute("""
-            INSERT INTO skyeye_activity (action, platform, details, timestamp)
+            INSERT INTO skyeye_activity (type, platform, content, created_at)
             VALUES ('iap_receipt_verified', $1, $2, NOW())
         """, source, f"user={user_id} plan={plan} product={product_id}")
 

@@ -41,14 +41,62 @@ async def memory_search(
 ):
     """
     Search a client's conversation memory by keyword.
-    Returns matching exchanges with previews and full text.
+    PG-first: uses conversation_history FTS index.
+    Falls back to memory.json if db_pool is unavailable.
     """
-    query = q.strip().lower()
+    query = q.strip()
     if not query:
         return {"query": "", "total_matches": 0, "results": []}
 
     limit = min(limit, 50)
 
+    db_pool = getattr(request.app.state, "db_pool", None) if request else None
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                user_row = await conn.fetchrow(
+                    "SELECT username FROM users WHERE hardware_id = $1 AND deleted_at IS NULL",
+                    hw_id,
+                )
+                if not user_row:
+                    return {"query": query, "total_matches": 0, "results": []}
+                username = user_row["username"]
+
+                rows = await conn.fetch(
+                    """SELECT session_id, user_text, ai_text, created_at
+                       FROM conversation_history
+                       WHERE user_id = $1
+                         AND to_tsvector('english', user_text || ' ' || ai_text)
+                             @@ plainto_tsquery('english', $2)
+                       ORDER BY created_at DESC
+                       LIMIT $3""",
+                    username, query, limit,
+                )
+
+            results = []
+            for r in rows:
+                ts = r["created_at"].isoformat() if r["created_at"] else ""
+                user_raw = r["user_text"] or ""
+                ai_raw = r["ai_text"] or ""
+                results.append({
+                    "timestamp": ts,
+                    "session_id": r["session_id"],
+                    "session_date": ts[:10] if ts else "",
+                    "user_preview": user_raw[:200] + ("..." if len(user_raw) > 200 else ""),
+                    "ai_preview": ai_raw[:200] + ("..." if len(ai_raw) > 200 else ""),
+                    "user_full": user_raw,
+                    "ai_full": ai_raw,
+                })
+
+            return {"query": query, "total_matches": len(results), "results": results}
+        except Exception as e:
+            logger.warning("memory_search PG failed, falling back to JSON: %s", e)
+
+    return _search_memory_json(hw_id, query, limit)
+
+
+def _search_memory_json(hw_id: str, query: str, limit: int) -> dict:
+    """Fallback: search memory.json flat file."""
     mem_path = _memory_path(hw_id)
     if not mem_path.exists():
         return {"query": query, "total_matches": 0, "results": []}
@@ -57,18 +105,18 @@ async def memory_search(
         raw = mem_path.read_text()
         all_entries = json.loads(raw) if raw.strip() else []
     except Exception:
-        raise HTTPException(500, "Failed to read memory")
+        return {"query": query, "total_matches": 0, "results": []}
 
+    query_lower = query.lower()
     matches = []
-    for idx, entry in enumerate(all_entries):
+    for entry in all_entries:
         user_text = (entry.get("user") or "").lower()
         ai_text = (entry.get("ai") or "").lower()
-        if query in user_text or query in ai_text:
+        if query_lower in user_text or query_lower in ai_text:
             user_raw = entry.get("user", "")
             ai_raw = entry.get("ai", "")
             ts = entry.get("timestamp", "")
             matches.append({
-                "index": idx,
                 "timestamp": ts,
                 "session_id": entry.get("session_id"),
                 "session_date": ts[:10] if ts else "",
@@ -79,11 +127,7 @@ async def memory_search(
             })
 
     matches.reverse()
-    return {
-        "query": query,
-        "total_matches": len(matches),
-        "results": matches[:limit],
-    }
+    return {"query": query, "total_matches": len(matches), "results": matches[:limit]}
 
 
 @router.get("/memory/sessions/{hw_id}")
@@ -91,7 +135,71 @@ async def memory_sessions(
     hw_id: str,
     request: Request = None,
 ):
-    """Return memory entries grouped by session/date as story chapters."""
+    """
+    Return memory entries grouped by session/date as story chapters.
+    PG-first: uses conversation_history table.
+    Falls back to memory.json if db_pool is unavailable.
+    """
+    db_pool = getattr(request.app.state, "db_pool", None) if request else None
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                user_row = await conn.fetchrow(
+                    "SELECT username FROM users WHERE hardware_id = $1 AND deleted_at IS NULL",
+                    hw_id,
+                )
+                if not user_row:
+                    return {"sessions": [], "total_sessions": 0}
+                username = user_row["username"]
+
+                rows = await conn.fetch(
+                    """SELECT session_id, user_text, ai_text, created_at
+                       FROM conversation_history
+                       WHERE user_id = $1
+                       ORDER BY created_at ASC""",
+                    username,
+                )
+
+            from collections import OrderedDict
+            sessions: OrderedDict = OrderedDict()
+            for r in rows:
+                ts = r["created_at"].isoformat() if r["created_at"] else ""
+                key = r["session_id"] or ts[:10]
+                if not key:
+                    key = "unknown"
+                if key not in sessions:
+                    sessions[key] = []
+                sessions[key].append({
+                    "timestamp": ts,
+                    "user": r["user_text"] or "",
+                    "ai": r["ai_text"] or "",
+                })
+
+            result = []
+            for key, entries in sessions.items():
+                first_ts = entries[0]["timestamp"] if entries else ""
+                last_ts = entries[-1]["timestamp"] if entries else ""
+                first_user = (entries[0]["user"] or "")[:120]
+                result.append({
+                    "session_key": key,
+                    "date": first_ts[:10] if first_ts else key,
+                    "first_timestamp": first_ts,
+                    "last_timestamp": last_ts,
+                    "entry_count": len(entries),
+                    "preview": first_user + ("..." if len(first_user) >= 120 else ""),
+                    "entries": entries,
+                })
+
+            result.reverse()
+            return {"sessions": result, "total_sessions": len(result)}
+        except Exception as e:
+            logger.warning("memory_sessions PG failed, falling back to JSON: %s", e)
+
+    return _sessions_from_json(hw_id)
+
+
+def _sessions_from_json(hw_id: str) -> dict:
+    """Fallback: read sessions from memory.json flat file."""
     mem_path = _memory_path(hw_id)
     if not mem_path.exists():
         return {"sessions": [], "total_sessions": 0}
@@ -100,7 +208,7 @@ async def memory_sessions(
         raw = mem_path.read_text()
         all_entries = json.loads(raw) if raw.strip() else []
     except Exception:
-        raise HTTPException(500, "Failed to read memory")
+        return {"sessions": [], "total_sessions": 0}
 
     from collections import OrderedDict
     sessions: OrderedDict = OrderedDict()
