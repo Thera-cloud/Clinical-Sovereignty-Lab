@@ -304,6 +304,229 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .mobile-toggle:hover{background:rgba(255,255,255,0.08);color:var(--t1)}
 .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:140}
 .sidebar-overlay.show{display:block}
+
+/* ── Crystal Intelligence Tab ── */
+.ci-exa-hero{background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;padding:28px;margin:0 0 24px;position:relative;overflow:hidden}
+.ci-exa-hero::before{content:'';position:absolute;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,#5a4820,#d4a84b,#5a4820)}
+.ci-exa-top{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px}
+.ci-exa-number{font-family:monospace;font-size:48px;font-weight:500;color:#d4a84b;line-height:1}
+.ci-exa-unit{font-family:monospace;font-size:14px;color:#8a7030;letter-spacing:1px;margin-left:8px}
+.ci-exa-label{font-size:11px;color:#5a5850;letter-spacing:2px;text-transform:uppercase;margin-bottom:4px}
+.ci-exa-comp{text-align:right}
+.ci-exa-comp-line{font-size:11px;color:#5a5850;line-height:1.8;font-family:monospace}
+.ci-exa-comp-line span{color:#8a8678}
+.ci-bar-wrap{height:28px;background:var(--bg,#08080c);border-radius:6px;overflow:hidden;margin-bottom:8px;position:relative}
+.ci-bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#5a4820,#d4a84b,#f0d080);transition:width 1.5s ease;position:relative}
+.ci-bar-glow{position:absolute;right:-2px;top:0;bottom:0;width:16px;background:linear-gradient(90deg,transparent,rgba(240,208,128,.4));border-radius:0 6px 6px 0;animation:ci-glow 2s ease infinite}
+@keyframes ci-glow{0%,100%{opacity:.5}50%{opacity:1}}
+.ci-bar-marks{display:flex;justify-content:space-between;font-family:monospace;font-size:10px;color:#5a5850;padding:0 2px}
+.ci-bar-marks .ci-active{color:#d4a84b}
+.ci-rate{margin-top:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:#8a8678}
+.ci-rate strong{color:#f0e6d0;font-weight:500}
+.ci-rate .ci-mono{font-family:monospace;color:#d4a84b}
+.ci-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin:0 0 24px;background:var(--bdr,#1e1e28);border-radius:8px;overflow:hidden}
+.ci-stat{background:var(--bg-card,#0e0e14);padding:14px 16px;position:relative}
+.ci-stat::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.ci-stat:nth-child(1)::before{background:#1d9e75}
+.ci-stat:nth-child(2)::before{background:#378add}
+.ci-stat:nth-child(3)::before{background:#d85a30}
+.ci-stat:nth-child(4)::before{background:#7f77dd}
+.ci-stat:nth-child(5)::before{background:#d4a84b}
+.ci-stat-val{font-family:monospace;font-size:22px;font-weight:500;margin-bottom:2px}
+.ci-stat-lbl{font-size:10px;color:#5a5850;letter-spacing:1px;text-transform:uppercase}
+.ci-formula{background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;padding:18px 24px;margin:0 0 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.ci-formula-text{font-family:monospace;font-size:16px;color:#f0e6d0}
+.ci-formula-text em{color:#d4a84b;font-style:normal}
+.ci-formula-lbl{font-size:10px;color:#5a5850;letter-spacing:2px;text-transform:uppercase}
+.ci-section-title{font-family:var(--serif,serif);font-size:20px;font-weight:600;margin:28px 0 16px;padding-bottom:10px;border-bottom:1px solid var(--bdr,#1e1e28)}
+.ci-section-title em{color:#d4a84b;font-style:normal}
+.ci-nodes{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.ci-node{background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;padding:22px;position:relative;overflow:hidden;transition:border-color .3s}
+.ci-node:hover{border-color:rgba(212,168,75,.15)}
+.ci-node::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%}
+.ci-node-green::before{background:#1d9e75}
+.ci-node-orange::before{background:#d85a30}
+.ci-node-blue::before{background:#378add}
+.ci-node-purple::before{background:#7f77dd}
+.ci-node-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.ci-node-num{font-family:monospace;font-size:10px;color:#5a5850;letter-spacing:1px;margin-bottom:2px}
+.ci-node-name{font-family:var(--serif,serif);font-size:16px;font-weight:600}
+.ci-s{display:flex;align-items:center;gap:5px;font-size:10px;letter-spacing:1px;text-transform:uppercase;padding:3px 8px;border-radius:4px;flex-shrink:0}
+.ci-s-active{background:rgba(29,158,117,.15);color:#1d9e75}
+.ci-s-issue{background:rgba(216,90,48,.15);color:#d85a30}
+.ci-s-dead{background:rgba(239,68,68,.15);color:#ef4444}
+.ci-s-disabled{background:rgba(127,119,221,.15);color:#7f77dd}
+.ci-s-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:ci-pulse 2s ease infinite}
+@keyframes ci-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ci-node-file{font-family:monospace;font-size:10px;color:#8a7030;margin-bottom:10px;padding:4px 8px;background:rgba(212,168,75,.06);border-radius:4px;display:inline-block}
+.ci-node-desc{font-size:12px;color:#8a8678;line-height:1.6;margin-bottom:10px}
+.ci-details{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.ci-d-row{display:flex;gap:8px;font-size:11px}
+.ci-d-key{color:#5a5850;min-width:75px;flex-shrink:0;font-family:monospace;font-size:10px;letter-spacing:.5px;padding-top:1px}
+.ci-d-val{color:#f0e6d0;line-height:1.4}
+.ci-sources{display:flex;flex-wrap:wrap;gap:4px}
+.ci-tag{font-size:9px;padding:2px 6px;border-radius:3px;letter-spacing:.5px;font-family:monospace}
+.ci-tag-green{background:rgba(29,158,117,.1);color:#1d9e75;border:1px solid rgba(29,158,117,.2)}
+.ci-tag-orange{background:rgba(216,90,48,.1);color:#d85a30;border:1px solid rgba(216,90,48,.2)}
+.ci-tag-blue{background:rgba(55,138,221,.1);color:#378add;border:1px solid rgba(55,138,221,.2)}
+.ci-tag-purple{background:rgba(127,119,221,.1);color:#7f77dd;border:1px solid rgba(127,119,221,.2)}
+.ci-tag-gold{background:rgba(212,168,75,.1);color:#d4a84b;border:1px solid rgba(212,168,75,.2)}
+.ci-flow{background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;padding:24px;margin:0 0 24px}
+.ci-flow-title{font-family:var(--serif,serif);font-size:14px;font-weight:600;color:#d4a84b;margin-bottom:14px}
+.ci-flow-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px}
+.ci-flow-row:last-child{margin-bottom:0}
+.ci-fn{padding:5px 12px;border-radius:5px;font-family:monospace;font-size:10px;letter-spacing:.5px;font-weight:500;min-width:100px;text-align:center}
+.ci-fn-green{background:rgba(29,158,117,.15);color:#1d9e75;border:1px solid rgba(29,158,117,.25)}
+.ci-fn-orange{background:rgba(216,90,48,.15);color:#d85a30;border:1px solid rgba(216,90,48,.25)}
+.ci-fn-blue{background:rgba(55,138,221,.15);color:#378add;border:1px solid rgba(55,138,221,.25)}
+.ci-fn-purple{background:rgba(127,119,221,.15);color:#7f77dd;border:1px solid rgba(127,119,221,.25)}
+.ci-fn-gold{background:rgba(212,168,75,.15);color:#d4a84b;border:1px solid rgba(212,168,75,.25)}
+.ci-flow-arrow{color:#8a7030;font-family:monospace;font-size:13px}
+.ci-flow-label{color:#8a8678;font-size:11px;flex:1}
+.ci-ctrl-panel{background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;padding:24px;margin:0 0 24px}
+.ci-ctrl-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(30,30,40,.5)}
+.ci-ctrl-row:last-child{border-bottom:none}
+.ci-ctrl-name{flex:1;font-weight:500;font-size:13px}
+.ci-ctrl-btn{padding:5px 14px;border-radius:5px;font-size:11px;font-family:monospace;cursor:pointer;border:none;transition:.2s}
+.ci-ctrl-btn-action{background:rgba(29,158,117,.15);color:#1d9e75;border:1px solid rgba(29,158,117,.3)}
+.ci-ctrl-btn-action:hover{background:rgba(29,158,117,.25)}
+.ci-ctrl-btn-stop{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2)}
+.ci-ctrl-btn-stop:hover{background:rgba(239,68,68,.2)}
+.ci-ctrl-ssh{font-family:monospace;font-size:10px;background:rgba(255,255,255,.03);border:1px solid var(--bdr,#1e1e28);border-radius:4px;padding:6px 10px;color:#8a8678;flex:1;word-break:break-all}
+.ci-ctrl-copy{padding:4px 10px;border-radius:4px;font-size:10px;cursor:pointer;background:rgba(212,168,75,.1);color:#d4a84b;border:1px solid rgba(212,168,75,.2)}
+.ci-ctrl-copy:hover{background:rgba(212,168,75,.2)}
+.ci-error-badge{font-size:9px;padding:2px 6px;border-radius:3px;font-family:monospace;letter-spacing:.5px}
+.ci-err-dead{background:rgba(239,68,68,.15);color:#ef4444}
+.ci-err-degraded{background:rgba(216,90,48,.15);color:#d85a30}
+.ci-err-disabled{background:rgba(127,119,221,.15);color:#7f77dd}
+.ci-err-healthy{background:rgba(29,158,117,.15);color:#1d9e75}
+.ci-error-detail{font-size:11px;color:#8a8678;margin-top:6px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:4px;display:none}
+.ci-error-detail.ci-show{display:block}
+@media(max-width:900px){.ci-nodes{grid-template-columns:1fr}.ci-stats{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){.ci-stats{grid-template-columns:1fr 1fr}}
+
+/* ── Command Terminal Tab ── */
+.ct-container{display:flex;flex-direction:column;height:calc(100vh - 60px);max-height:800px;background:var(--bg-card,#0e0e14);border:1px solid var(--bdr,#1e1e28);border-radius:12px;overflow:hidden}
+.ct-toolbar{display:flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(0,0,0,.3);border-bottom:1px solid var(--bdr,#1e1e28);flex-shrink:0}
+.ct-mode-btn{background:transparent;border:1px solid var(--bdr,#1e1e28);color:#8a8678;padding:5px 14px;border-radius:5px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:.5px}
+.ct-mode-btn:hover{border-color:#8B7355;color:#E8D5A3}
+.ct-mode-btn.ct-active{background:#C9A962;color:#050505;border-color:#C9A962;font-weight:600}
+.ct-spacer{flex:1}
+.ct-cli-selector{display:flex;align-items:center;gap:4px;margin-right:8px}
+.ct-cli-btn{background:transparent;border:1px solid var(--bdr,#1e1e28);color:#8a8678;padding:4px 10px;border-radius:4px;font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer;transition:all .2s;letter-spacing:.3px}
+.ct-cli-btn:hover{border-color:#4ECDC4;color:#4ECDC4}
+.ct-cli-btn.ct-cli-active{background:rgba(78,205,196,.15);color:#4ECDC4;border-color:#4ECDC4;font-weight:600}
+.ct-clear-btn{background:transparent;border:1px solid var(--bdr,#1e1e28);color:#8a8678;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer}
+.ct-clear-btn:hover{border-color:#ef4444;color:#ef4444}
+.ct-status-bar{display:flex;align-items:center;gap:8px;padding:4px 14px;background:rgba(0,0,0,.15);border-bottom:1px solid var(--bdr,#1e1e28);flex-shrink:0;font-size:10px;font-family:'JetBrains Mono',monospace;color:#8a8678}
+.ct-status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.ct-status-dot.ct-online{background:#22C55E;box-shadow:0 0 6px rgba(34,197,94,.4)}
+.ct-status-dot.ct-offline{background:#ef4444}
+.ct-status-dot.ct-connecting{background:#C9A962;animation:ct-pulse 1.5s infinite}
+@keyframes ct-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ct-pending-count{margin-left:auto;color:#C9A962}
+.ct-chatlog{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+.ct-chatlog::-webkit-scrollbar{width:6px}
+.ct-chatlog::-webkit-scrollbar-track{background:transparent}
+.ct-chatlog::-webkit-scrollbar-thumb{background:#8B7355;border-radius:3px}
+.ct-msg-user{align-self:flex-end;background:rgba(201,169,98,.12);border:1px solid rgba(201,169,98,.25);border-radius:12px 12px 4px 12px;padding:9px 15px;max-width:85%;font-size:13px;color:#E8D5A3}
+.ct-msg-nate{align-self:flex-start;background:rgba(78,205,196,.06);border-left:3px solid #4ECDC4;border-radius:4px;padding:11px 15px;max-width:90%;font-size:13px;color:#E8D5A3;line-height:1.6}
+.ct-msg-nate code{background:rgba(255,255,255,.05);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:12px}
+.ct-msg-nate pre{background:#0e0e14;border:1px solid var(--bdr,#1e1e28);border-radius:6px;padding:10px;overflow-x:auto;margin:8px 0}
+.ct-msg-nate pre code{background:transparent;padding:0;font-size:12px;line-height:1.5}
+.ct-msg-status{align-self:center;color:#8a8678;font-size:11px;font-style:italic;padding:4px 12px}
+.ct-turn-card{border-left:3px solid var(--bdr,#1e1e28);border-radius:6px;background:rgba(0,0,0,.2);overflow:hidden;transition:border-color .2s}
+.ct-turn-card.ct-turn-active{border-left-color:#C9A962}
+.ct-turn-header{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;background:rgba(255,255,255,.02);transition:background .15s}
+.ct-turn-header:hover{background:rgba(255,255,255,.04)}
+.ct-turn-label{font-size:10px;font-family:'JetBrains Mono',monospace;color:#8a8678;text-transform:uppercase;letter-spacing:.3px;flex-shrink:0}
+.ct-turn-summary{flex:1;font-size:12px;color:#E8D5A3;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ct-turn-tools{font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(34,197,94,.15);color:#22C55E;font-family:'JetBrains Mono',monospace;font-weight:600;flex-shrink:0}
+.ct-turn-dur{font-size:10px;color:#8a8678;font-family:'JetBrains Mono',monospace;flex-shrink:0}
+.ct-turn-chevron{color:#8a8678;font-size:11px;transition:transform .2s;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.ct-turn-card.ct-expanded .ct-turn-chevron{transform:rotate(90deg)}
+.ct-turn-progress{display:none;padding:6px 12px;font-size:11px;color:#8a8678;font-family:'JetBrains Mono',monospace;border-top:1px solid rgba(255,255,255,.04);align-items:center;gap:6px}
+.ct-turn-progress.ct-visible{display:flex}
+.ct-turn-progress .ct-progress-text{flex:1}
+.ct-turn-progress .ct-progress-time{color:#8B7355}
+.ct-turn-body{display:none;border-top:1px solid rgba(255,255,255,.04)}
+.ct-turn-card.ct-expanded .ct-turn-body{display:block}
+.ct-tool-line{display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.03)}
+.ct-tool-line:last-child{border-bottom:none}
+.ct-tool-icon{flex-shrink:0;font-size:13px;width:18px;text-align:center}
+.ct-tool-name{color:#E8D5A3;font-family:'JetBrains Mono',monospace;font-weight:500;flex-shrink:0;font-size:12px}
+.ct-tool-args{color:#8a8678;font-size:11px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ct-tool-status{font-size:10px;padding:1px 7px;border-radius:3px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;font-weight:600;flex-shrink:0;letter-spacing:.3px}
+.ct-tool-status.ct-ok{background:rgba(34,197,94,.15);color:#22C55E}
+.ct-tool-status.ct-pending{background:rgba(201,169,98,.15);color:#C9A962}
+.ct-tool-status.ct-error{background:rgba(239,68,68,.15);color:#ef4444}
+.ct-tool-dur{font-size:10px;color:#8a8678;font-family:'JetBrains Mono',monospace;flex-shrink:0;min-width:32px;text-align:right}
+.ct-tool-show-btn{background:transparent;border:1px solid var(--bdr,#1e1e28);color:#8a8678;font-size:10px;padding:1px 6px;border-radius:3px;cursor:pointer;font-family:'JetBrains Mono',monospace;flex-shrink:0}
+.ct-tool-show-btn:hover{border-color:#8B7355;color:#E8D5A3}
+.ct-tool-output{display:none;padding:8px 12px 8px 38px;background:rgba(0,0,0,.3);font-size:11px;font-family:'JetBrains Mono',monospace;color:#8a8678;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;border-bottom:1px solid rgba(255,255,255,.03)}
+.ct-tool-output.ct-visible{display:block}
+.ct-proposal{background:rgba(0,0,0,.2);border-left:3px solid #C9A962;border-radius:6px;padding:12px 14px}
+.ct-proposal-title{font-size:13px;font-weight:600;color:#E8D5A3;margin-bottom:10px}
+.ct-proposal-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.ct-proposal-label.ct-before{color:#F87171}
+.ct-proposal-label.ct-after{color:#22C55E}
+.ct-proposal-code{background:#050505;border:1px solid var(--bdr,#1e1e28);border-radius:4px;padding:8px 10px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;color:#8a8678;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto}
+.ct-proposal-actions{margin-top:10px;font-size:12px;color:#8a8678}
+.ct-proposal-actions .ct-kw-approved{color:#22C55E;font-weight:700}
+.ct-proposal-actions .ct-kw-stop{color:#ef4444;font-weight:700}
+.ct-approval-waiting{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:#C9A962;font-family:'JetBrains Mono',monospace}
+.ct-approval-dot{width:8px;height:8px;border-radius:50%;background:#C9A962;animation:ct-pulse 1.5s infinite;flex-shrink:0}
+.ct-hypothesis-panel{display:none;padding:10px 12px;background:rgba(0,0,0,.2);border-top:1px solid var(--bdr,#1e1e28);max-height:200px;overflow-y:auto;flex-shrink:0}
+.ct-hypothesis-panel.ct-visible{display:block}
+.ct-hypothesis-card{background:rgba(157,78,221,.08);border:1px solid rgba(157,78,221,.2);border-radius:6px;padding:8px 12px;margin-bottom:6px}
+.ct-hypothesis-card .ct-h-title{color:#9D4EDD;font-weight:600;font-size:12px;margin-bottom:4px}
+.ct-hypothesis-card .ct-h-confidence{font-size:10px;color:#8a8678;text-transform:uppercase;letter-spacing:.5px}
+.ct-hypothesis-card .ct-h-evidence{margin-top:4px;font-size:11px;color:#8a8678;list-style:disc;padding-left:16px}
+.ct-provider-badge{display:inline-block;font-size:9px;padding:2px 7px;border-radius:3px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;font-weight:600;letter-spacing:.3px;flex-shrink:0}
+.ct-provider-badge.ct-sovereign{background:rgba(34,197,94,.15);color:#22C55E}
+.ct-provider-badge.ct-grok{background:rgba(78,205,196,.15);color:#4ECDC4}
+.ct-provider-badge.ct-azure{background:rgba(239,68,68,.15);color:#ef4444}
+.ct-provider-badge.ct-workers_ai{background:rgba(157,78,221,.15);color:#9D4EDD}
+.ct-provider-badge.ct-ollama,.ct-provider-badge.ct-home_gpu{background:rgba(34,197,94,.15);color:#22C55E}
+.ct-cost-badge{display:none;align-items:center;gap:4px;background:rgba(201,169,98,.1);border:1px solid rgba(201,169,98,.2);border-radius:4px;padding:2px 8px;font-size:10px;color:#8B7355;font-family:'JetBrains Mono',monospace;margin-left:8px}
+.ct-input-area{display:flex;gap:8px;padding:10px 14px;background:rgba(0,0,0,.3);border-top:1px solid var(--bdr,#1e1e28);flex-shrink:0}
+.ct-input-area textarea{flex:1;background:rgba(255,255,255,.03);border:1px solid var(--bdr,#1e1e28);border-radius:6px;padding:8px 12px;color:#E8D5A3;font-family:'JetBrains Mono',monospace;font-size:13px;resize:none;outline:none;min-height:36px;max-height:120px;line-height:1.5}
+.ct-input-area textarea:focus{border-color:#8B7355}
+.ct-input-area textarea::placeholder{color:#8a8678}
+.ct-send-btn{background:#C9A962;color:#050505;border:none;border-radius:6px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;align-self:flex-end;transition:opacity .2s}
+.ct-send-btn:hover{opacity:.85}
+.ct-send-btn:disabled{opacity:.4;cursor:not-allowed}
+.ct-spinner{display:inline-block;width:12px;height:12px;border:2px solid #8B7355;border-top-color:#C9A962;border-radius:50%;animation:ct-spin .8s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes ct-spin{to{transform:rotate(360deg)}}
+.ct-tabs-panel{display:flex;gap:2px;padding:0 14px 6px;background:rgba(0,0,0,.15);flex-shrink:0}
+.ct-tab-mini{background:transparent;border:none;color:#8a8678;padding:4px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase;letter-spacing:.3px}
+.ct-tab-mini:hover{color:#E8D5A3}
+.ct-tab-mini.ct-tab-active{color:#C9A962;border-bottom-color:#C9A962}
+.ct-sub-panel{display:none;flex:1;overflow-y:auto;flex-direction:column}
+.ct-sub-panel.ct-sub-active{display:flex}
+.ct-pending-list{padding:14px;display:flex;flex-direction:column;gap:10px;overflow-y:auto}
+.ct-pending-item{background:rgba(0,0,0,.2);border:1px solid var(--bdr,#1e1e28);border-radius:8px;padding:12px 14px}
+.ct-pending-item-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.ct-pending-item-type{font-size:10px;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.3px;padding:2px 7px;border-radius:3px;background:rgba(201,169,98,.12);color:#C9A962;flex-shrink:0}
+.ct-pending-item-id{font-size:10px;color:#8a8678;font-family:'JetBrains Mono',monospace}
+.ct-pending-item-desc{font-size:12px;color:#E8D5A3;margin-bottom:8px;line-height:1.5}
+.ct-pending-item-actions{display:flex;gap:6px}
+.ct-btn-approve{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.3);color:#22C55E;padding:5px 14px;border-radius:5px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer}
+.ct-btn-approve:hover{background:rgba(34,197,94,.25)}
+.ct-btn-reject{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:#ef4444;padding:5px 14px;border-radius:5px;font-size:11px;font-family:'JetBrains Mono',monospace;cursor:pointer}
+.ct-btn-reject:hover{background:rgba(239,68,68,.2)}
+.ct-analytics-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;padding:14px}
+.ct-analytics-card{background:rgba(0,0,0,.2);border:1px solid var(--bdr,#1e1e28);border-radius:8px;padding:14px;text-align:center}
+.ct-analytics-card .ct-a-value{font-size:28px;font-weight:700;color:#C9A962;font-family:'JetBrains Mono',monospace}
+.ct-analytics-card .ct-a-label{font-size:10px;color:#8a8678;text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.ct-history-table{width:100%;border-collapse:collapse;font-size:12px}
+.ct-history-table th{text-align:left;padding:8px 12px;font-size:10px;color:#8a8678;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--bdr,#1e1e28);font-family:'JetBrains Mono',monospace}
+.ct-history-table td{padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.03);color:#E8D5A3}
+.ct-badge-approved{background:rgba(34,197,94,.12);color:#22C55E;padding:2px 7px;border-radius:3px;font-size:10px;font-family:'JetBrains Mono',monospace}
+.ct-badge-rejected{background:rgba(239,68,68,.12);color:#ef4444;padding:2px 7px;border-radius:3px;font-size:10px;font-family:'JetBrains Mono',monospace}
+.ct-badge-pending{background:rgba(201,169,98,.12);color:#C9A962;padding:2px 7px;border-radius:3px;font-size:10px;font-family:'JetBrains Mono',monospace}
+.ct-badge-executing{background:rgba(78,205,196,.12);color:#4ECDC4;padding:2px 7px;border-radius:3px;font-size:10px;font-family:'JetBrains Mono',monospace}
+.ct-empty{text-align:center;padding:40px 20px;color:#8a8678;font-style:italic;font-size:13px}
 </style>
 </head>
 <body>
@@ -410,6 +633,13 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     </div>
     <div class="nav-item" data-tab="social-developer" onclick="switchTab('social-developer',this)">
       <span class="nav-icon">🔧</span><span class="nav-label">Social Developer</span>
+    </div>
+    <div class="nav-divider"></div>
+    <div class="nav-item" data-tab="crystal-intelligence" onclick="switchTab('crystal-intelligence',this)">
+      <span class="nav-icon">💎</span><span class="nav-label">Crystal Intelligence</span>
+    </div>
+    <div class="nav-item" data-tab="command-terminal" onclick="switchTab('command-terminal',this)">
+      <span class="nav-icon">⌨️</span><span class="nav-label">Command Terminal</span>
     </div>
   </aside>
 
@@ -1703,6 +1933,250 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       <div id="sd-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px"></div>
     </section>
 
+    <!-- TAB: CRYSTAL INTELLIGENCE -->
+    <section class="tab-content" id="tab-crystal-intelligence">
+
+      <!-- ExaFLOPS Hero Meter -->
+      <div class="ci-exa-hero">
+        <div class="ci-exa-top">
+          <div>
+            <div class="ci-exa-label">Current ExaFLOPS Equivalent</div>
+            <div style="display:flex;align-items:baseline">
+              <span class="ci-exa-number" id="ci-exa-val">0.00</span>
+              <span class="ci-exa-unit">ExaFLOPS</span>
+            </div>
+          </div>
+          <div class="ci-exa-comp">
+            <div class="ci-exa-comp-line">El Capitan (DOE) <span>1.809 ExaFLOPS</span> — surpassed</div>
+            <div class="ci-exa-comp-line">Primary Target <span>5.015 ExaFLOPS</span> — C_emo 0.75</div>
+            <div class="ci-exa-comp-line">Long Game <span>15.552 ExaFLOPS</span> — C_emo 0.90</div>
+          </div>
+        </div>
+        <div class="ci-bar-wrap">
+          <div class="ci-bar-fill" id="ci-bar-fill" style="width:0%"><div class="ci-bar-glow"></div></div>
+        </div>
+        <div class="ci-bar-marks">
+          <span class="ci-active">0</span><span>1.809</span><span>5.015</span><span>10.0</span><span>15.552</span>
+        </div>
+        <div class="ci-rate">
+          <div><strong>Crystals:</strong> <span class="ci-mono" id="ci-crystal-count">—</span></div>
+          <div><strong>Rate:</strong> <span class="ci-mono" id="ci-rate-val">—</span>/hr</div>
+          <div><strong>24h:</strong> <span class="ci-mono" id="ci-24h-val">—</span></div>
+          <div><strong>Target:</strong> <span class="ci-mono">1,000,000</span> crystals for 5.015</div>
+        </div>
+      </div>
+
+      <!-- Stats Bar -->
+      <div class="ci-stats">
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-crystals" style="color:#1d9e75">—</div><div class="ci-stat-lbl">Total Crystals</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-nodes" style="color:#378add">—</div><div class="ci-stat-lbl">Active Nodes</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-systems" style="color:#d85a30">5</div><div class="ci-stat-lbl">Systems</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-health" style="color:#7f77dd">—</div><div class="ci-stat-lbl">Healthy</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-rate" style="color:#d4a84b">—</div><div class="ci-stat-lbl">Crystal Rate</div></div>
+      </div>
+
+      <!-- Nevedal Formula -->
+      <div class="ci-formula">
+        <div>
+          <div class="ci-formula-lbl">Governing Equation</div>
+          <div class="ci-formula-text"><em>EC</em> = (<em>A</em> &times; <em>Aw</em> &times; <em>I</em>) / <em>R</em></div>
+        </div>
+        <div style="text-align:right">
+          <div class="ci-formula-lbl">Nevedal Emotional Coherence Formula</div>
+          <div style="font-size:11px;color:#8a8678;margin-top:3px">Authenticity &times; Awareness &times; Integration / Resistance</div>
+        </div>
+      </div>
+
+      <!-- Production Systems -->
+      <div class="ci-section-title">Production <em>Systems</em></div>
+      <div class="ci-nodes" id="ci-nodes-grid">
+        <div class="ci-node ci-node-green" id="ci-node-hetzner">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 01 — HETZNER</div><div class="ci-node-name">Crystal Factory</div></div>
+            <div class="ci-s ci-s-active" id="ci-s-hetzner"><div class="ci-s-dot"></div><span>Loading</span></div>
+          </div>
+          <div class="ci-node-file">crystal_factory.py — Hetzner Finland</div>
+          <div class="ci-node-desc">External datasets: CounselChat, MentalChat16K, AnnoMI, PsychoCounsel, Stack Overflow, GitHub repos. Processes via local Ollama, pushes to GREEN PostgreSQL.</div>
+          <div class="ci-details" id="ci-det-hetzner"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-green">CounselChat</span><span class="ci-tag ci-tag-green">MentalChat16K</span><span class="ci-tag ci-tag-green">AnnoMI</span><span class="ci-tag ci-tag-green">PsychoCounsel</span><span class="ci-tag ci-tag-green">GitHub</span></div>
+        </div>
+        <div class="ci-node ci-node-green" id="ci-node-do">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 02 — DIGITALOCEAN</div><div class="ci-node-name">Crystal Factory</div></div>
+            <div class="ci-s ci-s-active" id="ci-s-do"><div class="ci-s-dot"></div><span>Loading</span></div>
+          </div>
+          <div class="ci-node-file">crystal_factory.py — DigitalOcean US</div>
+          <div class="ci-node-desc">Internal clinical data from 10 PostgreSQL tables: sessions, assessments, briefings, insights, metrics, coherence data.</div>
+          <div class="ci-details" id="ci-det-do"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-green">Sessions</span><span class="ci-tag ci-tag-green">Assessments</span><span class="ci-tag ci-tag-green">Briefings</span><span class="ci-tag ci-tag-green">Insights</span><span class="ci-tag ci-tag-green">10 PG Tables</span></div>
+        </div>
+        <div class="ci-node ci-node-blue" id="ci-node-bh">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 03</div><div class="ci-node-name">Blue Harvester</div></div>
+            <div class="ci-s ci-s-disabled" id="ci-s-bh"><div class="ci-s-dot"></div><span>Loading</span></div>
+          </div>
+          <div class="ci-node-file">blue_harvester.py — Mac local</div>
+          <div class="ci-node-desc">Codebase scanner. Crystallizes source code, configs, therapeutic prompts, git history. Knowledge only accessible from the BLUE (Mac) node.</div>
+          <div class="ci-details" id="ci-det-bh"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-blue">SovereignRules</span><span class="ci-tag ci-tag-blue">CursorRules</span><span class="ci-tag ci-tag-blue">NightSchool</span><span class="ci-tag ci-tag-blue">BridgePrompts</span><span class="ci-tag ci-tag-blue">GitHistory</span></div>
+        </div>
+        <div class="ci-node ci-node-orange" id="ci-node-ac">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 04</div><div class="ci-node-name">Autonomous Controller</div></div>
+            <div class="ci-s ci-s-active" id="ci-s-ac"><div class="ci-s-dot"></div><span>Loading</span></div>
+          </div>
+          <div class="ci-node-file">autonomous_controller.py — Phase 7c LEARN</div>
+          <div class="ci-node-desc">Background bridge task. 10 health gates &rarr; LEARN mode (crystallize TENSION resolutions, maintain crystals, ingest RSS). Any fail &rarr; FIX mode.</div>
+          <div class="ci-details" id="ci-det-ac"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-orange">TENSION</span><span class="ci-tag ci-tag-orange">RSS Feeds</span><span class="ci-tag ci-tag-orange">Maintenance</span><span class="ci-tag ci-tag-orange">Tool Calls</span></div>
+        </div>
+      </div>
+      <!-- Subconscious Engine as full-width -->
+      <div class="ci-nodes" style="grid-template-columns:1fr;margin-bottom:24px">
+        <div class="ci-node ci-node-purple" id="ci-node-se">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 05</div><div class="ci-node-name">Subconscious Engine</div></div>
+            <div class="ci-s ci-s-disabled" id="ci-s-se"><div class="ci-s-dot"></div><span>Loading</span></div>
+          </div>
+          <div class="ci-node-file">crystallization_engine.py + subconscious_bootstrap.py</div>
+          <div class="ci-node-desc">Idle-cycle crystallization. Monitors GPU, Redis, edge, and inference load. When sustained idle detected, dispatches Nevedal recalibration, cross-session patterns, memory tier migration, modality tuning.</div>
+          <div class="ci-details" id="ci-det-se"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-purple">Nevedal Recalibration</span><span class="ci-tag ci-tag-purple">Cross-Session</span><span class="ci-tag ci-tag-purple">Memory Migration</span><span class="ci-tag ci-tag-purple">Modality Tuning</span><span class="ci-tag ci-tag-purple">Arc Synthesis</span></div>
+        </div>
+        <div class="ci-node ci-node-blue" id="ci-node-mac">
+          <div class="ci-node-header">
+            <div><div class="ci-node-num">SYSTEM 06</div><div class="ci-node-name">Mac Agent</div></div>
+            <div class="ci-s ci-s-disabled" id="ci-s-mac"><div class="ci-s-dot"></div><span>Checking</span></div>
+          </div>
+          <div class="ci-node-file">nate_mac_agent.py — Mac local via Cloudflare VPC</div>
+          <div class="ci-node-desc">CLI-Mac command execution agent. Runs shell, file, build, git, and process management on the local Mac. Manages Blue Harvester and cloudflared watchdog. Exposed through Twin Engine tunnel.</div>
+          <div class="ci-details" id="ci-det-mac"></div>
+          <div class="ci-sources"><span class="ci-tag ci-tag-blue">CLI-Mac</span><span class="ci-tag ci-tag-blue">LN-FAB</span><span class="ci-tag ci-tag-blue">BH Watchdog</span><span class="ci-tag ci-tag-blue">cloudflared</span><span class="ci-tag ci-tag-blue">Flutter Build</span></div>
+        </div>
+      </div>
+
+      <!-- System Controls -->
+      <div class="ci-section-title">System <em>Controls</em></div>
+      <div class="ci-ctrl-panel" id="ci-ctrl-panel">
+        <!-- Populated by ciRenderControls -->
+        <div style="color:#5a5850;font-size:12px;padding:12px">Loading system controls...</div>
+      </div>
+
+      <!-- Error Assessment -->
+      <div class="ci-section-title">Error <em>Assessment</em></div>
+      <div class="ci-ctrl-panel" id="ci-error-panel">
+        <div style="color:#5a5850;font-size:12px;padding:12px">Loading diagnostics...</div>
+      </div>
+
+      <!-- Data Flow -->
+      <div class="ci-section-title">Crystal <em>Data Flow</em></div>
+      <div class="ci-flow">
+        <div class="ci-flow-title">How crystals move through the system</div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-green">ORANGE</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">External datasets harvested, filtered via Ollama, pushed to GREEN PostgreSQL</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-green">GREEN</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Internal clinical tables harvested, crystals stored in PostgreSQL + Cloudflare Vectorize</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-blue">BLUE</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Codebase scanned locally, filtered through Ollama, passing crystals pushed to GREEN via API</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-orange">LEARN</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">TENSION resolutions crystallized from bridge tool call logs, stored directly in GREEN PostgreSQL</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-purple">SUBCONSCIOUS</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Idle-cycle recalibration and pattern extraction, results stored in PostgreSQL</div></div>
+        <div class="ci-flow-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--bdr,#1e1e28)"><div class="ci-fn ci-fn-gold">RECALL</div><span class="ci-flow-arrow">&larr;</span><div class="ci-flow-label">Crystal recall bridge retrieves from PostgreSQL + Vectorize across 6 conversation surfaces</div></div>
+      </div>
+
+      <!-- Confidence Tiers -->
+      <div class="ci-section-title">Crystal <em>Confidence</em> Tiers</div>
+      <div class="ci-flow">
+        <div class="ci-flow-title">ODPE signal routing by confidence score</div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-gold" style="min-width:130px">LOCKED &ge; 0.90</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Fastest retrieval, near-zero cost. Workers AI edge inference.</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-green" style="min-width:130px">PROMOTED &ge; 0.75</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">High-confidence recall. Used directly in responses.</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-blue" style="min-width:130px">PROVISIONAL &ge; 0.55</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Available for context but not authoritative.</div></div>
+        <div class="ci-flow-row"><div class="ci-fn ci-fn-orange" style="min-width:130px">TENSION &lt; 0.55</div><span class="ci-flow-arrow">&rarr;</span><div class="ci-flow-label">Escalates to frontier model. Resolution crystallized.</div></div>
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         COMMAND TERMINAL — Sovereign Sanctuary IDE-class interface
+         ═══════════════════════════════════════════════════════════════ -->
+    <section class="tab-content" id="tab-command-terminal">
+
+      <!-- YubiKey Gate Overlay -->
+      <div id="ctYubiKeyGate" style="position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(5,5,5,0.95);flex-direction:column;gap:20px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:28px;color:#C9A962;letter-spacing:2px;">COMMAND TERMINAL</div>
+        <div style="color:#8B7355;font-size:13px;max-width:400px;text-align:center;line-height:1.6;">
+          This terminal grants shell access to the sovereign infrastructure.<br>
+          Physical key verification is required before entry.
+        </div>
+        <button id="ctYubiKeyBtn" onclick="ctYubiKeyGateVerify()" style="margin-top:12px;padding:14px 40px;background:transparent;border:1px solid #C9A962;color:#C9A962;font-family:'Cormorant Garamond',serif;font-size:18px;cursor:pointer;letter-spacing:1px;border-radius:4px;transition:all 0.3s;">
+          🔑 Tap YubiKey to Enter
+        </button>
+        <div id="ctYubiKeyStatus" style="color:#5a5850;font-size:12px;min-height:18px;"></div>
+      </div>
+
+      <div class="ct-container">
+        <!-- Mode Bar -->
+        <div class="ct-toolbar">
+          <button class="ct-mode-btn ct-active" data-ctmode="ask" onclick="ctSwitchMode('ask',this)">ASK</button>
+          <button class="ct-mode-btn" data-ctmode="plan" onclick="ctSwitchMode('plan',this)">PLAN</button>
+          <button class="ct-mode-btn" data-ctmode="ln_fab" onclick="ctSwitchMode('ln_fab',this)">LN-FAB</button>
+          <button class="ct-mode-btn" data-ctmode="debug" onclick="ctSwitchMode('debug',this)">DEBUG</button>
+          <div class="ct-spacer"></div>
+          <div class="ct-cli-selector">
+            <button class="ct-cli-btn ct-cli-active" data-ctcli="cloud" onclick="ctSwitchCli('cloud',this)">CLI-Cloud</button>
+            <button class="ct-cli-btn" data-ctcli="mac" onclick="ctSwitchCli('mac',this)">CLI-Mac</button>
+          </div>
+          <span class="ct-cost-badge" id="ctSessionCost"></span>
+          <button class="ct-clear-btn" onclick="ctClearChat()">Clear</button>
+        </div>
+
+        <!-- Sub-tabs: Chat | Pending Approvals | Analytics | History -->
+        <div class="ct-tabs-panel">
+          <button class="ct-tab-mini ct-tab-active" data-cttab="chat" onclick="ctSwitchSubTab('chat',this)">Chat</button>
+          <button class="ct-tab-mini" data-cttab="pending" onclick="ctSwitchSubTab('pending',this)">Pending <span id="ctPendingBadge"></span></button>
+          <button class="ct-tab-mini" data-cttab="analytics" onclick="ctSwitchSubTab('analytics',this)">Analytics</button>
+          <button class="ct-tab-mini" data-cttab="history" onclick="ctSwitchSubTab('history',this)">History</button>
+        </div>
+
+        <!-- Status bar -->
+        <div class="ct-status-bar" id="ctStatusBar">
+          <span class="ct-status-dot ct-connecting" id="ctStatusDot"></span>
+          <span id="ctStatusText">Connecting...</span>
+          <span id="ctMacStatus" style="margin-left:12px;font-size:10px;color:#5a5850;cursor:pointer" title="Mac Agent status" onclick="ctCheckMacAgent()">🖥️ Mac: —</span>
+          <span id="ctModeLabel" style="margin-left:auto;color:#C9A962">ASK</span>
+        </div>
+
+        <!-- ═══ SUB-PANEL: CHAT ═══ -->
+        <div class="ct-sub-panel ct-sub-active" id="ctSubChat" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <div class="ct-chatlog" id="ctChatLog"></div>
+          <div class="ct-hypothesis-panel" id="ctHypothesisPanel"></div>
+          <div class="ct-input-area">
+            <textarea id="ctChatInput" rows="1" placeholder="Ask Little Nate..."></textarea>
+            <button class="ct-send-btn" id="ctSendBtn" onclick="ctSendMessage()">Send</button>
+          </div>
+        </div>
+
+        <!-- ═══ SUB-PANEL: PENDING APPROVALS ═══ -->
+        <div class="ct-sub-panel" id="ctSubPending">
+          <div class="ct-pending-list" id="ctPendingList">
+            <div class="ct-empty">Loading pending approvals...</div>
+          </div>
+        </div>
+
+        <!-- ═══ SUB-PANEL: ANALYTICS ═══ -->
+        <div class="ct-sub-panel" id="ctSubAnalytics">
+          <div class="ct-analytics-grid" id="ctAnalyticsGrid">
+            <div class="ct-empty">Loading analytics...</div>
+          </div>
+        </div>
+
+        <!-- ═══ SUB-PANEL: HISTORY ═══ -->
+        <div class="ct-sub-panel" id="ctSubHistory" style="overflow-y:auto;padding:14px">
+          <table class="ct-history-table" id="ctHistoryTable">
+            <thead><tr><th>ID</th><th>Type</th><th>CLI</th><th>Mode</th><th>Status</th><th>Time</th></tr></thead>
+            <tbody id="ctHistoryBody"><tr><td colspan="6" class="ct-empty">Loading history...</td></tr></tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -1971,6 +2445,15 @@ function switchTab(tabId, el) {
     case 'hardware-security': loadHardwareSecurity(); break;
     case 'engagement-requests': loadEngagementRequests(); break;
     case 'social-developer': loadSocialDeveloper(); break;
+    case 'crystal-intelligence': ciLoadAll(); break;
+    case 'command-terminal': ctInit(); break;
+  }
+  if (tabId !== 'crystal-intelligence' && _ciRefreshTimer) {
+    clearInterval(_ciRefreshTimer); _ciRefreshTimer = null;
+  }
+  if (tabId !== 'command-terminal') {
+    if (_ctWs) { _ctWs.close(); _ctWs = null; }
+    _ctYubiKeyVerified = false;
   }
 }
 
@@ -5363,6 +5846,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!sessionStorage.getItem('token') && storedToken) {
     try { sessionStorage.setItem('token', storedToken); } catch(e) {}
   }
+  var ykVerified = false;
+  try { ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+  if (!ykVerified) {
+    window.location.href = 'command.html';
+    return;
+  }
   loadCommandCenter();
   loadEngagementRequestCount();
 });
@@ -5502,6 +5991,1257 @@ function _timeAgo(d) {
   if (s < 3600) return Math.floor(s/60) + 'm ago';
   if (s < 86400) return Math.floor(s/3600) + 'h ago';
   return Math.floor(s/86400) + 'd ago';
+}
+
+/* ─── Crystal Intelligence Tab ─── */
+var _ciRefreshTimer = null;
+var _ciLastStatus = null;
+var _ciLastDiag = null;
+var _ciControlCooldown = {};
+
+var CI_SYSTEMS = [
+  {id:'hetzner',       label:'Hetzner Crystal Factory',  bridge:false},
+  {id:'digitalocean',  label:'DO Crystal Factory',       bridge:false},
+  {id:'blue_harvester',label:'Blue Harvester',           bridge:false},
+  {id:'autonomous_controller', label:'Autonomous Controller', bridge:true},
+  {id:'subconscious_engine',   label:'Subconscious Engine',   bridge:true},
+  {id:'mac_agent',             label:'Mac Agent',             bridge:false, http:true},
+];
+
+async function ciLoadAll() {
+  if (_ciRefreshTimer) clearInterval(_ciRefreshTimer);
+  await Promise.all([ciLoadStatus(), ciLoadDiag()]);
+  _ciRefreshTimer = setInterval(function(){ ciLoadStatus(); ciLoadDiag(); }, 30000);
+}
+
+async function ciLoadStatus() {
+  var d = await apiFetch('/api/nate-agent/admin/crystal-network/status');
+  if (!d) return;
+  _ciLastStatus = d;
+  ciRenderStatus(d);
+  ciRenderControls(d);
+}
+
+async function ciLoadDiag() {
+  var d = await apiFetch('/api/nate-agent/admin/crystal-network/diagnostics');
+  if (!d) return;
+  _ciLastDiag = d;
+  ciRenderDiag(d);
+}
+
+function ciRenderStatus(d) {
+  var totals = d.totals || {};
+  var total = totals.total_crystals || 0;
+  var rate = totals.rate_per_hour || 0;
+  var last24 = totals.last_24h || 0;
+  var exa = d.exa_flops || (total * 0.00008);
+
+  var el = function(id){ return document.getElementById(id); };
+  el('ci-exa-val').textContent = exa.toFixed(3);
+  el('ci-crystal-count').textContent = _ciNum(total);
+  el('ci-rate-val').textContent = _ciNum(rate);
+  el('ci-24h-val').textContent = _ciNum(last24);
+  el('ci-st-crystals').textContent = _ciNum(total);
+  el('ci-st-rate').textContent = rate.toFixed(1) + '/hr';
+
+  var pct = Math.min((exa / 15.552) * 100, 100);
+  el('ci-bar-fill').style.width = pct + '%';
+
+  var nodes = d.nodes || [];
+  var ac = d.autonomous_controller || {};
+  var se = d.subconscious_engine || {};
+  var bh = d.blue_harvester || {};
+
+  var activeCount = 0;
+  var healthyCount = 0;
+
+  nodes.forEach(function(n) {
+    var key = (n.node || '').toLowerCase();
+    var elId = key.indexOf('hetzner') >= 0 ? 'hetzner' : key.indexOf('digital') >= 0 ? 'do' : null;
+    if (!elId) return;
+    var badge = el('ci-s-' + elId);
+    var det = el('ci-det-' + elId);
+    var st = n.status || 'unknown';
+    var isHealthy = st === 'healthy';
+    if (isHealthy) { activeCount++; healthyCount++; }
+    else if (st === 'stale') { activeCount++; }
+    _ciSetBadge(badge, st === 'healthy' ? 'healthy' : st === 'stale' ? 'warning' : 'offline');
+    if (det) det.innerHTML =
+      '<div><strong>Last heartbeat:</strong> ' + _ciTimeStr(n.last_heartbeat) + '</div>' +
+      '<div><strong>Crystals (active):</strong> ' + _ciNum(n.total || 0) + '</div>' +
+      '<div><strong>Last 24h:</strong> ' + _ciNum(n.last_24h || 0) + '</div>';
+  });
+
+  var acBadge = el('ci-s-ac');
+  var acDet = el('ci-det-ac');
+  var acRunning = ac.running || false;
+  var acDegraded = acRunning && (ac.crystals_forged || 0) === 0 && (ac.cycles || 0) > 5;
+  if (acRunning) { activeCount++; if (!acDegraded) healthyCount++; }
+  _ciSetBadge(acBadge, acRunning ? (acDegraded ? 'degraded' : 'healthy') : 'offline');
+  if (acDet) acDet.innerHTML =
+    '<div><strong>Running:</strong> ' + (acRunning ? 'Yes' : 'No') + '</div>' +
+    '<div><strong>Crystals forged:</strong> ' + _ciNum(ac.crystals_forged || 0) + '</div>' +
+    '<div><strong>Buffer size:</strong> ' + _ciNum(ac.buffer_size || 0) + '</div>' +
+    '<div><strong>Cycles:</strong> ' + _ciNum(ac.cycles || 0) + '</div>';
+
+  var seBadge = el('ci-s-se');
+  var seDet = el('ci-det-se');
+  var seRunning = se.running || false;
+  var seEnabled = se.enabled || false;
+  if (seRunning) { activeCount++; healthyCount++; }
+  else if (seEnabled) { activeCount++; }
+  _ciSetBadge(seBadge, seRunning ? 'healthy' : seEnabled ? 'warning' : 'offline');
+  if (seDet) seDet.innerHTML =
+    '<div><strong>Enabled:</strong> ' + (seEnabled ? 'Yes' : 'No') + '</div>' +
+    '<div><strong>Running:</strong> ' + (seRunning ? 'Yes' : 'No') + '</div>' +
+    '<div><strong>Jobs completed:</strong> ' + _ciNum(se.jobs_completed || 0) + '</div>' +
+    '<div><strong>Idle score:</strong> ' + (se.idle_score || 0) + '</div>';
+
+  var bhBadge = el('ci-s-bh');
+  var bhDet = el('ci-det-bh');
+  var bhStatus = bh.status || 'offline';
+  var bhActive = bhStatus === 'active' || bhStatus === 'healthy';
+  if (bhActive) { activeCount++; healthyCount++; }
+  else if (bhStatus === 'stale') { activeCount++; }
+  _ciSetBadge(bhBadge, bhActive ? 'healthy' : bhStatus === 'stale' ? 'warning' : 'offline');
+  var bhChunks = bh.chunks_processed || 0;
+  var bhTotal = bh.chunks_total || 0;
+  var bhPassed = bh.chunks_passed || 0;
+  var bhRate = bh.pass_rate ? (bh.pass_rate * 100).toFixed(1) : '0.0';
+  var bhForged = bh.crystals_forged || 0;
+  var bhScanner = bh.current_scanner || '—';
+  var bhProg = bhTotal > 0 ? Math.round(bhChunks / bhTotal * 100) : 0;
+  var bhProgBar = bhTotal > 0
+    ? '<div style="background:#1a1a18;border-radius:4px;height:6px;margin:6px 0;overflow:hidden">' +
+      '<div style="background:linear-gradient(90deg,#4ECDC4,#C9A962);width:' + bhProg + '%;height:100%;border-radius:4px;transition:width .3s"></div></div>' +
+      '<div style="font-size:10px;color:#5a5850;text-align:right">' + bhChunks + ' / ' + bhTotal + ' chunks (' + bhProg + '%)</div>'
+    : '';
+  if (bhDet) bhDet.innerHTML =
+    '<div><strong>Status:</strong> ' + bhStatus + '</div>' +
+    bhProgBar +
+    '<div><strong>Pass rate:</strong> ' + bhRate + '%</div>' +
+    '<div><strong>Crystals forged:</strong> ' + _ciNum(bhForged) + '</div>' +
+    '<div><strong>Scanner:</strong> ' + bhScanner + '</div>' +
+    (bh.last_heartbeat ? '<div style="font-size:10px;color:#5a5850;margin-top:4px">Last heartbeat: ' + new Date(bh.last_heartbeat).toLocaleString() + '</div>' : '');
+
+  var macBadge = el('ci-s-mac');
+  var macDet = el('ci-det-mac');
+  var mac = d.mac_agent || {};
+  var macOk = mac.status === 'ok' || mac.status === 'healthy';
+  if (macOk) { activeCount++; healthyCount++; }
+  else if (mac.status === 'degraded') { activeCount++; }
+  _ciSetBadge(macBadge, macOk ? 'healthy' : mac.status === 'degraded' ? 'warning' : 'offline');
+  if (macDet) {
+    if (mac.status) {
+      var macUptime = mac.uptime_s ? (mac.uptime_s > 3600 ? (mac.uptime_s / 3600).toFixed(1) + 'h' : Math.round(mac.uptime_s / 60) + 'min') : '—';
+      var macProcs = mac.managed_processes || {};
+      var procLines = Object.keys(macProcs).map(function(p) {
+        var ps = macProcs[p] || {};
+        var dot = ps.running ? '🟢' : '🔴';
+        return '<div style="padding-left:10px">' + dot + ' ' + p + (ps.pid ? ' (pid ' + ps.pid + ')' : '') + '</div>';
+      }).join('');
+      macDet.innerHTML =
+        '<div><strong>Status:</strong> ' + mac.status + '</div>' +
+        '<div><strong>Uptime:</strong> ' + macUptime + '</div>' +
+        '<div><strong>Tunnel:</strong> ' + (mac.tunnel_healthy ? '🟢 Connected' : '🔴 Down') + '</div>' +
+        (procLines ? '<div><strong>Managed:</strong></div>' + procLines : '');
+    } else {
+      macDet.innerHTML = '<div style="color:#5a5850">Mac agent not reachable</div>';
+    }
+  }
+
+  el('ci-st-nodes').textContent = activeCount;
+  el('ci-st-health').textContent = healthyCount + '/' + CI_SYSTEMS.length;
+}
+
+function ciRenderControls(d) {
+  var panel = document.getElementById('ci-ctrl-panel');
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">';
+  CI_SYSTEMS.forEach(function(sys) {
+    var isBridge = sys.bridge;
+    var isManual = !isBridge;
+    html += '<div class="ci-ctrl-card">';
+    html += '<div class="ci-ctrl-name">' + sys.label + '</div>';
+    if (sys.http) {
+      html += '<div style="font-size:11px;color:#5a5850;margin-bottom:8px">HTTP-controlled via Cloudflare VPC tunnel</div>';
+      html += '<div class="ci-ctrl-btns">';
+      html += '<button class="ci-ctrl-btn ci-ctrl-restart" onclick="ciMacAgentAction(\'restart\')">Restart</button>';
+      html += '<button class="ci-ctrl-btn" onclick="ciMacAgentAction(\'status\')">Health</button>';
+      html += '<button class="ci-ctrl-btn" onclick="ciMacAgentAction(\'processes\')">Processes</button>';
+      html += '</div>';
+    } else if (isManual) {
+      html += '<div style="font-size:11px;color:#5a5850;margin-bottom:8px">Host-level service — use SSH commands</div>';
+      html += '<div class="ci-ctrl-btns">';
+      html += '<button class="ci-ctrl-btn ci-ctrl-restart" onclick="ciShowSSH(\'' + sys.id + '\',\'restart\')">SSH Restart</button>';
+      html += '<button class="ci-ctrl-btn ci-ctrl-stop" onclick="ciShowSSH(\'' + sys.id + '\',\'stop\')">SSH Stop</button>';
+      html += '<button class="ci-ctrl-btn" onclick="ciShowSSH(\'' + sys.id + '\',\'status\')">SSH Status</button>';
+      html += '</div>';
+    } else {
+      html += '<div style="font-size:11px;color:#5a5850;margin-bottom:8px">Bridge-controlled — Redis pub/sub IPC</div>';
+      html += '<div class="ci-ctrl-btns">';
+      html += '<button class="ci-ctrl-btn ci-ctrl-restart" onclick="ciControl(\'' + sys.id + '\',\'restart\')">Restart</button>';
+      html += '<button class="ci-ctrl-btn ci-ctrl-stop" onclick="ciControl(\'' + sys.id + '\',\'stop\')">Stop</button>';
+      html += '<button class="ci-ctrl-btn" onclick="ciControl(\'' + sys.id + '\',\'start\')">Start</button>';
+      html += '</div>';
+    }
+    html += '<div class="ci-ctrl-result" id="ci-ctrl-res-' + sys.id + '"></div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  panel.innerHTML = html;
+}
+
+async function ciControl(system, action) {
+  var now = Date.now();
+  if (_ciControlCooldown[system] && now - _ciControlCooldown[system] < 10000) {
+    var res = document.getElementById('ci-ctrl-res-' + system);
+    if (res) res.innerHTML = '<span style="color:#d4a84b">⏳ Cooldown — wait 10s between actions</span>';
+    return;
+  }
+  _ciControlCooldown[system] = now;
+  var res = document.getElementById('ci-ctrl-res-' + system);
+  if (res) res.innerHTML = '<span style="color:#5a5850">Sending ' + action + '...</span>';
+  try {
+    var resp = await fetch(API + '/api/nate-agent/admin/crystal-network/control', {
+      method: 'POST',
+      headers: _authHeaders('application/json'),
+      body: JSON.stringify({system: system, action: action})
+    });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      if (res) res.innerHTML = '<span style="color:#1d9e75">✓ ' + (data.detail || 'Success') + '</span>';
+      setTimeout(ciLoadStatus, 3000);
+    } else if (data.status === 'manual_only') {
+      if (res) res.innerHTML =
+        '<div style="color:#d4a84b;margin-bottom:4px">Manual SSH required:</div>' +
+        '<pre class="ci-ssh-cmd">' + _ciEsc(data.ssh_command || '—') + '</pre>';
+    } else {
+      if (res) res.innerHTML = '<span style="color:#d85a30">✗ ' + _ciEsc(data.detail || 'Failed') + '</span>';
+    }
+  } catch(e) {
+    if (res) res.innerHTML = '<span style="color:#d85a30">✗ Network error: ' + _ciEsc(e.message) + '</span>';
+  }
+}
+
+function ciShowSSH(system, action) {
+  var cmds = {
+    'hetzner': {
+      restart: 'ssh -J root@68.183.168.75 root@10.13.13.5 "systemctl restart crystal-factory"',
+      stop:    'ssh -J root@68.183.168.75 root@10.13.13.5 "systemctl stop crystal-factory"',
+      status:  'ssh -J root@68.183.168.75 root@10.13.13.5 "systemctl status crystal-factory"',
+    },
+    'digitalocean': {
+      restart: 'ssh root@68.183.168.75 "systemctl restart crystal-factory"',
+      stop:    'ssh root@68.183.168.75 "systemctl stop crystal-factory"',
+      status:  'ssh root@68.183.168.75 "systemctl status crystal-factory"',
+    },
+    'blue_harvester': {
+      restart: 'cd /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2 && python3 backend/blue_harvester.py',
+      stop:    'pkill -f blue_harvester.py',
+      status:  'pgrep -f blue_harvester.py && echo "Running" || echo "Stopped"',
+    },
+  };
+  var cmd = (cmds[system] || {})[action] || 'echo "No command defined for ' + system + ' ' + action + '"';
+  var res = document.getElementById('ci-ctrl-res-' + system);
+  if (res) res.innerHTML =
+    '<div style="color:#d4a84b;margin-bottom:4px;font-size:11px">Run this command in your terminal:</div>' +
+    '<pre class="ci-ssh-cmd">' + _ciEsc(cmd) + '</pre>' +
+    '<button class="ci-ctrl-btn" style="margin-top:6px;font-size:10px" onclick="ciCopyCmd(this,\'' + _ciEsc(cmd).replace(/'/g, "\\'") + '\')">Copy</button>';
+}
+
+function ciCopyCmd(btn, cmd) {
+  navigator.clipboard.writeText(cmd).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function(){ btn.textContent = 'Copy'; }, 2000);
+  });
+}
+
+async function ciMacAgentAction(action) {
+  var res = document.getElementById('ci-ctrl-res-mac_agent');
+  if (res) res.innerHTML = '<span style="color:#5a5850">Sending ' + action + '...</span>';
+  try {
+    if (action === 'status') {
+      var resp = await fetch(API + '/api/nate-agent/admin/crystal-network/status', { headers: _authHeaders() });
+      var data = await resp.json();
+      var mac = data.mac_agent || {};
+      if (res) res.innerHTML = '<pre style="font-size:10px;color:#a09880;white-space:pre-wrap">' + _ciEsc(JSON.stringify(mac, null, 2)) + '</pre>';
+    } else if (action === 'processes') {
+      var resp = await fetch(API + '/api/nate-agent/admin/crystal-network/status', { headers: _authHeaders() });
+      var data = await resp.json();
+      var procs = (data.mac_agent || {}).managed_processes || {};
+      var lines = Object.keys(procs).map(function(p) { var s = procs[p]; return (s.running ? '🟢' : '🔴') + ' ' + p + (s.pid ? ' (pid ' + s.pid + ')' : ''); }).join('\n') || 'No managed processes';
+      if (res) res.innerHTML = '<pre style="font-size:11px;color:#a09880;white-space:pre-wrap">' + _ciEsc(lines) + '</pre>';
+    } else if (action === 'restart') {
+      var resp = await fetch(API + '/api/nate-agent/admin/crystal-network/control', {
+        method: 'POST', headers: _authHeaders('application/json'),
+        body: JSON.stringify({system: 'mac_agent', action: 'restart'})
+      });
+      var data = await resp.json();
+      if (data.status === 'ok') {
+        if (res) res.innerHTML = '<span style="color:#1d9e75">✓ Restart signal sent</span>';
+        setTimeout(ciLoadStatus, 5000);
+      } else {
+        if (res) res.innerHTML = '<span style="color:#d85a30">✗ ' + _ciEsc(data.detail || 'Failed') + '</span>';
+      }
+    }
+  } catch(e) {
+    if (res) res.innerHTML = '<span style="color:#d85a30">✗ ' + _ciEsc(e.message) + '</span>';
+  }
+}
+
+function ciRenderDiag(d) {
+  var panel = document.getElementById('ci-error-panel');
+  var systems = d.systems || {};
+  var keys = Object.keys(systems);
+  if (keys.length === 0) {
+    panel.innerHTML = '<div style="color:#1d9e75;padding:12px;font-size:12px">✓ No diagnostics data available yet</div>';
+    return;
+  }
+  var html = '';
+  var hasErrors = false;
+  keys.forEach(function(key) {
+    var sys = systems[key];
+    var errors = sys.errors || [];
+    var status = sys.status || 'unknown';
+    var isOk = status === 'healthy' && errors.length === 0;
+    if (!isOk) hasErrors = true;
+    html += '<div class="ci-diag-card" style="border-left:3px solid ' + (isOk ? '#1d9e75' : '#d85a30') + '">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<div style="font-weight:600;color:#e8e0d0;font-size:13px">' + _ciEsc(key.replace(/_/g,' ')) + '</div>';
+    html += '<span style="font-size:11px;padding:2px 8px;border-radius:8px;background:' + (isOk ? '#1d9e7522' : '#d85a3022') + ';color:' + (isOk ? '#1d9e75' : '#d85a30') + '">' + status + '</span>';
+    html += '</div>';
+    if (errors.length === 0) {
+      html += '<div style="font-size:11px;color:#1d9e75">✓ No issues detected</div>';
+    } else {
+      errors.forEach(function(err) {
+        html += '<div class="ci-err-row">';
+        html += '<span class="ci-err-code">' + _ciEsc(err.code || 'UNKNOWN') + '</span>';
+        html += '<span class="ci-err-msg">' + _ciEsc(err.message || '') + '</span>';
+        html += '</div>';
+        if (err.suggestion) {
+          html += '<div style="font-size:10px;color:#8a8678;margin:2px 0 6px 4px">💡 ' + _ciEsc(err.suggestion) + '</div>';
+        }
+      });
+    }
+    html += '</div>';
+  });
+  if (!hasErrors) {
+    html = '<div style="color:#1d9e75;padding:12px;font-size:13px;font-weight:600">✓ All systems nominal — no errors detected</div>' + html;
+  }
+  panel.innerHTML = html;
+}
+
+function _ciSetBadge(el, status) {
+  if (!el) return;
+  el.className = 'ci-s';
+  var dot = el.querySelector('.ci-s-dot');
+  var span = el.querySelector('span');
+  if (status === 'healthy') {
+    el.classList.add('ci-s-active');
+    if (span) span.textContent = 'RUNNING';
+  } else if (status === 'warning' || status === 'stale') {
+    el.classList.add('ci-s-warn');
+    if (span) span.textContent = status === 'stale' ? 'STALE' : 'WARNING';
+  } else if (status === 'degraded') {
+    el.classList.add('ci-s-warn');
+    if (span) span.textContent = 'DEGRADED';
+  } else if (status === 'error') {
+    el.classList.add('ci-s-err');
+    if (span) span.textContent = 'ERROR';
+  } else {
+    el.classList.add('ci-s-disabled');
+    if (span) span.textContent = 'OFFLINE';
+  }
+}
+
+function _ciNum(n) {
+  if (typeof n !== 'number') return '—';
+  if (n >= 1000000) return (n/1000000).toFixed(2) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+function _ciTimeStr(iso) {
+  if (!iso) return '—';
+  try {
+    var d = new Date(iso);
+    var s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  } catch(e) { return iso; }
+}
+
+function _ciEsc(s) {
+  if (!s) return '';
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  COMMAND TERMINAL — Full WebSocket chat + REST management interface
+// ══════════════════════════════════════════════════════════════════════════
+
+var _ctWs = null;
+var _ctMode = 'ask';
+var _ctCli = 'cloud';
+var _ctBusy = false;
+var _ctRetry = 0;
+var _ctRetryTimer = null;
+var _ctActiveNateEl = null;
+var _ctCurrentCard = null;
+var _ctCurrentCardBody = null;
+var _ctCurrentProgressEl = null;
+var _ctTurnNum = 0;
+var _ctTurnToolCount = 0;
+var _ctTurnStartMs = 0;
+var _ctTurnProvider = '';
+var _ctTurnToolNames = [];
+var _ctProgressTimer = null;
+var _ctBusyTimeout = null;
+var _ctActivePlanId = null;
+var _ctInitialized = false;
+var _ctYubiKeyVerified = false;
+
+var _CT_PLACEHOLDERS = {
+  ask: 'Ask Little Nate...',
+  plan: 'Describe what you want to plan...',
+  ln_fab: 'Describe what to build or change...',
+  debug: 'Describe the bug or unexpected behavior...'
+};
+
+var _CT_TOOL_ICONS = {
+  read_file:'📄',write_file:'✏️',create_file:'📝',str_replace:'✏️',proposed_edit:'✏️',
+  search_code:'🔍',list_directory:'📁',grep:'🔎',glob:'📂',shell:'⚡',read_lints:'🔬',
+  inject_log:'💉',debug_cleanup:'🧹',delete_file:'🗑️',rename_file:'📎',run_command:'⚡',
+  read_diagnostics:'🔬',read_git_status:'📊',read_open_editors:'📑',web_fetch:'🌐',
+  web_search_local:'🌐',todo_write:'📋',switch_mode:'🔄',provider_stats:'📊'
+};
+
+async function ctCheckMacAgent() {
+  var el = document.getElementById('ctMacStatus');
+  if (!el) return;
+  el.textContent = '🖥️ Mac: checking...';
+  el.style.color = '#5a5850';
+  try {
+    var d = await apiFetch('/api/nate-agent/admin/crystal-network/status');
+    var mac = (d && d.mac_agent) || {};
+    if (mac.status === 'ok' || mac.status === 'healthy') {
+      el.textContent = '🖥️ Mac: online';
+      el.style.color = '#22C55E';
+    } else if (mac.status === 'degraded') {
+      el.textContent = '🖥️ Mac: degraded';
+      el.style.color = '#EAB308';
+    } else {
+      el.textContent = '🖥️ Mac: offline';
+      el.style.color = '#EF4444';
+    }
+  } catch(e) {
+    el.textContent = '🖥️ Mac: error';
+    el.style.color = '#EF4444';
+  }
+}
+
+function ctInit() {
+  var gate = document.getElementById('ctYubiKeyGate');
+  if (!_ctYubiKeyVerified) {
+    if (gate) gate.style.display = 'flex';
+    return;
+  }
+  if (gate) gate.style.display = 'none';
+  if (!_ctInitialized) {
+    var inp = document.getElementById('ctChatInput');
+    if (inp) {
+      inp.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ctSendMessage(); }
+      });
+      inp.addEventListener('input', function() {
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+      });
+    }
+    _ctInitialized = true;
+  }
+  ctConnectWs();
+  ctCheckMacAgent();
+  ctSwitchSubTab('chat', document.querySelector('.ct-tab-mini[data-cttab="chat"]'));
+}
+
+async function ctYubiKeyGateVerify() {
+  var btn = document.getElementById('ctYubiKeyBtn');
+  var statusEl = document.getElementById('ctYubiKeyStatus');
+  if (!window.PublicKeyCredential) {
+    statusEl.textContent = 'WebAuthn not supported in this browser.';
+    statusEl.style.color = 'var(--red, #EF4444)';
+    return;
+  }
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  statusEl.textContent = 'Requesting challenge...';
+  statusEl.style.color = '#C9A962';
+
+  try {
+    var optionsResp = await apiPost('/api/admin/webauthn/auth-options', {});
+    if (!optionsResp || !optionsResp.options) {
+      statusEl.textContent = 'Failed to get auth challenge.';
+      statusEl.style.color = 'var(--red, #EF4444)';
+      btn.disabled = false; btn.style.opacity = '1';
+      return;
+    }
+    var options = optionsResp.options;
+    options.challenge = _hwB64toBuffer(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map(function(c) {
+        return Object.assign({}, c, { id: _hwB64toBuffer(c.id) });
+      });
+    }
+    statusEl.textContent = 'Touch your YubiKey now...';
+    statusEl.style.color = '#C9A962';
+    btn.textContent = '🔑 Waiting for key...';
+
+    var credential = await navigator.credentials.get({ publicKey: options });
+    var assertion = {
+      id: credential.id,
+      rawId: _hwBufferToB64(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: _hwBufferToB64(credential.response.clientDataJSON),
+        authenticatorData: _hwBufferToB64(credential.response.authenticatorData),
+        signature: _hwBufferToB64(credential.response.signature),
+      },
+    };
+    statusEl.textContent = 'Verifying...';
+    statusEl.style.color = '#4ECDC4';
+
+    var result = await apiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+    if (result && result.verified) {
+      _ctYubiKeyVerified = true;
+      statusEl.textContent = '\u2713 Key verified — entering terminal...';
+      statusEl.style.color = 'var(--green, #22C55E)';
+      setTimeout(function() { ctInit(); }, 600);
+    } else {
+      statusEl.textContent = 'Key verification failed.';
+      statusEl.style.color = 'var(--red, #EF4444)';
+      btn.disabled = false; btn.style.opacity = '1';
+      btn.textContent = '🔑 Tap YubiKey to Enter';
+    }
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      statusEl.textContent = 'Verification cancelled.';
+      statusEl.style.color = '#5a5850';
+    } else {
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.style.color = 'var(--red, #EF4444)';
+    }
+    btn.disabled = false; btn.style.opacity = '1';
+    btn.textContent = '🔑 Tap YubiKey to Enter';
+  }
+}
+
+function ctConnectWs() {
+  if (_ctWs && (_ctWs.readyState === 0 || _ctWs.readyState === 1)) return;
+  var dot = document.getElementById('ctStatusDot');
+  var txt = document.getElementById('ctStatusText');
+  if (dot) { dot.className = 'ct-status-dot ct-connecting'; }
+  if (txt) txt.textContent = 'Connecting...';
+
+  var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var wsUrl = wsProto + '//api.sovereignsanctuary.net/ws';
+  try { _ctWs = new WebSocket(wsUrl); } catch(e) { ctScheduleReconnect(); return; }
+
+  _ctWs.onopen = function() {
+    _ctRetry = 0;
+    if (dot) { dot.className = 'ct-status-dot ct-online'; }
+    if (txt) txt.textContent = 'Connected';
+    ctAppendStatus('Connected to bridge (' + (_ctCli === 'mac' ? 'mac' : 'cloud') + ')');
+    var token = sessionStorage.getItem('token') || localStorage.getItem('sc_token');
+    var username = sessionStorage.getItem('username') || localStorage.getItem('sc_username');
+    var profileStr = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile');
+    var hwId = '';
+    if (profileStr) {
+      try { var pObj = JSON.parse(profileStr); hwId = pObj.hardware_id || ''; } catch(e) {}
+    }
+    if (token && hwId) {
+      _ctWs.send(JSON.stringify({ type: 'auth', token: token, hardware_id: hwId }));
+    } else if (token && username) {
+      _ctWs.send(JSON.stringify({ type: 'auth', token: token, hardware_id: 'ADMIN_DRNEVEDAL1_ID', username: username }));
+    } else {
+      ctAppendStatus('No session token — attempting login...');
+      _ctWs.send(JSON.stringify({
+        type: 'login_request',
+        username: username || 'DrNevedal1',
+        expected_role: 'ADMIN'
+      }));
+    }
+  };
+
+  _ctWs.onmessage = function(evt) {
+    try { var msg = JSON.parse(evt.data); } catch(e) { return; }
+    ctHandleMessage(msg);
+  };
+
+  _ctWs.onclose = function() {
+    if (dot) { dot.className = 'ct-status-dot ct-offline'; }
+    if (txt) txt.textContent = 'Disconnected';
+    _ctWs = null;
+    if (currentTab === 'command-terminal') ctScheduleReconnect();
+  };
+
+  _ctWs.onerror = function() {
+    console.warn('[CT] WebSocket error');
+  };
+}
+
+function ctScheduleReconnect() {
+  if (_ctRetryTimer) return;
+  var attempt = Math.min(_ctRetry, 10);
+  var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+  var jitter = Math.floor(baseMs * 0.2 * Math.random());
+  _ctRetry++;
+  _ctRetryTimer = setTimeout(function() {
+    _ctRetryTimer = null;
+    if (currentTab === 'command-terminal') ctConnectWs();
+  }, baseMs + jitter);
+}
+
+function ctHandleMessage(msg) {
+  var t = msg.type || '';
+  switch (t) {
+    case 'connected':
+      ctAppendStatus('Bridge ready');
+      break;
+    case 'auth_success':
+    case 'login_success':
+      document.getElementById('ctStatusText').textContent = 'Authenticated — ' + (msg.role || 'ADMIN');
+      ctAppendStatus('Authenticated — ready');
+      ctSetBusy(false);
+      break;
+    case 'nate_cli_chat_chunk':
+      ctHandleChunk(msg);
+      break;
+    case 'nate_cli_chat_tool':
+      ctHandleTool(msg);
+      break;
+    case 'nate_cli_chat_status':
+      ctHandleStatus(msg);
+      break;
+    case 'nate_cli_chat_output':
+      ctAppendStatus('Generated code output (' + (msg.language || 'text') + ')');
+      break;
+    case 'nate_cli_chat_done':
+      ctHandleDone(msg);
+      break;
+    case 'nate_cli_chat_error':
+      ctAppendStatus('Error: ' + (msg.error || 'Unknown'));
+      ctStopProgress();
+      ctResetTurn();
+      ctSetBusy(false);
+      break;
+    case 'ask_user_prompt':
+      ctHandleAskUserPrompt(msg);
+      break;
+    case 'auth_failed':
+      ctAppendStatus('Auth failed: ' + (msg.message || 'Unknown') + ' — reconnecting...');
+      document.getElementById('ctStatusText').textContent = 'Auth failed';
+      document.getElementById('ctStatusDot').className = 'ct-status-dot ct-offline';
+      break;
+    case 'error':
+      if (msg.message) ctAppendStatus('Error: ' + msg.message);
+      break;
+  }
+}
+
+// ── Send Message ──
+function ctSendMessage() {
+  var inp = document.getElementById('ctChatInput');
+  var text = (inp.value || '').trim();
+  if (!text || _ctBusy) return;
+  if (!_ctWs || _ctWs.readyState !== 1) { ctAppendStatus('Not connected — reconnecting...'); ctConnectWs(); return; }
+
+  ctAppendUser(text);
+  inp.value = '';
+  inp.style.height = 'auto';
+  ctSetBusy(true);
+  ctResetTurn();
+
+  _ctWs.send(JSON.stringify({
+    type: 'nate_cli_chat',
+    mode: _ctMode,
+    cli: _ctCli,
+    message: text,
+    context: {}
+  }));
+}
+
+// ── Mode Switching ──
+function ctSwitchMode(mode, el) {
+  _ctMode = mode;
+  document.querySelectorAll('.ct-mode-btn').forEach(function(b) { b.classList.remove('ct-active'); });
+  if (el) el.classList.add('ct-active');
+  var lbl = document.getElementById('ctModeLabel');
+  if (lbl) lbl.textContent = mode.toUpperCase().replace('_', '-');
+  var inp = document.getElementById('ctChatInput');
+  if (inp) inp.placeholder = _CT_PLACEHOLDERS[mode] || 'Ask Little Nate...';
+  var hp = document.getElementById('ctHypothesisPanel');
+  if (hp) hp.classList.toggle('ct-visible', mode === 'debug');
+}
+
+function ctSwitchCli(cli, el) {
+  _ctCli = cli;
+  document.querySelectorAll('.ct-cli-btn').forEach(function(b) { b.classList.remove('ct-cli-active'); });
+  if (el) el.classList.add('ct-cli-active');
+  ctAppendStatus('Switched to CLI-' + cli.charAt(0).toUpperCase() + cli.slice(1));
+}
+
+// ── Sub-Tab Switching ──
+function ctSwitchSubTab(tab, el) {
+  document.querySelectorAll('.ct-tab-mini').forEach(function(b) { b.classList.remove('ct-tab-active'); });
+  if (el) el.classList.add('ct-tab-active');
+  document.querySelectorAll('.ct-sub-panel').forEach(function(p) { p.classList.remove('ct-sub-active'); p.style.display = 'none'; });
+  var panel = document.getElementById('ctSub' + tab.charAt(0).toUpperCase() + tab.slice(1));
+  if (panel) { panel.classList.add('ct-sub-active'); panel.style.display = 'flex'; }
+  if (tab === 'pending') ctLoadPending();
+  if (tab === 'analytics') ctLoadAnalytics();
+  if (tab === 'history') ctLoadHistory();
+}
+
+// ── Chat Rendering ──
+function ctAppendUser(text) {
+  var el = document.createElement('div');
+  el.className = 'ct-msg-user';
+  el.textContent = text;
+  document.getElementById('ctChatLog').appendChild(el);
+  ctScrollBottom();
+}
+
+function ctAppendStatus(text) {
+  var el = document.createElement('div');
+  el.className = 'ct-msg-status';
+  el.textContent = text;
+  document.getElementById('ctChatLog').appendChild(el);
+  ctScrollBottom();
+}
+
+function ctScrollBottom() {
+  var log = document.getElementById('ctChatLog');
+  requestAnimationFrame(function() { log.scrollTop = log.scrollHeight; });
+}
+
+function ctClearChat() {
+  document.getElementById('ctChatLog').innerHTML = '';
+  var hp = document.getElementById('ctHypothesisPanel');
+  if (hp) { hp.innerHTML = ''; hp.classList.remove('ct-visible'); }
+  var cost = document.getElementById('ctSessionCost');
+  if (cost) cost.style.display = 'none';
+  _ctActivePlanId = null;
+  ctResetTurn();
+  ctSetBusy(false);
+}
+
+function ctSetBusy(busy) {
+  _ctBusy = busy;
+  var btn = document.getElementById('ctSendBtn');
+  var inp = document.getElementById('ctChatInput');
+  if (btn) btn.disabled = busy;
+  if (inp) inp.disabled = busy;
+  if (_ctBusyTimeout) { clearTimeout(_ctBusyTimeout); _ctBusyTimeout = null; }
+  if (busy) {
+    _ctBusyTimeout = setTimeout(function() {
+      if (_ctBusy) { ctSetBusy(false); ctAppendStatus('Response timed out. You can try again.'); }
+    }, 120000);
+  } else {
+    if (inp) inp.focus();
+  }
+}
+
+// ── Turn Card Management ──
+function ctResetTurn() {
+  _ctTurnNum = 0; _ctCurrentCard = null; _ctCurrentCardBody = null;
+  _ctCurrentProgressEl = null; _ctTurnToolCount = 0; _ctTurnStartMs = 0;
+  _ctTurnProvider = ''; _ctTurnToolNames = []; _ctActiveNateEl = null;
+  ctStopProgress();
+}
+
+function ctEnsureCard(turn) {
+  var tn = turn || (_ctTurnNum || 1);
+  if (_ctCurrentCard && _ctTurnNum === tn) return;
+  if (_ctCurrentCard) { ctFinalizeCard(); _ctCurrentCard.classList.remove('ct-turn-active','ct-expanded'); }
+  _ctTurnNum = tn; _ctTurnToolCount = 0; _ctTurnToolNames = []; _ctTurnStartMs = Date.now();
+
+  var card = document.createElement('div');
+  card.className = 'ct-turn-card ct-turn-active ct-expanded';
+  card.dataset.turn = tn;
+
+  var hdr = document.createElement('div');
+  hdr.className = 'ct-turn-header';
+  hdr.innerHTML = '<span class="ct-turn-label">TURN ' + tn + '</span>' +
+    '<span class="ct-turn-summary">Working...</span>' +
+    '<span class="ct-turn-tools" style="display:none"></span>' +
+    '<span class="ct-turn-dur"></span>' +
+    '<span class="ct-provider-badge" style="display:none"></span>' +
+    '<span class="ct-turn-chevron">›</span>';
+  hdr.addEventListener('click', function() { card.classList.toggle('ct-expanded'); });
+
+  var prog = document.createElement('div');
+  prog.className = 'ct-turn-progress ct-visible';
+  prog.innerHTML = '<span class="ct-spinner"></span><span class="ct-progress-text">Working...</span><span class="ct-progress-time"></span>';
+
+  var body = document.createElement('div');
+  body.className = 'ct-turn-body';
+
+  card.appendChild(hdr); card.appendChild(prog); card.appendChild(body);
+  document.getElementById('ctChatLog').appendChild(card);
+
+  _ctCurrentCard = card; _ctCurrentCardBody = body; _ctCurrentProgressEl = prog;
+  ctStartProgress();
+  requestAnimationFrame(function() { card.scrollIntoView({behavior:'smooth',block:'start'}); });
+}
+
+function ctFinalizeCard() {
+  if (!_ctCurrentCard) return;
+  ctStopProgress();
+  if (_ctCurrentProgressEl) _ctCurrentProgressEl.classList.remove('ct-visible');
+  ctUpdateCardHeader();
+  var summary = _ctTurnToolNames.length === 0 ? 'Working...' : (function() {
+    var c = {}; _ctTurnToolNames.forEach(function(n) { c[n] = (c[n]||0)+1; });
+    return Object.entries(c).map(function(e) { return e[0] + (e[1]>1?' ×'+e[1]:''); }).join(', ');
+  })();
+  var el = _ctCurrentCard.querySelector('.ct-turn-summary');
+  if (el) el.textContent = summary;
+}
+
+function ctUpdateCardHeader() {
+  if (!_ctCurrentCard) return;
+  var hdr = _ctCurrentCard.querySelector('.ct-turn-header');
+  if (!hdr) return;
+  var tc = hdr.querySelector('.ct-turn-tools');
+  if (tc && _ctTurnToolCount > 0) { tc.textContent = _ctTurnToolCount + ' tool' + (_ctTurnToolCount!==1?'s':''); tc.style.display = ''; }
+  var dur = hdr.querySelector('.ct-turn-dur');
+  if (dur && _ctTurnStartMs) dur.textContent = ((Date.now()-_ctTurnStartMs)/1000).toFixed(1)+'s';
+  if (_ctTurnProvider) {
+    var prov = hdr.querySelector('.ct-provider-badge');
+    if (prov) { prov.textContent = _ctTurnProvider.toUpperCase(); prov.className = 'ct-provider-badge ct-' + _ctTurnProvider.toLowerCase().replace(/[\s-]/g,'_'); prov.style.display = ''; }
+  }
+}
+
+function ctStartProgress() {
+  ctStopProgress();
+  var start = Date.now();
+  _ctProgressTimer = setInterval(function() {
+    if (_ctCurrentProgressEl) {
+      var te = _ctCurrentProgressEl.querySelector('.ct-progress-time');
+      if (te) te.textContent = ((Date.now()-start)/1000).toFixed(1)+'s';
+    }
+  }, 100);
+}
+
+function ctStopProgress() {
+  if (_ctProgressTimer) { clearInterval(_ctProgressTimer); _ctProgressTimer = null; }
+}
+
+// ── Message Handlers ──
+function ctHandleChunk(msg) {
+  if (_ctCurrentCard && _ctCurrentProgressEl && _ctCurrentProgressEl.classList.contains('ct-visible')) {
+    ctFinalizeCard(); _ctCurrentCard.classList.remove('ct-expanded');
+  }
+  if (!_ctActiveNateEl) {
+    _ctActiveNateEl = document.createElement('div');
+    _ctActiveNateEl.className = 'ct-msg-nate';
+    _ctActiveNateEl._raw = '';
+    document.getElementById('ctChatLog').appendChild(_ctActiveNateEl);
+  }
+  if (msg.provider) _ctTurnProvider = msg.provider;
+  _ctActiveNateEl._raw += msg.delta || '';
+  _ctActiveNateEl.innerHTML = ctParseMarkdown(_ctActiveNateEl._raw);
+  ctScrollBottom();
+}
+
+function ctHandleTool(msg) {
+  var turn = msg.turn || _ctTurnNum || 1;
+  ctEnsureCard(turn);
+  _ctTurnToolCount++;
+  _ctTurnToolNames.push(msg.tool_name);
+  if (msg.provider) _ctTurnProvider = msg.provider;
+
+  var line = document.createElement('div');
+  line.className = 'ct-tool-line';
+  var icon = _CT_TOOL_ICONS[msg.tool_name] || (msg.tool_name && msg.tool_name.startsWith('query_') ? '🗃️' : '🔧');
+  var argsText = ctToolArgs(msg.tool_name, msg.tool_input);
+  var status = (msg.status || 'ok').toLowerCase();
+  var durText = msg.duration_ms != null ? msg.duration_ms + 'ms' : '';
+  var hasOutput = msg.tool_output_preview && msg.tool_output_preview.length > 0;
+
+  line.innerHTML = '<span class="ct-tool-icon">' + icon + '</span>' +
+    '<span class="ct-tool-name">' + ctEsc(msg.tool_name) + '</span>' +
+    '<span class="ct-tool-args">(' + ctEsc(argsText) + ')</span>' +
+    '<span class="ct-tool-status ct-' + ctEsc(status) + '">' + status.toUpperCase() + '</span>' +
+    '<span class="ct-tool-dur">' + ctEsc(durText) + '</span>' +
+    (hasOutput ? '<button class="ct-tool-show-btn">Show</button>' : '');
+
+  _ctCurrentCardBody.appendChild(line);
+
+  if (hasOutput) {
+    var out = document.createElement('div');
+    out.className = 'ct-tool-output';
+    out.textContent = String(msg.tool_output_preview || '').substring(0, 3000);
+    _ctCurrentCardBody.appendChild(out);
+    var sb = line.querySelector('.ct-tool-show-btn');
+    sb.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var vis = out.classList.toggle('ct-visible');
+      sb.textContent = vis ? 'Hide' : 'Show';
+    });
+  }
+
+  if ((msg.tool_name === 'str_replace' || msg.tool_name === 'proposed_edit') && (msg.status === 'pending' || msg.status === 'denied')) {
+    ctRenderProposal(msg);
+  }
+  ctUpdateCardHeader();
+  if (_ctCurrentProgressEl) {
+    var pt = _ctCurrentProgressEl.querySelector('.ct-progress-text');
+    if (pt) pt.textContent = msg.tool_name + '(' + ctToolArgs(msg.tool_name, msg.tool_input, true) + ')';
+  }
+  requestAnimationFrame(function() { if (_ctCurrentCard) _ctCurrentCard.scrollIntoView({behavior:'smooth',block:'start'}); });
+}
+
+function ctHandleStatus(msg) {
+  var text = msg.status_text || msg.detail || 'Processing...';
+  if (text === 'debug_cleanup') { ctAppendStatus('Debug injections cleaned up.'); return; }
+  var turn = msg.turn || _ctTurnNum || 1;
+  if (text === 'thinking' || text === 'Thinking...') { ctEnsureCard(turn); return; }
+  if (_ctCurrentCard && _ctCurrentProgressEl) {
+    _ctCurrentProgressEl.classList.add('ct-visible');
+    var pt = _ctCurrentProgressEl.querySelector('.ct-progress-text');
+    if (pt) pt.textContent = text;
+    ctStartProgress();
+  } else {
+    ctEnsureCard(turn);
+  }
+}
+
+function ctHandleDone(msg) {
+  ctStopProgress();
+  if (_ctCurrentCard) {
+    ctFinalizeCard();
+    if (msg.provider) _ctTurnProvider = msg.provider;
+    ctUpdateCardHeader();
+    if (_ctActiveNateEl) _ctCurrentCard.classList.remove('ct-expanded');
+  }
+  ctSetBusy(false);
+  if (msg.plan_id) _ctActivePlanId = msg.plan_id;
+
+  if (_ctActiveNateEl && !_ctCurrentCard && (msg.provider || _ctTurnProvider)) {
+    var badge = document.createElement('div');
+    badge.style.cssText = 'margin-top:4px;';
+    var prov = msg.provider || _ctTurnProvider;
+    badge.innerHTML = '<span class="ct-provider-badge ct-' + ctEsc(prov) + '">' + ctEsc(prov.toUpperCase()) + '</span>';
+    _ctActiveNateEl.appendChild(badge);
+  }
+
+  if (msg.hypotheses && msg.hypotheses.length > 0) ctRenderHypotheses(msg.hypotheses);
+
+  if (msg.cost) {
+    var ce = document.getElementById('ctSessionCost');
+    if (ce) {
+      ce.textContent = '$' + msg.cost.est_cost_usd.toFixed(4) + ' | ' + msg.cost.est_input_tokens + '→' + msg.cost.est_output_tokens + ' tok';
+      ce.style.display = 'inline-flex';
+    }
+  }
+  if (msg.error) ctAppendStatus('Error: ' + msg.error);
+
+  _ctCurrentCard = null; _ctCurrentCardBody = null; _ctCurrentProgressEl = null; _ctActiveNateEl = null;
+  ctScrollBottom();
+}
+
+function ctHandleAskUserPrompt(msg) {
+  var container = document.createElement('div');
+  container.style.cssText = 'background:rgba(201,169,98,.08);border:1px solid rgba(201,169,98,.25);border-radius:8px;padding:12px 14px;margin:8px 0';
+  var q = document.createElement('div');
+  q.style.cssText = 'color:#E8D5A3;font-weight:600;margin-bottom:8px;font-size:13px';
+  q.textContent = msg.question || 'Please select:';
+  container.appendChild(q);
+  if (msg.context) {
+    var ctx = document.createElement('div');
+    ctx.style.cssText = 'color:#8a8678;font-size:11px;margin-bottom:10px';
+    ctx.textContent = msg.context;
+    container.appendChild(ctx);
+  }
+  var opts = document.createElement('div');
+  opts.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px';
+  var isMulti = msg.question_type === 'multi_select';
+  var selected = {};
+  (msg.options || []).forEach(function(opt) {
+    var btn = document.createElement('button');
+    btn.style.cssText = 'background:rgba(201,169,98,.12);border:1px solid rgba(201,169,98,.3);color:#C9A962;border-radius:5px;padding:6px 14px;font-size:12px;cursor:pointer';
+    btn.textContent = opt.label || opt.id;
+    btn.addEventListener('click', function() {
+      if (isMulti) {
+        selected[opt.id] = !selected[opt.id];
+        btn.style.background = selected[opt.id] ? 'rgba(201,169,98,.3)' : 'rgba(201,169,98,.12)';
+      } else {
+        _ctWs.send(JSON.stringify({ type: 'ask_user_response', question_id: msg.question_id, selected_values: [opt.id] }));
+        container.remove();
+        ctAppendStatus('Selected: ' + (opt.label || opt.id));
+      }
+    });
+    opts.appendChild(btn);
+  });
+  container.appendChild(opts);
+  if (isMulti) {
+    var submit = document.createElement('button');
+    submit.textContent = 'Confirm';
+    submit.style.cssText = 'background:none;border:1px solid rgba(201,169,98,.3);color:#8B7355;border-radius:5px;padding:5px 14px;font-size:11px;cursor:pointer;margin-right:6px';
+    submit.addEventListener('click', function() {
+      var vals = Object.keys(selected).filter(function(k) { return selected[k]; });
+      if (vals.length > 0) {
+        _ctWs.send(JSON.stringify({ type: 'ask_user_response', question_id: msg.question_id, selected_values: vals }));
+        container.remove();
+        ctAppendStatus('Selected: ' + vals.join(', '));
+      }
+    });
+    container.appendChild(submit);
+  }
+  document.getElementById('ctChatLog').appendChild(container);
+  ctScrollBottom();
+}
+
+// ── Proposal Rendering ──
+function ctRenderProposal(msg) {
+  var block = document.createElement('div');
+  block.className = 'ct-proposal';
+  var path = msg.tool_input && msg.tool_input.path ? String(msg.tool_input.path) : 'file';
+  var shortPath = path.split('/').pop();
+  var oldStr = msg.tool_input && msg.tool_input.old_string ? String(msg.tool_input.old_string) : '';
+  var newStr = msg.tool_input && msg.tool_input.new_string ? String(msg.tool_input.new_string) : '';
+  var content = msg.tool_input && msg.tool_input.content ? String(msg.tool_input.content) : '';
+
+  var beforeHtml = '', afterHtml = '';
+  if (oldStr || newStr) {
+    if (oldStr) beforeHtml = '<div style="margin-bottom:8px"><div class="ct-proposal-label ct-before">BEFORE:</div><pre class="ct-proposal-code">' + ctEsc(ctTruncCode(oldStr,20)) + '</pre></div>';
+    if (newStr) afterHtml = '<div style="margin-bottom:8px"><div class="ct-proposal-label ct-after">AFTER:</div><pre class="ct-proposal-code">' + ctEsc(ctTruncCode(newStr,20)) + '</pre></div>';
+  } else if (content) {
+    afterHtml = '<div style="margin-bottom:8px"><div class="ct-proposal-label ct-after">CONTENT:</div><pre class="ct-proposal-code">' + ctEsc(ctTruncCode(content,20)) + '</pre></div>';
+  }
+  block.innerHTML = '<div class="ct-proposal-title">Proposed ' + ctEsc(msg.tool_name) + ' for ' + ctEsc(shortPath) + ':</div>' +
+    beforeHtml + afterHtml +
+    '<div class="ct-proposal-actions">Say <span class="ct-kw-approved">"approved"</span> to execute or <span class="ct-kw-stop">"stop"</span> to abandon.</div>';
+  document.getElementById('ctChatLog').appendChild(block);
+
+  var waiting = document.createElement('div');
+  waiting.className = 'ct-approval-waiting';
+  waiting.innerHTML = '<span class="ct-approval-dot"></span> Waiting for approval...';
+  document.getElementById('ctChatLog').appendChild(waiting);
+}
+
+// ── Hypothesis Rendering (DEBUG mode) ──
+function ctRenderHypotheses(hypotheses) {
+  var hp = document.getElementById('ctHypothesisPanel');
+  if (!hp) return;
+  hp.innerHTML = '';
+  hp.classList.add('ct-visible');
+  hypotheses.forEach(function(h) {
+    var card = document.createElement('div');
+    card.className = 'ct-hypothesis-card';
+    var evHtml = '';
+    if (h.evidence && h.evidence.length) {
+      evHtml = '<ul class="ct-h-evidence">' + h.evidence.map(function(e) { return '<li>' + ctEsc(e) + '</li>'; }).join('') + '</ul>';
+    }
+    card.innerHTML = '<div class="ct-h-title">Hypothesis ' + h.id + ': ' + ctEsc(h.title) + '</div>' +
+      '<div class="ct-h-confidence">' + ctEsc(h.confidence || 'medium') + '</div>' + evHtml;
+    hp.appendChild(card);
+  });
+}
+
+// ── REST: Pending Approvals ──
+async function ctLoadPending() {
+  var list = document.getElementById('ctPendingList');
+  list.innerHTML = '<div class="ct-empty"><span class="ct-spinner"></span> Loading...</div>';
+  var data = await apiFetch('/api/nate-agent/pending?cli=' + _ctCli);
+  if (!data) { list.innerHTML = '<div class="ct-empty">Failed to load pending requests</div>'; return; }
+
+  var ops = data.repair_proposals || [];
+  var src = data.source_repair_requests || [];
+  var all = [];
+  ops.forEach(function(r) { all.push({id: r.id, type: 'operational', desc: r.description || r.proposed_action, status: r.status, created: r.created_at, raw: r}); });
+  src.forEach(function(r) { all.push({id: r.id, type: 'source', desc: r.description || r.plan, status: r.status, created: r.created_at, raw: r}); });
+
+  var pending = all.filter(function(r) { return r.status === 'pending'; });
+  var badge = document.getElementById('ctPendingBadge');
+  if (badge) badge.textContent = pending.length > 0 ? '(' + pending.length + ')' : '';
+
+  if (all.length === 0) { list.innerHTML = '<div class="ct-empty">No pending approvals</div>'; return; }
+
+  list.innerHTML = '';
+  all.forEach(function(item) {
+    var div = document.createElement('div');
+    div.className = 'ct-pending-item';
+    var isPending = item.status === 'pending';
+    div.innerHTML =
+      '<div class="ct-pending-item-header">' +
+        '<span class="ct-pending-item-type">' + ctEsc(item.type) + '</span>' +
+        '<span class="ct-pending-item-id">' + ctEsc(String(item.id).substring(0,8)) + '...</span>' +
+        '<span style="margin-left:auto" class="ct-badge-' + ctEsc(item.status) + '">' + ctEsc(item.status) + '</span>' +
+      '</div>' +
+      '<div class="ct-pending-item-desc">' + ctEsc(item.desc || 'No description') + '</div>' +
+      (isPending ?
+      '<div class="ct-pending-item-actions">' +
+        '<button class="ct-btn-approve" data-id="' + ctEsc(item.id) + '" data-type="' + ctEsc(item.type) + '">Approve</button>' +
+        '<button class="ct-btn-reject" data-id="' + ctEsc(item.id) + '" data-type="' + ctEsc(item.type) + '">Reject</button>' +
+      '</div>' : '');
+    list.appendChild(div);
+  });
+
+  list.querySelectorAll('.ct-btn-approve').forEach(function(btn) {
+    btn.addEventListener('click', function() { ctDecide(btn.dataset.id, btn.dataset.type, true); });
+  });
+  list.querySelectorAll('.ct-btn-reject').forEach(function(btn) {
+    btn.addEventListener('click', function() { ctDecide(btn.dataset.id, btn.dataset.type, false); });
+  });
+}
+
+async function ctDecide(id, type, approved) {
+  var res = await apiPost('/api/nate-agent/approve', { id: id, type: type, approved: approved, admin_note: '' });
+  if (res && !res._error) {
+    ctAppendStatus((approved ? 'Approved' : 'Rejected') + ' ' + type + ' request ' + id.substring(0,8));
+    ctLoadPending();
+  } else {
+    ctAppendStatus('Failed to process decision: ' + (res && res.detail ? res.detail : 'unknown error'));
+  }
+}
+
+// ── REST: Analytics ──
+async function ctLoadAnalytics() {
+  var grid = document.getElementById('ctAnalyticsGrid');
+  grid.innerHTML = '<div class="ct-empty"><span class="ct-spinner"></span> Loading analytics...</div>';
+  var data = await apiFetch('/api/admin/cli/analytics?days=7');
+  if (!data || data.status !== 'ok' || !data.data) {
+    grid.innerHTML = '<div class="ct-empty">No analytics data available</div>';
+    return;
+  }
+  var d = data.data;
+  var totals = d.totals || {};
+  grid.innerHTML = '';
+  var cards = [
+    { value: totals.total_sessions || 0, label: 'Sessions (7d)' },
+    { value: totals.total_tool_calls || 0, label: 'Tool Calls' },
+    { value: totals.total_messages || 0, label: 'Messages' },
+    { value: (totals.avg_tools_per_session || 0).toFixed(1), label: 'Avg Tools/Session' }
+  ];
+  var modes = d.mode_breakdown || {};
+  Object.keys(modes).forEach(function(m) {
+    cards.push({ value: modes[m] || 0, label: m.toUpperCase().replace('_','-') + ' sessions' });
+  });
+  cards.forEach(function(c) {
+    var div = document.createElement('div');
+    div.className = 'ct-analytics-card';
+    div.innerHTML = '<div class="ct-a-value">' + ctEsc(String(c.value)) + '</div><div class="ct-a-label">' + ctEsc(c.label) + '</div>';
+    grid.appendChild(div);
+  });
+
+  var costData = await apiFetch('/api/admin/cli/cost-summary?days=30');
+  if (costData && costData.status === 'ok' && costData.cost) {
+    var ct = costData.cost.totals || {};
+    [
+      { value: '$' + (ct.cloud_est_cost_usd || 0).toFixed(2), label: 'Est. Cost (30d)' },
+      { value: (ct.cloud_est_input_tokens || 0).toLocaleString(), label: 'Input Tokens' },
+      { value: (ct.cloud_est_output_tokens || 0).toLocaleString(), label: 'Output Tokens' }
+    ].forEach(function(c) {
+      var div = document.createElement('div');
+      div.className = 'ct-analytics-card';
+      div.innerHTML = '<div class="ct-a-value">' + ctEsc(String(c.value)) + '</div><div class="ct-a-label">' + ctEsc(c.label) + '</div>';
+      grid.appendChild(div);
+    });
+  }
+}
+
+// ── REST: History ──
+async function ctLoadHistory() {
+  var tbody = document.getElementById('ctHistoryBody');
+  tbody.innerHTML = '<tr><td colspan="6" class="ct-empty"><span class="ct-spinner"></span> Loading...</td></tr>';
+  var data = await apiFetch('/api/nate-agent/history?cli=' + _ctCli + '&limit=50');
+  if (!data) { tbody.innerHTML = '<tr><td colspan="6" class="ct-empty">Failed to load history</td></tr>'; return; }
+
+  var ops = data.repair_proposals || [];
+  var src = data.source_repair_requests || [];
+  var all = [];
+  ops.forEach(function(r) { all.push({id:r.id,type:'operational',cli:r.executor_cli||_ctCli,mode:r.mode||'-',status:r.status,time:r.created_at}); });
+  src.forEach(function(r) { all.push({id:r.id,type:'source',cli:r.executor_cli||_ctCli,mode:r.mode||'-',status:r.status,time:r.created_at}); });
+  all.sort(function(a,b) { return (b.time||'').localeCompare(a.time||''); });
+
+  if (all.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="ct-empty">No history found</td></tr>'; return; }
+
+  tbody.innerHTML = '';
+  all.forEach(function(r) {
+    var tr = document.createElement('tr');
+    var statusClass = r.status === 'approved' ? 'ct-badge-approved' :
+                      r.status === 'rejected' ? 'ct-badge-rejected' :
+                      r.status === 'executing' ? 'ct-badge-executing' : 'ct-badge-pending';
+    var timeStr = r.time ? new Date(r.time).toLocaleString() : '-';
+    tr.innerHTML = '<td style="font-family:monospace;font-size:11px">' + ctEsc(String(r.id).substring(0,8)) + '</td>' +
+      '<td>' + ctEsc(r.type) + '</td>' +
+      '<td>' + ctEsc(r.cli) + '</td>' +
+      '<td>' + ctEsc(r.mode) + '</td>' +
+      '<td><span class="' + statusClass + '">' + ctEsc(r.status) + '</span></td>' +
+      '<td style="font-size:11px;color:#8a8678">' + ctEsc(timeStr) + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Utilities ──
+function ctParseMarkdown(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```(\w*)\n([\s\S]*?)```/g, function(m,lang,code) {
+      return '<pre><code>' + code + '</code></pre>';
+    })
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+}
+
+function ctToolArgs(name, input, short) {
+  if (!input) return '';
+  var p = input.path ? String(input.path) : '';
+  var sp = p.split('/').pop() || p;
+  switch (name) {
+    case 'read_file': {
+      var range = '';
+      if (input.start_line && input.end_line) range = ':'+input.start_line+'-'+input.end_line;
+      else if (input.start_line) range = ':'+input.start_line;
+      return sp + range;
+    }
+    case 'str_replace': case 'proposed_edit':
+      if (short) return sp;
+      return sp + ' +' + (input.new_string ? String(input.new_string).split('\n').length : 0) + ' lines';
+    case 'write_file': case 'create_file': case 'delete_file': return sp;
+    case 'run_command': {
+      var cmd = input.command ? String(input.command) : '';
+      return cmd.length > 40 ? cmd.substring(0,40)+'…' : cmd;
+    }
+    default: return sp || Object.keys(input).filter(function(k){return k!=='content';}).map(function(k){return k+'='+String(input[k]).substring(0,30);}).join(', ');
+  }
+}
+
+function ctTruncCode(code, maxLines) {
+  var lines = code.split('\n');
+  if (lines.length <= maxLines) return code;
+  return lines.slice(0,maxLines).join('\n') + '\n  ... (' + (lines.length - maxLines) + ' more lines)';
+}
+
+function ctEsc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Hash-based deep link support ──
+if (location.hash === '#command-terminal') {
+  setTimeout(function() {
+    var nav = document.querySelector('.nav-item[data-tab="command-terminal"]');
+    if (nav) switchTab('command-terminal', nav);
+  }, 500);
 }
 </script>
 </body>

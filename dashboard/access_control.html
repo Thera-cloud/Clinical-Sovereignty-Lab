@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Control | Sovereign Command</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #FFD700; --gold-dim: rgba(255, 215, 0, 0.2);
+            --red: #FF3B3B; --red-dim: rgba(255, 59, 59, 0.15);
+            --cyan: #00D4FF; --cyan-dim: rgba(0, 212, 255, 0.1);
+            --green: #00FF88; --green-dim: rgba(0, 255, 136, 0.15);
+            --purple: #9D4EDD; --purple-dim: rgba(157, 78, 221, 0.15);
+            --orange: #FF9500;
+            --text-primary: #FFFFFF; --text-secondary: #888888; --border: #252525;
+        }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg-dark); color: var(--text-primary); min-height: 100vh; }
+        .header { background: linear-gradient(180deg, #1A1A10 0%, #0A0A0A 100%); border-bottom: 1px solid var(--gold-dim); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; }
+        .logo-icon { width: 40px; height: 40px; background: linear-gradient(135deg, var(--gold), #FF8C00); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        .logo-text { font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+        .page-title { font-size: 14px; color: var(--text-secondary); }
+        .back-btn { padding: 8px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; text-decoration: none; cursor: pointer; }
+        .back-btn:hover { border-color: var(--gold); }
+        .main-layout { display: grid; grid-template-columns: 360px 1fr; height: calc(100vh - 73px); }
+        .sidebar { background: var(--bg-card); border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
+        .search-box { padding: 16px; border-bottom: 1px solid var(--border); }
+        .search-input { width: 100%; padding: 12px 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 13px; outline: none; }
+        .search-input:focus { border-color: var(--gold); }
+        .search-input::placeholder { color: var(--text-secondary); }
+        .search-filters { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .filter-chip { padding: 6px 12px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; font-size: 11px; color: var(--text-secondary); cursor: pointer; transition: all 0.2s; }
+        .filter-chip:hover { border-color: var(--gold); color: var(--gold); }
+        .filter-chip.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+        .result-count { padding: 8px 16px; font-size: 11px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+        .user-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .user-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; border: 1px solid transparent; transition: all 0.15s; }
+        .user-item:hover { background: var(--bg-elevated); }
+        .user-item.selected { background: var(--gold-dim); border-color: var(--gold); }
+        .user-item-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+        .user-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; flex-shrink: 0; }
+        .user-avatar.client { background: var(--cyan-dim); border: 2px solid var(--cyan); color: var(--cyan); }
+        .user-avatar.coach { background: var(--gold-dim); border: 2px solid var(--gold); color: var(--gold); }
+        .user-avatar.admin { background: var(--red-dim); border: 2px solid var(--red); color: var(--red); }
+        .user-avatar.corp { background: var(--purple-dim); border: 2px solid var(--purple); color: var(--purple); }
+        .user-name { font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .role-badge { font-size: 9px; padding: 3px 8px; border-radius: 4px; font-weight: 600; letter-spacing: 0.5px; }
+        .role-badge.client { background: var(--cyan-dim); color: var(--cyan); }
+        .role-badge.coach { background: var(--gold-dim); color: var(--gold); }
+        .role-badge.admin { background: var(--red-dim); color: var(--red); }
+        .role-badge.corp { background: var(--purple-dim); color: var(--purple); }
+        .user-meta { font-size: 10px; color: var(--text-secondary); margin-left: 46px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        .content { padding: 24px; overflow-y: auto; }
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary); gap: 12px; }
+        .empty-state .icon { font-size: 48px; opacity: 0.5; }
+
+        .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+        .detail-title { font-size: 22px; font-weight: 700; }
+        .detail-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+        .detail-actions { display: flex; gap: 8px; }
+        .action-btn { padding: 8px 16px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; transition: all 0.2s; }
+        .action-btn:hover { border-color: var(--gold); }
+        .action-btn.primary { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+        .action-btn.primary:hover { background: rgba(255, 215, 0, 0.3); }
+        .action-btn.danger { border-color: var(--red); color: var(--red); }
+        .action-btn.danger:hover { background: var(--red-dim); }
+
+        .section-tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+        .section-tab { padding: 10px 16px; font-size: 12px; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .section-tab:hover { color: var(--text-primary); }
+        .section-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+        .section-panel { display: none; }
+        .section-panel.active { display: block; }
+
+        .field-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .field-grid.single { grid-template-columns: 1fr; }
+        .field-group { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+        .field-group-title { font-size: 12px; font-weight: 600; color: var(--gold); margin-bottom: 12px; letter-spacing: 0.5px; }
+        .field-row { display: flex; flex-direction: column; margin-bottom: 12px; }
+        .field-row:last-child { margin-bottom: 0; }
+        .field-label { font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .field-input { padding: 8px 12px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 12px; outline: none; width: 100%; }
+        .field-input:focus { border-color: var(--cyan); }
+        .field-input:disabled { opacity: 0.5; cursor: not-allowed; }
+        .field-input[readonly] { opacity: 0.7; cursor: default; }
+        .field-value-display { font-size: 12px; padding: 8px 12px; background: var(--bg-dark); border-radius: 6px; border: 1px solid transparent; color: var(--text-primary); min-height: 34px; display: flex; align-items: center; }
+        select.field-input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; }
+        textarea.field-input { min-height: 60px; resize: vertical; font-family: inherit; }
+
+        .save-bar { position: sticky; bottom: 0; padding: 16px 24px; background: var(--bg-card); border-top: 1px solid var(--gold-dim); display: none; z-index: 10; }
+        .save-bar.visible { display: flex; justify-content: space-between; align-items: center; }
+        .save-bar .changes-count { font-size: 12px; color: var(--gold); }
+        .save-bar .save-actions { display: flex; gap: 8px; }
+
+        .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 12px; font-weight: 500; z-index: 1000; transform: translateY(80px); opacity: 0; transition: all 0.3s; pointer-events: none; }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+        .toast.error { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+
+        .pw-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: none; align-items: center; justify-content: center; }
+        .pw-modal-overlay.show { display: flex; }
+        .pw-modal { background: var(--bg-card); border: 1px solid var(--gold-dim); border-radius: 12px; padding: 24px; width: 400px; max-width: 90vw; }
+        .pw-modal h3 { font-size: 16px; margin-bottom: 16px; color: var(--gold); }
+        .pw-modal .field-row { margin-bottom: 14px; }
+        .pw-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+        .json-viewer { background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; max-height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all; color: var(--cyan); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🔐</div>
+            <div>
+                <div class="logo-text">SOVEREIGN COMMAND</div>
+                <div class="page-title">Access Control</div>
+            </div>
+        </div>
+        <a class="back-btn" onclick="navTo('command.html')">← Back to Dashboard</a>
+    </header>
+
+    <div class="main-layout">
+        <aside class="sidebar">
+            <div class="search-box">
+                <input type="text" class="search-input" id="acSearch" placeholder="Search by name, username, email, phone, ID..." oninput="acDebounceSearch()">
+                <div class="search-filters">
+                    <span class="filter-chip active" data-role="all" onclick="acSetFilter('all', this)">All</span>
+                    <span class="filter-chip" data-role="CLIENT" onclick="acSetFilter('CLIENT', this)">Clients</span>
+                    <span class="filter-chip" data-role="COACH" onclick="acSetFilter('COACH', this)">Coaches</span>
+                    <span class="filter-chip" data-role="ADMIN" onclick="acSetFilter('ADMIN', this)">Admins</span>
+                    <span class="filter-chip" data-role="corp" onclick="acSetFilter('corp', this)">Corporations</span>
+                </div>
+            </div>
+            <div class="result-count" id="acResultCount">0 results</div>
+            <div class="user-list" id="acUserList">
+                <div class="empty-state" style="padding:40px 0">
+                    <div class="icon">🔍</div>
+                    <div>Search for a user or corporation</div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content" id="acContent">
+            <div class="empty-state">
+                <div class="icon">🔐</div>
+                <div style="font-size:16px;font-weight:600;margin-bottom:4px">Access Control</div>
+                <div style="font-size:12px">Search and select a user to view and edit their data</div>
+            </div>
+        </main>
+    </div>
+
+    <div class="save-bar" id="acSaveBar">
+        <span class="changes-count" id="acChangesCount">0 unsaved changes</span>
+        <div class="save-actions">
+            <button class="action-btn" onclick="acDiscardChanges()">Discard</button>
+            <button class="action-btn primary" onclick="acSaveChanges()">Save Changes</button>
+        </div>
+    </div>
+
+    <div class="pw-modal-overlay" id="pwModal">
+        <div class="pw-modal">
+            <h3>Reset Password</h3>
+            <div id="pwModalUser" style="font-size:12px;color:var(--text-secondary);margin-bottom:14px"></div>
+            <div class="field-row">
+                <label class="field-label">New Password</label>
+                <input type="password" class="field-input" id="pwNew" placeholder="Min 6 characters">
+            </div>
+            <div class="field-row">
+                <label class="field-label">Confirm Password</label>
+                <input type="password" class="field-input" id="pwConfirm" placeholder="Re-enter password">
+            </div>
+            <div class="pw-modal-actions">
+                <button class="action-btn" onclick="acClosePwModal()">Cancel</button>
+                <button class="action-btn primary" onclick="acSubmitPwReset()">Reset Password</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="acToast"></div>
+
+<script>
+function _recoverAuth() {
+    function _ck(n) { var m = document.cookie.match(new RegExp('(^| )' + n + '=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+    var hp = new URLSearchParams(location.hash.slice(1));
+    var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+    if (ht) { try { sessionStorage.setItem('token', decodeURIComponent(ht)); } catch(e){} try { localStorage.setItem('sc_token', decodeURIComponent(ht)); } catch(e){} }
+    if (hu) { try { sessionStorage.setItem('username', decodeURIComponent(hu)); } catch(e){} try { localStorage.setItem('sc_username', decodeURIComponent(hu)); } catch(e){} }
+    if (hpf) { try { sessionStorage.setItem('profile', decodeURIComponent(hpf)); } catch(e){} try { localStorage.setItem('sc_profile', decodeURIComponent(hpf)); } catch(e){} }
+    if (location.hash) try { history.replaceState(null, '', location.pathname + location.search); } catch(e){}
+    if (!sessionStorage.getItem('token')) { var ct = _ck('sc_token') || localStorage.getItem('sc_token'); if (ct) { try { sessionStorage.setItem('token', ct); } catch(e){} } }
+    if (!sessionStorage.getItem('username')) { var cu = _ck('sc_username') || localStorage.getItem('sc_username'); if (cu) { try { sessionStorage.setItem('username', cu); } catch(e){} } }
+    if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
+}
+_recoverAuth();
+
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
+
+function navTo(page) {
+    var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+    var u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+    var p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || '';
+    window.location.href = page + '#t=' + encodeURIComponent(t) + '&u=' + encodeURIComponent(u) + '&p=' + encodeURIComponent(p);
+}
+
+function getApiBase() {
+    var h = location.hostname;
+    if (!h || h === 'localhost' || h === '127.0.0.1') return 'https://api.sovereignsanctuary.net';
+    if (h.includes('sovereignsanctuary')) return 'https://api.sovereignsanctuary.net';
+    return location.protocol + '//' + h + ':8000';
+}
+
+function _authHeaders(ct) {
+    var h = { 'Authorization': 'Bearer ' + (sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '') };
+    if (ct) h['Content-Type'] = ct;
+    return h;
+}
+
+var API = getApiBase();
+var _acFilter = 'all';
+var _acUsers = [];
+var _acCorps = [];
+var _acSelected = null;
+var _acSelectedType = null; // 'user' or 'corp'
+var _acOriginal = {};
+var _acPending = {};
+var _acSearchTimer = null;
+
+function esc(s) {
+    if (s === null || s === undefined) return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+}
+
+function acDebounceSearch() {
+    clearTimeout(_acSearchTimer);
+    _acSearchTimer = setTimeout(acDoSearch, 300);
+}
+
+async function acDoSearch() {
+    var q = (document.getElementById('acSearch').value || '').trim();
+    if (_acFilter === 'corp') {
+        await acSearchCorps(q);
+    } else {
+        await acSearchUsers(q);
+    }
+}
+
+async function acSearchUsers(q) {
+    try {
+        var role = (_acFilter === 'all' || _acFilter === 'corp') ? 'all' : _acFilter;
+        var url = API + '/api/admin/access-control/search?limit=200&role=' + encodeURIComponent(role);
+        if (q) url += '&q=' + encodeURIComponent(q);
+        var resp = await fetch(url, { headers: _authHeaders() });
+        if (!resp.ok) { console.warn('Search failed:', resp.status); return; }
+        var data = await resp.json();
+        _acUsers = data.users || [];
+        acRenderList();
+    } catch (e) {
+        console.warn('Search error:', e);
+    }
+}
+
+async function acSearchCorps(q) {
+    try {
+        var url = API + '/api/admin/access-control/corporations';
+        if (q) url += '?q=' + encodeURIComponent(q);
+        var resp = await fetch(url, { headers: _authHeaders() });
+        if (!resp.ok) return;
+        var data = await resp.json();
+        _acCorps = data.corporations || [];
+        acRenderCorpList();
+    } catch (e) {
+        console.warn('Corp search error:', e);
+    }
+}
+
+function acSetFilter(role, elem) {
+    _acFilter = role;
+    document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); });
+    elem.classList.add('active');
+    acDoSearch();
+}
+
+function acRenderList() {
+    var list = document.getElementById('acUserList');
+    var count = document.getElementById('acResultCount');
+    count.textContent = _acUsers.length + ' user' + (_acUsers.length !== 1 ? 's' : '');
+    if (_acUsers.length === 0) {
+        list.innerHTML = '<div style="padding:40px 0;text-align:center;color:#888;font-size:12px">No users found</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < _acUsers.length; i++) {
+        var u = _acUsers[i];
+        var r = (u.role || '').toUpperCase();
+        var rc = r === 'ADMIN' ? 'admin' : r === 'COACH' ? 'coach' : 'client';
+        var sel = _acSelected && _acSelectedType === 'user' && _acSelected.username === u.username ? ' selected' : '';
+        var initials = acInitials(u.name || u.username);
+        var meta = [];
+        if (u.email) meta.push(esc(u.email));
+        if (u.username) meta.push('@' + esc(u.username));
+        html += '<div class="user-item' + sel + '" onclick="acSelectUser(\'' + esc(u.username) + '\')">';
+        html += '<div class="user-item-header">';
+        html += '<div class="user-avatar ' + rc + '">' + esc(initials) + '</div>';
+        html += '<span class="user-name">' + esc(u.name || u.username) + '</span>';
+        html += '<span class="role-badge ' + rc + '">' + esc(r) + '</span>';
+        html += '</div>';
+        if (meta.length) html += '<div class="user-meta">' + meta.join(' · ') + '</div>';
+        html += '</div>';
+    }
+    list.innerHTML = html;
+}
+
+function acRenderCorpList() {
+    var list = document.getElementById('acUserList');
+    var count = document.getElementById('acResultCount');
+    count.textContent = _acCorps.length + ' corporation' + (_acCorps.length !== 1 ? 's' : '');
+    if (_acCorps.length === 0) {
+        list.innerHTML = '<div style="padding:40px 0;text-align:center;color:#888;font-size:12px">No corporations found</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < _acCorps.length; i++) {
+        var c = _acCorps[i];
+        var sel = _acSelected && _acSelectedType === 'corp' && _acSelected.id === c.id ? ' selected' : '';
+        html += '<div class="user-item' + sel + '" onclick="acSelectCorp(\'' + esc(c.id) + '\')">';
+        html += '<div class="user-item-header">';
+        html += '<div class="user-avatar corp">🏢</div>';
+        html += '<span class="user-name">' + esc(c.company_name) + '</span>';
+        html += '<span class="role-badge corp">CORP</span>';
+        html += '</div>';
+        html += '<div class="user-meta">Code: ' + esc(c.sponsor_code) + ' · Employees: ' + (c.current_employees || 0) + '/' + (c.max_employees || '∞') + '</div>';
+        html += '</div>';
+    }
+    list.innerHTML = html;
+}
+
+async function acSelectUser(username) {
+    try {
+        var resp = await fetch(API + '/api/admin/access-control/user/' + encodeURIComponent(username), { headers: _authHeaders() });
+        if (!resp.ok) { acShowToast('Failed to load user: HTTP ' + resp.status, 'error'); return; }
+        var user = await resp.json();
+        _acSelected = user;
+        _acSelectedType = 'user';
+        _acOriginal = JSON.parse(JSON.stringify(user));
+        _acPending = {};
+        acRenderUserDetail(user);
+        acRenderList();
+        acUpdateSaveBar();
+    } catch (e) {
+        acShowToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function acSelectCorp(corpId) {
+    try {
+        var resp = await fetch(API + '/api/admin/access-control/corporation/' + encodeURIComponent(corpId), { headers: _authHeaders() });
+        if (!resp.ok) { acShowToast('Failed to load corporation: HTTP ' + resp.status, 'error'); return; }
+        var corp = await resp.json();
+        _acSelected = corp;
+        _acSelectedType = 'corp';
+        _acOriginal = JSON.parse(JSON.stringify(corp));
+        _acPending = {};
+        acRenderCorpDetail(corp);
+        acRenderCorpList();
+        acUpdateSaveBar();
+    } catch (e) {
+        acShowToast('Error: ' + e.message, 'error');
+    }
+}
+
+function acInitials(name) {
+    if (!name) return '?';
+    var parts = name.split(' ');
+    var r = '';
+    for (var i = 0; i < parts.length && i < 2; i++) { if (parts[i].length > 0) r += parts[i][0]; }
+    return r.toUpperCase();
+}
+
+var _acActiveSection = 'identity';
+
+function acSwitchSection(section) {
+    _acActiveSection = section;
+    document.querySelectorAll('.section-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.section-panel').forEach(function(p) { p.classList.remove('active'); });
+    var tab = document.querySelector('.section-tab[data-section="' + section + '"]');
+    var panel = document.getElementById('section-' + section);
+    if (tab) tab.classList.add('active');
+    if (panel) panel.classList.add('active');
+}
+
+function acFieldChanged(fieldName, value) {
+    var orig = acGetOriginalValue(fieldName);
+    if (String(value) === String(orig === null || orig === undefined ? '' : orig)) {
+        delete _acPending[fieldName];
+    } else {
+        _acPending[fieldName] = value;
+    }
+    acUpdateSaveBar();
+}
+
+function acGetOriginalValue(fieldName) {
+    if (!_acOriginal) return '';
+    if (_acSelectedType === 'corp') return _acOriginal[fieldName];
+    if (_acOriginal[fieldName] !== undefined && _acOriginal[fieldName] !== null) return _acOriginal[fieldName];
+    if (_acOriginal.coach_fields && _acOriginal.coach_fields[fieldName] !== undefined) return _acOriginal.coach_fields[fieldName];
+    if (_acOriginal.profile_data_raw && _acOriginal.profile_data_raw[fieldName] !== undefined) return _acOriginal.profile_data_raw[fieldName];
+    return '';
+}
+
+function acUpdateSaveBar() {
+    var bar = document.getElementById('acSaveBar');
+    var cnt = document.getElementById('acChangesCount');
+    var n = Object.keys(_acPending).length;
+    if (n > 0) {
+        bar.classList.add('visible');
+        cnt.textContent = n + ' unsaved change' + (n !== 1 ? 's' : '');
+    } else {
+        bar.classList.remove('visible');
+    }
+}
+
+function acDiscardChanges() {
+    _acPending = {};
+    if (_acSelected) {
+        if (_acSelectedType === 'user') acRenderUserDetail(_acOriginal);
+        else acRenderCorpDetail(_acOriginal);
+    }
+    acUpdateSaveBar();
+}
+
+async function acSaveChanges() {
+    if (Object.keys(_acPending).length === 0) return;
+    try {
+        var url, identifier;
+        if (_acSelectedType === 'user') {
+            identifier = _acSelected.username;
+            url = API + '/api/admin/access-control/user/' + encodeURIComponent(identifier);
+        } else {
+            identifier = _acSelected.id;
+            url = API + '/api/admin/access-control/corporation/' + encodeURIComponent(identifier);
+        }
+        var resp = await fetch(url, {
+            method: 'PUT',
+            headers: _authHeaders('application/json'),
+            body: JSON.stringify({ fields: _acPending })
+        });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            acShowToast('Save failed: ' + (err.detail || 'HTTP ' + resp.status), 'error');
+            return;
+        }
+        var result = await resp.json();
+        acShowToast('Saved ' + result.fields_updated.length + ' field(s) for ' + (result.username || result.company_name), 'success');
+        _acPending = {};
+        acUpdateSaveBar();
+        if (_acSelectedType === 'user') acSelectUser(_acSelected.username);
+        else acSelectCorp(_acSelected.id);
+    } catch (e) {
+        acShowToast('Error: ' + e.message, 'error');
+    }
+}
+
+function acOpenPwModal() {
+    if (!_acSelected || _acSelectedType !== 'user') return;
+    document.getElementById('pwModalUser').textContent = 'Resetting password for: ' + (_acSelected.name || _acSelected.username);
+    document.getElementById('pwNew').value = '';
+    document.getElementById('pwConfirm').value = '';
+    document.getElementById('pwModal').classList.add('show');
+}
+
+function acClosePwModal() {
+    document.getElementById('pwModal').classList.remove('show');
+}
+
+async function acSubmitPwReset() {
+    var pw1 = document.getElementById('pwNew').value;
+    var pw2 = document.getElementById('pwConfirm').value;
+    if (pw1.length < 6) { acShowToast('Password must be at least 6 characters', 'error'); return; }
+    if (pw1 !== pw2) { acShowToast('Passwords do not match', 'error'); return; }
+    try {
+        var resp = await fetch(API + '/api/admin/access-control/reset-password/' + encodeURIComponent(_acSelected.username), {
+            method: 'POST',
+            headers: _authHeaders('application/json'),
+            body: JSON.stringify({ new_password: pw1 })
+        });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return {}; });
+            acShowToast('Reset failed: ' + (err.detail || 'HTTP ' + resp.status), 'error');
+            return;
+        }
+        acShowToast('Password reset for ' + _acSelected.username, 'success');
+        acClosePwModal();
+    } catch (e) {
+        acShowToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function acForcePasswordReset() {
+    if (!_acSelected || _acSelectedType !== 'user') return;
+    if (!confirm('Force ' + (_acSelected.name || _acSelected.username) + ' to change their password on next login?')) return;
+    try {
+        var resp = await fetch(API + '/api/admin/access-control/force-password-reset/' + encodeURIComponent(_acSelected.username), {
+            method: 'POST',
+            headers: _authHeaders('application/json')
+        });
+        if (resp.ok) {
+            acShowToast('Force password reset set for ' + _acSelected.username, 'success');
+        } else {
+            acShowToast('Failed: HTTP ' + resp.status, 'error');
+        }
+    } catch (e) {
+        acShowToast('Error: ' + e.message, 'error');
+    }
+}
+
+function acShowToast(msg, type) {
+    var t = document.getElementById('acToast');
+    t.textContent = msg;
+    t.className = 'toast ' + (type || 'success');
+    setTimeout(function() { t.classList.add('show'); }, 10);
+    setTimeout(function() { t.classList.remove('show'); }, 3500);
+}
+
+function acEditableField(label, fieldName, value, opts) {
+    opts = opts || {};
+    var v = value === null || value === undefined ? '' : value;
+    var type = opts.type || 'text';
+    var ro = opts.readonly ? ' readonly' : '';
+    var dis = opts.disabled ? ' disabled' : '';
+
+    var html = '<div class="field-row">';
+    html += '<label class="field-label">' + esc(label) + '</label>';
+
+    if (opts.select) {
+        html += '<select class="field-input" onchange="acFieldChanged(\'' + fieldName + '\', this.value)"' + dis + '>';
+        for (var i = 0; i < opts.select.length; i++) {
+            var opt = opts.select[i];
+            var sel = String(v) === String(opt.value) ? ' selected' : '';
+            html += '<option value="' + esc(opt.value) + '"' + sel + '>' + esc(opt.label) + '</option>';
+        }
+        html += '</select>';
+    } else if (opts.textarea) {
+        html += '<textarea class="field-input" oninput="acFieldChanged(\'' + fieldName + '\', this.value)"' + ro + dis + '>' + esc(v) + '</textarea>';
+    } else if (opts.readonly) {
+        html += '<div class="field-value-display">' + esc(v) + '</div>';
+    } else {
+        html += '<input type="' + type + '" class="field-input" value="' + esc(v) + '" oninput="acFieldChanged(\'' + fieldName + '\', this.value)"' + ro + dis + '>';
+    }
+    html += '</div>';
+    return html;
+}
+
+function acRenderUserDetail(user) {
+    var content = document.getElementById('acContent');
+    var r = (user.role || '').toUpperCase();
+    var isCoach = r === 'COACH';
+    var cf = user.coach_fields || {};
+    var pd = user.profile_data_raw || {};
+
+    var tabs = [
+        { id: 'identity', label: 'Identity' },
+        { id: 'subscription', label: 'Subscription' },
+        { id: 'contact', label: 'Contact & Preferences' },
+    ];
+    if (isCoach) {
+        tabs.push({ id: 'coach', label: 'Coach Profile' });
+        tabs.push({ id: 'financial', label: 'Financial & Tax' });
+    }
+    tabs.push({ id: 'tokens', label: 'Tokens' });
+    tabs.push({ id: 'raw', label: 'Raw Data' });
+
+    var html = '<div class="detail-header">';
+    html += '<div><div class="detail-title">' + esc(user.name || user.username) + '</div>';
+    html += '<div class="detail-subtitle">@' + esc(user.username) + ' · ' + esc(r) + ' · ID: ' + esc(user.id) + '</div></div>';
+    html += '<div class="detail-actions">';
+    html += '<button class="action-btn" onclick="acOpenPwModal()">🔑 Reset Password</button>';
+    html += '<button class="action-btn" onclick="acForcePasswordReset()">⚡ Force Reset on Login</button>';
+    html += '</div></div>';
+
+    html += '<div class="section-tabs">';
+    for (var t = 0; t < tabs.length; t++) {
+        var act = tabs[t].id === _acActiveSection ? ' active' : '';
+        html += '<div class="section-tab' + act + '" data-section="' + tabs[t].id + '" onclick="acSwitchSection(\'' + tabs[t].id + '\')">' + esc(tabs[t].label) + '</div>';
+    }
+    html += '</div>';
+
+    // IDENTITY
+    html += '<div class="section-panel' + (_acActiveSection === 'identity' ? ' active' : '') + '" id="section-identity">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">PERSONAL INFORMATION</div>';
+    html += acEditableField('Full Name', 'name', user.name);
+    html += acEditableField('Email', 'email', user.email);
+    html += acEditableField('Phone', 'phone', user.phone);
+    html += acEditableField('Date of Birth', 'dob', user.dob, { type: 'date' });
+    html += acEditableField('Timezone', 'timezone', user.timezone || pd.timezone);
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">ACCOUNT IDENTIFIERS</div>';
+    html += acEditableField('Username', 'username', user.username, { readonly: true });
+    html += acEditableField('Hardware ID', 'hardware_id', user.hardware_id, { readonly: true });
+    html += acEditableField('UUID', 'id', user.id, { readonly: true });
+    html += acEditableField('Role', 'role', r, { readonly: true });
+    html += acEditableField('Account Status', 'account_status', user.account_status || 'ACTIVE', { select: [
+        { value: '', label: 'Active' }, { value: 'SUSPENDED', label: 'Suspended' }, { value: 'FROZEN', label: 'Frozen' }, { value: 'DELETED', label: 'Deleted' }
+    ]});
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">FAMILY & COMPANY</div>';
+    html += acEditableField('Family ID', 'family_id', user.family_id);
+    html += acEditableField('Family Role', 'family_role', user.family_role, { select: [
+        { value: '', label: 'None' }, { value: 'HEAD', label: 'Head of Household' }, { value: 'SPOUSE', label: 'Spouse' }, { value: 'DEPENDENT', label: 'Dependent' }
+    ]});
+    html += acEditableField('Company ID', 'company_id', user.company_id);
+    html += acEditableField('Company Name', 'company_name', user.company_name);
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">COACH ASSIGNMENT</div>';
+    html += acEditableField('Coach ID (HW)', 'coach_id', user.coach_id);
+    html += acEditableField('Assigned Coach Username', 'assigned_coach', user.assigned_coach);
+    html += acEditableField('Assigned Coach ID', 'assigned_coach_id', user.assigned_coach_id);
+    html += '</div>';
+    html += '</div></div>';
+
+    // SUBSCRIPTION
+    html += '<div class="section-panel' + (_acActiveSection === 'subscription' ? ' active' : '') + '" id="section-subscription">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">SUBSCRIPTION</div>';
+    html += acEditableField('Status', 'subscription_status', user.subscription_status, { select: [
+        { value: 'ACTIVE', label: 'Active' }, { value: 'TRIAL_ACTIVE', label: 'Trial Active' },
+        { value: 'PENDING_VERIFICATION', label: 'Pending Verification' },
+        { value: 'FAMILY_PLAN_ACTIVE', label: 'Family Plan Active' },
+        { value: 'SUSPENDED', label: 'Suspended' }, { value: 'CANCELLED', label: 'Cancelled' }
+    ]});
+    html += acEditableField('Tier', 'tier', user.tier, { select: [
+        { value: 'TRIAL', label: 'Trial (Threshold)' },
+        { value: 'STANDARD', label: 'Standard (Inner Chamber)' },
+        { value: 'TOP', label: 'Top (Sovereign Circle)' },
+        { value: 'DEPENDENT', label: 'Dependent' },
+        { value: 'MASTER', label: 'Master Coach' },
+        { value: 'SUPERVISOR', label: 'Supervisor' }
+    ]});
+    html += acEditableField('Subscription Plan', 'subscription_plan', pd.subscription_plan);
+    html += acEditableField('Stripe Customer ID', 'stripe_customer_id', user.stripe_customer_id);
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">DATES & CONSENT</div>';
+    html += acEditableField('Subscription Start', 'subscription_start_date', pd.subscription_start_date, { readonly: true });
+    html += acEditableField('Trial End Date', 'trial_end_date', pd.trial_end_date);
+    html += acEditableField('Consent Version', 'consent_version', user.consent_version);
+    html += acEditableField('Account Created', 'created_at', user.created_at, { readonly: true });
+    html += acEditableField('Last Login', 'last_login', user.last_login, { readonly: true });
+    html += acEditableField('Login Count', 'login_count', user.login_count, { readonly: true });
+    html += acEditableField('Founding Member', 'is_founding_member', user.is_founding_member ? 'Yes' : 'No', { readonly: true });
+    if (user.founding_member_number) html += acEditableField('Founding #', 'founding_member_number', user.founding_member_number, { readonly: true });
+    html += '</div>';
+    html += '</div></div>';
+
+    // CONTACT & PREFERENCES
+    html += '<div class="section-panel' + (_acActiveSection === 'contact' ? ' active' : '') + '" id="section-contact">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">CONTACT PREFERENCES</div>';
+    html += acEditableField('Preferred Contact', 'preferred_contact', user.preferred_contact || pd.preferred_contact, { select: [
+        { value: 'email', label: 'Email' }, { value: 'phone', label: 'Phone' }, { value: 'sms', label: 'SMS' }
+    ]});
+    html += acEditableField('Emergency Contact', 'emergency_contact', user.emergency_contact || pd.emergency_contact);
+    html += acEditableField('Profile Photo URL', 'profile_photo_url', user.profile_photo_url || pd.profile_photo_url);
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">SOCIAL</div>';
+    html += acEditableField('Social Handle', 'social_handle', user.social_handle || pd.social_handle);
+    html += acEditableField('Social Platform', 'social_platform', user.social_platform || pd.social_platform);
+    html += acEditableField('Onboarding Completed', 'onboarding_completed', (user.onboarding_completed || pd.onboarding_completed) ? 'true' : 'false', { select: [
+        { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+    ]});
+    html += '</div>';
+    html += '</div></div>';
+
+    // COACH PROFILE
+    if (isCoach) {
+        html += '<div class="section-panel' + (_acActiveSection === 'coach' ? ' active' : '') + '" id="section-coach">';
+        html += '<div class="field-grid">';
+        html += '<div class="field-group"><div class="field-group-title">VERIFICATION & STATUS</div>';
+        html += acEditableField('Certification Status', 'certification_status', cf.certification_status, { select: [
+            { value: 'PENDING', label: 'Pending' }, { value: 'VERIFIED', label: 'Verified' }, { value: 'REJECTED', label: 'Rejected' }
+        ]});
+        html += acEditableField('Coach Verified', 'coach_verified', cf.coach_verified ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += acEditableField('Master Coach Approved', 'master_coach_approved', cf.master_coach_approved ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += acEditableField('Approval Notes', 'approval_notes', cf.approval_notes, { textarea: true });
+        html += acEditableField('Ethics Version', 'coach_ethics_version', cf.coach_ethics_version, { readonly: true });
+        html += acEditableField('Beta User', 'beta_user', cf.beta_user ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += '</div>';
+        html += '<div class="field-group"><div class="field-group-title">PRACTICE DETAILS</div>';
+        html += acEditableField('Coaching Fee ($)', 'coaching_fee', cf.coaching_fee);
+        html += acEditableField('Hourly Rate ($)', 'hourly_rate', cf.hourly_rate);
+        html += acEditableField('Payment Mode', 'payment_mode', cf.payment_mode, { select: [
+            { value: 'coach_handles', label: 'Coach Handles' }, { value: 'platform_handles', label: 'Platform Handles' }
+        ]});
+        html += acEditableField('Platform Fee %', 'platform_fee_pct', cf.platform_fee_pct);
+        html += acEditableField('Zoom Link', 'zoom_link', cf.zoom_link);
+        html += acEditableField('Specializations', 'specializations', (cf.specializations || []).join(', '));
+        html += acEditableField('Selected DOJOs', 'selected_dojos', (cf.selected_dojos || []).join(', '), { readonly: true });
+        html += acEditableField('Judge DOJO Bar ID', 'judge_nate_bar_id', cf.judge_nate_bar_id);
+        html += '</div>';
+        html += '</div></div>';
+
+        // FINANCIAL & TAX
+        html += '<div class="section-panel' + (_acActiveSection === 'financial' ? ' active' : '') + '" id="section-financial">';
+        html += '<div class="field-grid">';
+        html += '<div class="field-group"><div class="field-group-title">W-9 & TAX</div>';
+        html += acEditableField('W-9 Submitted', 'w9_submitted', cf.w9_submitted ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += acEditableField('TIN Document Uploaded', 'tin_doc_uploaded', cf.tin_doc_uploaded ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += acEditableField('TIN Match Status', 'tin_match_status', cf.tin_match_status, { select: [
+            { value: 'not_submitted', label: 'Not Submitted' },
+            { value: 'pending_admin_review', label: 'Pending Admin Review' },
+            { value: 'verified', label: 'Verified' },
+            { value: 'rejected', label: 'Rejected' }
+        ]});
+        html += acEditableField('TIN Verification Method', 'tin_verification_method', cf.tin_verification_method);
+        html += acEditableField('Requires 1099', 'requires_1099', cf.requires_1099 ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += acEditableField('Address Verified', 'address_verified', cf.address_verified ? 'true' : 'false', { select: [
+            { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+        ]});
+        html += '</div>';
+        html += '<div class="field-group"><div class="field-group-title">EARNINGS</div>';
+        html += acEditableField('Total Earnings YTD ($)', 'total_earnings_ytd', cf.total_earnings_ytd, { readonly: true });
+        html += acEditableField('Total Platform Fees YTD ($)', 'total_platform_fees_ytd', cf.total_platform_fees_ytd, { readonly: true });
+        html += acEditableField('Total Sessions Conducted', 'total_sessions_conducted', cf.total_sessions_conducted, { readonly: true });
+        html += acEditableField('Billable Sessions', 'total_sessions_billable', cf.total_sessions_billable, { readonly: true });
+        html += '</div>';
+        html += '</div></div>';
+    }
+
+    // TOKENS
+    html += '<div class="section-panel' + (_acActiveSection === 'tokens' ? ' active' : '') + '" id="section-tokens">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">TOKEN BALANCE</div>';
+    html += acEditableField('Current Balance', 'token_balance', user.token_balance);
+    html += acEditableField('Usage Today', 'token_usage_today', pd.token_usage_today || 0, { readonly: true });
+    html += acEditableField('Usage This Month', 'token_usage_month', pd.token_usage_month || 0, { readonly: true });
+    html += acEditableField('Last Token Reset', 'last_token_reset', pd.last_token_reset, { readonly: true });
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">ACCESS</div>';
+    html += acEditableField('Can Access Nate', 'can_access_nate', (pd.can_access_nate !== false) ? 'true' : 'false', { select: [
+        { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+    ]});
+    html += '</div>';
+    html += '</div></div>';
+
+    // RAW DATA
+    html += '<div class="section-panel' + (_acActiveSection === 'raw' ? ' active' : '') + '" id="section-raw">';
+    html += '<div class="field-grid single">';
+    html += '<div class="field-group"><div class="field-group-title">FULL PROFILE_DATA (JSONB)</div>';
+    html += '<div class="json-viewer">' + esc(JSON.stringify(pd, null, 2)) + '</div>';
+    html += '</div>';
+    html += '</div></div>';
+
+    content.innerHTML = html;
+}
+
+function acRenderCorpDetail(corp) {
+    var content = document.getElementById('acContent');
+    _acActiveSection = 'identity';
+
+    var html = '<div class="detail-header">';
+    html += '<div><div class="detail-title">' + esc(corp.company_name) + '</div>';
+    html += '<div class="detail-subtitle">Code: ' + esc(corp.sponsor_code) + ' · ID: ' + esc(corp.id) + '</div></div>';
+    html += '</div>';
+
+    html += '<div class="section-tabs">';
+    html += '<div class="section-tab active" data-section="identity" onclick="acSwitchSection(\'identity\')">Company Info</div>';
+    html += '<div class="section-tab" data-section="billing" onclick="acSwitchSection(\'billing\')">Billing & Pricing</div>';
+    html += '<div class="section-tab" data-section="employees" onclick="acSwitchSection(\'employees\')">Employees</div>';
+    html += '</div>';
+
+    // COMPANY INFO
+    html += '<div class="section-panel active" id="section-identity">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">COMPANY DETAILS</div>';
+    html += acEditableField('Company Name', 'company_name', corp.company_name);
+    html += acEditableField('Sponsor Code', 'sponsor_code', corp.sponsor_code);
+    html += acEditableField('Industry', 'industry', corp.industry);
+    html += acEditableField('Logo URL', 'logo_url', corp.logo_url);
+    html += acEditableField('Active', 'active', corp.active ? 'true' : 'false', { select: [
+        { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+    ]});
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">CONTACTS</div>';
+    html += acEditableField('Billing Contact Email', 'billing_contact_email', corp.billing_contact_email);
+    html += acEditableField('Primary Contact Email', 'primary_contact_email', corp.primary_contact_email);
+    html += acEditableField('Primary Contact Phone', 'primary_contact_phone', corp.primary_contact_phone);
+    html += '</div>';
+    html += '</div></div>';
+
+    // BILLING
+    html += '<div class="section-panel" id="section-billing">';
+    html += '<div class="field-grid">';
+    html += '<div class="field-group"><div class="field-group-title">SUBSCRIPTION & BILLING</div>';
+    html += acEditableField('Platform Tier', 'platform_tier', corp.platform_tier, { select: [
+        { value: 'starter', label: 'Starter ($299/mo)' },
+        { value: 'growth', label: 'Growth ($799/mo)' },
+        { value: 'enterprise', label: 'Enterprise ($1,999/mo)' }
+    ]});
+    html += acEditableField('Platform Fee (cents)', 'platform_fee_cents', corp.platform_fee_cents);
+    html += acEditableField('Stripe Customer ID', 'stripe_customer_id', corp.stripe_customer_id);
+    html += acEditableField('Stripe Coupon ID', 'stripe_coupon_id', corp.stripe_coupon_id);
+    html += acEditableField('Platform Subscription ID', 'platform_subscription_id', corp.platform_subscription_id);
+    html += acEditableField('Billing Cycle Day', 'billing_cycle_day', corp.billing_cycle_day);
+    html += '</div>';
+    html += '<div class="field-group"><div class="field-group-title">EMPLOYEE PRICING</div>';
+    html += acEditableField('Max Seats', 'max_seats', corp.max_seats || corp.max_employees);
+    html += acEditableField('Current Employees', 'current_employees', corp.current_employees, { readonly: true });
+    html += acEditableField('Subsidy Percentage', 'subsidy_percentage', corp.subsidy_percentage);
+    html += acEditableField('Allowed Employee Tier', 'allowed_employee_tier', corp.allowed_employee_tier);
+    html += acEditableField('Auto Enroll', 'auto_enroll', corp.auto_enroll ? 'true' : 'false', { select: [
+        { value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }
+    ]});
+    html += acEditableField('Require Domain', 'require_domain', corp.require_domain);
+    html += acEditableField('Discount Type', 'discount_type', corp.discount_type, { select: [
+        { value: 'percent', label: 'Percent' }, { value: 'amount', label: 'Amount' }, { value: 'full', label: 'Full Coverage' }
+    ]});
+    html += acEditableField('Discount Value', 'discount_value', corp.discount_value);
+    html += '</div>';
+    html += '</div></div>';
+
+    // EMPLOYEES
+    html += '<div class="section-panel" id="section-employees">';
+    var emps = corp.employees || [];
+    if (emps.length === 0) {
+        html += '<div style="text-align:center;padding:40px;color:#888">No employees enrolled</div>';
+    } else {
+        html += '<div class="field-group"><div class="field-group-title">ENROLLED EMPLOYEES (' + emps.length + ')</div>';
+        for (var e = 0; e < emps.length; e++) {
+            var emp = emps[e];
+            html += '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">';
+            html += '<span>' + esc(emp.name || emp.username) + '</span>';
+            html += '<span style="color:var(--text-secondary)">' + esc(emp.email) + ' · ' + esc(emp.role) + ' · ' + esc(emp.tier) + '</span>';
+            html += '<span style="color:var(--cyan);cursor:pointer" onclick="acSelectUser(\'' + esc(emp.username) + '\')">View →</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+// Load all users on init
+window.onload = function() {
+    acDoSearch();
+};
+</script>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:24px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+</body>
+</html>

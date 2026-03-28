@@ -240,6 +240,9 @@ function _recoverAuth() {
   if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
 }
 _recoverAuth();
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
         var username = (sessionStorage.getItem("username") || localStorage.getItem("sc_username"));
         var token = (sessionStorage.getItem("token") || localStorage.getItem("sc_token"));
         var profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Predictive Intelligence | Nevedal Lab</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050505;color:#E8D5A3;font-family:'DM Sans',sans-serif;min-height:100vh}
+.header{background:#0A0A0A;border-bottom:1px solid #C9A96233;padding:16px 24px;display:flex;align-items:center;gap:16px}
+.header h1{font-family:'Cormorant Garamond',serif;font-size:22px;color:#C9A962}
+.header .back-btn{background:none;border:1px solid #C9A96244;color:#C9A962;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.header .back-btn:hover{background:#C9A96215}
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:20px}
+.card{background:#0A0A0A;border:1px solid #C9A96222;border-radius:12px;padding:20px}
+.card h3{font-family:'Cormorant Garamond',serif;color:#C9A962;font-size:18px;margin-bottom:12px;border-bottom:1px solid #C9A96218;padding-bottom:8px}
+.gauge-container{text-align:center;padding:20px 0}
+.gauge-value{font-size:64px;font-weight:700;color:#C9A962;font-family:'Cormorant Garamond',serif}
+.gauge-label{font-size:14px;color:#8B7355;margin-top:4px}
+.gauge-confidence{font-size:12px;color:#4ECDC4;margin-top:8px}
+.stat-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #111}
+.stat-row .label{color:#8B7355;font-size:13px}
+.stat-row .value{color:#E8D5A3;font-size:13px;font-weight:600}
+.radar-container{width:100%;height:300px;position:relative}
+.list-item{background:#111;border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.list-item .factor{font-size:13px}
+.list-item .score{font-size:13px;font-weight:600}
+.positive{color:#22C55E}.negative{color:#EF4444}
+.coaching-score{font-size:48px;font-weight:700;text-align:center;padding:16px 0}
+.coaching-high{color:#22C55E}.coaching-mid{color:#C9A962}.coaching-low{color:#EF4444}
+.habit-timeline{background:#111;border-radius:8px;padding:16px;margin-bottom:12px}
+.habit-header{display:flex;justify-content:space-between;margin-bottom:8px}
+.habit-bar{height:8px;background:#1a1a1a;border-radius:4px;overflow:hidden;margin:8px 0}
+.habit-fill{height:100%;background:linear-gradient(90deg,#C9A962,#4ECDC4);border-radius:4px;transition:width 0.5s}
+.sabotage-badge{background:#EF444422;color:#EF4444;font-size:11px;padding:3px 8px;border-radius:12px;display:inline-block;margin-top:4px}
+.family-member{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #111}
+.empty-state{text-align:center;padding:40px;color:#8B7355;font-size:14px}
+.user-select{background:#111;border:1px solid #C9A96233;color:#E8D5A3;padding:8px 14px;border-radius:6px;font-size:14px;width:260px}
+.refresh-btn{background:#C9A96222;border:1px solid #C9A96244;color:#C9A962;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px}
+.refresh-btn:hover{background:#C9A96233}
+.toolbar{display:flex;gap:12px;align-items:center;margin-bottom:20px}
+canvas{width:100%!important;height:280px!important}
+</style>
+</head>
+<body>
+<div class="header">
+<button class="back-btn" onclick="history.back()">← Back</button>
+<h1>Predictive Intelligence Engine</h1>
+</div>
+<div class="container">
+<div class="toolbar">
+<select id="userSelect" class="user-select" onchange="loadPredictions()">
+<option value="">Select Client...</option>
+</select>
+<button class="refresh-btn" onclick="loadPredictions()">Refresh</button>
+</div>
+<div class="grid-2">
+<div class="card">
+<h3>Therapeutic Success Probability</h3>
+<div class="gauge-container">
+<div class="gauge-value" id="probValue">--</div>
+<div class="gauge-label">Success Probability</div>
+<div class="gauge-confidence" id="confValue"></div>
+</div>
+</div>
+<div class="card">
+<h3>Formula Components</h3>
+<div id="componentsList"></div>
+</div>
+</div>
+<div class="grid-3">
+<div class="card">
+<h3>Key Amplifiers</h3>
+<div id="amplifiersList"><div class="empty-state">Load a client to view</div></div>
+</div>
+<div class="card">
+<h3>Key Resistances</h3>
+<div id="resistancesList"><div class="empty-state">Load a client to view</div></div>
+</div>
+<div class="card">
+<h3>Real-Time Coaching Score</h3>
+<div class="coaching-score coaching-mid" id="coachingScore">--</div>
+<div id="coachingDetails"></div>
+</div>
+</div>
+<div class="grid-2">
+<div class="card">
+<h3>Habit Forecasting</h3>
+<div id="habitForecasts"><div class="empty-state">No active habit tracking</div></div>
+</div>
+<div class="card">
+<h3>Family System Prediction</h3>
+<div id="familyPrediction"><div class="empty-state">Select a client with family membership</div></div>
+</div>
+</div>
+<div class="card" style="margin-top:20px">
+<h3>Prediction Accuracy</h3>
+<div id="accuracySection"><div class="empty-state">Loading accuracy data...</div></div>
+</div>
+</div>
+<script>
+const API=window.location.origin.replace(/:\d+$/,':8000');
+function _authHeaders(ct){const h={};const t=sessionStorage.getItem('sc_token')||localStorage.getItem('sc_token')||'';if(t)h['Authorization']='Bearer '+t;if(ct)h['Content-Type']=ct;return h}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+async function apiFetch(path){
+try{const r=await fetch(API+path,{headers:_authHeaders()});if(!r.ok){console.warn('API error',path,r.status);return null}return await r.json()}catch(e){console.warn('fetch error',path,e);return null}}
+
+async function loadClients(){
+const s=document.getElementById('userSelect');
+const d=await apiFetch('/api/admin/clients');
+if(!d)return;
+const clients=(d.clients||d.data||d||[]);
+if(Array.isArray(clients)){clients.forEach(c=>{const o=document.createElement('option');o.value=c.username||c.user_id||c.hardware_id||'';o.textContent=(c.name||c.username||'Unknown');s.appendChild(o)})}
+}
+
+async function loadPredictions(){
+const uid=document.getElementById('userSelect').value;
+if(!uid)return;
+
+const prob=await apiFetch('/api/predictive/therapeutic-probability/'+uid);
+if(prob){
+document.getElementById('probValue').textContent=Math.round(prob.success_probability)+'%';
+document.getElementById('confValue').textContent='Confidence: '+Math.round(prob.confidence_score)+'%';
+const cl=document.getElementById('componentsList');cl.innerHTML='';
+if(prob.components){Object.entries(prob.components).forEach(([k,v])=>{
+cl.innerHTML+=`<div class="stat-row"><span class="label">${esc(k.replace(/_/g,' '))}</span><span class="value">${(v*100).toFixed(1)}%</span></div>`})}
+const al=document.getElementById('amplifiersList');al.innerHTML='';
+(prob.key_amplifiers||[]).forEach(a=>{al.innerHTML+=`<div class="list-item"><span class="factor positive">${esc(a.factor.replace(/_/g,' '))}</span><span class="score positive">${(a.score*100).toFixed(0)}%</span></div>`});
+if(!prob.key_amplifiers||!prob.key_amplifiers.length)al.innerHTML='<div class="empty-state">No strong amplifiers</div>';
+const rl=document.getElementById('resistancesList');rl.innerHTML='';
+(prob.key_resistances||[]).forEach(r=>{rl.innerHTML+=`<div class="list-item"><span class="factor negative">${esc(r.factor.replace(/_/g,' '))}</span><span class="score negative">${(r.score*100).toFixed(0)}%</span></div>`});
+if(!prob.key_resistances||!prob.key_resistances.length)rl.innerHTML='<div class="empty-state">No significant resistances</div>';
+}
+
+const coaching=await apiFetch('/api/predictive/realtime-coaching/'+uid);
+if(coaching){
+const cs=document.getElementById('coachingScore');
+cs.textContent=Math.round(coaching.coaching_effectiveness)+'%';
+cs.className='coaching-score '+(coaching.coaching_effectiveness>70?'coaching-high':coaching.coaching_effectiveness>40?'coaching-mid':'coaching-low');
+const cd=document.getElementById('coachingDetails');cd.innerHTML='';
+cd.innerHTML+=`<div class="stat-row"><span class="label">Micro Receptivity</span><span class="value">${(coaching.micro_receptivity*100).toFixed(0)}%</span></div>`;
+cd.innerHTML+=`<div class="stat-row"><span class="label">Timing Score</span><span class="value">${(coaching.timing_score*100).toFixed(0)}%</span></div>`;
+cd.innerHTML+=`<div class="stat-row"><span class="label">Current Resistance</span><span class="value">${(coaching.current_resistance*100).toFixed(0)}%</span></div>`;
+}
+
+const habits=await apiFetch('/api/predictive/habit-tracking/'+uid);
+const hd=document.getElementById('habitForecasts');hd.innerHTML='';
+if(habits&&habits.habits&&habits.habits.length){habits.habits.forEach(h=>{
+const pct=Math.min((h.current_streak||0)/(h.predicted_adoption_days||66)*100,100);
+hd.innerHTML+=`<div class="habit-timeline"><div class="habit-header"><span>${esc(h.habit_type)}</span><span>${h.status}</span></div><div class="stat-row"><span class="label">Adoption</span><span class="value">${h.predicted_adoption_days||'?'} days</span></div><div class="stat-row"><span class="label">Crystallization</span><span class="value">${h.predicted_crystallization_days||'?'} days</span></div><div class="stat-row"><span class="label">Maintenance Prob.</span><span class="value">${((h.predicted_maintenance_probability||0)*100).toFixed(0)}%</span></div><div class="habit-bar"><div class="habit-fill" style="width:${pct}%"></div></div><div class="stat-row"><span class="label">Streak</span><span class="value">${h.current_streak||0}/${h.predicted_adoption_days||66}</span></div></div>`})}
+else{hd.innerHTML='<div class="empty-state">No active habit tracking</div>'}
+
+const acc=await apiFetch('/api/predictive/prediction-accuracy?days=90');
+const as=document.getElementById('accuracySection');
+if(acc){as.innerHTML=`<div class="stat-row"><span class="label">Total Predictions</span><span class="value">${acc.total_predictions}</span></div><div class="stat-row"><span class="label">With Outcome</span><span class="value">${acc.predictions_with_outcome}</span></div><div class="stat-row"><span class="label">Avg Accuracy</span><span class="value">${acc.average_accuracy||'N/A'}%</span></div>`}
+}
+
+loadClients();
+</script>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:24px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+</body>
+</html>

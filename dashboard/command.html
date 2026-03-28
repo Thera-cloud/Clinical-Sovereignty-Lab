@@ -1031,6 +1031,20 @@
         </div>
     </header>
 
+    <!-- YubiKey Verification Gate -->
+    <div id="scYubiKeyGate" style="position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:#050505;flex-direction:column;gap:24px;">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:36px;color:#C9A962;letter-spacing:3px;">SOVEREIGN COMMAND</div>
+        <div style="width:60px;height:1px;background:linear-gradient(90deg,transparent,#C9A962,transparent);"></div>
+        <div style="color:#8B7355;font-size:13px;max-width:440px;text-align:center;line-height:1.8;">
+            Administrative access to the Sovereign Sanctuary infrastructure.<br>
+            Physical key verification required before proceeding.
+        </div>
+        <button id="scYubiKeyBtn" onclick="scYubiKeyVerify()" style="margin-top:16px;padding:16px 48px;background:transparent;border:1px solid #C9A962;color:#C9A962;font-family:'Cormorant Garamond',serif;font-size:20px;cursor:pointer;letter-spacing:1.5px;border-radius:4px;transition:all 0.3s;">
+            🔑 Tap YubiKey to Enter
+        </button>
+        <div id="scYubiKeyStatus" style="color:#5a5850;font-size:12px;min-height:20px;"></div>
+    </div>
+
     <!-- NAVIGATION -->
     <nav class="nav-tabs">
         <div class="nav-tab active" data-tab="command" onclick="switchTab('command')">
@@ -1070,6 +1084,9 @@
         </div>
         <div class="nav-tab" data-tab="discounts" onclick="navTo('discounts.html')">
             <span>🏷️</span> Discounts
+        </div>
+        <div class="nav-tab" data-tab="access_control" onclick="navTo('access_control.html')">
+            <span>🔐</span> Access Control
         </div>
         <div class="nav-tab" data-tab="quickbooks" onclick="navTo('quickbooks.html')">
             <span>📒</span> QuickBooks
@@ -1535,6 +1552,132 @@
 
     <script>
         // =============================================================================
+        // YUBIKEY VERIFICATION GATE
+        // =============================================================================
+        function _scB64toBuffer(b64) {
+            var s = b64.replace(/-/g,'+').replace(/_/g,'/');
+            while (s.length % 4) s += '=';
+            var bin = atob(s);
+            var buf = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return buf.buffer;
+        }
+        function _scBufferToB64(buf) {
+            var bytes = new Uint8Array(buf);
+            var s = '';
+            for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+        }
+        async function _scApiPost(path, body) {
+            var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            try {
+                var resp = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t },
+                    body: JSON.stringify(body)
+                });
+                if (!resp.ok) {
+                    var errText = '';
+                    try { var ej = await resp.json(); errText = ej.detail || JSON.stringify(ej); } catch(e2) { errText = resp.statusText; }
+                    console.warn('YubiKey API ' + path + ' returned ' + resp.status + ': ' + errText);
+                    return { _error: true, status: resp.status, detail: errText };
+                }
+                return await resp.json();
+            } catch(e) {
+                console.error('YubiKey API fetch failed:', e);
+                return { _error: true, status: 0, detail: e.message };
+            }
+        }
+
+        function scCheckYubiKeyGate() {
+            var gate = document.getElementById('scYubiKeyGate');
+            if (!gate) return;
+            try {
+                var verified = sessionStorage.getItem('sc_yubikey_verified');
+                if (verified === 'true') { gate.style.display = 'none'; return; }
+            } catch(e) {}
+            gate.style.display = 'flex';
+        }
+
+        async function scYubiKeyVerify() {
+            var btn = document.getElementById('scYubiKeyBtn');
+            var statusEl = document.getElementById('scYubiKeyStatus');
+            if (!window.PublicKeyCredential) {
+                statusEl.textContent = 'WebAuthn not supported in this browser.';
+                statusEl.style.color = '#EF4444';
+                return;
+            }
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            statusEl.textContent = 'Requesting challenge...';
+            statusEl.style.color = '#C9A962';
+
+            try {
+                var optionsResp = await _scApiPost('/api/admin/webauthn/auth-options', {});
+                if (!optionsResp || optionsResp._error || !optionsResp.options) {
+                    var msg = 'Failed to get auth challenge.';
+                    if (optionsResp && optionsResp._error) msg += ' (' + optionsResp.status + ': ' + (optionsResp.detail || 'unknown') + ')';
+                    statusEl.textContent = msg;
+                    statusEl.style.color = '#EF4444';
+                    btn.disabled = false; btn.style.opacity = '1';
+                    return;
+                }
+                var options = optionsResp.options;
+                options.challenge = _scB64toBuffer(options.challenge);
+                if (options.allowCredentials) {
+                    options.allowCredentials = options.allowCredentials.map(function(c) {
+                        return Object.assign({}, c, { id: _scB64toBuffer(c.id) });
+                    });
+                }
+                statusEl.textContent = 'Touch your YubiKey now...';
+                statusEl.style.color = '#C9A962';
+                btn.textContent = '🔑 Waiting for key...';
+
+                var credential = await navigator.credentials.get({ publicKey: options });
+                var assertion = {
+                    id: credential.id,
+                    rawId: _scBufferToB64(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: _scBufferToB64(credential.response.clientDataJSON),
+                        authenticatorData: _scBufferToB64(credential.response.authenticatorData),
+                        signature: _scBufferToB64(credential.response.signature),
+                    },
+                };
+                statusEl.textContent = 'Verifying...';
+                statusEl.style.color = '#4ECDC4';
+
+                var result = await _scApiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+                if (result && !result._error && result.verified) {
+                    try { sessionStorage.setItem('sc_yubikey_verified', 'true'); } catch(e) {}
+                    statusEl.textContent = '\u2713 Verified — entering Sovereign Command...';
+                    statusEl.style.color = '#22C55E';
+                    setTimeout(function() {
+                        var gate = document.getElementById('scYubiKeyGate');
+                        if (gate) gate.style.display = 'none';
+                    }, 700);
+                } else {
+                    var vmsg = 'Key verification failed.';
+                    if (result && result._error) vmsg += ' (' + result.status + ': ' + (result.detail || 'unknown') + ')';
+                    statusEl.textContent = vmsg;
+                    statusEl.style.color = '#EF4444';
+                    btn.disabled = false; btn.style.opacity = '1';
+                    btn.textContent = '🔑 Tap YubiKey to Enter';
+                }
+            } catch (err) {
+                if (err.name === 'NotAllowedError') {
+                    statusEl.textContent = 'Verification cancelled.';
+                    statusEl.style.color = '#5a5850';
+                } else {
+                    statusEl.textContent = 'Error: ' + err.message;
+                    statusEl.style.color = '#EF4444';
+                }
+                btn.disabled = false; btn.style.opacity = '1';
+                btn.textContent = '🔑 Tap YubiKey to Enter';
+            }
+        }
+
+        // =============================================================================
         // WEBSOCKET & STATE
         // =============================================================================
         function getWsUrl() {
@@ -1635,6 +1778,7 @@
             document.getElementById('userRole').textContent = (profile && profile.role) || 'ADMIN';
             if (profile && profile.role !== 'ADMIN') { var cab = document.getElementById('coachApprovalsBtn'); if (cab) cab.style.display = 'none'; }
 
+            scCheckYubiKeyGate();
             connect();
         }
 

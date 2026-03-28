@@ -124,6 +124,9 @@ function _recoverAuth() {
   if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
 }
 _recoverAuth();
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
         var socket = null;
         var schedule = []; // raw schedule entries (CoachNexusV2 format)
         var clientNameById = {}; // client_id -> name (from coach_get_clients)

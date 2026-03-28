@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ask Little Nate — Siri Shortcut</title>
+<style>
+:root {
+  --void: #050505;
+  --chamber: #0A0A0A;
+  --elevated: #111111;
+  --gold: #C9A962;
+  --gold-bright: #E8D5A3;
+  --gold-dim: #8B7355;
+  --cyan: #4ECDC4;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--void);
+  color: var(--gold-bright);
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.card {
+  background: var(--chamber);
+  border: 1px solid rgba(201,169,98,0.2);
+  border-radius: 20px;
+  max-width: 480px;
+  width: 100%;
+  padding: 40px 32px;
+  text-align: center;
+}
+.icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+h1 {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 28px;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+.subtitle {
+  color: var(--gold-dim);
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+.desc {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--gold-bright);
+  margin-bottom: 32px;
+  text-align: left;
+}
+.desc strong { color: var(--gold); }
+.steps {
+  text-align: left;
+  margin-bottom: 28px;
+}
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+  font-size: 14px;
+}
+.step-num {
+  background: rgba(201,169,98,0.15);
+  color: var(--gold);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.btn {
+  display: inline-block;
+  background: var(--gold);
+  color: var(--void);
+  font-weight: 700;
+  padding: 14px 32px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-size: 16px;
+  transition: background 0.2s;
+}
+.btn:hover { background: var(--gold-bright); }
+.manual {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(201,169,98,0.1);
+  font-size: 12px;
+  color: var(--gold-dim);
+  text-align: left;
+}
+.manual h3 {
+  font-size: 14px;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+code {
+  background: var(--elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--cyan);
+}
+.footer {
+  margin-top: 20px;
+  font-size: 11px;
+  color: var(--gold-dim);
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="icon">✦</div>
+  <h1>Ask Little Nate</h1>
+  <p class="subtitle">Siri Shortcut for iOS, iPadOS & macOS</p>
+
+  <div class="desc">
+    Say <strong>"Hey Siri, Ask Little Nate"</strong> followed by your question, and Nate will respond instantly through Siri.
+    Works on iPhone, iPad, Mac, Apple Watch, and HomePod.
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <span class="step-num">1</span>
+      <span>Tap the button below to add the shortcut</span>
+    </div>
+    <div class="step">
+      <span class="step-num">2</span>
+      <span>Allow the shortcut to run (it connects to Sovereign Sanctuary securely)</span>
+    </div>
+    <div class="step">
+      <span class="step-num">3</span>
+      <span>Say <strong>"Hey Siri, Ask Little Nate"</strong> or run from the Shortcuts app</span>
+    </div>
+  </div>
+
+  <a class="btn" href="https://www.icloud.com/shortcuts/" id="shortcutLink">
+    Add to Siri
+  </a>
+
+  <div class="manual">
+    <h3>Manual Setup</h3>
+    <p>If the button doesn't work, create the shortcut manually:</p>
+    <ol style="margin-top:8px; padding-left:20px; line-height:2;">
+      <li>Open the <strong>Shortcuts</strong> app</li>
+      <li>Tap <strong>+</strong> to create a new shortcut</li>
+      <li>Add action: <strong>Ask for Input</strong> (Text, prompt: "What would you like to ask?")</li>
+      <li>Add action: <strong>Get Contents of URL</strong></li>
+      <li>Set URL to: <code>https://api.sovereignsanctuary.net/api/summon</code></li>
+      <li>Method: <strong>POST</strong></li>
+      <li>Headers: <code>Content-Type: application/json</code></li>
+      <li>Body: JSON with <code>message</code> = Provided Input, <code>channel</code> = "siri"</li>
+      <li>Add action: <strong>Get Dictionary Value</strong> → key: <code>response</code></li>
+      <li>Add action: <strong>Speak Text</strong> (or Show Result)</li>
+      <li>Name it "Ask Little Nate"</li>
+    </ol>
+  </div>
+</div>
+
+<p class="footer">Sovereign Sanctuary &middot; sovereignsanctuary.net</p>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:24px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+</body>
+</html>

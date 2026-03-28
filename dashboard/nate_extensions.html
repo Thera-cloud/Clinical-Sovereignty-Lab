@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nate Extensions — Sovereign Command</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050505;color:#d4d4d4;font-family:'DM Sans',system-ui,sans-serif;min-height:100vh}
+.header{padding:16px 24px;border-bottom:1px solid #1a1a1a;display:flex;align-items:center;gap:12px}
+.header h1{font-family:'Cormorant Garamond',serif;color:#C9A962;font-size:22px;font-weight:600}
+.header .back{color:#8B7355;text-decoration:none;font-size:13px;border:1px solid #333;padding:4px 12px;border-radius:4px}
+.header .back:hover{color:#C9A962;border-color:#C9A962}
+.tabs{display:flex;gap:0;border-bottom:1px solid #1a1a1a;padding:0 24px}
+.tab{padding:10px 20px;color:#666;cursor:pointer;font-size:13px;border-bottom:2px solid transparent}
+.tab:hover{color:#999}
+.tab.active{color:#C9A962;border-bottom-color:#C9A962}
+.content{padding:24px;max-width:1200px}
+.section{display:none}
+.section.active{display:block}
+.card{background:#0A0A0A;border:1px solid #1a1a1a;border-radius:8px;padding:16px;margin-bottom:12px}
+.card h3{color:#C9A962;font-size:15px;margin-bottom:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;text-transform:uppercase}
+.badge.pending{background:#92400e33;color:#fbbf24}
+.badge.approved{background:#14532d33;color:#22c55e}
+.badge.rejected{background:#7f1d1d33;color:#ef4444}
+.badge.executed{background:#1e3a5f33;color:#60a5fa}
+.badge.formula{background:#4c1d9533;color:#a78bfa}
+.badge.table{background:#164e6333;color:#67e8f9}
+.badge.widget{background:#713f1233;color:#fb923c}
+.badge.webhook{background:#14532d33;color:#4ade80}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px;color:#8B7355;border-bottom:1px solid #222;font-weight:500}
+td{padding:8px;border-bottom:1px solid #111}
+.btn{padding:6px 14px;border:1px solid #333;background:#111;color:#C9A962;border-radius:4px;cursor:pointer;font-size:12px}
+.btn:hover{background:#1a1a1a;border-color:#C9A962}
+.btn.approve{border-color:#22c55e;color:#22c55e}
+.btn.reject{border-color:#ef4444;color:#ef4444}
+.btn.execute{border-color:#60a5fa;color:#60a5fa}
+.btn.deactivate{border-color:#f97316;color:#f97316}
+.stat-row{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.stat{background:#0A0A0A;border:1px solid #1a1a1a;border-radius:8px;padding:14px 20px;flex:1;min-width:140px}
+.stat .val{font-size:28px;font-weight:700;color:#C9A962}
+.stat .lbl{font-size:11px;color:#666;text-transform:uppercase;margin-top:2px}
+.detail-panel{background:#080808;border:1px solid #1a1a1a;border-radius:8px;padding:20px;margin-top:12px;display:none}
+.detail-panel h4{color:#E8D5A3;font-size:14px;margin-bottom:8px}
+.detail-panel pre{background:#050505;padding:12px;border-radius:4px;font-size:12px;color:#aaa;overflow-x:auto;white-space:pre-wrap}
+.empty{padding:40px;text-align:center;color:#555;font-size:14px}
+.gate-status{padding:12px 20px;border-radius:8px;margin-bottom:20px;font-size:14px;font-weight:600}
+.gate-cleared{background:#14532d22;border:1px solid #22c55e44;color:#22c55e}
+.gate-failed{background:#7f1d1d22;border:1px solid #ef444444;color:#ef4444}
+.gate-unknown{background:#1a1a1a;border:1px solid #33333366;color:#666}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <a class="back" href="command.html">← Command</a>
+  <h1>Nate Extensions & Nightly Audit</h1>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('proposals')">Innovation Proposals</div>
+  <div class="tab" onclick="switchTab('extensions')">Active Extensions</div>
+  <div class="tab" onclick="switchTab('audit')">Nightly Audit</div>
+</div>
+
+<div class="content">
+
+  <!-- ═══ Innovation Proposals ═══ -->
+  <div class="section active" id="sec-proposals">
+    <div class="stat-row" id="proposal-stats"></div>
+    <div id="proposals-list"></div>
+    <div class="detail-panel" id="proposal-detail"></div>
+  </div>
+
+  <!-- ═══ Active Extensions ═══ -->
+  <div class="section" id="sec-extensions">
+    <div class="stat-row" id="ext-stats"></div>
+    <div id="widget-charts" style="margin-bottom:12px"></div>
+    <div id="extensions-list"></div>
+  </div>
+
+  <!-- ═══ Nightly Audit ═══ -->
+  <div class="section" id="sec-audit">
+    <div id="gate-banner"></div>
+    <div class="stat-row" id="audit-stats"></div>
+    <div style="margin-bottom:16px">
+      <button class="btn" onclick="rerunAudit()">Run Full Audit Now</button>
+      <button class="btn" onclick="overrideGate('CLEARED')" style="margin-left:8px">Override Gate → CLEARED</button>
+    </div>
+    <div id="audit-history"></div>
+  </div>
+
+</div>
+
+<script>
+const API = window.location.origin.replace(/:\d+$/, '') + ':8000';
+
+function _recoverAuth() {
+  if (!sessionStorage.getItem('sc_token')) {
+    const h = window.location.hash.substring(1);
+    if (h) {
+      const p = new URLSearchParams(h);
+      if (p.get('t')) sessionStorage.setItem('sc_token', p.get('t'));
+      if (p.get('u')) sessionStorage.setItem('sc_username', p.get('u'));
+    }
+  }
+  ['sc_token','sc_username','sc_profile'].forEach(k => {
+    if (!sessionStorage.getItem(k) && localStorage.getItem(k))
+      sessionStorage.setItem(k, localStorage.getItem(k));
+  });
+}
+_recoverAuth();
+
+function _authHeaders(ct) {
+  const t = sessionStorage.getItem('sc_token') || '';
+  const h = {'Authorization': 'Bearer ' + t};
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('sec-' + name).classList.add('active');
+  if (name === 'proposals') loadProposals();
+  else if (name === 'extensions') loadExtensions();
+  else if (name === 'audit') loadAudit();
+}
+
+// ═══ Proposals ═══
+async function loadProposals() {
+  try {
+    const resp = await fetch(API + '/api/nate-agent/innovations/pending', {headers: _authHeaders()});
+    if (!resp.ok) { document.getElementById('proposals-list').innerHTML = '<div class="empty">Could not load proposals</div>'; return; }
+    const data = await resp.json();
+    const proposals = data.proposals || [];
+
+    document.getElementById('proposal-stats').innerHTML =
+      `<div class="stat"><div class="val">${proposals.length}</div><div class="lbl">Pending</div></div>`;
+
+    if (!proposals.length) {
+      document.getElementById('proposals-list').innerHTML = '<div class="empty">No pending innovation proposals</div>';
+      return;
+    }
+
+    let html = '<table><tr><th>Type</th><th>Domain</th><th>Summary</th><th>Proposed By</th><th>When</th><th>Actions</th></tr>';
+    for (const p of proposals) {
+      const d = new Date(p.proposed_at).toLocaleDateString();
+      html += `<tr>
+        <td><span class="badge ${p.extension_type}">${p.extension_type}</span></td>
+        <td>${p.domain}</td>
+        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.executive_summary)}</td>
+        <td>${esc(p.proposed_by)}</td>
+        <td>${d}</td>
+        <td>
+          <button class="btn" onclick="viewProposal('${p.id}')">View</button>
+          <button class="btn approve" onclick="decideProposal('${p.id}',true)">Approve</button>
+          <button class="btn reject" onclick="decideProposal('${p.id}',false)">Reject</button>
+        </td>
+      </tr>`;
+    }
+    html += '</table>';
+    document.getElementById('proposals-list').innerHTML = html;
+  } catch (e) {
+    document.getElementById('proposals-list').innerHTML = '<div class="empty">Error loading proposals</div>';
+  }
+}
+
+async function viewProposal(id) {
+  try {
+    const resp = await fetch(API + '/api/nate-agent/innovations/' + id, {headers: _authHeaders()});
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const p = data.proposal;
+    const panel = document.getElementById('proposal-detail');
+    panel.style.display = 'block';
+    panel.innerHTML = `
+      <h4>${esc(p.executive_summary)}</h4>
+      <p style="color:#888;margin-bottom:12px"><span class="badge ${p.extension_type}">${p.extension_type}</span>
+        <span class="badge ${p.status}">${p.status}</span> by ${esc(p.proposed_by)} — ${p.domain}</p>
+      <h4>Problem Statement</h4>
+      <pre>${esc(p.problem_statement)}</pre>
+      <h4 style="margin-top:12px">Proposed Solution</h4>
+      <pre>${JSON.stringify(p.proposed_solution, null, 2)}</pre>
+      <h4 style="margin-top:12px">System Impact</h4>
+      <pre>${JSON.stringify(p.system_impact, null, 2)}</pre>
+      <h4 style="margin-top:12px">Rollback Plan</h4>
+      <pre>${esc(p.rollback_plan)}</pre>
+      <div style="margin-top:16px">
+        <button class="btn approve" onclick="decideProposal('${p.id}',true)">Approve</button>
+        <button class="btn reject" onclick="decideProposal('${p.id}',false)" style="margin-left:8px">Reject</button>
+        ${p.status === 'approved' ? `<button class="btn execute" onclick="executeProposal('${p.id}')" style="margin-left:8px">Execute</button>` : ''}
+      </div>`;
+  } catch (e) { console.warn('View proposal error:', e); }
+}
+
+async function decideProposal(id, approved) {
+  const note = approved ? '' : (prompt('Rejection reason:') || '');
+  try {
+    await fetch(API + '/api/nate-agent/innovations/' + id + '/decide', {
+      method: 'POST', headers: _authHeaders('application/json'),
+      body: JSON.stringify({approved, admin_note: note})
+    });
+    loadProposals();
+    document.getElementById('proposal-detail').style.display = 'none';
+  } catch (e) { console.warn('Decision error:', e); }
+}
+
+async function executeProposal(id) {
+  if (!confirm('Execute this approved proposal? This will create the extension.')) return;
+  try {
+    const resp = await fetch(API + '/api/nate-agent/innovations/' + id + '/execute', {
+      method: 'POST', headers: _authHeaders('application/json')
+    });
+    const data = await resp.json();
+    alert(resp.ok ? 'Executed successfully' : ('Execution failed: ' + JSON.stringify(data)));
+    loadProposals();
+  } catch (e) { alert('Execution error: ' + e); }
+}
+
+// ═══ Extensions ═══
+async function loadExtensions() {
+  try {
+    const resp = await fetch(API + '/api/nate-agent/extensions/active', {headers: _authHeaders()});
+    if (!resp.ok) { document.getElementById('extensions-list').innerHTML = '<div class="empty">Could not load</div>'; return; }
+    const data = await resp.json();
+    const exts = data.extensions || [];
+
+    const byType = {};
+    exts.forEach(e => { byType[e.extension_type] = (byType[e.extension_type] || 0) + 1; });
+    let statsHtml = `<div class="stat"><div class="val">${exts.length}</div><div class="lbl">Active</div></div>`;
+    for (const [t, c] of Object.entries(byType)) {
+      statsHtml += `<div class="stat"><div class="val">${c}</div><div class="lbl">${t}s</div></div>`;
+    }
+    document.getElementById('ext-stats').innerHTML = statsHtml;
+    renderWidgetCharts(exts.filter(e => e.extension_type === 'widget'));
+
+    if (!exts.length) {
+      document.getElementById('extensions-list').innerHTML = '<div class="empty">No active extensions</div>';
+      return;
+    }
+
+    let html = '<table><tr><th>Type</th><th>Name</th><th>Domain</th><th>D1 Table</th><th>Created</th><th>Actions</th></tr>';
+    for (const e of exts) {
+      const d = new Date(e.created_at).toLocaleDateString();
+      html += `<tr>
+        <td><span class="badge ${e.extension_type}">${e.extension_type}</span></td>
+        <td>${esc(e.name)}</td>
+        <td>${e.domain}</td>
+        <td>${e.d1_table_name || '—'}</td>
+        <td>${d}</td>
+        <td>
+          <button class="btn" onclick="queryExtension('${e.id}')">Query</button>
+          <button class="btn deactivate" onclick="deactivateExt('${e.id}','${esc(e.name)}')">Deactivate</button>
+        </td>
+      </tr>`;
+    }
+    html += '</table>';
+    document.getElementById('extensions-list').innerHTML = html;
+  } catch (e) {
+    document.getElementById('extensions-list').innerHTML = '<div class="empty">Error loading extensions</div>';
+  }
+}
+
+async function queryExtension(id) {
+  try {
+    const resp = await fetch(API + '/api/nate-agent/extensions/' + id + '/query?limit=20', {headers: _authHeaders()});
+    const data = await resp.json();
+    alert(JSON.stringify(data.data || [], null, 2).substring(0, 2000));
+  } catch (e) { alert('Query error: ' + e); }
+}
+
+async function deactivateExt(id, name) {
+  if (!confirm('Deactivate extension "' + name + '"?')) return;
+  try {
+    await fetch(API + '/api/nate-agent/extensions/' + id + '/deactivate', {
+      method: 'POST', headers: _authHeaders('application/json')
+    });
+    loadExtensions();
+  } catch (e) { alert('Deactivation error: ' + e); }
+}
+
+// ═══ Audit ═══
+async function loadAudit() {
+  try {
+    const resp = await fetch(API + '/api/admin/nightly-audit/status', {headers: _authHeaders()});
+    if (!resp.ok) { document.getElementById('gate-banner').innerHTML = '<div class="gate-status gate-unknown">Could not load audit status</div>'; return; }
+    const data = await resp.json();
+    const gate = data.gate || 'unknown';
+    const cls = gate === 'CLEARED' ? 'gate-cleared' : gate === 'BLOCKED' ? 'gate-failed' : 'gate-unknown';
+    const gateLabel = gate === 'CLEARED' ? 'PLATFORM GATE: CLEARED — All systems operational'
+      : gate === 'BLOCKED' ? 'PLATFORM GATE: BLOCKED — Client sessions blocked until resolved'
+      : 'PLATFORM GATE: ' + gate;
+    document.getElementById('gate-banner').innerHTML = `<div class="gate-status ${cls}">${gateLabel}</div>`;
+
+    const last = data.last_result;
+    if (last) {
+      const pass = last.passed || 0;
+      const fail = last.failed || 0;
+      const total = pass + fail;
+      document.getElementById('audit-stats').innerHTML = `
+        <div class="stat"><div class="val">${pass}/${total}</div><div class="lbl">Passed</div></div>
+        <div class="stat"><div class="val">${fail}</div><div class="lbl">Failed</div></div>
+        <div class="stat"><div class="val">${last.run_date || '—'}</div><div class="lbl">Last Run</div></div>`;
+    } else {
+      document.getElementById('audit-stats').innerHTML = '<div class="stat"><div class="val">—</div><div class="lbl">No audit run yet</div></div>';
+    }
+
+    const histResp = await fetch(API + '/api/admin/nightly-audit/history?days=7', {headers: _authHeaders()});
+    if (histResp.ok) {
+      const histData = await histResp.json();
+      const runs = histData.history || [];
+      if (!runs.length) {
+        document.getElementById('audit-history').innerHTML = '<div class="empty">No audit history</div>';
+        return;
+      }
+      let html = '<table><tr><th>Date</th><th>Phase</th><th>Test</th><th>Status</th><th>Detail</th></tr>';
+      for (const r of runs) {
+        const sc = r.status === 'PASS' ? '#22c55e' : r.status === 'FAIL' ? '#ef4444' : '#888';
+        html += `<tr>
+          <td>${r.run_date}</td>
+          <td>${r.phase_name}</td>
+          <td>${esc(r.test_name)}</td>
+          <td style="color:${sc};font-weight:600">${r.status}</td>
+          <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.detail || '')}</td>
+        </tr>`;
+      }
+      html += '</table>';
+      document.getElementById('audit-history').innerHTML = html;
+    }
+  } catch (e) {
+    document.getElementById('gate-banner').innerHTML = '<div class="gate-status gate-unknown">Error loading audit status</div>';
+  }
+}
+
+async function rerunAudit() {
+  if (!confirm('Run a full nightly audit now? This may gate the platform if failures are found.')) return;
+  try {
+    const resp = await fetch(API + '/api/admin/nightly-audit/rerun', {
+      method: 'POST', headers: _authHeaders('application/json')
+    });
+    const data = await resp.json();
+    const result = data.result || {};
+    alert(resp.ok ? `Audit complete: ${result.passed || 0} passed, ${result.failed || 0} failed` : 'Audit error');
+    loadAudit();
+  } catch (e) { alert('Rerun error: ' + e); }
+}
+
+// ═══ Widget Charts ═══
+let _widgetCharts = [];
+function _clearWidgetCharts() {
+  _widgetCharts.forEach(ch => { try { ch.destroy(); } catch(e) {} });
+  _widgetCharts = [];
+}
+
+async function renderWidgetCharts(widgetExts) {
+  const wrap = document.getElementById('widget-charts');
+  if (!wrap) return;
+  _clearWidgetCharts();
+  wrap.innerHTML = '';
+  if (!widgetExts || !widgetExts.length || typeof Chart === 'undefined') return;
+
+  for (const ext of widgetExts.slice(0, 4)) {
+    let rows = [];
+    try {
+      const resp = await fetch(API + '/api/nate-agent/extensions/' + ext.id + '/query?limit=25', {headers: _authHeaders()});
+      const data = await resp.json();
+      rows = Array.isArray(data.data) ? data.data : [];
+    } catch (e) {
+      rows = [];
+    }
+    if (!rows.length) continue;
+
+    const sample = rows[0];
+    const keys = Object.keys(sample || {});
+    const labelKey = keys.find(k => typeof sample[k] === 'string') || keys[0];
+    const valueKey = keys.find(k => typeof sample[k] === 'number') || keys.find(k => !isNaN(parseFloat(sample[k]))) || keys[1];
+    if (!labelKey || !valueKey) continue;
+
+    const labels = rows.slice(0, 12).map(r => String(r[labelKey] ?? ''));
+    const values = rows.slice(0, 12).map(r => Number(r[valueKey] ?? 0));
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h3>${esc(ext.name || 'Widget')} <span class="badge widget">widget</span></h3><canvas id="w_${ext.id}" height="110"></canvas>`;
+    wrap.appendChild(card);
+
+    const ctx = document.getElementById(`w_${ext.id}`);
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: valueKey,
+          data: values,
+          borderColor: '#C9A962',
+          backgroundColor: '#C9A96255',
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8B7355' } },
+          y: { ticks: { color: '#8B7355' } },
+        },
+      },
+    });
+    _widgetCharts.push(chart);
+  }
+}
+
+async function overrideGate(value) {
+  const reason = prompt('Reason for override:') || 'Manual admin override';
+  try {
+    await fetch(API + '/api/admin/nightly-audit/override-gate', {
+      method: 'POST', headers: _authHeaders('application/json'),
+      body: JSON.stringify({value, reason})
+    });
+    loadAudit();
+  } catch (e) { alert('Override error: ' + e); }
+}
+
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+loadProposals();
+</script>
+</body>
+</html>

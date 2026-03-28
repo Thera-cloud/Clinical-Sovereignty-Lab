@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ask Little Nate — Summon from Anywhere</title>
+<style>
+:root {
+  --bg: #050505;
+  --surface: #0A0A0A;
+  --elevated: #111111;
+  --gold: #C9A962;
+  --gold-bright: #E8D5A3;
+  --gold-dim: #8B7355;
+  --cyan: #4ECDC4;
+  --purple: #9D4EDD;
+  --white: #FAFAFA;
+  --red: #EF4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--gold-bright);
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+  padding: 24px;
+}
+.container {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 36px;
+  color: var(--gold);
+  margin-bottom: 8px;
+  text-align: center;
+}
+.subtitle {
+  text-align: center;
+  color: var(--gold-dim);
+  font-size: 15px;
+  margin-bottom: 40px;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.15);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.card h2 {
+  font-size: 18px;
+  color: var(--gold);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.card h2 .icon { font-size: 24px; }
+.card p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--gold-bright);
+  margin-bottom: 12px;
+}
+.steps {
+  list-style: none;
+  padding: 0;
+}
+.steps li {
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--gold-bright);
+  border-bottom: 1px solid rgba(201,169,98,0.08);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.steps li:last-child { border-bottom: none; }
+.step-num {
+  background: var(--gold);
+  color: var(--bg);
+  font-weight: 700;
+  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+code {
+  background: var(--elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--cyan);
+}
+.btn {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  text-decoration: none;
+  margin-top: 10px;
+}
+.btn:hover { background: linear-gradient(135deg, var(--gold-bright), var(--gold)); }
+.try-section {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.2);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 32px;
+}
+.try-section h2 { color: var(--cyan); margin-bottom: 12px; }
+.try-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.try-row input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid rgba(201,169,98,0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--gold-bright);
+  outline: none;
+}
+.try-row input:focus { border-color: var(--gold); }
+.try-row input::placeholder { color: var(--gold-dim); }
+.try-row button {
+  background: linear-gradient(135deg, var(--cyan), #2AA89E);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bg);
+  cursor: pointer;
+}
+#nateResponse {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gold-bright);
+  min-height: 60px;
+  white-space: pre-wrap;
+  display: none;
+}
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-live { background: rgba(78,205,196,0.15); color: var(--cyan); }
+.badge-soon { background: rgba(157,78,221,0.15); color: var(--purple); }
+.platform-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+.platform-card {
+  background: var(--elevated);
+  border: 1px solid rgba(201,169,98,0.1);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+.platform-card .name { font-size: 14px; font-weight: 600; color: var(--gold); }
+.platform-card .status { font-size: 11px; color: var(--gold-dim); margin-top: 4px; }
+@media (max-width: 480px) {
+  .platform-grid { grid-template-columns: 1fr; }
+  h1 { font-size: 28px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Ask Little Nate</h1>
+  <p class="subtitle">Summon your AI companion from anywhere — no borders, no boundaries</p>
+
+  <div class="card">
+    <h2><span class="icon">🌐</span> Platforms</h2>
+    <div class="platform-grid">
+      <div class="platform-card">
+        <div class="name">X (Twitter)</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> @mention replies</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">LinkedIn</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> Comment replies</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">Telegram</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> @LittleNateBot</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">Browser</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> Chrome Extension</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">ChatGPT</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> Custom GPT</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">Alexa</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> "Ask Little Nate"</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">Google Assistant</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> "Talk to Little Nate"</div>
+      </div>
+      <div class="platform-card">
+        <div class="name">Siri</div>
+        <div class="status"><span class="badge badge-live">LIVE</span> Shortcut below</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">🐦</span> X (Twitter)</h2>
+    <p>Mention <code>@LittleNate</code> in any tweet with a question, and Nate will reply.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Tweet: <code>@LittleNate How do I manage stress?</code></li>
+      <li><span class="step-num">2</span>Nate monitors mentions every 2 minutes</li>
+      <li><span class="step-num">3</span>AI-generated reply appears on your tweet</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">💬</span> ChatGPT Custom GPT</h2>
+    <p>Search "Little Nate" in the ChatGPT GPT Store. Uses the same AI pipeline.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Open ChatGPT and search the GPT Store for "Little Nate"</li>
+      <li><span class="step-num">2</span>Start a conversation — it routes through Sovereign Sanctuary</li>
+      <li><span class="step-num">3</span>Get the same quality Nate responses inside ChatGPT</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">🔌</span> Chrome Extension</h2>
+    <p>Highlight any text on any webpage, right-click → "Ask Little Nate about this".</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Install the "Ask Little Nate" Chrome extension</li>
+      <li><span class="step-num">2</span>Highlight text on any page and right-click</li>
+      <li><span class="step-num">3</span>Or type <code>@littlenate</code> in any text field and press Enter</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">🗣️</span> Alexa &amp; Google</h2>
+    <p>Voice assistants connect through the same pipeline.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Alexa: "Alexa, ask Little Nate how to manage anxiety"</li>
+      <li><span class="step-num">2</span>Google: "Hey Google, talk to Little Nate"</li>
+      <li><span class="step-num">3</span>Link your account for full access: "link my account to [username]"</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">📱</span> Siri Shortcut</h2>
+    <p>Add "Ask Little Nate" to Siri for quick voice access on iPhone, iPad, and Mac.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Tap the button below to add the Shortcut</li>
+      <li><span class="step-num">2</span>Say "Hey Siri, Ask Little Nate" followed by your question</li>
+      <li><span class="step-num">3</span>Siri reads Nate's response aloud</li>
+    </ol>
+    <a href="javascript:void(0)" class="btn" onclick="alert('Siri Shortcut: Configure in iOS Shortcuts app. Action: Get Contents of URL → POST to https://api.sovereignsanctuary.net/api/summon with your question in the message field.')">Add Siri Shortcut</a>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">🤖</span> Telegram</h2>
+    <p>Message <code>@LittleNateBot</code> directly on Telegram.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Search <code>@LittleNateBot</code> on Telegram</li>
+      <li><span class="step-num">2</span>Send <code>/start</code> to begin</li>
+      <li><span class="step-num">3</span>Link your account: <code>/link your_username</code></li>
+    </ol>
+    <a href="https://t.me/LittleNateBot" target="_blank" class="btn">Open in Telegram</a>
+  </div>
+
+  <div class="card">
+    <h2><span class="icon">🔑</span> API Access</h2>
+    <p>Developers can integrate Little Nate directly via the Summon API.</p>
+    <ol class="steps">
+      <li><span class="step-num">1</span>Endpoint: <code>POST https://api.sovereignsanctuary.net/api/summon</code></li>
+      <li><span class="step-num">2</span>Body: <code>{"message": "your question", "channel": "api"}</code></li>
+      <li><span class="step-num">3</span>Auth: Bearer token (get from <code>/api/summon/my-token</code>)</li>
+    </ol>
+    <a href="https://api.sovereignsanctuary.net/api/static/openapi-summon.yaml" target="_blank" class="btn">View OpenAPI Spec</a>
+  </div>
+
+  <div class="try-section">
+    <h2>Try It Now</h2>
+    <p style="color:var(--gold-dim);font-size:13px;margin-bottom:12px;">3 free queries — no account needed</p>
+    <div class="try-row">
+      <input type="text" id="tryInput" placeholder="Ask Little Nate anything..." />
+      <button onclick="tryAsk()">Ask</button>
+    </div>
+    <div id="nateResponse"></div>
+  </div>
+</div>
+
+<script>
+async function tryAsk() {
+  const input = document.getElementById('tryInput');
+  const resp = document.getElementById('nateResponse');
+  const q = input.value.trim();
+  if (!q) return;
+  resp.style.display = 'block';
+  resp.textContent = 'Thinking...';
+  resp.style.color = '#4ECDC4';
+  try {
+    const r = await fetch('https://api.sovereignsanctuary.net/api/summon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: q, channel: 'web_try' }),
+    });
+    const data = await r.json();
+    resp.style.color = '#E8D5A3';
+    resp.textContent = data.response || 'No response.';
+    if (data.queries_remaining != null) {
+      resp.textContent += '\n\n(' + data.queries_remaining + ' free queries remaining)';
+    }
+  } catch(e) {
+    resp.style.color = '#EF4444';
+    resp.textContent = 'Could not reach Little Nate. Try again.';
+  }
+  input.value = '';
+}
+document.getElementById('tryInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') tryAsk();
+});
+</script>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:24px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+</body>
+</html>

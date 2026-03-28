@@ -678,6 +678,10 @@ function _recoverAuth() {
 }
 _recoverAuth();
 
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
+
 var API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:8000' : 'https://api.sovereignsanctuary.net';
 

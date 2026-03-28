@@ -506,6 +506,29 @@
         </div>
     </div>
 
+    <!-- YubiKey Verification Overlay (Layer 5 — physical presence) -->
+    <div id="yubiKeyOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.95);z-index:1400;overflow-y:auto;padding:40px 20px;">
+        <div style="max-width:440px;margin:80px auto 0;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;">
+            <div style="padding:40px 32px 0;text-align:center;">
+                <div style="font-size:10px;letter-spacing:3px;color:#C9A962;text-transform:uppercase;margin-bottom:16px;">Physical Key Verification</div>
+                <div style="font-size:36px;margin-bottom:12px;">🔑</div>
+                <div style="font-family:var(--font-display);font-size:20px;font-weight:300;color:var(--text-primary);margin-bottom:8px;line-height:1.4;">
+                    Tap Your YubiKey
+                </div>
+                <div style="font-size:12px;color:var(--text-secondary);margin-bottom:24px;">
+                    Touch the metal contact on your security key to confirm physical presence.
+                </div>
+            </div>
+            <div style="padding:0 32px 32px;text-align:center;">
+                <div class="error-message" id="yubiKeyError" style="display:none;"></div>
+                <button id="yubiKeyTapBtn" class="login-btn" style="width:100%;margin-top:8px;padding:16px 32px;" onclick="startYubiKeyVerification()">
+                    Begin Verification
+                </button>
+                <div id="yubiKeyStatus" style="font-size:12px;color:var(--text-muted);margin-top:16px;min-height:20px;"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // =============================================================================
         // WEBSOCKET CONNECTION
@@ -519,6 +542,142 @@
         let socket = null;
         let _wsRetry = 0;
         const selectedRole = 'ADMIN'; // Hardcoded — admin-only portal
+
+        // =============================================================================
+        // YUBIKEY VERIFICATION (Layer 5 — physical presence)
+        // =============================================================================
+        function _ykB64toBuf(b64) {
+            var s = b64.replace(/-/g,'+').replace(/_/g,'/');
+            while (s.length % 4) s += '=';
+            var bin = atob(s), buf = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return buf.buffer;
+        }
+        function _ykBufToB64(buf) {
+            var b = new Uint8Array(buf), s = '';
+            for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+            return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+        }
+        async function _ykApiPost(path, body) {
+            var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            try {
+                var resp = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t },
+                    body: JSON.stringify(body)
+                });
+                if (!resp.ok) {
+                    var errText = '';
+                    try { var ej = await resp.json(); errText = ej.detail || JSON.stringify(ej); } catch(e2) { errText = resp.statusText; }
+                    console.warn('YubiKey API ' + path + ' returned ' + resp.status + ': ' + errText);
+                    return { _error: true, status: resp.status, detail: errText };
+                }
+                return await resp.json();
+            } catch(e) {
+                console.error('YubiKey API fetch failed:', e);
+                return { _error: true, status: 0, detail: e.message };
+            }
+        }
+
+        function showYubiKeyChallenge() {
+            document.getElementById('passphraseOverlay').style.display = 'none';
+            document.getElementById('smsOverlay').style.display = 'none';
+            var errEl = document.getElementById('yubiKeyError');
+            if (errEl) { errEl.style.display = 'none'; }
+            document.getElementById('yubiKeyStatus').textContent = '';
+            document.getElementById('yubiKeyTapBtn').disabled = false;
+            document.getElementById('yubiKeyTapBtn').style.opacity = '1';
+            document.getElementById('yubiKeyTapBtn').textContent = 'Begin Verification';
+            document.getElementById('yubiKeyOverlay').style.display = 'block';
+        }
+
+        function _ykNavigateToCommand() {
+            try { sessionStorage.setItem('sc_yubikey_verified', 'true'); } catch(e) {}
+            var _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
+            setTimeout(function() { window.location.replace('command.html#t=' + encodeURIComponent(_navToken)); }, 300);
+        }
+
+        async function startYubiKeyVerification() {
+            var btn = document.getElementById('yubiKeyTapBtn');
+            var statusEl = document.getElementById('yubiKeyStatus');
+            var errEl = document.getElementById('yubiKeyError');
+            errEl.style.display = 'none';
+
+            if (!window.PublicKeyCredential) {
+                errEl.textContent = 'WebAuthn not supported in this browser.';
+                errEl.style.display = 'block';
+                return;
+            }
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            statusEl.textContent = 'Requesting challenge...';
+            statusEl.style.color = '#C9A962';
+
+            try {
+                var optionsResp = await _ykApiPost('/api/admin/webauthn/auth-options', {});
+                if (!optionsResp || optionsResp._error || !optionsResp.options) {
+                    var msg = 'Failed to get auth challenge.';
+                    if (optionsResp && optionsResp._error) {
+                        msg += ' (' + optionsResp.status + ': ' + (optionsResp.detail || 'unknown') + ')';
+                    }
+                    errEl.textContent = msg;
+                    errEl.style.display = 'block';
+                    btn.disabled = false; btn.style.opacity = '1';
+                    statusEl.textContent = '';
+                    return;
+                }
+                var options = optionsResp.options;
+                options.challenge = _ykB64toBuf(options.challenge);
+                if (options.allowCredentials) {
+                    options.allowCredentials = options.allowCredentials.map(function(c) {
+                        return Object.assign({}, c, { id: _ykB64toBuf(c.id) });
+                    });
+                }
+                statusEl.textContent = 'Touch your YubiKey now...';
+                btn.textContent = '🔑 Waiting for key...';
+
+                var credential = await navigator.credentials.get({ publicKey: options });
+                var assertion = {
+                    id: credential.id,
+                    rawId: _ykBufToB64(credential.rawId),
+                    type: credential.type,
+                    response: {
+                        clientDataJSON: _ykBufToB64(credential.response.clientDataJSON),
+                        authenticatorData: _ykBufToB64(credential.response.authenticatorData),
+                        signature: _ykBufToB64(credential.response.signature),
+                    },
+                };
+                statusEl.textContent = 'Verifying...';
+                statusEl.style.color = '#4ECDC4';
+
+                var result = await _ykApiPost('/api/admin/webauthn/auth-verify', { credential: assertion });
+                if (result && !result._error && result.verified) {
+                    statusEl.textContent = '\u2713 Key verified — entering Sovereign Command...';
+                    statusEl.style.color = '#22C55E';
+                    _ykNavigateToCommand();
+                } else {
+                    var vmsg = 'Key verification failed.';
+                    if (result && result._error) {
+                        vmsg += ' (' + result.status + ': ' + (result.detail || 'unknown') + ')';
+                    }
+                    errEl.textContent = vmsg;
+                    errEl.style.display = 'block';
+                    btn.disabled = false; btn.style.opacity = '1';
+                    btn.textContent = 'Begin Verification';
+                    statusEl.textContent = '';
+                }
+            } catch (err) {
+                if (err.name === 'NotAllowedError') {
+                    statusEl.textContent = 'Verification cancelled.';
+                    statusEl.style.color = 'var(--text-muted)';
+                } else {
+                    errEl.textContent = 'Error: ' + err.message;
+                    errEl.style.display = 'block';
+                }
+                btn.disabled = false; btn.style.opacity = '1';
+                btn.textContent = 'Begin Verification';
+            }
+        }
 
         // Passphrase challenge state (verification happens server-side)
         const MAX_PASSPHRASE_ATTEMPTS = 5;
@@ -620,8 +779,7 @@
                 } else if (data.type === 'sms_verification_result') {
                     if (data.success) {
                         document.getElementById('smsOverlay').style.display = 'none';
-                        const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
-                        setTimeout(() => { window.location.replace('command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                        showYubiKeyChallenge();
                     } else {
                         const smsErr = document.getElementById('smsError');
                         smsErr.textContent = data.message || 'Incorrect code.';
@@ -640,8 +798,7 @@
                             document.getElementById('smsOverlay').style.display = 'block';
                             document.getElementById('smsCodeInput').focus();
                         } else {
-                            const _navToken = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || '';
-                            setTimeout(() => { window.location.replace('command.html#t=' + encodeURIComponent(_navToken)); }, 150);
+                            showYubiKeyChallenge();
                         }
                     } else {
                         // Wrong answer — handle attempts/lockout client-side

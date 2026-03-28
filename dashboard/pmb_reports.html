@@ -191,6 +191,10 @@ function _recoverAuth() {
 }
 _recoverAuth();
 
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
+
 var API = '';
 (function() { var h = location.hostname; if (!h || h === 'localhost' || h === '127.0.0.1' || location.protocol === 'file:') API = 'https://api.sovereignsanctuary.net'; else if (h.indexOf('sovereignsanctuary') >= 0) API = ''; else API = location.protocol + '//' + h + ':8000'; })();
 function _authHeaders(ct) { var t = sessionStorage.getItem('token') || localStorage.getItem('sc_token') || ''; var h = { 'Authorization': 'Bearer ' + t }; if (ct) h['Content-Type'] = ct; return h; }

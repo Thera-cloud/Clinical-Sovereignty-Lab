@@ -59,7 +59,24 @@ tr:hover { background: rgba(255,255,255,0.02); }
 .status-msg { padding: 8px 12px; border-radius: 6px; font-size: 12px; margin-top: 8px; }
 .status-msg.success { background: var(--green-dim); color: var(--green); }
 .status-msg.error { background: var(--red-dim); color: var(--red); }
-@media (max-width: 768px) { .form-row { flex-direction: column; } }
+.overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.stat-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.stat-card-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-secondary); font-weight: 600; }
+.stat-card-value { font-size: 24px; font-weight: 700; font-family: var(--font-mono); }
+.stat-card-sub { font-size: 11px; color: var(--text-muted); }
+.stripe-indicator { display: flex; align-items: center; gap: 8px; }
+.stripe-dot { width: 10px; height: 10px; border-radius: 50%; }
+.stripe-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.stripe-dot.disconnected { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.pricing-table { width: 100%; font-size: 12px; margin-top: 8px; }
+.pricing-table td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.pricing-table .plan-name { color: var(--gold-text); font-weight: 600; }
+.pricing-table .plan-price { font-family: var(--font-mono); color: var(--text-primary); }
+.pricing-table .plan-features { color: var(--text-muted); font-size: 10px; }
+.feature-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 2px; }
+.feature-dot.on { background: var(--green); }
+.feature-dot.off { background: var(--red-dim); }
+@media (max-width: 768px) { .form-row { flex-direction: column; } .overview-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -74,13 +91,27 @@ tr:hover { background: rgba(255,255,255,0.02); }
 
 <div class="main-content">
     <div class="tab-bar">
-        <button class="tab-btn active" onclick="dcSwitchTab('promos', this)">Promo Codes</button>
+        <button class="tab-btn active" onclick="dcSwitchTab('overview', this)">Overview</button>
+        <button class="tab-btn" onclick="dcSwitchTab('promos', this)">Promo Codes</button>
         <button class="tab-btn" onclick="dcSwitchTab('schools', this)">School Codes</button>
         <button class="tab-btn" onclick="dcSwitchTab('corporates', this)">Corporate Sponsors</button>
     </div>
 
+    <!-- TAB 0: Overview -->
+    <div class="tab-panel active" id="tab-overview">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><span class="icon" style="color:var(--gold);">⚡</span> Stripe Integration &amp; Cost Policies</div>
+                <button class="btn btn-cyan" onclick="dcLoadOverview()">Refresh</button>
+            </div>
+            <div class="card-body" id="overview-body">
+                <div style="text-align:center;color:var(--text-muted);padding:20px;">Loading status...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- TAB 1: Promo Codes -->
-    <div class="tab-panel active" id="tab-promos">
+    <div class="tab-panel" id="tab-promos">
         <div class="card">
             <div class="card-header">
                 <div class="card-title"><span class="icon" style="color:var(--gold);">🎟️</span> Create Promo Code</div>
@@ -89,6 +120,7 @@ tr:hover { background: rgba(255,255,255,0.02); }
                 <div class="form-row">
                     <div class="form-group"><label>Name</label><input id="pc-name" placeholder="Launch Sale" maxlength="200"></div>
                     <div class="form-group"><label>Code</label><input id="pc-code" placeholder="LAUNCH80" maxlength="40" style="text-transform:uppercase;"></div>
+                    <div class="form-group"><label>Coach ID (optional)</label><input id="pc-coach-id" placeholder="COACH_COACHN_ID" maxlength="128"></div>
                     <div class="form-group"><label>Type</label>
                         <select id="pc-type"><option value="percent">Percent Off</option><option value="amount">Fixed Amount Off</option></select>
                     </div>
@@ -113,13 +145,17 @@ tr:hover { background: rgba(255,255,255,0.02); }
         <div class="card">
             <div class="card-header">
                 <div class="card-title"><span class="icon" style="color:var(--cyan);">📋</span> All Promo Codes</div>
-                <button class="btn btn-cyan" onclick="dcLoadPromos()">Refresh</button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="pc-filter-coach-id" placeholder="Filter coach_id" maxlength="128"
+                           style="padding:6px 8px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;width:170px;">
+                    <button class="btn btn-cyan" onclick="dcLoadPromos()">Refresh</button>
+                </div>
             </div>
             <div class="card-body" style="overflow-x:auto;">
                 <table><thead><tr>
-                    <th>Code</th><th>Name</th><th>Discount</th><th>Duration</th><th>Ends</th><th>Redeemed</th><th>Stripe</th><th>Status</th><th>Action</th>
+                    <th>Code</th><th>Name</th><th>Coach</th><th>Discount</th><th>Duration</th><th>Ends</th><th>Redeemed</th><th>Stripe</th><th>Status</th><th>Action</th>
                 </tr></thead><tbody id="pc-table">
-                    <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</td></tr>
+                    <tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">Loading...</td></tr>
                 </tbody></table>
             </div>
         </div>
@@ -218,8 +254,12 @@ var _dcToken = '';
     if (backBtn) backBtn.onclick = function() { window.location.href = 'command.html' + window.location.hash; };
 })();
 
+var _ykVerified = false;
+try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+if (!_ykVerified) { window.location.href = 'command.html'; }
+
 function _esc(s) {
-    if (!s) return '';
+    if (s === null || s === undefined || s === '') return '';
     var d = document.createElement('div');
     d.appendChild(document.createTextNode(String(s)));
     return d.innerHTML;
@@ -230,9 +270,8 @@ async function _dcFetch(url, opts) {
         var headers = { 'Authorization': 'Bearer ' + _dcToken, 'Content-Type': 'application/json' };
         var r = await fetch(url, Object.assign({ headers: headers }, opts || {}));
         if (r.status === 401 || r.status === 403) {
-            alert('Session expired. Please log in again.');
-            window.location.href = 'command.html';
-            return null;
+            console.warn('Auth issue on', url, '— token may still be propagating');
+            return { _error: true, status: r.status, detail: 'Authentication required — try refreshing the page' };
         }
         if (!r.ok) {
             var err = '';
@@ -248,6 +287,7 @@ function dcSwitchTab(tabId, btn) {
     document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
     document.getElementById('tab-' + tabId).classList.add('active');
     if (btn) btn.classList.add('active');
+    if (tabId === 'overview') dcLoadOverview();
     if (tabId === 'promos') dcLoadPromos();
     if (tabId === 'schools') dcLoadSchools();
     if (tabId === 'corporates') dcLoadCorporates();
@@ -270,6 +310,84 @@ function _showStatus(elId, msg, isError) {
     setTimeout(function() { el.textContent = ''; el.className = ''; }, 5000);
 }
 
+// ---- Overview ----
+
+async function dcLoadOverview() {
+    var body = document.getElementById('overview-body');
+    body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">Loading status...</div>';
+    var res = await _dcFetch('/api/admin/discounts/status');
+    if (!res || res._error) {
+        body.innerHTML = '<div style="text-align:center;color:var(--red);padding:20px;">Failed to load discount status</div>';
+        return;
+    }
+
+    var stripeColor = res.stripe_connected ? 'connected' : 'disconnected';
+    var stripeLabel = res.stripe_connected ? 'Connected' : 'Not Connected';
+
+    var promo = res.promo_codes || {};
+    var school = res.school_codes || {};
+    var corp = res.corporate_sponsors || {};
+
+    var featureKeys = ['voice','vision','me2me','family','secure_search','night_school'];
+    var featureLabels = { voice:'Voice', vision:'Vision', me2me:'Me2Me', family:'Family', secure_search:'Secure Search', night_school:'Night School' };
+    var tiers = res.tier_features || {};
+    var labels = res.tier_labels || {};
+    var pricing = res.plan_pricing || {};
+
+    var pricingRows = '';
+    var tierOrder = ['TRIAL','STANDARD','TOP_TIER'];
+    tierOrder.forEach(function(t) {
+        var feats = tiers[t] || {};
+        var dots = featureKeys.map(function(k) {
+            return '<span class="feature-dot ' + (feats[k] ? 'on' : 'off') + '" title="' + _esc(featureLabels[k]) + '"></span>';
+        }).join(' ');
+        pricingRows += '<tr><td class="plan-name">' + _esc(labels[t] || t) + '</td>'
+            + '<td class="plan-price">' + _esc(pricing[t] || '—') + '</td>'
+            + '<td class="plan-features">' + dots + '</td></tr>';
+    });
+
+    var html = '<div class="overview-grid">'
+        + '<div class="stat-card">'
+        +   '<div class="stat-card-label">Stripe Connection</div>'
+        +   '<div class="stripe-indicator"><span class="stripe-dot ' + stripeColor + '"></span><span style="font-size:14px;font-weight:600;color:' + (res.stripe_connected ? 'var(--green)' : 'var(--red)') + ';">' + stripeLabel + '</span></div>'
+        +   '<div class="stat-card-sub">' + (res.stripe_connected ? 'Coupons and promo codes sync to Stripe automatically' : 'Set STRIPE_SECRET_KEY in .env to enable Stripe sync') + '</div>'
+        + '</div>'
+        + '<div class="stat-card">'
+        +   '<div class="stat-card-label">Promo Codes</div>'
+        +   '<div class="stat-card-value" style="color:var(--gold);">' + (promo.total || 0) + '</div>'
+        +   '<div class="stat-card-sub">' + (promo.active || 0) + ' active &middot; ' + (promo.stripe_synced || 0) + ' Stripe-synced</div>'
+        + '</div>'
+        + '<div class="stat-card">'
+        +   '<div class="stat-card-label">School Codes</div>'
+        +   '<div class="stat-card-value" style="color:var(--purple);">' + (school.total || 0) + '</div>'
+        +   '<div class="stat-card-sub">' + (school.active || 0) + ' active</div>'
+        + '</div>'
+        + '<div class="stat-card">'
+        +   '<div class="stat-card-label">Corporate Sponsors</div>'
+        +   '<div class="stat-card-value" style="color:var(--green);">' + (corp.total || 0) + '</div>'
+        +   '<div class="stat-card-sub">' + (corp.active || 0) + ' active &middot; ' + (corp.stripe_synced || 0) + ' Stripe-synced &middot; ' + (corp.total_employees || 0) + ' employees</div>'
+        + '</div>'
+        + '</div>';
+
+    html += '<div class="card" style="margin-top:16px;"><div class="card-header"><div class="card-title"><span class="icon" style="color:var(--cyan);">💰</span> Plan Pricing &amp; Feature Matrix</div></div>'
+        + '<div class="card-body"><table class="pricing-table"><thead><tr><th>Tier</th><th>Price</th><th>Features</th></tr></thead><tbody>'
+        + pricingRows
+        + '</tbody></table>'
+        + '<div style="margin-top:10px;font-size:10px;color:var(--text-muted);">'
+        + featureKeys.map(function(k) { return '<span class="feature-dot on"></span> ' + _esc(featureLabels[k]); }).join(' &nbsp;&middot;&nbsp; ')
+        + '</div></div></div>';
+
+    html += '<div class="card" style="margin-top:16px;"><div class="card-header"><div class="card-title"><span class="icon" style="color:var(--orange);">📘</span> How Discounts Apply at Checkout</div></div>'
+        + '<div class="card-body" style="font-size:12px;color:var(--text-secondary);line-height:1.7;">'
+        + '<p><strong style="color:var(--gold-text);">Promo Codes</strong> — Entered by the user during subscription checkout. Creates a Stripe coupon + promotion code. Supports percent-off or fixed-amount, with optional duration (once, repeating months, forever) and max redemptions.</p>'
+        + '<p style="margin-top:8px;"><strong style="color:var(--purple);">School Codes</strong> — Used during signup (code field). Applies a percent discount to the subscription. Tracks enrollment count against an optional cap.</p>'
+        + '<p style="margin-top:8px;"><strong style="color:var(--green);">Corporate Sponsors</strong> — Assigned via admin or registration. Company pays a portion or full amount of the employee\'s subscription. Syncs as a Stripe coupon. The billing flow uses <code style="font-family:var(--font-mono);color:var(--cyan);font-size:11px;">calculate_subsidized_rate()</code> to split costs between company and employee (minimum 25% subsidy).</p>'
+        + '<p style="margin-top:8px;color:var(--text-muted);font-size:11px;">Discounts marked <span class="badge badge-green" style="font-size:9px;">Synced</span> have a corresponding Stripe coupon/promotion code. <span class="badge badge-red" style="font-size:9px;">Local</span> means the discount exists in the database only (Stripe key may not be configured).</p>'
+        + '</div></div>';
+
+    body.innerHTML = html;
+}
+
 // ---- Promo Codes ----
 
 async function dcCreatePromo() {
@@ -289,6 +407,8 @@ async function dcCreatePromo() {
         duration: document.getElementById('pc-duration').value,
         ends_at: new Date(endsAt).toISOString(),
     };
+    var coachId = (document.getElementById('pc-coach-id').value || '').trim();
+    if (coachId) body.coach_id = coachId;
     var maxR = parseInt(document.getElementById('pc-max').value);
     if (maxR > 0) body.max_redemptions = maxR;
     if (body.duration === 'repeating') body.duration_in_months = parseInt(document.getElementById('pc-months').value) || 3;
@@ -296,32 +416,40 @@ async function dcCreatePromo() {
     var res = await _dcFetch('/api/admin/discounts/promo', { method: 'POST', body: JSON.stringify(body) });
     btn.disabled = false;
     if (!res || res._error) { _showStatus('pc-status', res ? res.detail : 'Failed', true); return; }
-    _showStatus('pc-status', 'Promo code created' + (res.promo && res.promo.stripe_synced ? ' (Stripe synced)' : ''), false);
+    var msg = 'Promo code created';
+    if (res.promo && res.promo.stripe_synced) { msg += ' (Stripe synced)'; }
+    else if (res.promo && res.promo.stripe_error) { msg += ' — ⚠️ Stripe sync failed: ' + res.promo.stripe_error + '. Code will NOT apply at checkout until Stripe is configured.'; }
+    _showStatus('pc-status', msg, !!(res.promo && !res.promo.stripe_synced));
     document.getElementById('pc-code').value = '';
     document.getElementById('pc-name').value = '';
+    document.getElementById('pc-coach-id').value = '';
     dcLoadPromos();
 }
 
 async function dcLoadPromos() {
-    var res = await _dcFetch('/api/admin/discounts/promos');
-    if (!res || res._error) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--red);padding:20px;">Failed to load</td></tr>'; return; }
+    var coachFilter = ((document.getElementById('pc-filter-coach-id') || {}).value || '').trim();
+    var url = '/api/admin/discounts/promos' + (coachFilter ? ('?coach_id=' + encodeURIComponent(coachFilter)) : '');
+    var res = await _dcFetch(url);
+    if (!res || res._error) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--red);padding:20px;">Failed to load</td></tr>'; return; }
     var promos = res.promos || [];
-    if (promos.length === 0) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">No promo codes created yet</td></tr>'; return; }
+    if (promos.length === 0) { document.getElementById('pc-table').innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">No promo codes created yet</td></tr>'; return; }
     var html = '';
     promos.forEach(function(p) {
         var discountStr = p.discount_type === 'percent' ? _esc(p.discount_value) + '%' : '$' + (p.discount_value / 100).toFixed(2);
         var endsStr = p.ends_at ? new Date(p.ends_at).toLocaleDateString() : '—';
         var redeemed = (p.current_redemptions || 0) + '/' + (p.max_redemptions || '∞');
-        var stripeBadge = p.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var stripeBadge = p.stripe_synced ? '<span class="badge badge-green">Synced</span>' : (p.active ? '<span class="badge badge-red" title="No Stripe coupon — code will not apply at checkout">⚠ Not Synced</span>' : '<span class="badge badge-red">Local</span>');
+        var syncBtn = (!p.stripe_synced && p.active) ? ' <button class="btn btn-gold" style="margin-left:4px;font-size:11px;padding:2px 8px;" onclick="dcSyncPromo(\'' + _esc(p.id) + '\')">Sync</button>' : '';
         var statusBadge = p.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
         html += '<tr>';
         html += '<td style="font-family:var(--font-mono);color:var(--gold);font-weight:700;">' + _esc(p.promo_code) + '</td>';
         html += '<td>' + _esc(p.name) + '</td>';
+        html += '<td style="font-family:var(--font-mono);">' + _esc(p.coach_id || '—') + '</td>';
         html += '<td>' + discountStr + ' off</td>';
         html += '<td>' + _esc(p.duration || 'once') + '</td>';
         html += '<td>' + endsStr + '</td>';
         html += '<td>' + redeemed + '</td>';
-        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + stripeBadge + syncBtn + '</td>';
         html += '<td>' + statusBadge + '</td>';
         html += '<td><button class="btn ' + (p.active ? 'btn-red' : 'btn-green') + '" onclick="dcTogglePromo(\'' + _esc(p.id) + '\')">' + (p.active ? 'Deactivate' : 'Activate') + '</button></td>';
         html += '</tr>';
@@ -331,6 +459,18 @@ async function dcLoadPromos() {
 
 async function dcTogglePromo(id) {
     await _dcFetch('/api/admin/discounts/promo/' + encodeURIComponent(id), { method: 'PATCH' });
+    dcLoadPromos();
+}
+
+async function dcSyncPromo(id) {
+    var res = await _dcFetch('/api/admin/discounts/promo/' + encodeURIComponent(id) + '/sync-stripe', { method: 'POST' });
+    if (res && res.status === 'synced') {
+        _showStatus('pc-status', 'Synced to Stripe: ' + res.stripe_coupon_id, false);
+    } else if (res && res.status === 'already_synced') {
+        _showStatus('pc-status', 'Already synced', false);
+    } else {
+        _showStatus('pc-status', 'Sync failed: ' + ((res && res.detail) || 'unknown error'), true);
+    }
     dcLoadPromos();
 }
 
@@ -355,7 +495,10 @@ async function dcCreateSchool() {
     var res = await _dcFetch('/api/admin/discounts/school', { method: 'POST', body: JSON.stringify(body) });
     btn.disabled = false;
     if (!res || res._error) { _showStatus('sc-status', res ? res.detail : 'Failed', true); return; }
-    _showStatus('sc-status', 'School code created' + (res.school && res.school.stripe_synced ? ' (Stripe synced)' : ''), false);
+    var scMsg = 'School code created';
+    if (res.school && res.school.stripe_synced) { scMsg += ' (Stripe synced)'; }
+    else if (res.school && res.school.stripe_error) { scMsg += ' — ⚠️ Stripe sync failed: ' + res.school.stripe_error + '. Code will NOT apply at checkout until Stripe is configured.'; }
+    _showStatus('sc-status', scMsg, !!(res.school && !res.school.stripe_synced));
     document.getElementById('sc-code').value = '';
     document.getElementById('sc-name').value = '';
     dcLoadSchools();
@@ -369,14 +512,15 @@ async function dcLoadSchools() {
     var html = '';
     schools.forEach(function(s) {
         var enrolled = (s.current_students || 0) + '/' + (s.max_students || '∞');
-        var stripeBadge = s.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var stripeBadge = s.stripe_synced ? '<span class="badge badge-green">Synced</span>' : (s.active ? '<span class="badge badge-red" title="No Stripe coupon — code will not apply at checkout">⚠ Not Synced</span>' : '<span class="badge badge-red">Local</span>');
+        var syncBtn = (!s.stripe_synced && s.active) ? ' <button class="btn btn-gold" style="margin-left:4px;font-size:11px;padding:2px 8px;" onclick="dcSyncSchool(\'' + _esc(s.id) + '\')">Sync</button>' : '';
         var statusBadge = s.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
         html += '<tr>';
         html += '<td style="font-family:var(--font-mono);color:var(--purple);font-weight:700;">' + _esc(s.school_code) + '</td>';
         html += '<td>' + _esc(s.school_name) + '</td>';
         html += '<td>' + _esc(s.discount_percent) + '% off</td>';
         html += '<td>' + enrolled + '</td>';
-        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + stripeBadge + syncBtn + '</td>';
         html += '<td>' + statusBadge + '</td>';
         html += '<td><button class="btn ' + (s.active ? 'btn-red' : 'btn-green') + '" onclick="dcToggleSchool(\'' + _esc(s.id) + '\')">' + (s.active ? 'Deactivate' : 'Activate') + '</button></td>';
         html += '</tr>';
@@ -386,6 +530,18 @@ async function dcLoadSchools() {
 
 async function dcToggleSchool(id) {
     await _dcFetch('/api/admin/discounts/school/' + encodeURIComponent(id), { method: 'PATCH' });
+    dcLoadSchools();
+}
+
+async function dcSyncSchool(id) {
+    var res = await _dcFetch('/api/admin/discounts/school/' + encodeURIComponent(id) + '/sync-stripe', { method: 'POST' });
+    if (res && res.status === 'synced') {
+        _showStatus('sc-status', 'Synced to Stripe: ' + res.stripe_coupon_id, false);
+    } else if (res && res.status === 'already_synced') {
+        _showStatus('sc-status', 'Already synced', false);
+    } else {
+        _showStatus('sc-status', 'Sync failed: ' + ((res && res.detail) || 'unknown error'), true);
+    }
     dcLoadSchools();
 }
 
@@ -415,7 +571,10 @@ async function dcCreateCorporate() {
     var res = await _dcFetch('/api/admin/discounts/corporate', { method: 'POST', body: JSON.stringify(body) });
     btn.disabled = false;
     if (!res || res._error) { _showStatus('cc-status', res ? res.detail : 'Failed', true); return; }
-    _showStatus('cc-status', 'Corporate sponsor created' + (res.corporate && res.corporate.stripe_synced ? ' (Stripe synced)' : ''), false);
+    var ccMsg = 'Corporate sponsor created';
+    if (res.corporate && res.corporate.stripe_synced) { ccMsg += ' (Stripe synced)'; }
+    else if (res.corporate && res.corporate.stripe_error) { ccMsg += ' — ⚠️ Stripe sync failed: ' + res.corporate.stripe_error + '. Code will NOT apply at checkout until Stripe is configured.'; }
+    _showStatus('cc-status', ccMsg, !!(res.corporate && !res.corporate.stripe_synced));
     document.getElementById('cc-code').value = '';
     document.getElementById('cc-name').value = '';
     dcLoadCorporates();
@@ -428,16 +587,18 @@ async function dcLoadCorporates() {
     if (corps.length === 0) { document.getElementById('cc-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">No corporate sponsors created yet</td></tr>'; return; }
     var html = '';
     corps.forEach(function(c) {
-        var discStr = c.pays_full ? 'Fully Sponsored' : (c.discount_type === 'percent' ? _esc(c.discount_value) + '%' : '$' + (c.discount_value / 100).toFixed(2)) + ' off';
+        var dv = (c.discount_value === null || c.discount_value === undefined) ? 0 : c.discount_value;
+        var discStr = c.pays_full ? 'Fully Sponsored' : (c.discount_type === 'percent' ? dv + '%' : '$' + (dv / 100).toFixed(2)) + ' off';
         var enrolled = (c.current_employees || 0) + '/' + (c.max_employees || '∞');
-        var stripeBadge = c.stripe_synced ? '<span class="badge badge-green">Synced</span>' : '<span class="badge badge-red">Local</span>';
+        var stripeBadge = c.stripe_synced ? '<span class="badge badge-green">Synced</span>' : (c.active ? '<span class="badge badge-red" title="No Stripe coupon — code will not apply at checkout">⚠ Not Synced</span>' : '<span class="badge badge-red">Local</span>');
         var statusBadge = c.active ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-red">Inactive</span>';
+        var syncBtn = (!c.stripe_synced && c.active && (dv > 0 || c.pays_full)) ? ' <button class="btn btn-gold" style="margin-left:4px;font-size:11px;padding:2px 8px;" onclick="dcSyncCorporate(\'' + _esc(c.id) + '\')">Sync</button>' : '';
         html += '<tr>';
         html += '<td style="font-family:var(--font-mono);color:var(--green);font-weight:700;">' + _esc(c.sponsor_code) + '</td>';
         html += '<td>' + _esc(c.company_name) + '</td>';
         html += '<td>' + discStr + '</td>';
         html += '<td>' + enrolled + '</td>';
-        html += '<td>' + stripeBadge + '</td>';
+        html += '<td>' + stripeBadge + syncBtn + '</td>';
         html += '<td>' + statusBadge + '</td>';
         html += '<td><button class="btn ' + (c.active ? 'btn-red' : 'btn-green') + '" onclick="dcToggleCorporate(\'' + _esc(c.id) + '\')">' + (c.active ? 'Deactivate' : 'Activate') + '</button></td>';
         html += '</tr>';
@@ -450,9 +611,21 @@ async function dcToggleCorporate(id) {
     dcLoadCorporates();
 }
 
+async function dcSyncCorporate(id) {
+    var res = await _dcFetch('/api/admin/discounts/corporate/' + encodeURIComponent(id) + '/sync-stripe', { method: 'POST' });
+    if (res && res.status === 'synced') {
+        _showStatus('cc-status', 'Synced to Stripe: ' + res.stripe_coupon_id, false);
+    } else if (res && res.status === 'already_synced') {
+        _showStatus('cc-status', 'Already synced', false);
+    } else {
+        _showStatus('cc-status', 'Sync failed: ' + ((res && res.detail) || 'unknown error'), true);
+    }
+    dcLoadCorporates();
+}
+
 // Auto-load on page ready
 document.addEventListener('DOMContentLoaded', function() {
-    dcLoadPromos();
+    dcLoadOverview();
 });
 </script>
 </body>

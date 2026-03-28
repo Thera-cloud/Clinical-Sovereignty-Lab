@@ -225,6 +225,9 @@ var _gkmDonationChart = null;
         } catch(e) {}
     }
     if (!_gkmToken) { try { _gkmToken = localStorage.getItem('sc_token') || ''; } catch(e) {} }
+    var _ykVerified = false;
+    try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
+    if (!_ykVerified) { window.location.href = 'command.html'; return; }
     var backBtn = document.getElementById('backBtn');
     if (backBtn) backBtn.onclick = function() { window.location.href = 'command.html' + window.location.hash; };
 })();

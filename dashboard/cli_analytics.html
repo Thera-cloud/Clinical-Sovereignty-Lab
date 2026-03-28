@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLI Analytics — Sovereign Command</title>
+<style>
+:root{--bg0:#050505;--bg1:#0A0A0A;--bg2:#111111;--bg3:#1a1a1a;--gold:#C9A962;--gold-b:#E8D5A3;--gold-d:#8B7355;--cyan:#4ECDC4;--purple:#9D4EDD;--red:#EF4444;--green:#22C55E;--blue:#3B82F6;--text:#E0E0E0;--text2:#888;--bdr:rgba(201,169,98,0.12);--bdr2:rgba(201,169,98,0.25);--rl:8px;--shadow:0 2px 12px rgba(0,0,0,0.4)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',system-ui,-apple-system,sans-serif;background:var(--bg0);color:var(--text);min-height:100vh}
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:var(--bg1);border-bottom:1px solid var(--bdr)}
+.top-bar h1{font-family:'Cormorant Garamond',serif;font-size:1.4rem;color:var(--gold)}
+.top-bar .back-btn{color:var(--gold-d);text-decoration:none;font-size:0.85rem;cursor:pointer}
+.top-bar .back-btn:hover{color:var(--gold)}
+.controls{display:flex;gap:12px;align-items:center;padding:16px 24px;background:var(--bg1);border-bottom:1px solid var(--bdr)}
+.controls select,.controls button{background:var(--bg2);border:1px solid var(--bdr);color:var(--text);padding:6px 14px;border-radius:var(--rl);font-size:0.82rem;cursor:pointer}
+.controls button:hover{border-color:var(--gold);color:var(--gold)}
+.controls select:focus{outline:none;border-color:var(--gold)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:16px 24px}
+.stat-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);padding:18px;text-align:center}
+.stat-card .value{font-size:1.8rem;font-weight:700;color:var(--gold);margin:6px 0}
+.stat-card .label{font-size:0.78rem;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px}
+.stat-card.cost .value{color:var(--green)}
+.stat-card.sessions .value{color:var(--cyan)}
+.stat-card.hipaa .value{color:var(--purple)}
+.section{margin:16px 24px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--rl);overflow:hidden}
+.section-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--bdr);background:var(--bg3)}
+.section-head h2{font-family:'Cormorant Garamond',serif;font-size:1.1rem;color:var(--gold-b)}
+.section-body{padding:16px 18px;max-height:420px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:0.82rem}
+th{text-align:left;padding:8px 10px;color:var(--gold-d);border-bottom:1px solid var(--bdr);font-weight:500;text-transform:uppercase;font-size:0.72rem;letter-spacing:0.5px}
+td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04);color:var(--text)}
+tr:hover td{background:rgba(201,169,98,0.03)}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72rem;font-weight:500}
+.badge-ask{background:rgba(59,130,246,0.15);color:var(--blue)}
+.badge-plan{background:rgba(157,78,221,0.15);color:var(--purple)}
+.badge-ln_fab{background:rgba(201,169,98,0.15);color:var(--gold)}
+.badge-debug{background:rgba(239,68,68,0.15);color:var(--red)}
+.badge-cloud{background:rgba(78,205,196,0.12);color:var(--cyan)}
+.badge-mac{background:rgba(34,197,94,0.12);color:var(--green)}
+.badge-phi{background:rgba(239,68,68,0.15);color:var(--red);font-weight:700}
+.badge-general{background:rgba(255,255,255,0.06);color:var(--text2)}
+.bar-row{display:flex;align-items:center;gap:10px;margin:6px 0}
+.bar-row .bar-label{flex:0 0 120px;font-size:0.78rem;color:var(--text2);text-align:right}
+.bar-row .bar-track{flex:1;height:18px;background:var(--bg1);border-radius:4px;overflow:hidden;position:relative}
+.bar-row .bar-fill{height:100%;border-radius:4px;transition:width 0.4s ease}
+.bar-row .bar-val{flex:0 0 60px;font-size:0.78rem;color:var(--text);text-align:right}
+.empty-state{text-align:center;padding:40px;color:var(--text2);font-size:0.9rem}
+.loading{text-align:center;padding:40px;color:var(--gold-d);font-size:0.9rem}
+.daily-chart{display:flex;align-items:flex-end;gap:4px;height:120px;padding:10px 0}
+.daily-bar{flex:1;background:var(--gold);border-radius:3px 3px 0 0;min-width:12px;position:relative;cursor:pointer;transition:opacity 0.2s}
+.daily-bar:hover{opacity:0.8}
+.daily-bar .tip{display:none;position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--bg0);border:1px solid var(--bdr2);padding:4px 8px;border-radius:4px;font-size:0.7rem;white-space:nowrap;color:var(--text);z-index:10}
+.daily-bar:hover .tip{display:block}
+.daily-labels{display:flex;gap:4px;padding:4px 0}
+.daily-labels span{flex:1;text-align:center;font-size:0.65rem;color:var(--text2)}
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <h1>CLI Analytics</h1>
+  <a class="back-btn" onclick="navTo('command.html')">← Back to Command</a>
+</div>
+
+<div class="controls">
+  <select id="periodSelect" onchange="loadAll()">
+    <option value="7">Last 7 days</option>
+    <option value="14">Last 14 days</option>
+    <option value="30" selected>Last 30 days</option>
+    <option value="90">Last 90 days</option>
+  </select>
+  <button onclick="loadAll()">Refresh</button>
+</div>
+
+<div class="grid" id="statCards">
+  <div class="stat-card sessions"><div class="label">Sessions</div><div class="value" id="sTotalSessions">—</div></div>
+  <div class="stat-card"><div class="label">Total Turns</div><div class="value" id="sTotalTurns">—</div></div>
+  <div class="stat-card"><div class="label">Tool Calls</div><div class="value" id="sTotalTools">—</div></div>
+  <div class="stat-card cost"><div class="label">Est. Cloud Cost</div><div class="value" id="sCloudCost">—</div></div>
+  <div class="stat-card hipaa"><div class="label">Data Queries (HIPAA)</div><div class="value" id="sDataQueries">—</div></div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Daily Activity</h2></div>
+  <div class="section-body" id="dailySection"><div class="loading">Loading...</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 24px">
+  <div class="section" style="margin:0">
+    <div class="section-head"><h2>Mode Distribution</h2></div>
+    <div class="section-body" id="modeSection"><div class="loading">Loading...</div></div>
+  </div>
+  <div class="section" style="margin:0">
+    <div class="section-head"><h2>Tool Usage</h2></div>
+    <div class="section-body" id="toolSection"><div class="loading">Loading...</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Recent Sessions</h2></div>
+  <div class="section-body" id="sessionsSection"><div class="loading">Loading...</div></div>
+</div>
+
+<div class="section">
+  <div class="section-head"><h2>Cost Breakdown</h2></div>
+  <div class="section-body" id="costSection"><div class="loading">Loading...</div></div>
+</div>
+
+<div class="section" style="margin-bottom:40px">
+  <div class="section-head"><h2>HIPAA Data Access Log</h2></div>
+  <div class="section-body" id="hipaaSection"><div class="loading">Loading...</div></div>
+</div>
+
+<script>
+var API = '';
+function _recoverAuth(){
+  var keys=['sc_token','sc_username','sc_profile'];
+  keys.forEach(function(k){
+    if(!sessionStorage.getItem(k)){
+      var c=document.cookie.split(';').find(function(x){return x.trim().startsWith(k+'=')});
+      if(c) sessionStorage.setItem(k,decodeURIComponent(c.split('=').slice(1).join('=')));
+      var l=localStorage.getItem(k);
+      if(!sessionStorage.getItem(k)&&l) sessionStorage.setItem(k,l);
+    }
+  });
+  var h=window.location.hash;
+  if(h&&h.includes('t=')){
+    var p=new URLSearchParams(h.substring(1));
+    if(p.get('t')) sessionStorage.setItem('sc_token',p.get('t'));
+    if(p.get('u')) sessionStorage.setItem('sc_username',p.get('u'));
+    if(p.get('p')) sessionStorage.setItem('sc_profile',p.get('p'));
+    history.replaceState(null,'',window.location.pathname);
+  }
+}
+_recoverAuth();
+
+function _authHeaders(ct){
+  var t=sessionStorage.getItem('sc_token')||'';
+  var h={'Authorization':'Bearer '+t};
+  if(ct) h['Content-Type']=ct;
+  return h;
+}
+
+function navTo(page){
+  var t=sessionStorage.getItem('sc_token')||'';
+  var u=sessionStorage.getItem('sc_username')||'';
+  var p=sessionStorage.getItem('sc_profile')||'';
+  window.location.href=page+'#t='+encodeURIComponent(t)+'&u='+encodeURIComponent(u)+'&p='+encodeURIComponent(p);
+}
+
+function _days(){return parseInt(document.getElementById('periodSelect').value)||30}
+
+async function apiFetch(path){
+  try{
+    var r=await fetch(API+path,{headers:_authHeaders()});
+    if(!r.ok){console.warn('API',r.status,path);return null}
+    return await r.json();
+  }catch(e){console.warn('Fetch error:',path,e);return null}
+}
+
+function modeBadge(m){
+  if(!m) return '<span class="badge badge-general">—</span>';
+  return '<span class="badge badge-'+m.toLowerCase()+'">'+m.toUpperCase()+'</span>';
+}
+function typeBadge(t){
+  if(!t) return '';
+  return '<span class="badge badge-'+t+'">'+t+'</span>';
+}
+function classifBadge(c){
+  if(c==='PHI') return '<span class="badge badge-phi">PHI</span>';
+  return '<span class="badge badge-general">'+(c||'general')+'</span>';
+}
+
+function fmtCost(usd){
+  if(!usd||usd===0) return '$0.00';
+  if(usd<0.01) return '$'+usd.toFixed(6);
+  return '$'+usd.toFixed(4);
+}
+
+function fmtDuration(s){
+  if(!s) return '—';
+  if(s<60) return Math.round(s)+'s';
+  return Math.round(s/60)+'m '+Math.round(s%60)+'s';
+}
+
+function fmtDate(iso){
+  if(!iso) return '—';
+  var d=new Date(iso);
+  return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+}
+
+async function loadAnalytics(){
+  var d=await apiFetch('/api/admin/cli/analytics?days='+_days());
+  if(!d||!d.data){
+    document.getElementById('sTotalSessions').textContent='—';
+    document.getElementById('sTotalTurns').textContent='—';
+    document.getElementById('sTotalTools').textContent='—';
+    document.getElementById('sDataQueries').textContent='—';
+    return;
+  }
+  var a=d.data;
+  document.getElementById('sTotalSessions').textContent=a.total_sessions||0;
+  document.getElementById('sTotalTurns').textContent=a.total_turns||0;
+  document.getElementById('sTotalTools').textContent=a.total_tool_calls||0;
+  document.getElementById('sDataQueries').textContent=a.data_access_queries||0;
+
+  // Mode distribution
+  var mEl=document.getElementById('modeSection');
+  if(!a.mode_breakdown||!a.mode_breakdown.length){
+    mEl.innerHTML='<div class="empty-state">No sessions yet</div>';
+  } else {
+    var maxS=Math.max.apply(null,a.mode_breakdown.map(function(m){return m.sessions||1}));
+    var html='';
+    a.mode_breakdown.forEach(function(m){
+      var pct=Math.round(((m.sessions||0)/maxS)*100);
+      var colors={ask:'var(--blue)',plan:'var(--purple)',ln_fab:'var(--gold)',debug:'var(--red)'};
+      var c=colors[(m.mode||'').toLowerCase()]||'var(--text2)';
+      html+='<div class="bar-row"><div class="bar-label">'+modeBadge(m.mode)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%;background:'+c+'"></div></div><div class="bar-val">'+m.sessions+' / '+m.total_turns+' turns</div></div>';
+    });
+    mEl.innerHTML=html;
+  }
+
+  // Tool distribution
+  var tEl=document.getElementById('toolSection');
+  if(!a.tool_breakdown||!a.tool_breakdown.length){
+    tEl.innerHTML='<div class="empty-state">No tool calls yet</div>';
+  } else {
+    var maxT=Math.max.apply(null,a.tool_breakdown.map(function(t){return t.count||1}));
+    var html2='';
+    a.tool_breakdown.forEach(function(t){
+      var pct2=Math.round(((t.count||0)/maxT)*100);
+      html2+='<div class="bar-row"><div class="bar-label" style="flex:0 0 140px;font-size:0.75rem">'+t.tool+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct2+'%;background:var(--cyan)"></div></div><div class="bar-val">'+t.count+' ('+t.avg_ms+'ms)</div></div>';
+    });
+    tEl.innerHTML=html2;
+  }
+
+  // Daily activity chart
+  var dEl=document.getElementById('dailySection');
+  if(!a.daily_activity||!a.daily_activity.length){
+    dEl.innerHTML='<div class="empty-state">No daily data</div>';
+  } else {
+    var maxD=Math.max.apply(null,a.daily_activity.map(function(d){return d.turns||1}));
+    var barsHtml='<div class="daily-chart">';
+    var labelsHtml='<div class="daily-labels">';
+    a.daily_activity.slice().reverse().forEach(function(d){
+      var h=Math.max(4,Math.round(((d.turns||0)/maxD)*100));
+      barsHtml+='<div class="daily-bar" style="height:'+h+'%"><div class="tip">'+d.day+'<br>'+d.sessions+' sessions, '+d.turns+' turns, '+d.tool_calls+' tools</div></div>';
+      labelsHtml+='<span>'+d.day.slice(5)+'</span>';
+    });
+    barsHtml+='</div>';
+    labelsHtml+='</div>';
+    dEl.innerHTML=barsHtml+labelsHtml;
+  }
+
+  // Sessions table
+  var sEl=document.getElementById('sessionsSection');
+  if(!a.sessions||!a.sessions.length){
+    sEl.innerHTML='<div class="empty-state">No sessions recorded</div>';
+  } else {
+    var rows='<table><tr><th>Time</th><th>Mode</th><th>Type</th><th>Turns</th><th>Tools</th><th>Duration</th><th>Status</th></tr>';
+    a.sessions.forEach(function(s){
+      rows+='<tr><td>'+fmtDate(s.created_at)+'</td><td>'+modeBadge(s.mode)+'</td><td>'+typeBadge(s.cli_type)+'</td><td>'+s.total_turns+'</td><td>'+s.total_tool_calls+'</td><td>'+fmtDuration(s.duration_secs)+'</td><td>'+(s.status||'—')+'</td></tr>';
+    });
+    rows+='</table>';
+    sEl.innerHTML=rows;
+  }
+}
+
+async function loadCost(){
+  var d=await apiFetch('/api/admin/cli/cost-summary?days='+_days());
+  if(!d||!d.cost){
+    document.getElementById('sCloudCost').textContent='—';
+    document.getElementById('costSection').innerHTML='<div class="empty-state">No cost data</div>';
+    return;
+  }
+  var c=d.cost;
+  document.getElementById('sCloudCost').textContent=fmtCost(c.cloud_est_cost_usd);
+
+  var el=document.getElementById('costSection');
+  if(!c.breakdown||!c.breakdown.length){
+    el.innerHTML='<div class="empty-state">No cost breakdown available</div>';
+    return;
+  }
+  var rows='<table><tr><th>Provider</th><th>Mode</th><th>Tool Calls</th><th>Est. Input Tokens</th><th>Est. Output Tokens</th><th>Est. Cost</th></tr>';
+  c.breakdown.forEach(function(b){
+    rows+='<tr><td>'+typeBadge(b.cli_type)+'</td><td>'+modeBadge(b.mode)+'</td><td>'+b.tool_calls+'</td><td>'+b.est_input_tokens.toLocaleString()+'</td><td>'+b.est_output_tokens.toLocaleString()+'</td><td>'+fmtCost(b.est_cost_usd)+'</td></tr>';
+  });
+  rows+='</table>';
+  rows+='<div style="margin-top:14px;padding:10px;background:var(--bg1);border-radius:var(--rl);font-size:0.78rem;color:var(--text2)"><strong style="color:var(--gold-d)">Period Summary ('+c.period_days+'d):</strong> '+c.total_sessions+' sessions, '+c.total_turns+' turns. Cloud: '+c.cloud_est_input_tokens.toLocaleString()+' input + '+c.cloud_est_output_tokens.toLocaleString()+' output tokens = '+fmtCost(c.cloud_est_cost_usd)+'. Local: '+c.local_tool_calls+' calls ($0.00).</div>';
+  el.innerHTML=rows;
+}
+
+async function loadHipaa(){
+  var d=await apiFetch('/api/admin/cli/data-access-log?days='+_days()+'&limit=50');
+  var el=document.getElementById('hipaaSection');
+  if(!d||!d.entries||!d.entries.length){
+    el.innerHTML='<div class="empty-state">No data access queries logged</div>';
+    return;
+  }
+  var rows='<table><tr><th>Time</th><th>User</th><th>Tool</th><th>Scope</th><th>Rows</th><th>Class</th></tr>';
+  d.entries.forEach(function(e){
+    rows+='<tr><td>'+fmtDate(e.created_at)+'</td><td>'+(e.username||'—')+'</td><td>'+(e.tool_name||'—')+'</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(e.data_scope||'—')+'</td><td>'+(e.result_row_count||0)+'</td><td>'+classifBadge(e.data_classification)+'</td></tr>';
+  });
+  rows+='</table>';
+  el.innerHTML=rows;
+}
+
+async function loadAll(){
+  await Promise.all([loadAnalytics(),loadCost(),loadHipaa()]);
+}
+
+loadAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cycle Detection | Nevedal Lab</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050505;color:#E8D5A3;font-family:'DM Sans',sans-serif;min-height:100vh}
+.header{background:#0A0A0A;border-bottom:1px solid #C9A96233;padding:16px 24px;display:flex;align-items:center;gap:16px}
+.header h1{font-family:'Cormorant Garamond',serif;font-size:22px;color:#C9A962}
+.header .back-btn{background:none;border:1px solid #C9A96244;color:#C9A962;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+.header .back-btn:hover{background:#C9A96215}
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.toolbar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+.user-select,.domain-select{background:#111;border:1px solid #C9A96233;color:#E8D5A3;padding:8px 14px;border-radius:6px;font-size:14px}
+.user-select{width:260px}.domain-select{width:200px}
+.refresh-btn{background:#C9A96222;border:1px solid #C9A96244;color:#C9A962;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px}
+.refresh-btn:hover{background:#C9A96233}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+.card{background:#0A0A0A;border:1px solid #C9A96222;border-radius:12px;padding:20px;margin-bottom:20px}
+.card h3{font-family:'Cormorant Garamond',serif;color:#C9A962;font-size:18px;margin-bottom:12px;border-bottom:1px solid #C9A96218;padding-bottom:8px}
+.domain-card{background:#111;border-radius:8px;padding:14px;margin-bottom:10px}
+.domain-card .domain-name{font-weight:600;color:#C9A962;font-size:14px;margin-bottom:6px}
+.domain-card .domain-status{font-size:12px;color:#8B7355}
+.cycle-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #0A0A0A}
+.phase-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.phase-rising{background:#C9A96222;color:#C9A962}
+.phase-peak{background:#EF444422;color:#EF4444}
+.phase-falling{background:#4ECDC422;color:#4ECDC4}
+.phase-trough{background:#9D4EDD22;color:#9D4EDD}
+.convergence-alert{background:#EF444411;border:1px solid #EF444433;border-radius:8px;padding:14px;margin-bottom:10px}
+.convergence-alert .risk-score{font-size:24px;font-weight:700;color:#EF4444}
+.convergence-alert .domains{font-size:12px;color:#E8D5A3;margin-top:4px}
+.convergence-alert .recommendation{font-size:12px;color:#EF9999;margin-top:6px;font-style:italic}
+.intervention-window{background:#22C55E11;border:1px solid #22C55E33;border-radius:8px;padding:12px;margin-bottom:8px}
+.intervention-window .urgency{font-size:11px;text-transform:uppercase;font-weight:700}
+.urgency-high{color:#EF4444}.urgency-moderate{color:#C9A962}.urgency-low{color:#22C55E}
+.stat-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #111;font-size:13px}
+.stat-row .label{color:#8B7355}.stat-row .value{color:#E8D5A3;font-weight:600}
+.empty-state{text-align:center;padding:30px;color:#8B7355;font-size:14px}
+.risk-critical{color:#EF4444;font-weight:700}.risk-high{color:#F97316;font-weight:600}.risk-moderate{color:#C9A962}.risk-low{color:#22C55E}
+</style>
+</head>
+<body>
+<div class="header">
+<button class="back-btn" onclick="history.back()">← Back</button>
+<h1>Cycle Detection Engine</h1>
+</div>
+<div class="container">
+<div class="toolbar">
+<select id="userSelect" class="user-select" onchange="loadCycles()"><option value="">Select Client...</option></select>
+<select id="domainSelect" class="domain-select"><option value="">All Domains</option></select>
+<button class="refresh-btn" onclick="loadCycles()">Detect Cycles</button>
+<button class="refresh-btn" onclick="loadConvergence()">Convergence Risk</button>
+</div>
+
+<div class="grid-2">
+<div class="card">
+<h3>Detected Cycles</h3>
+<div id="cycleResults"><div class="empty-state">Select a client and run detection</div></div>
+</div>
+<div class="card">
+<h3>Convergence Risk</h3>
+<div id="convergenceResults"><div class="empty-state">Run convergence analysis</div></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Predicted Events &amp; Intervention Windows</h3>
+<div id="predictionsSection"><div class="empty-state">Run cycle detection to see predictions</div></div>
+</div>
+
+<div class="grid-2">
+<div class="card">
+<h3>Family Cycles</h3>
+<div id="familyCycles"><div class="empty-state">Select a client with family membership</div></div>
+</div>
+<div class="card">
+<h3>Group Cycles</h3>
+<div id="groupCycles"><div class="empty-state">Select a client with group membership</div></div>
+</div>
+</div>
+</div>
+
+<script>
+const API=window.location.origin.replace(/:\d+$/,':8000');
+function _authHeaders(ct){const h={};const t=sessionStorage.getItem('sc_token')||localStorage.getItem('sc_token')||'';if(t)h['Authorization']='Bearer '+t;if(ct)h['Content-Type']=ct;return h}
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+const DOMAINS=['addiction','sexual_desire','harm_risk','criminal_intent','legacy','porn_addiction','emotional_state','financial','coping','economic','cultural','group_dynamics'];
+
+async function apiFetch(path){
+try{const r=await fetch(API+path,{headers:_authHeaders()});if(!r.ok)return null;return await r.json()}catch(e){return null}}
+
+function init(){
+const ds=document.getElementById('domainSelect');
+DOMAINS.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d.replace(/_/g,' ');ds.appendChild(o)});
+loadClients();
+}
+
+async function loadClients(){
+const s=document.getElementById('userSelect');
+const d=await apiFetch('/api/admin/clients');
+if(!d)return;
+const clients=(d.clients||d.data||d||[]);
+if(Array.isArray(clients)){clients.forEach(c=>{const o=document.createElement('option');o.value=c.username||c.user_id||'';o.textContent=(c.name||c.username||'Unknown');s.appendChild(o)})}
+}
+
+async function loadCycles(){
+const uid=document.getElementById('userSelect').value;
+if(!uid)return;
+const domain=document.getElementById('domainSelect').value;
+const path=domain?'/api/predictive/cycles/detect/'+uid+'/'+domain:'/api/predictive/cycles/detect/'+uid;
+const data=await apiFetch(path);
+const el=document.getElementById('cycleResults');
+if(!data||!data.results){el.innerHTML='<div class="empty-state">No results</div>';return}
+
+el.innerHTML='';
+Object.entries(data.results).forEach(([domId,res])=>{
+let html=`<div class="domain-card"><div class="domain-name">${esc(domId.replace(/_/g,' '))}</div>`;
+if(res.status==='cycles_detected'){
+const phase=res.current_phase||{};
+html+=`<div class="domain-status">${res.data_points} data points | Phase: <span class="phase-badge phase-${phase.phase||'unknown'}">${phase.phase||'?'}</span></div>`;
+(res.detected_cycles||[]).forEach(c=>{
+html+=`<div class="cycle-row"><span>Period: ${c.period_days} days</span><span>Amplitude: ${c.amplitude}</span><span>Confidence: ${(c.confidence*100).toFixed(0)}%</span></div>`});
+if(phase.days_to_next_peak!==undefined){html+=`<div class="cycle-row"><span>Days to next peak: ${phase.days_to_next_peak}</span><span>Position: ${(phase.position_in_cycle*100).toFixed(0)}%</span></div>`}
+}else if(res.status==='insufficient_data'){
+html+=`<div class="domain-status">Insufficient data: ${res.data_points}/${res.min_required} needed</div>`;
+}else{
+html+=`<div class="domain-status">${res.status}</div>`;
+}
+html+='</div>';
+el.innerHTML+=html;
+});
+
+const predData=await apiFetch('/api/predictive/cycles/predict/'+uid+'?horizon_days=30');
+const ps=document.getElementById('predictionsSection');
+if(!predData){ps.innerHTML='<div class="empty-state">No predictions</div>';return}
+ps.innerHTML='';
+const wins=predData.intervention_windows||[];
+if(wins.length){
+wins.forEach(w=>{
+ps.innerHTML+=`<div class="intervention-window"><div class="urgency urgency-${w.urgency}">${esc(w.urgency)} priority</div><div style="font-size:13px;margin-top:4px">${esc(w.recommendation)}</div><div class="stat-row"><span class="label">Window</span><span class="value">${w.window_start?new Date(w.window_start).toLocaleDateString():'-'} — ${w.window_end?new Date(w.window_end).toLocaleDateString():'-'}</span></div><div class="stat-row"><span class="label">Confidence</span><span class="value">${(w.confidence*100).toFixed(0)}%</span></div></div>`});
+}else{
+ps.innerHTML='<div class="empty-state">No intervention windows predicted in the next 30 days</div>';
+}
+}
+
+async function loadConvergence(){
+const uid=document.getElementById('userSelect').value;
+if(!uid)return;
+const data=await apiFetch('/api/predictive/cycles/convergence/'+uid+'?horizon_days=14');
+const el=document.getElementById('convergenceResults');
+if(!data){el.innerHTML='<div class="empty-state">No data</div>';return}
+el.innerHTML='';
+el.innerHTML+=`<div class="stat-row"><span class="label">Max Convergence Risk</span><span class="value risk-${data.risk_level}">${(data.max_convergence_risk*100).toFixed(0)}%</span></div>`;
+el.innerHTML+=`<div class="stat-row"><span class="label">Risk Level</span><span class="value risk-${data.risk_level}">${esc(data.risk_level).toUpperCase()}</span></div>`;
+el.innerHTML+=`<div class="stat-row"><span class="label">Convergence Events</span><span class="value">${data.convergence_count}</span></div>`;
+(data.convergences||[]).forEach(c=>{
+el.innerHTML+=`<div class="convergence-alert"><div class="risk-score">${(c.convergence_risk*100).toFixed(0)}% Risk</div><div class="domains">Converging: ${c.converging_domains.map(d=>esc(d.replace(/_/g,' '))).join(', ')}</div><div class="recommendation">${esc(c.recommendation)}</div></div>`});
+if(!data.convergences||!data.convergences.length){el.innerHTML+='<div class="empty-state" style="padding:12px">No convergence events detected in the next 14 days</div>'}
+}
+
+init();
+</script>
+<div id="ss-copyright" style="text-align:center;padding:12px 0 8px;font-size:11px;color:#8B7355;font-family:'DM Sans',sans-serif;letter-spacing:0.3px;opacity:0.7;border-top:1px solid rgba(201,169,98,0.08);margin-top:24px;">© 2025-<script>document.write(new Date().getFullYear())</script> Sovereign Sanctuary. All rights reserved.</div>
+</body>
+</html>
