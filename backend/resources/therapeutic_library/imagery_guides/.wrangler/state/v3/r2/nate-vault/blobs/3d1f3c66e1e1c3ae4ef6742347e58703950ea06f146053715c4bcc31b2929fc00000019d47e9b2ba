@@ -1,0 +1,315 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "created": "2026-04-01",
+    "description": "Sovereign Story Engine — Biome Fog Panel Library",
+    "purpose": "Pre-generated rest/fog scenes for institutional mandatory report holds and clinical cool-down periods (EC < 0.3 or Resistance > 0.8). Zero Grok Imagine API cost during holds. Character composited in by Layer 6 using archetype reference images.",
+    "r2_storage_template": "stories/{tenant_id}/fog_panels/{biome}/{filename}",
+    "usage": "When clinical pacing gate triggers cool-down, Layer 6 selects a fog panel from the user's current biome and composites their archetype character into the scene via Grok Imagine image-to-image.",
+    "generation_policy": "Generated once per institutional tenant at deployment time. Stored in tenant's R2 partition.",
+    "character_free": true,
+    "copyright": "(c) 2026 Sovereign Sanctuary. Patent Pending."
+  },
+
+  "category": "biome_scenes",
+  "total_panels": 30,
+
+  "biomes": {
+    "crystal_mountains": {
+      "biome_id": "crystal_mountains",
+      "name": "Crystal Mountains",
+      "therapeutic_phase": "mid-journey",
+      "description": "High altitude clarity, crystal formations, alpine wonder. The biome of perspective and discovery.",
+      "ambient_sounds": "Cave echoes, water, distant wind",
+      "panel_count": 6,
+      "panels": [
+        {
+          "id": "crystal_mountains_01",
+          "filename": "crystal_mountains_01_fog_panel.jpg",
+          "scene": "Crystal cave with prismatic light patterns on walls",
+          "mood": "wonder",
+          "therapeutic_use": "Contemplation, internal discovery, seeing beauty in the unknown",
+          "time_of_day": "ambient_cave_light"
+        },
+        {
+          "id": "crystal_mountains_02",
+          "filename": "crystal_mountains_02_fog_panel.jpg",
+          "scene": "Mountain ledge at sunrise, clouds below, peaks above",
+          "mood": "perspective",
+          "therapeutic_use": "Gaining perspective, seeing beyond the immediate pain, vastness as comfort",
+          "time_of_day": "sunrise"
+        },
+        {
+          "id": "crystal_mountains_03",
+          "filename": "crystal_mountains_03_fog_panel.jpg",
+          "scene": "Small alpine meadow between crystal peaks",
+          "mood": "gentleness",
+          "therapeutic_use": "Unexpected softness in hard places, gentleness at high altitude",
+          "time_of_day": "midday_soft"
+        },
+        {
+          "id": "crystal_mountains_04",
+          "filename": "crystal_mountains_04_fog_panel.jpg",
+          "scene": "Waterfall over crystal-embedded rock face",
+          "mood": "cleansing",
+          "therapeutic_use": "Release, letting go, cleansing energy, emotional flow",
+          "time_of_day": "midday"
+        },
+        {
+          "id": "crystal_mountains_05",
+          "filename": "crystal_mountains_05_fog_panel.jpg",
+          "scene": "Single crystal formation catching and splitting light",
+          "mood": "examination",
+          "therapeutic_use": "Examining something closely, discovering facets, self-reflection",
+          "time_of_day": "ambient_cave_light"
+        },
+        {
+          "id": "crystal_mountains_06",
+          "filename": "crystal_mountains_06_fog_panel.jpg",
+          "scene": "Warm natural hot spring in the mountains",
+          "mood": "safety",
+          "therapeutic_use": "Warmth in cold places, physical comfort, letting guard down",
+          "time_of_day": "dusk"
+        }
+      ]
+    },
+
+    "dark_forest": {
+      "biome_id": "dark_forest",
+      "name": "Dark Forest",
+      "therapeutic_phase": "early-journey",
+      "description": "Dense, misty, primal. The biome of the unknown, the shadow, and the beginning. Most clients start here.",
+      "ambient_sounds": "Crackling fire, night sounds, gentle wind",
+      "panel_count": 6,
+      "panels": [
+        {
+          "id": "dark_forest_01",
+          "filename": "dark_forest_01_fog_panel.jpg",
+          "scene": "Small campfire in a misty forest clearing",
+          "mood": "solitude",
+          "therapeutic_use": "Safe solitude, warmth in darkness, the fire you built yourself",
+          "time_of_day": "night"
+        },
+        {
+          "id": "dark_forest_02",
+          "filename": "dark_forest_02_fog_panel.jpg",
+          "scene": "Narrow winding path through misty forest",
+          "mood": "invitation",
+          "therapeutic_use": "The path exists even when you can't see far, one step at a time",
+          "time_of_day": "dappled_daylight"
+        },
+        {
+          "id": "dark_forest_03",
+          "filename": "dark_forest_03_fog_panel.jpg",
+          "scene": "Golden fireflies drifting through dark forest at twilight",
+          "mood": "magic",
+          "therapeutic_use": "Small lights in darkness, beauty that finds you, unexpected wonder",
+          "time_of_day": "twilight"
+        },
+        {
+          "id": "dark_forest_04",
+          "filename": "dark_forest_04_fog_panel.jpg",
+          "scene": "Base of massive ancient oak with natural sheltered nook",
+          "mood": "shelter",
+          "therapeutic_use": "Being held by something ancient and strong, resting against what endures",
+          "time_of_day": "filtered_daylight"
+        },
+        {
+          "id": "dark_forest_05",
+          "filename": "dark_forest_05_fog_panel.jpg",
+          "scene": "Looking up through canopy at star-filled sky",
+          "mood": "wonder",
+          "therapeutic_use": "Perspective through looking up, the sky is always there above the trees",
+          "time_of_day": "night"
+        },
+        {
+          "id": "dark_forest_06",
+          "filename": "dark_forest_06_fog_panel.jpg",
+          "scene": "Dawn breaking through misty forest",
+          "mood": "hope",
+          "therapeutic_use": "The night ends, new light arrives, transition and beginning",
+          "time_of_day": "dawn"
+        }
+      ]
+    },
+
+    "fortress_plains": {
+      "biome_id": "fortress_plains",
+      "name": "Fortress Plains",
+      "therapeutic_phase": "early-to-mid-journey",
+      "description": "Open expanses with ancient structures. The biome of boundaries, walls, and the tension between protection and freedom.",
+      "ambient_sounds": "Wind across plains, distant birdsong",
+      "panel_count": 6,
+      "panels": [
+        {
+          "id": "fortress_plains_01",
+          "filename": "fortress_plains_01_fog_panel.jpg",
+          "scene": "Low ancient stone wall on open plains at sunset",
+          "mood": "peace",
+          "therapeutic_use": "A boundary that doesn't imprison, watching the day end safely",
+          "time_of_day": "sunset"
+        },
+        {
+          "id": "fortress_plains_02",
+          "filename": "fortress_plains_02_fog_panel.jpg",
+          "scene": "Sketchbook and charcoal left on a flat stone in grass",
+          "mood": "creative_pause",
+          "therapeutic_use": "The creative act waiting to resume, evidence of expression, gentle pause",
+          "time_of_day": "afternoon"
+        },
+        {
+          "id": "fortress_plains_03",
+          "filename": "fotress_plains_03_fog_panel.jpg",
+          "scene": "Small tended garden beside ancient fortress wall",
+          "mood": "nurture",
+          "therapeutic_use": "Growing something alive against old stone, life emerging from defense",
+          "time_of_day": "morning"
+        },
+        {
+          "id": "fortress_plains_04",
+          "filename": "fortress_plains_04_fog_panel.jpg",
+          "scene": "Hawks circling in warm sky above open plains",
+          "mood": "freedom",
+          "therapeutic_use": "Watching freedom from the ground, aspiration, the sky is open",
+          "time_of_day": "midday"
+        },
+        {
+          "id": "fortress_plains_05",
+          "filename": "fortress_plains_05_fog_panel.jpg",
+          "scene": "Open stone doorway in ancient fortress wall with light beyond",
+          "mood": "threshold",
+          "therapeutic_use": "An invitation to cross, the door is open, the choice is yours",
+          "time_of_day": "golden_hour"
+        },
+        {
+          "id": "fortress_plains_06",
+          "filename": "fortress_plains_06_fog_panel.jpg",
+          "scene": "Fortress plains at dawn with long shadows across golden grass",
+          "mood": "awakening",
+          "therapeutic_use": "The world is waking up, new day, fresh start on ancient ground",
+          "time_of_day": "dawn"
+        }
+      ]
+    },
+
+    "open_sky": {
+      "biome_id": "open_sky",
+      "name": "Open Sky",
+      "therapeutic_phase": "late-journey",
+      "description": "Vast, boundless, free. The biome of integration, wholeness, and the view from the other side of healing.",
+      "ambient_sounds": "Open air, multiple nature sounds, peace",
+      "panel_count": 6,
+      "panels": [
+        {
+          "id": "open_sky_01",
+          "filename": "open_sky_01_fog_panel.jpg",
+          "scene": "High viewpoint above the clouds with endless sky",
+          "mood": "transcendence",
+          "therapeutic_use": "Rising above, seeing the whole picture, peace above the storm",
+          "time_of_day": "golden_hour"
+        },
+        {
+          "id": "open_sky_02",
+          "filename": "open_sky_02_fog_panel.jpg",
+          "scene": "Wide gentle path through open rolling hills under vast sky",
+          "mood": "clarity",
+          "therapeutic_use": "The way forward is clear and open, no obstacles, walking freely",
+          "time_of_day": "midday"
+        },
+        {
+          "id": "open_sky_03",
+          "filename": "open_sky_03_fog_panel.jpg",
+          "scene": "Beautiful open garden under vast sky, flowers in full bloom",
+          "mood": "flourishing",
+          "therapeutic_use": "What you tended is blooming, no walls needed, cultivated beauty",
+          "time_of_day": "afternoon"
+        },
+        {
+          "id": "open_sky_04",
+          "filename": "open_sky_04_fog_panel.jpg",
+          "scene": "Panoramic sunrise and sunset visible simultaneously",
+          "mood": "integration",
+          "therapeutic_use": "Holding both endings and beginnings, time is held, wholeness",
+          "time_of_day": "dawn_and_dusk"
+        },
+        {
+          "id": "open_sky_05",
+          "filename": "open_sky_05_fog_panel.jpg",
+          "scene": "Gentle companion animal resting on hilltop under open sky",
+          "mood": "companionship",
+          "therapeutic_use": "Safe attachment, unconditional presence, an invitation to sit",
+          "time_of_day": "afternoon"
+        },
+        {
+          "id": "open_sky_06",
+          "filename": "open_sky_06_fog_panel.jpg",
+          "scene": "The Great Tree at full size under open sky",
+          "mood": "wholeness",
+          "therapeutic_use": "The central landmark of the story world, sacred and whole, the origin fully realized",
+          "time_of_day": "golden_hour"
+        }
+      ]
+    },
+
+    "river_valley": {
+      "biome_id": "river_valley",
+      "name": "River Valley",
+      "therapeutic_phase": "mid-journey",
+      "description": "Flowing water, meadows, the Healing Tree. The biome of emotional flow, gentleness, and letting go.",
+      "ambient_sounds": "Water flowing, birdsong, soft breeze",
+      "panel_count": 6,
+      "panels": [
+        {
+          "id": "river_valley_01",
+          "filename": "river_valley_01_fog_panel.jpg",
+          "scene": "Gentle river edge with clear water over smooth stones",
+          "mood": "grounding",
+          "therapeutic_use": "Touching the water, feeling the flow, grounding in the present",
+          "time_of_day": "afternoon"
+        },
+        {
+          "id": "river_valley_02",
+          "filename": "river_valley_02_fog_panel.jpg",
+          "scene": "Massive Healing Tree beside calm river with reading nook in roots",
+          "mood": "safety",
+          "therapeutic_use": "The Healing Tree, sacred rest, being held by something ancient",
+          "time_of_day": "dappled_daylight"
+        },
+        {
+          "id": "river_valley_03",
+          "filename": "river_valley_03_fog_panel.jpg",
+          "scene": "Meadow of wildflowers with gentle stream winding through",
+          "mood": "beauty",
+          "therapeutic_use": "Beauty without agenda, flowers picked gently, simple gathering",
+          "time_of_day": "golden_hour"
+        },
+        {
+          "id": "river_valley_04",
+          "filename": "river_valley_04_fog_panel.jpg",
+          "scene": "Still river section reflecting clouds and sky perfectly",
+          "mood": "contemplation",
+          "therapeutic_use": "Mirror stillness, seeing the self reflected, contemplation",
+          "time_of_day": "calm_overcast"
+        },
+        {
+          "id": "river_valley_05",
+          "filename": "river_valley_05_fog_panel.jpg",
+          "scene": "Grassy meadow with impression where someone recently lay",
+          "mood": "rest",
+          "therapeutic_use": "Permission to rest, the meadow remembers, someone was here and it was safe",
+          "time_of_day": "afternoon"
+        },
+        {
+          "id": "river_valley_06",
+          "filename": "river_valley_06_fog_panel.jpg",
+          "scene": "Smooth river stones with gentle ripples from skipped stones",
+          "mood": "play",
+          "therapeutic_use": "Simple joy, playfulness, evidence of lightness, the child part at ease",
+          "time_of_day": "afternoon"
+        }
+      ]
+    }
+  },
+
+  "filename_note": "fortress_plains_03 has a typo in actual filename: 'fotress_plains_03_fog_panel.jpg' — consider renaming to 'fortress_plains_03_fog_panel.jpg' for consistency"
+}

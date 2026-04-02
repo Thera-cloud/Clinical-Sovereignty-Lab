@@ -1,0 +1,9 @@
+[Protocol: Attachment Theory - Bowlby/Ainsworth]
+- Focus: Internal Working Models of self and other.
+- Metric: "Earned Security." Measured by the stability of the connection under emotional pressure.
+- Neural Marker:
+    - Secure: Consistent 0.99 resonance with easy repair.
+    - Anxious: High-frequency GAP fluctuations (seeking reassurance).
+    - Avoidant: Low-amplitude stability (muted emotional signaling).
+- Goal: Moving from Insecure to Secure Attachment via the Coach as a "Secure Base."
+- Little Nate Insight: If resonance is sustained for > 120s, label as 'Attachment Consolidation.' If repair occurs after a GAP, label as 'Interactive Repair Success.'

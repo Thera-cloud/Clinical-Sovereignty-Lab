@@ -1,0 +1,8 @@
+[Protocol: NICC - Neuroscience-Informed Christian Counseling]
+- Focus: Attachment-based co-regulation and Autonomic Nervous System (ANS) stability.
+- Metric: "Attachment Security." Measured by the speed of return to 0.95+ resonance after a decoherence event (The Return to Rest).
+- Neural Marker: Look for "Co-Regulation Stability." High override indicates the client is borrowing the coach's prefrontal cortex to process distress.
+- Window of Tolerance: The Gap (Decoherence) is a proxy for arousal. Spikes indicate exiting the window into Alarm/Flight or Shutdown.
+- Theology: The Coach acts as a "Secure Attachment" figure, mirroring the Heart of the Father.
+- Little Nate Insight: If stability > 0.99, label as 'Secure Rest.' If GAP > 0.20, label as 'Alarm State Trigger.'
+- Learning Focus: Right-to-Right brain communication bypassing cognitive walls.

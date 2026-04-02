@@ -1,0 +1,219 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "created": "2026-04-01",
+    "description": "Sovereign Story Engine — Sacred Spaces Reference Library",
+    "purpose": "Recurring therapeutic landmarks that must maintain visual consistency across every panel they appear in. Layer 6 (Imagination Engine) uses these as anchors for Grok Imagine image-to-image when a scene takes place in or near a sacred space.",
+    "r2_storage_template": "stories/sacred_spaces/{filename}",
+    "usage": "When a scene description references a sacred space, Layer 6 loads the corresponding reference image and composites the user's archetype character into or near the space via Grok Imagine image-to-image.",
+    "character_free": true,
+    "consistency_rule": "These spaces must look the SAME every time they appear in a user's story. The reference image is the canonical visual. Variations in lighting and weather are acceptable; structural changes are not.",
+    "copyright": "(c) 2026 Sovereign Sanctuary. Patent Pending."
+  },
+
+  "category": "sacred_spaces",
+  "total_spaces": 15,
+
+  "sources": {
+    "women_workbook": {
+      "title": "He Came For All My Parts",
+      "spaces": ["the_meadow", "the_river_of_life", "the_healing_tree", "the_sacred_hallway", "the_tower"]
+    },
+    "men_workbook": {
+      "title": "The Father, and Broken Sons",
+      "spaces": ["the_bunker", "the_forge", "the_battlefield_turned_garden", "the_fire_that_doesnt_burn", "the_dragon_lair"]
+    },
+    "universal": {
+      "title": "SSE Universal Sacred Spaces",
+      "spaces": ["the_great_tree", "the_mirror_pool", "the_threshold", "the_starfield", "the_convergence_point"]
+    }
+  },
+
+  "spaces": [
+    {
+      "id": "the_meadow",
+      "name": "The Meadow",
+      "filename": "the_meadow_sacred_space.jpg",
+      "source": "women_workbook",
+      "biome": "river_valley",
+      "therapeutic_function": "The place where healing begins — infinite safety, no walls, no borders",
+      "visual_description": "Vast gentle meadow with soft golden grass and wildflowers, warm amber light, no walls or borders visible, grass moving in warm breeze",
+      "narrative_usage": "First safe space encountered. Default rest scene for women's narrative. Where the girl stands when she first enters the story world.",
+      "appears_in_phases": ["early", "mid", "late", "transformed"],
+      "evolution_notes": "The meadow doesn't change — it's always safe. What changes is how the character stands in it (guarded → open → dancing → lying down in peace)."
+    },
+    {
+      "id": "the_river_of_life",
+      "name": "The River of Life",
+      "filename": "the_river_of_life_sacred_space.jpg",
+      "source": "women_workbook",
+      "biome": "river_valley",
+      "therapeutic_function": "The water carries what needs releasing — emotional flow, letting go, baptism metaphor",
+      "visual_description": "Wide gentle river flowing through lush valley, crystal clear water over smooth stones, warm reflected light, willows trailing at banks",
+      "narrative_usage": "Appears during emotional release scenes. When the client is ready to let go of something, the river is where it happens.",
+      "appears_in_phases": ["mid", "late", "transformed"],
+      "evolution_notes": "River remains constant. Character's relationship changes — feet at edge → wading in → swimming → floating peacefully."
+    },
+    {
+      "id": "the_healing_tree",
+      "name": "The Healing Tree",
+      "filename": "the_healing_tree_sacred_space.jpg",
+      "source": "women_workbook",
+      "biome": "river_valley",
+      "therapeutic_function": "The tree remembers everything — shelter, being held, safe attachment figure",
+      "visual_description": "Single massive ancient tree in sunlit meadow, broad canopy providing shelter, roots visible and deep, warm golden light filtering through leaves, natural sitting nook at base",
+      "narrative_usage": "The primary safe attachment metaphor. Where the character goes to rest, to be held, to remember. The therapist in tree form.",
+      "appears_in_phases": ["early", "mid", "late", "transformed"],
+      "evolution_notes": "Tree remains constant. Character moves from leaning against it with back turned → sitting facing outward → standing beside it → eventually planting a new tree nearby."
+    },
+    {
+      "id": "the_sacred_hallway",
+      "name": "The Sacred Hallway",
+      "filename": "the_scared_hallway_sacred_space.jpg",
+      "source": "women_workbook",
+      "biome": "fortress_plains",
+      "therapeutic_function": "Each door holds a memory waiting to be met — structured exploration of the past",
+      "visual_description": "Long warm corridor with soft light from doorways on each side, each door different (wood, stone, light, ivy-covered), hallway curves gently ahead, warm amber walls",
+      "narrative_usage": "Appears when the client is ready to explore specific memories or parts. Each door represents a memory or exile. Opening a door is a therapeutic act.",
+      "appears_in_phases": ["mid", "late"],
+      "evolution_notes": "Hallway remains constant. Doors change — closed and dark → cracked open with light → wide open → some doors no longer needed and become windows."
+    },
+    {
+      "id": "the_tower",
+      "name": "The Tower",
+      "filename": "the_tower_sacred_space.jpg",
+      "source": "women_workbook",
+      "biome": "fortress_plains",
+      "therapeutic_function": "The protective structure that became a prison — isolation, the Good Girl's fortress",
+      "visual_description": "Tall stone tower seen from outside, ivy growing up one side, single window lit warmly high up, surrounded by mist, door at base closed",
+      "narrative_usage": "Represents the client's primary defensive structure. The tower she built to be safe that became the thing that keeps her alone. The therapeutic arc is the tower coming down.",
+      "appears_in_phases": ["early", "mid", "late"],
+      "evolution_notes": "The tower DOES change — fully intact and sealed → cracks appearing → door opens → ivy covers it → eventually becomes a garden wall or crumbles entirely. One of the few sacred spaces that transforms structurally."
+    },
+    {
+      "id": "the_bunker",
+      "name": "The Bunker",
+      "filename": "the_bunker_sacred_space.jpg",
+      "source": "men_workbook",
+      "biome": "dark_forest",
+      "therapeutic_function": "The place the boy built to survive — safety through withdrawal, the underground fortress",
+      "visual_description": "Underground fortified room with thick walls, single dim lantern, narrow entrance, supplies stacked, boy's drawings scratched into walls, warm amber light against cold stone",
+      "narrative_usage": "The boy's primary safe space — where he retreated from the father's rage. The therapeutic arc is leaving the bunker, not destroying it. The bunker is honored, then outgrown.",
+      "appears_in_phases": ["early", "mid", "late"],
+      "evolution_notes": "The bunker transforms — sealed and dark → lantern lit → door cracked → drawings become murals → skylight added → eventually the boy leaves but can always return. The bunker is never destroyed — it becomes a memorial."
+    },
+    {
+      "id": "the_forge",
+      "name": "The Forge",
+      "filename": "the_forge_sacred_space.jpg",
+      "source": "men_workbook",
+      "biome": "crystal_mountains",
+      "therapeutic_function": "Where pain is shaped into something useful — transformation through purpose and heat",
+      "visual_description": "Blacksmith's forge in stone chamber, orange coals glowing in hearth, anvil with half-formed blade, tools on walls, warm deep oranges against dark stone",
+      "narrative_usage": "Appears when the client is ready to transmute pain into purpose. The act of forging is the therapeutic metaphor — heat, hammering, shaping, cooling.",
+      "appears_in_phases": ["mid", "late"],
+      "evolution_notes": "Forge remains constant. What's being forged changes — weapons early → tools mid → art late → the blade is eventually set down and the forge becomes a hearth for warmth."
+    },
+    {
+      "id": "the_battlefield_turned_garden",
+      "name": "The Battlefield Turned Garden",
+      "filename": "the_battlefield_turned_garden_sacred_space.jpg",
+      "source": "men_workbook",
+      "biome": "fortress_plains",
+      "therapeutic_function": "War becoming peace — the transformation of conflict into growth",
+      "visual_description": "Wide field where weapons are half-buried in earth, flowers growing through and around them, swords becoming trellises, shields collecting rainwater for birds, warm golden light",
+      "narrative_usage": "Appears in late-stage narrative when the client begins integrating the warrior identity with gentleness. The battlefield doesn't disappear — it transforms.",
+      "appears_in_phases": ["late", "transformed"],
+      "evolution_notes": "This space IS the evolution — it represents the endpoint. Early stage clients never see it. It appears only when the warrior is ready to plant."
+    },
+    {
+      "id": "the_fire_that_doesnt_burn",
+      "name": "The Fire That Doesn't Burn",
+      "filename": "the_fire_that_doesnt_burn_sacred_space.jpg",
+      "source": "men_workbook",
+      "biome": "dark_forest",
+      "therapeutic_function": "The fire transforms without destroying — approaching what's feared and finding it doesn't hurt",
+      "visual_description": "Large campfire with tall warm golden flames in dark clearing, flames gentle not destructive, objects placed in fire remain whole, warm sacred glow",
+      "narrative_usage": "Corrective emotional experience metaphor. The client expects the fire (rage, pain, memory) to destroy. It doesn't. Placing something in the fire is an act of trust.",
+      "appears_in_phases": ["mid", "late"],
+      "evolution_notes": "Fire remains constant. What changes is what the character brings to it and whether they can sit close."
+    },
+    {
+      "id": "the_dragon_lair",
+      "name": "The Dragon's Lair",
+      "filename": "the_dragon_lair_sacred_space.jpg",
+      "source": "men_workbook",
+      "biome": "crystal_mountains",
+      "therapeutic_function": "The dragon is not evil — it is a boy's rage resting. Approaching the monster and finding it pitiable.",
+      "visual_description": "Vast cave with sleeping dragon curled around central fire, dragon massive but breathing slow and peaceful, treasure scattered but unimportant, warm amber light from dragon's heat",
+      "narrative_usage": "The confrontation-that-becomes-compassion scene. The Dragon Slayer archetype's ultimate destination is not killing the dragon but sitting with it. The lair is where integration happens.",
+      "appears_in_phases": ["mid", "late", "transformed"],
+      "evolution_notes": "The lair remains constant. The dragon changes — massive and terrifying → smaller and tired → sleeping → eventually the dragon and the boy sit by the fire together. The dragon shrinks as the boy makes peace with his anger."
+    },
+    {
+      "id": "the_great_tree",
+      "name": "The Great Tree",
+      "filename": "the_great_tree_sacred_space.jpg",
+      "source": "universal",
+      "biome": "open_sky",
+      "therapeutic_function": "The origin of all stories — where the boy and the girl were torn apart and where they find each other again",
+      "visual_description": "Largest tree in story world at crossroads of all five biomes, roots reaching into every landscape, canopy touching clouds, two small figures carved in trunk at base (boy and girl separated by roots), warm golden light",
+      "narrative_usage": "The central landmark of the entire SSE universe. Appears in couples convergence scenes, family milestone scenes, and individual late-stage narrative when the client's story connects to the larger world.",
+      "appears_in_phases": ["late", "transformed"],
+      "evolution_notes": "The Great Tree is always there but only revealed when the client is ready. The carved figures become visible as the couples narrative progresses."
+    },
+    {
+      "id": "the_mirror_pool",
+      "name": "The Mirror Pool",
+      "filename": "the_mirro_pool_sacred_space.jpg",
+      "source": "universal",
+      "biome": "crystal_mountains",
+      "therapeutic_function": "The water reflects not what is above but what is within — honest self-seeing",
+      "visual_description": "Perfectly still circular pool in hidden grotto, water reflects inner truth not surroundings, soft bioluminescent light from pool edges, moss-covered stones, warm blue-green glow",
+      "narrative_usage": "Appears when the client is ready for genuine self-reflection. What the mirror shows depends on the client's therapeutic state — their parts, their exile, their Self.",
+      "appears_in_phases": ["mid", "late"],
+      "evolution_notes": "Pool remains constant. What it reflects changes based on the client's clinical state — early: shows the exile hiding → mid: shows the protector parts → late: shows the Self clearly."
+    },
+    {
+      "id": "the_threshold",
+      "name": "The Threshold",
+      "filename": "the_threshold_sacred_space.jpg",
+      "source": "universal",
+      "biome": "fortress_plains",
+      "therapeutic_function": "The moment before crossing into new understanding — liminal space, the edge of change",
+      "visual_description": "Simple stone archway standing alone in open misty field, nothing on either side but open space, arch glows faintly warm at edges, wildflowers at base",
+      "narrative_usage": "Appears at narrative turning points — when the LIMINAL RESOLVE engine detects threshold crossing. The client stands before the arch. Crossing is the therapeutic act.",
+      "appears_in_phases": ["early", "mid", "late"],
+      "evolution_notes": "The threshold appears multiple times throughout the journey. Each crossing changes the world on the other side. The arch itself remains constant."
+    },
+    {
+      "id": "the_starfield",
+      "name": "The Starfield",
+      "filename": "the_starfield_sacred_space.jpg",
+      "source": "universal",
+      "biome": "open_sky",
+      "therapeutic_function": "Where smallness feels safe not frightening — perspective, awe, connection to something larger",
+      "visual_description": "Open clearing at night with impossibly close star-filled sky, ground mirrors stars with tiny bioluminescent flowers, no horizon line — above and below merge, warm starlight",
+      "narrative_usage": "Rest scene for existential processing. When the client confronts the largeness of their pain or their place in the world, the starfield holds them in beauty.",
+      "appears_in_phases": ["mid", "late", "transformed"],
+      "evolution_notes": "Starfield remains constant. Character's posture changes — curled up looking down → sitting looking outward → lying on back looking up → standing with arms open."
+    },
+    {
+      "id": "the_convergence_point",
+      "name": "The Convergence Point",
+      "filename": "the_convergence_point_sacred_space.jpg",
+      "source": "universal",
+      "biome": "river_valley",
+      "therapeutic_function": "Where two people's healing stories touch for the first time — couples sacred space",
+      "visual_description": "Place where two story worlds visibly meet — one side warm forest, one side open plains, border gentle not harsh, paths from both sides meeting at single stone bench, warm mixed light",
+      "narrative_usage": "Exclusively for couples scenes (Layer 2). When two individual narratives converge, this is where the characters meet. The bench is for two.",
+      "appears_in_phases": ["mid", "late", "transformed"],
+      "evolution_notes": "The convergence point evolves as the couple heals — the border between worlds softens, the bench gains carvings, eventually the two biomes blend together seamlessly."
+    }
+  ],
+
+  "filename_notes": {
+    "the_scared_hallway_sacred_space.jpg": "Typo in filename — 'scared' should be 'sacred'. Consider renaming to 'the_sacred_hallway_sacred_space.jpg'.",
+    "the_mirro_pool_sacred_space.jpg": "Typo in filename — 'mirro' should be 'mirror'. Consider renaming to 'the_mirror_pool_sacred_space.jpg'."
+  }
+}
