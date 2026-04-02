@@ -92,12 +92,14 @@ Key vars: AZURE_API_KEY, DATABASE_URL, JWT_SECRET
 Repo: git@github.com:Thera-cloud/Clinical-Sovereignty-Lab.git
 
 ## Voice Pipeline Decision (LOCKED)
-- Live calls use Azure Realtime TTS (TWILIO_VOICE_PIPELINE=azure_realtime)
+- Live calls use Grok native voice (Rex) when GROK_NATIVE_VOICE=true (1-hop audio pipeline)
+- Fallback: Azure Onyx TTS (automatic mid-call if Grok audio stream fails)
 - XTTS on Hetzner is STOPPED and DISABLED (systemctl disable xtts-server)
 - Do NOT restart XTTS on Hetzner
 - Do NOT set TWILIO_VOICE_PIPELINE=grok_xtts
 - XTTS will only be used when a dedicated GPU is available (not shared with firehose)
-- The degradation ladder: Azure Realtime → Edge TTS fallback. XTTS is not in the chain.
+- The degradation ladder: Grok Rex native → Azure Onyx TTS fallback. XTTS is not in the chain.
+- To disable Grok native voice and revert to Azure-only: set GROK_NATIVE_VOICE=false
 
 ## When Making Changes
 1. Check if algorithm is in "Key Algorithms" section - if so, be very careful
@@ -124,3 +126,21 @@ Changes must be additive only: no reformatting, no restructuring, no refactoring
 4. New code must be behind a feature flag.
 5. Every change must include a comment: `# QUANTUM-CRYSTAL-ARCH` or `# SOVEREIGN-VOICE`.
 6. If Composer/agent proposes more than 50 lines changed, stop and ask for explicit approval.
+
+# PROTECTED FILES — 50-line change limit per commit
+# These files are production-verified. Do NOT rewrite, refactor, or add features.
+# Maximum 50 lines changed per edit. Show diff before saving.
+backend/app/services/twilio_grok_xtts_pipeline.py
+backend/app/services/crystal_graph.py
+backend/app/services/crystal_recall_bridge.py
+backend/app/websocket/main.py
+backend/app/routers/voice_billing_api.py
+
+# PROTECTED FILES — 50-line change limit per commit
+# These files are production-verified and load-tested. Do NOT rewrite, refactor, or add features.
+# Maximum 50 lines changed per edit. Show diff before saving. No new features without explicit approval.
+backend/app/services/twilio_grok_xtts_pipeline.py
+backend/app/services/crystal_graph.py
+backend/app/services/crystal_recall_bridge.py
+backend/app/websocket/main.py
+backend/app/routers/voice_billing_api.py
