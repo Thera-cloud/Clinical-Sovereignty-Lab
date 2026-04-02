@@ -1063,55 +1063,19 @@ def _wav_to_mulaw(wav_audio: bytes) -> Optional[bytes]:
 async def _synthesize_with_fallback(
     text: str, profile: str, xtts_to_mulaw_state: list
 ) -> Optional[bytes]:
-    """Priority: Azure TTS (fast) → Edge TTS (free) → XTTS (voice clone, slow).
-
-    Returns μ-law bytes ready for Twilio, or None if all engines failed.
-    """
-    global _xtts_consecutive_failures
-
-    # 1. Azure TTS — fastest for live calls (<2s)
-    try:
-        wav = await _azure_tts(text)
-        if wav:
-            mulaw = _wav_to_mulaw(wav)
-            if mulaw:
-                return mulaw
-    except Exception as e:
-        print(f"[TWILIO-GROK-XTTS] Azure TTS failed: {e}")
-
-    # 2. Edge TTS — free Microsoft, fast (~3s)
-    edge_audio = await _synthesize_edge_tts_fallback(text)
-    if edge_audio:
-        mulaw = _wav_to_mulaw(edge_audio)
-        if mulaw:
-            return mulaw
-
-    # 3. XTTS — voice clone but slow on ARM (~10-50s), use with tight timeout
-    if _xtts_consecutive_failures < _XTTS_FAIL_THRESHOLD:
+    """Azure TTS only — no voice switching. Retry once on failure."""
+    for attempt in range(2):
         try:
-            wav = await asyncio.wait_for(
-                synthesize_nathan_xtts(text, profile=profile),
-                timeout=8.0,
-            )
-            pcm_24k = strip_wav_header(wav)
-            mulaw_out = xtts_pcm_to_twilio_mulaw(pcm_24k, xtts_to_mulaw_state)
-            _xtts_consecutive_failures = 0
-            return mulaw_out
-        except asyncio.TimeoutError:
-            _xtts_consecutive_failures += 1
-            print(f"[TWILIO-GROK-XTTS] XTTS timed out (8s) ({_xtts_consecutive_failures}/{_XTTS_FAIL_THRESHOLD})")
+            wav = await _azure_tts(text)
+            if wav:
+                mulaw = _wav_to_mulaw(wav)
+                if mulaw:
+                    return mulaw
         except Exception as e:
-            _xtts_consecutive_failures += 1
-            logger.warning(
-                "XTTS failed (%d/%d): %s",
-                _xtts_consecutive_failures,
-                _XTTS_FAIL_THRESHOLD,
-                e,
-            )
-    else:
-        logger.info("XTTS circuit-breaker open (%d failures)", _xtts_consecutive_failures)
-
-    logger.error("All TTS engines failed for text: %s", text[:80])
+            logger.warning("Azure TTS attempt %d failed: %s", attempt + 1, e)
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+    logger.warning("Azure TTS failed twice — skipping utterance (no voice switch)")
     return None
 
 
@@ -1191,7 +1155,7 @@ async def run_twilio_grok_xtts_bridge(
     async def _rolling_ec_loop() -> None:
         while True:
             await asyncio.sleep(30)
-            await _record_ec_snapshot("rolling")
+            asyncio.create_task(_record_ec_snapshot("rolling"))
 
     async def _send_mulaw_to_twilio(mulaw_out: bytes) -> None:
         nonlocal stream_sid
@@ -1349,7 +1313,7 @@ async def run_twilio_grok_xtts_bridge(
                         _bc_engine.enable()
                         print("[BACKCHANNEL] enabled after first user speech")
                     if voice_crystallization_enabled:
-                        await _record_ec_snapshot("turn")
+                        asyncio.create_task(_record_ec_snapshot("turn"))
 
                     if _is_memory_query(user_txt) and _search_dedup.should_search(user_txt) and session_username and ctx.get("db_pool"):
                         print(f"[VOICE-DEEP-SEARCH] memory query detected: '{user_txt[:80]}'")
@@ -1487,7 +1451,7 @@ async def run_twilio_grok_xtts_bridge(
                     if ec_task and not ec_task.done():
                         ec_task.cancel()
                     ec_task = asyncio.create_task(_rolling_ec_loop())
-                    await _record_ec_snapshot("start")
+                    asyncio.create_task(_record_ec_snapshot("start"))
 
                 _voice_db = ctx.get("db_pool")
                 if _voice_db and uname:
@@ -1677,7 +1641,7 @@ async def run_twilio_grok_xtts_bridge(
                     try:
                         from app.services.vectorize_service import index_conversation
 
-                        await _record_ec_snapshot("final")
+                        asyncio.create_task(_record_ec_snapshot("final"))
                         pair_count = min(len(user_turns), len(assistant_turns))
                         async with db_pool.acquire() as conn:
                             for i in range(pair_count):
