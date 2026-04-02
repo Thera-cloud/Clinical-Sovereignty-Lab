@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trial billing setup — Sovereign Sanctuary</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #050505; color: #e8e8e8; margin: 0; padding: 24px; max-width: 480px; margin-left: auto; margin-right: auto; }
+    h1 { font-size: 1.25rem; color: #C9A962; }
+    label { display: block; margin-top: 12px; font-size: 0.85rem; color: #888; }
+    input { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; border-radius: 8px; border: 1px solid #333; background: #111; color: #fff; }
+    button { margin-top: 20px; width: 100%; padding: 14px; border: none; border-radius: 8px; background: #C9A962; color: #000; font-weight: bold; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .msg { margin-top: 16px; font-size: 0.9rem; line-height: 1.4; }
+    .ok { color: #4ECDC4; }
+    .err { color: #EF4444; }
+  </style>
+</head>
+<body>
+  <h1>Start your free trial</h1>
+  <p class="msg">Add a card for when your trial ends. You won’t be charged for the trial period.</p>
+  <label>Full name</label>
+  <input id="name" type="text" autocomplete="name" />
+  <label>Email</label>
+  <input id="email" type="email" autocomplete="email" />
+  <label>Phone (optional if email provided)</label>
+  <input id="phone" type="tel" autocomplete="tel" />
+  <button id="go" type="button">Continue to secure card setup</button>
+  <p id="status" class="msg"></p>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var nameEl = document.getElementById('name');
+      var emailEl = document.getElementById('email');
+      var phoneEl = document.getElementById('phone');
+      var statusEl = document.getElementById('status');
+      var btn = document.getElementById('go');
+      if (params.get('name')) nameEl.value = decodeURIComponent(params.get('name'));
+      if (params.get('email')) emailEl.value = decodeURIComponent(params.get('email'));
+      if (params.get('billing_complete') === '1' && params.get('session_id')) {
+        statusEl.textContent = 'Billing setup complete. Return to the Little Nate app and tap Create Account again.';
+        statusEl.className = 'msg ok';
+        btn.style.display = 'none';
+        return;
+      }
+      if (params.get('cancelled') === '1') {
+        statusEl.textContent = 'Card setup was cancelled. You can try again when ready.';
+        statusEl.className = 'msg err';
+      }
+      var apiBase = 'https://api.sovereignsanctuary.net';
+      btn.addEventListener('click', function () {
+        var name = (nameEl.value || '').trim();
+        var email = (emailEl.value || '').trim().toLowerCase();
+        var phone = (phoneEl.value || '').replace(/\D/g, '');
+        if (!name) { statusEl.textContent = 'Name is required.'; statusEl.className = 'msg err'; return; }
+        if (!email && phone.length < 10) { statusEl.textContent = 'Enter an email or a 10+ digit phone number.'; statusEl.className = 'msg err'; return; }
+        btn.disabled = true;
+        statusEl.textContent = 'Opening Stripe…';
+        statusEl.className = 'msg';
+        fetch(apiBase + '/api/registration/trial/setup-billing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name,
+            email: email || null,
+            phone_digits: phone.length >= 10 ? phone : null
+          })
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (x) {
+            if (!x.ok) throw new Error(x.j.detail || 'Request failed');
+            if (x.j.checkout_url) window.location.href = x.j.checkout_url;
+            else throw new Error('No checkout URL');
+          })
+          .catch(function (e) {
+            statusEl.textContent = e.message || String(e);
+            statusEl.className = 'msg err';
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

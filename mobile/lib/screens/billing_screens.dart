@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show defaultApiBaseUrl, isNativeIOS;
 import '../services/payment_service.dart';
+import '../config/app_config.dart';
 
 /// Build standard auth headers for REST API calls.
 /// Backend auth accepts X-User-Id as a fallback for service/internal calls.
@@ -358,48 +359,50 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
       }
     }
 
-    final wsMsg = <String, dynamic>{
-      'type': 'get_checkout_url',
-      'plan': planKey,
-      'success_url': 'https://app.sovereignsanctuary.net/billing/success',
-      'cancel_url': 'https://app.sovereignsanctuary.net/billing/cancel',
-    };
-    if (_verifiedPromo != null && _verifiedPromo!.isNotEmpty) {
-      wsMsg['promo_code'] = _verifiedPromo;
-    }
-    _sendWs(wsMsg);
+    final token = widget.currentUserProfile['token'] ?? '';
 
-    // Also attempt REST upgrade/downgrade
     try {
-      final endpoint = isUpgrade ? 'upgrade' : 'downgrade';
-      final userId =
-          widget.currentUserProfile['hardware_id'] ?? '';
+      final reqBody = <String, dynamic>{
+        'tier': planKey,
+        'success_url': 'https://app.sovereignsanctuary.net/payment-success',
+        'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
+      };
+      if (_verifiedPromo != null && _verifiedPromo!.isNotEmpty) {
+        reqBody['promo_code'] = _verifiedPromo;
+      }
       final resp = await http.post(
-        Uri.parse('$defaultApiBaseUrl/api/billing/subscription/$endpoint'),
-        headers: _authHeaders(userId, json: true),
-        body: jsonEncode({
-          'user_id': userId,
-          'new_plan': planKey,
-        }),
-      );
+        Uri.parse('$defaultApiBaseUrl/api/billing/checkout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(reqBody),
+      ).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+
       if (resp.statusCode == 200) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(isUpgrade
-                ? 'Upgraded to ${names[planKey]}!'
-                : 'Plan change to ${names[planKey]} scheduled'),
-            backgroundColor: _D.bgElevated,
-          ));
-          Navigator.pop(context, planKey);
+        final data = jsonDecode(resp.body);
+        final url = data['checkout_url'];
+        if (url != null) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Complete your ${isUpgrade ? "upgrade" : "plan change"} in the browser'),
+              backgroundColor: _D.bgElevated,
+            ));
+            Navigator.pop(context, planKey);
+          }
         }
       } else {
         final body = jsonDecode(resp.body);
         setState(() {
-          _error = body['detail'] ?? 'Plan change failed';
+          _error = body['detail'] ?? 'Could not start checkout';
           _loading = false;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Network error: $e';
         _loading = false;
@@ -2793,10 +2796,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
 }
 
 // =============================================================================
-// 5. TRIAL BANNER WIDGET — Countdown + Upgrade CTA
+// 5. TRIAL BANNER WIDGET — Countdown + tier checkout (Stripe uses stored customer)
 // =============================================================================
 
-class TrialBannerWidget extends StatelessWidget {
+class TrialBannerWidget extends StatefulWidget {
   final Map<String, dynamic> userProfile;
   final VoidCallback? onUpgrade;
 
@@ -2807,42 +2810,123 @@ class TrialBannerWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final plan = (userProfile['subscription_plan'] ?? '').toString().toUpperCase();
-    final status =
-        (userProfile['subscription_status'] ?? '').toString().toUpperCase();
+  State<TrialBannerWidget> createState() => _TrialBannerWidgetState();
+}
 
-    // Only show for trial users
-    if (plan != 'TRIAL' && plan != 'THRESHOLD' && plan != '') return const SizedBox.shrink();
+class _TrialBannerWidgetState extends State<TrialBannerWidget> {
+  bool _checkoutBusy = false;
+
+  Future<void> _startTierCheckout(BuildContext context, String tier) async {
+    if (_checkoutBusy || isNativeIOS) {
+      widget.onUpgrade?.call();
+      return;
+    }
+    final token = widget.userProfile['token']?.toString() ?? '';
+    if (token.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please sign in again to upgrade.'),
+            backgroundColor: _D.red,
+          ),
+        );
+      }
+      return;
+    }
+    setState(() => _checkoutBusy = true);
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('${AppConfig.apiBaseUrl}/api/billing/checkout'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'tier': tier,
+              'success_url': 'https://app.sovereignsanctuary.net/payment-success',
+              'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!context.mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final url = data['checkout_url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Complete checkout in your browser'),
+              backgroundColor: Color(0xFF1A1A1A),
+            ),
+          );
+        }
+      } else {
+        final body = jsonDecode(resp.body);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${body['detail'] ?? 'Checkout failed'}'),
+            backgroundColor: _D.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: _D.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checkoutBusy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan =
+        (widget.userProfile['subscription_plan'] ?? '').toString().toUpperCase();
+    final status =
+        (widget.userProfile['subscription_status'] ?? '').toString().toUpperCase();
+
+    if (plan != 'TRIAL' && plan != 'THRESHOLD' && plan != '') {
+      return const SizedBox.shrink();
+    }
     if (status == 'ACTIVE' && plan != 'TRIAL' && plan != 'THRESHOLD' && plan != '') {
       return const SizedBox.shrink();
     }
 
-    // Calculate days remaining
-    final trialStartStr = userProfile['trial_start_date'] ??
-        userProfile['created_at'] ??
+    final trialEndStr = widget.userProfile['trial_end_date'] ??
+        widget.userProfile['trial_start_date'] ??
+        widget.userProfile['created_at'] ??
         '';
     int daysRemaining = 14;
-    if (trialStartStr.toString().isNotEmpty) {
+    if (trialEndStr.toString().isNotEmpty) {
       try {
-        final start = DateTime.parse(trialStartStr.toString());
-        final end = start.add(const Duration(days: 14));
+        final end = DateTime.parse(trialEndStr.toString());
         daysRemaining = end.difference(DateTime.now()).inDays;
         if (daysRemaining < 0) daysRemaining = 0;
-      } catch (_) {}
+      } catch (_) {
+        try {
+          final start = DateTime.parse(trialEndStr.toString());
+          final end = start.add(const Duration(days: 14));
+          daysRemaining = end.difference(DateTime.now()).inDays;
+          if (daysRemaining < 0) daysRemaining = 0;
+        } catch (_) {}
+      }
     }
 
-    final isExpired = daysRemaining <= 0 || status == 'TRIAL_EXPIRED' || status == 'GRACE_EXPIRED';
+    final isExpired =
+        daysRemaining <= 0 || status == 'TRIAL_EXPIRED' || status == 'GRACE_EXPIRED';
     final isUrgent = daysRemaining <= 3;
 
-    // Full-screen modal on expiry
     if (isExpired) {
-      return _TrialExpiredBanner(onUpgrade: onUpgrade);
+      return _trialExpiredPanel(context);
     }
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: isUrgent ? _D.red.withOpacity(0.12) : _D.gold.withOpacity(0.08),
         border: Border(
@@ -2851,61 +2935,98 @@ class TrialBannerWidget extends StatelessWidget {
           ),
         ),
       ),
-      child: Row(children: [
-        Icon(
-          isUrgent ? Icons.warning_amber : Icons.timer,
-          color: isUrgent ? _D.red : _D.gold,
-          size: 18,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isUrgent
-                    ? 'Trial ends in $daysRemaining day${daysRemaining != 1 ? 's' : ''}!'
-                    : '$daysRemaining days left in your trial',
-                style: TextStyle(
-                  color: isUrgent ? _D.red : _D.gold,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(
+              isUrgent ? Icons.warning_amber : Icons.timer,
+              color: isUrgent ? _D.red : _D.gold,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isUrgent
+                        ? 'Trial ends in $daysRemaining day${daysRemaining != 1 ? 's' : ''}!'
+                        : '$daysRemaining days left in your trial',
+                    style: TextStyle(
+                      color: isUrgent ? _D.red : _D.gold,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (isUrgent)
+                    const Text(
+                      'Choose Inner Chamber or Sovereign Circle to continue',
+                      style: TextStyle(color: _D.textSecondary, fontSize: 10),
+                    ),
+                ],
               ),
-              if (isUrgent)
-                const Text(
-                  'Upgrade now to keep your progress',
-                  style: TextStyle(color: _D.textSecondary, fontSize: 10),
+            ),
+          ]),
+          if (!isNativeIOS) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: _checkoutBusy
+                        ? null
+                        : () => _startTierCheckout(context, 'STANDARD'),
+                    style: TextButton.styleFrom(
+                      backgroundColor: _D.cyan.withOpacity(0.2),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    child: Text(
+                      _checkoutBusy ? '…' : 'Inner Chamber',
+                      style: const TextStyle(
+                        color: _D.cyan,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ),
-            ],
-          ),
-        ),
-        TextButton(
-          onPressed: onUpgrade,
-          style: TextButton.styleFrom(
-            backgroundColor: isUrgent ? _D.red : _D.gold,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          ),
-          child: const Text('Upgrade',
-              style: TextStyle(
-                  color: Colors.black,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold)),
-        ),
-      ]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextButton(
+                    onPressed: _checkoutBusy
+                        ? null
+                        : () => _startTierCheckout(context, 'TOP_TIER'),
+                    style: TextButton.styleFrom(
+                      backgroundColor: _D.gold.withOpacity(0.25),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    child: Text(
+                      _checkoutBusy ? '…' : 'Sovereign Circle',
+                      style: const TextStyle(
+                        color: _D.gold,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (widget.onUpgrade != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: widget.onUpgrade,
+                child: const Text('Upgrade', style: TextStyle(color: _D.gold)),
+              ),
+            ),
+        ],
+      ),
     );
   }
-}
 
-class _TrialExpiredBanner extends StatelessWidget {
-  final VoidCallback? onUpgrade;
-
-  const _TrialExpiredBanner({this.onUpgrade});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _trialExpiredPanel(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -2930,10 +3051,8 @@ class _TrialExpiredBanner extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Your conversations, progress, and insights are all waiting for you. '
-            'Choose a plan to continue your journey.',
-            style:
-                TextStyle(color: _D.textSecondary, fontSize: 12, height: 1.5),
+            'Your trial has ended. Upgrade to continue using Little Nate.',
+            style: TextStyle(color: _D.textSecondary, fontSize: 12, height: 1.5),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
@@ -2941,7 +3060,7 @@ class _TrialExpiredBanner extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: onUpgrade,
+                onPressed: widget.onUpgrade,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _D.gold,
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2959,10 +3078,21 @@ class _TrialExpiredBanner extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _planButton('Inner Chamber', '\$49/mo', _D.cyan, onUpgrade),
+                _planTile(
+                  context,
+                  'Inner Chamber',
+                  '\$49/mo',
+                  _D.cyan,
+                  () => _startTierCheckout(context, 'STANDARD'),
+                ),
                 const SizedBox(width: 12),
-                _planButton(
-                    'Sovereign Circle', '\$149/mo', _D.gold, onUpgrade),
+                _planTile(
+                  context,
+                  'Sovereign Circle',
+                  '\$149/mo',
+                  _D.gold,
+                  () => _startTierCheckout(context, 'TOP_TIER'),
+                ),
               ],
             ),
         ],
@@ -2970,10 +3100,15 @@ class _TrialExpiredBanner extends StatelessWidget {
     );
   }
 
-  Widget _planButton(
-      String name, String price, Color color, VoidCallback? onTap) {
+  Widget _planTile(
+    BuildContext context,
+    String name,
+    String price,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return InkWell(
-      onTap: onTap,
+      onTap: _checkoutBusy ? null : onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(

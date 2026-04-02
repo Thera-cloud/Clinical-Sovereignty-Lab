@@ -25,6 +25,8 @@ import 'updated_screens.dart';
 import 'avatar.dart';
 import 'screens/onboarding_threshold_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
+import 'screens/ai_consent_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shared_widgets.dart';
 import 'services/device_shield.dart';
@@ -6719,10 +6721,31 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
               final subPlan = (profile['subscription_plan'] ?? '').toString().toUpperCase();
               final canAccessNate = profile['can_access_nate'] ?? true;
               if (subPlan == 'COACH_ONLY' || canAccessNate == false) {
-                // COACH_ONLY clients get scheduling-only screen
                 nextScreen = ClientScheduleScreen(currentUserProfile: profileWithToken, username: user, password: pass);
               } else {
-                nextScreen = NeuralInterfaceV2(currentUserProfile: profileWithToken, username: user, password: pass);
+                // AI consent gate — required before chat access
+                final hasConsent = profileWithToken['ai_consent_granted_at'] != null;
+                bool localConsent = false;
+                if (!hasConsent) {
+                  try {
+                    final prefs = await SharedPreferences.getInstance();
+                    localConsent = prefs.getString('ai_consent_granted_at') != null;
+                  } catch (_) {}
+                }
+                if (!hasConsent && !localConsent) {
+                  nextScreen = AiConsentScreen(
+                    profile: profileWithToken,
+                    username: user,
+                    password: pass,
+                    buildNextScreen: () => NeuralInterfaceV2(
+                      currentUserProfile: profileWithToken,
+                      username: user,
+                      password: pass,
+                    ),
+                  );
+                } else {
+                  nextScreen = NeuralInterfaceV2(currentUserProfile: profileWithToken, username: user, password: pass);
+                }
               }
             }
 
@@ -7647,6 +7670,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
   WebSocketChannel? _regSocket;
   bool _isRegistering = false;
   Timer? _regTimeoutTimer;
+  /// After Stripe trial setup (Checkout mode=setup); sent with register_request.
+  String? _trialStripeSessionId;
 
   // Dojo pricing
   static const Map<String, double> _dojoPrices = {
@@ -7773,7 +7798,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
     return age;
   }
 
-  void _submitRegistration() {
+  Future<void> _submitRegistration() async {
     if (_isRegistering) return;
 
     // 1. Validation
@@ -7813,9 +7838,123 @@ class _SignUpWizardState extends State<SignUpWizard> {
         }
       }
     }
+    if (_effectiveRole == "CLIENT") {
+      final emailT = _emailCtrl.text.trim();
+      final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+      if (emailT.isEmpty && phoneDigits.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please provide an email address or phone number.")),
+        );
+        return;
+      }
+      if (emailT.isNotEmpty && (!emailT.contains('@') || !emailT.contains('.'))) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please enter a valid email address")),
+        );
+        return;
+      }
+      if (phoneDigits.isNotEmpty && phoneDigits.length < 10) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Phone number must be at least 10 digits")),
+        );
+        return;
+      }
+    }
     if (_userCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Username and Password are required")));
        return;
+    }
+
+    if (_effectiveRole == "CLIENT" && _selectedTier == "TRIAL") {
+      final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
+      String? sid = _trialStripeSessionId;
+      if (sid == null || sid.isEmpty) {
+        final emailT = _emailCtrl.text.trim();
+        final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+        try {
+          final q = Uri.parse('$base/api/registration/trial/billing-status').replace(
+            queryParameters: {
+              if (emailT.isNotEmpty) 'email': emailT,
+              if (phoneDigits.length >= 10) 'phone_digits': phoneDigits,
+            },
+          );
+          final poll = await http.get(q).timeout(const Duration(seconds: 12));
+          if (poll.statusCode == 200) {
+            final pj = jsonDecode(poll.body) as Map<String, dynamic>;
+            if (pj['ready'] == true && (pj['session_id']?.toString().isNotEmpty ?? false)) {
+              sid = pj['session_id'].toString();
+              _trialStripeSessionId = sid;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (sid == null || sid.isEmpty) {
+        if (isNativeIOS) {
+          final nameQ = Uri.encodeComponent(_nameCtrl.text.trim());
+          final emailQ = Uri.encodeComponent(_emailCtrl.text.trim());
+          final webUrl = 'https://app.sovereignsanctuary.net/trial-setup.html?name=$nameQ&email=$emailQ';
+          await launchUrl(Uri.parse(webUrl), mode: LaunchMode.externalApplication);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Complete billing on the website, then return and tap Create Account again.'),
+              duration: Duration(seconds: 8),
+            ));
+          }
+          return;
+        }
+        setState(() => _isRegistering = true);
+        try {
+          final uri = Uri.parse('$base/api/registration/trial/setup-billing');
+          final emailT = _emailCtrl.text.trim();
+          final phoneDigits = _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '');
+          final resp = await http
+              .post(
+                uri,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'name': _nameCtrl.text.trim(),
+                  if (emailT.isNotEmpty) 'email': emailT,
+                  if (phoneDigits.length >= 10) 'phone_digits': phoneDigits,
+                }),
+              )
+              .timeout(const Duration(seconds: 20));
+          if (!mounted) return;
+          setState(() => _isRegistering = false);
+          if (resp.statusCode == 200) {
+            final data = jsonDecode(resp.body) as Map<String, dynamic>;
+            final checkoutUrl = data['checkout_url'] as String?;
+            final newSid = data['session_id'] as String?;
+            if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+              await launchUrl(Uri.parse(checkoutUrl), mode: LaunchMode.externalApplication);
+              if (newSid != null && newSid.isNotEmpty) {
+                _trialStripeSessionId = newSid;
+              }
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('After you add your card, return here and tap Create Account again.'),
+                duration: Duration(seconds: 6),
+              ));
+            }
+          } else {
+            var msg = 'Billing setup failed';
+            try {
+              final err = jsonDecode(resp.body);
+              msg = err['detail']?.toString() ?? msg;
+            } catch (_) {}
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(msg), backgroundColor: Colors.red),
+            );
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() => _isRegistering = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Connection error: $e'), backgroundColor: Colors.red),
+            );
+          }
+        }
+        return;
+      }
     }
 
     setState(() => _isRegistering = true);
@@ -7856,6 +7995,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
       "registration_type": role == "CLIENT" ? _selectedTier : null,
       // Coach invite token (when client arrives via coach invite link)
       if (role == "CLIENT" && _coachInviteToken != null) "coach_invite_token": _coachInviteToken,
+      if (role == "CLIENT" && _selectedTier == "TRIAL" && (_trialStripeSessionId ?? "").isNotEmpty)
+        "stripe_session_id": _trialStripeSessionId,
       // Dojo selection (coaches)
       "selected_dojos": role == "COACH" ? _selectedDojos : null,
       "dojo_discount_pct": role == "COACH" ? _calculateDojoDiscount() : null,
@@ -7911,6 +8052,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
       // CASE A: Server created account AND logged us in (Ideal)
       if (data['type'] == 'login_success') {
         _regTimeoutTimer?.cancel();
+        _trialStripeSessionId = null;
         final profile = Map<String, dynamic>.from(data['profile'] ?? {});
         final regRole = (profile['role'] ?? _effectiveRole).toString();
         final token = data['token'] ?? "";
@@ -9280,7 +9422,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
             
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: _isRegistering ? null : (_isPaidTier ? _goToOrderReview : _submitRegistration), 
+              onPressed: _isRegistering
+                  ? null
+                  : (_isPaidTier ? _goToOrderReview : () => _submitRegistration()), 
               style: ElevatedButton.styleFrom(
                 backgroundColor: _isRegistering ? Colors.grey : Colors.blueAccent,
                 minimumSize: const Size(double.infinity, 50),

@@ -6,13 +6,17 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+
+from app.services.trial_signup_redis_keys import trial_contact_key, trial_signup_session_key
 
 try:
     from app.services.api_server import get_current_user
@@ -53,6 +57,22 @@ CANCEL_URL = os.getenv(
     "https://app.sovereignsanctuary.net/?registration=cancel",
 )
 
+API_PUBLIC_BASE = os.getenv("API_PUBLIC_URL", "https://api.sovereignsanctuary.net").rstrip("/")
+TRIAL_SETUP_CANCEL_URL = os.getenv(
+    "TRIAL_SETUP_CANCEL_URL",
+    "https://app.sovereignsanctuary.net/trial-setup.html?cancelled=1",
+)
+TRIAL_SETUP_SUCCESS_REDIRECT = os.getenv(
+    "TRIAL_SETUP_SUCCESS_REDIRECT",
+    "https://app.sovereignsanctuary.net/trial-setup.html",
+)
+_TRIAL_SIGNUP_TTL = int(os.getenv("TRIAL_SIGNUP_REDIS_TTL", "1800"))
+
+
+def _trial_redis_client(request: Request):
+    wm = getattr(request.app.state, "wisdom_mesh", None)
+    return getattr(wm, "_redis", None) if wm else None
+
 # Rate limiting: 5 req/min per IP
 _rate_limits: Dict[str, List[float]] = {}
 _RATE_WINDOW = 60
@@ -86,6 +106,208 @@ public_router = APIRouter(
     prefix="/api/registration",
     tags=["registration-public"],
 )
+
+
+class TrialSetupBillingRequest(BaseModel):
+    name: str
+    email: Optional[str] = None
+    phone_digits: Optional[str] = None
+
+
+@public_router.post("/trial/setup-billing")
+async def trial_setup_billing(body: TrialSetupBillingRequest, request: Request):
+    """Stripe Checkout (mode=setup) to collect a card for trial registration; pending state in Redis."""
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_check(client_ip):
+        raise HTTPException(429, "Too many registration attempts. Please try again shortly.")
+
+    r = _trial_redis_client(request)
+    if not r:
+        raise HTTPException(503, "Service temporarily unavailable")
+    if not stripe.api_key:
+        raise HTTPException(503, "Billing unavailable")
+
+    email = (body.email or "").strip().lower()
+    phone_digits = re.sub(r"\D", "", body.phone_digits or "")
+    if not email and len(phone_digits) < 10:
+        raise HTTPException(400, "Email or phone number is required")
+
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+
+    customer_id = None
+    try:
+        if email:
+            existing = stripe.Customer.list(email=email, limit=1)
+            if existing and existing.data:
+                customer_id = existing.data[0].id
+        if not customer_id:
+            kwargs: Dict[str, Any] = {"name": name, "metadata": {"source": "trial_registration"}}
+            if email:
+                kwargs["email"] = email
+            if len(phone_digits) >= 10:
+                kwargs["phone"] = phone_digits
+            cust = stripe.Customer.create(**kwargs)
+            customer_id = cust.id
+    except stripe.StripeError as e:
+        logger.error("trial_setup_billing customer: %s", e)
+        raise HTTPException(502, "Payment provider error")
+
+    success_url = f"{API_PUBLIC_BASE}/api/registration/trial/setup-callback?session_id={{CHECKOUT_SESSION_ID}}"
+    try:
+        session = stripe.checkout.Session.create(
+            mode="setup",
+            customer=customer_id,
+            payment_method_types=["card"],
+            success_url=success_url,
+            cancel_url=TRIAL_SETUP_CANCEL_URL,
+            metadata={"type": "trial_registration_setup", "customer_id": customer_id},
+        )
+    except stripe.StripeError as e:
+        logger.error("trial_setup_billing session: %s", e)
+        raise HTTPException(502, "Payment service unavailable")
+
+    pending = {
+        "phase": "pending",
+        "name": name,
+        "email_normalized": email,
+        "phone_digits": phone_digits if len(phone_digits) >= 10 else "",
+    }
+    try:
+        await r.setex(trial_signup_session_key(session.id), _TRIAL_SIGNUP_TTL, json.dumps(pending))
+    except Exception as e:
+        logger.warning("trial_setup_billing redis: %s", e)
+        raise HTTPException(503, "Session storage failed")
+
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+@public_router.get("/trial/setup-callback")
+async def trial_setup_callback(session_id: str, request: Request):
+    """Stripe redirects here after setup-mode Checkout; finalize Redis and send user back to app web."""
+    r = _trial_redis_client(request)
+    if not stripe.api_key:
+        sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+        return RedirectResponse(
+            f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}error=no_stripe", status_code=302
+        )
+
+    try:
+        sess = stripe.checkout.Session.retrieve(session_id, expand=["setup_intent"])
+    except stripe.StripeError as e:
+        logger.warning("trial_setup_callback retrieve: %s", e)
+        sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+        return RedirectResponse(
+            f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}error=stripe", status_code=302
+        )
+
+    if sess.status != "complete":
+        sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+        return RedirectResponse(
+            f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}error=incomplete", status_code=302
+        )
+
+    setup = sess.setup_intent
+    if isinstance(setup, str):
+        setup = stripe.SetupIntent.retrieve(setup)
+    st = getattr(setup, "status", None) if setup else None
+    if st != "succeeded":
+        sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+        return RedirectResponse(
+            f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}error=setup_failed", status_code=302
+        )
+
+    customer_id = sess.customer
+    if not customer_id:
+        sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+        return RedirectResponse(
+            f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}error=no_customer", status_code=302
+        )
+
+    email_norm = ""
+    phone_digits = ""
+    name = ""
+    if r:
+        try:
+            raw = await r.get(trial_signup_session_key(session_id))
+            if raw:
+                prev = json.loads(raw)
+                email_norm = prev.get("email_normalized") or ""
+                phone_digits = prev.get("phone_digits") or ""
+                name = prev.get("name") or ""
+        except Exception as e:
+            logger.warning("trial_setup_callback redis read: %s", e)
+
+    try:
+        cust = stripe.Customer.retrieve(customer_id)
+        if not email_norm and getattr(cust, "email", None):
+            email_norm = (cust.email or "").lower()
+        if (not phone_digits or len(phone_digits) < 10) and getattr(cust, "phone", None):
+            phone_digits = re.sub(r"\D", "", cust.phone or "")
+    except Exception as e:
+        logger.warning("trial_setup_callback customer retrieve: %s", e)
+
+    payload = {
+        "verified": True,
+        "stripe_customer_id": customer_id,
+        "email_normalized": email_norm,
+        "phone_digits": phone_digits if len(phone_digits) >= 10 else "",
+        "name": name,
+    }
+    if r:
+        try:
+            await r.setex(trial_signup_session_key(session_id), _TRIAL_SIGNUP_TTL, json.dumps(payload))
+            if email_norm:
+                await r.setex(trial_contact_key("email", email_norm), _TRIAL_SIGNUP_TTL, session_id)
+            if phone_digits and len(phone_digits) >= 10:
+                await r.setex(trial_contact_key("phone", phone_digits), _TRIAL_SIGNUP_TTL, session_id)
+        except Exception as e:
+            logger.warning("trial_setup_callback redis write: %s", e)
+
+    sep = "&" if "?" in TRIAL_SETUP_SUCCESS_REDIRECT else "?"
+    return RedirectResponse(
+        f"{TRIAL_SETUP_SUCCESS_REDIRECT}{sep}billing_complete=1&session_id={session_id}",
+        status_code=302,
+    )
+
+
+@public_router.get("/trial/billing-status")
+async def trial_billing_status(
+    request: Request,
+    email: Optional[str] = None,
+    phone_digits: Optional[str] = None,
+):
+    """Poll after Stripe setup so the app can recover session_id without deep links."""
+    r = _trial_redis_client(request)
+    if not r:
+        return {"ready": False, "session_id": None}
+
+    digits = re.sub(r"\D", "", phone_digits or "")
+    sid = None
+    if email and email.strip():
+        try:
+            sid = await r.get(trial_contact_key("email", email.strip().lower()))
+        except Exception:
+            sid = None
+    if not sid and len(digits) >= 10:
+        try:
+            sid = await r.get(trial_contact_key("phone", digits))
+        except Exception:
+            sid = None
+
+    if not sid:
+        return {"ready": False, "session_id": None}
+
+    try:
+        raw = await r.get(trial_signup_session_key(sid))
+        data = json.loads(raw) if raw else {}
+    except Exception:
+        return {"ready": False, "session_id": None}
+
+    if data.get("verified") and data.get("stripe_customer_id"):
+        return {"ready": True, "session_id": sid}
+    return {"ready": False, "session_id": None}
 
 
 class PrepareRequest(BaseModel):
@@ -268,7 +490,7 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
             session_params["discounts"] = discounts
 
         checkout_session = stripe.checkout.Session.create(**session_params)
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error("Stripe Checkout creation failed: %s", e)
         raise HTTPException(502, "Payment service unavailable")
 
@@ -373,7 +595,7 @@ async def coach_upgrade_checkout(
                 "phone": body.phone or "",
             },
         )
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error("Coach upgrade Stripe session failed: %s", e)
         raise HTTPException(502, "Payment provider error")
 

@@ -328,7 +328,23 @@ class NoeticSynthesisStage3:
                     content_hash,
                     now,
                 )
-                return dict(row) if row else None
+            # QUANTUM-CRYSTAL-ARCH: Vectorize embedding for semantic search
+            if row:
+                try:
+                    from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                    if is_vectorize_configured():
+                        await index_wisdom(
+                            user_id="nate_crystal",
+                            wisdom_id=f"crystal_{content_hash[:16]}",
+                            insight_type=f"noetic_stage3_{domain}",
+                            content=text,
+                            source="noetic_stage3",
+                            domain=domain,
+                        )
+                except Exception as _v:
+                    logger.debug("NoeticStage3: vectorize non-fatal: %s", _v)
+                return dict(row)
+            return None
         except Exception as e:
             logger.warning("NoeticSynthesisStage3: direct INSERT failed: %s", e)
             return None

@@ -31,7 +31,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from app.services.twilio_voice_codec import (
     strip_wav_header,
@@ -63,11 +63,6 @@ try:
     from app.services.search_proxy import SecureSearchProxy
 except ImportError:
     SecureSearchProxy = None  # type: ignore[assignment,misc]
-
-try:
-    import jellyfish as _jf
-except ImportError:
-    _jf = None
 
 logger = logging.getLogger("nate.twilio_grok_xtts")
 
@@ -117,12 +112,6 @@ def _default_phone_instructions(username: str, db_pool=None, user_id=None) -> st
         f"{ANTI_CONFABULATION}"
         f"\nIf you do not have specific information about {who}'s life, "
         f"ask open questions rather than assuming or inventing details.\n\n"
-        "CLINICAL DIRECTNESS:\n"
-        "When the caller is intellectualizing, deflecting, or using professional jargon "
-        "to avoid vulnerability, match their intensity and name what you see. "
-        "You are warm by default but clinically direct when the moment calls for it. "
-        "Always deliver a transition statement before shifting tone: 'I'm going to be "
-        "more direct with you for a moment.'\n\n"
         "INTERNET SEARCH CAPABILITY:\n"
         "You CAN search the internet when the caller asks. When they ask you to look something up, "
         "search for something, or ask a factual question you're unsure about, just say something like "
@@ -213,12 +202,6 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
         "- If the user mentions someone not in your memory, say 'Tell me about them.'\n"
         "- If uncertain, ask: 'I want to make sure I'm remembering correctly — did you mention...?'\n"
         "- Never invent names, events, or details not in your memory.\n\n"
-        "CLINICAL DIRECTNESS:\n"
-        "When the caller is intellectualizing, deflecting, or using professional jargon "
-        "to avoid vulnerability, match their intensity and name what you see. "
-        "You are warm by default but clinically direct when the moment calls for it. "
-        "Always deliver a transition statement before shifting tone: 'I'm going to be "
-        "more direct with you for a moment.'\n\n"
         "INTERNET SEARCH CAPABILITY:\n"
         "You CAN search the internet when the caller asks. When they ask you to look something up, "
         "search for something, or ask a factual question you're unsure about, just say something like "
@@ -537,208 +520,6 @@ def _get_voice_search_proxy() -> Optional["SecureSearchProxy"]:
     return _voice_search_proxy
 
 
-# ---------------------------------------------------------------------------
-# PREDICTIVE ENTITY GRAPH — semantic lookahead engine
-# Patent 8, Claim 2: entity pre-loading from partial STT stream
-# ---------------------------------------------------------------------------
-
-
-class PredictiveEntityGraph:
-    """Extracts entities from partial STT transcripts and pre-loads crystal
-    memory before the user finishes speaking.
-
-    Architecture:
-      - Receives incremental transcript fragments from the Grok listener
-      - Extracts proper nouns and domain-specific terms in real time
-      - Pre-loads related crystal memory asynchronously
-      - When a search query is triggered, pre-warmed context is already available
-
-    Crystal integration:
-      - Uses recall_crystals_for_context() for entity-related memory
-      - Stores entity graph expansions as crystals for future recall
-    """
-
-    _ENTITY_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*)\b")
-    _DOMAIN_TERMS_RE = re.compile(
-        r"\b(Vatican|Bible|Old Testament|New Testament|Torah|Quran|"
-        r"Dead Sea Scrolls|Sumerian|Annunaki|Elohim|scripture|"
-        r"pharaoh|hieroglyphic|cuneiform|archaeology|anthropology|"
-        r"Enoch|Genesis|Exodus|Deuteronomy|Leviticus|"
-        r"psychology|neuroscience|attachment theory|CBT|DBT|EMDR|"
-        r"cortisol|serotonin|dopamine|amygdala|prefrontal)\b",
-        re.I,
-    )
-
-    def __init__(self, db_pool=None, username: str = ""):
-        self._db_pool = db_pool
-        self._username = username
-        self._entities: Dict[str, float] = {}  # entity → confidence
-        self._preloaded_context: Dict[str, str] = {}  # entity → crystal context
-        self._preload_tasks: Dict[str, asyncio.Task] = {}
-        self._last_fragment = ""
-        self._fragment_count = 0
-        self._crystallized_entities: set = set()
-
-    def _extract_entities(self, text: str) -> List[str]:
-        """Extract proper nouns and domain terms from a transcript fragment."""
-        entities: List[str] = []
-        for m in self._ENTITY_RE.finditer(text):
-            name = m.group(1)
-            if name.lower() not in _STOP_WORDS and len(name) >= 3:
-                entities.append(name)
-        for m in self._DOMAIN_TERMS_RE.finditer(text):
-            entities.append(m.group(1))
-        return entities
-
-    async def on_transcript_fragment(self, text: str) -> None:
-        """Process a partial STT transcript — extract entities and pre-load.
-
-        Called incrementally as the user speaks, before the full turn is complete.
-        """
-        if not text or len(text) < 5:
-            return
-        self._fragment_count += 1
-        self._last_fragment = text
-
-        new_entities = self._extract_entities(text)
-        for entity in new_entities:
-            key = entity.lower()
-            old_conf = self._entities.get(key, 0.0)
-            self._entities[key] = min(old_conf + 0.3, 1.0)
-
-            if key not in self._preloaded_context and key not in self._preload_tasks:
-                self._preload_tasks[key] = asyncio.create_task(
-                    self._preload_entity(entity)
-                )
-
-        # Phonetic cross-reference: if we have multiple similar entities,
-        # boost the one with the highest confidence
-        if _jf and len(self._entities) > 1:
-            keys = list(self._entities.keys())
-            for i in range(len(keys)):
-                for j in range(i + 1, len(keys)):
-                    sim = _metaphone_similarity(keys[i], keys[j])
-                    if sim >= 0.8 and keys[i] != keys[j]:
-                        # They sound alike — merge: boost the longer one
-                        winner = keys[i] if len(keys[i]) >= len(keys[j]) else keys[j]
-                        self._entities[winner] = min(self._entities[winner] + 0.2, 1.0)
-
-    async def _preload_entity(self, entity: str) -> None:
-        """Pre-load crystal memory for an extracted entity."""
-        key = entity.lower()
-        if not self._db_pool or not _crystal_recall:
-            return
-        try:
-            ctx = await _crystal_recall(
-                self._db_pool,
-                self._username,
-                max_results=4,
-                source="voice_entity_preload",
-            )
-            if ctx:
-                self._preloaded_context[key] = ctx
-                print(f"[ENTITY-GRAPH] pre-loaded {len(ctx)} chars for '{entity}'")
-            else:
-                self._preloaded_context[key] = ""
-        except Exception as e:
-            logger.debug("Entity preload failed for '%s': %s", entity, e)
-            self._preloaded_context[key] = ""
-
-    def get_preloaded_context(self) -> str:
-        """Return all pre-loaded crystal context, concatenated.
-
-        Called when a search is triggered — the context is already warm.
-        """
-        parts = [v for v in self._preloaded_context.values() if v]
-        if not parts:
-            return ""
-        return "\n\n".join(parts)
-
-    def get_entity_hints(self) -> List[str]:
-        """Return sorted entity names by confidence (highest first).
-
-        Used to augment search queries with pre-identified entities.
-        """
-        return [
-            k for k, _v in sorted(
-                self._entities.items(), key=lambda x: x[1], reverse=True
-            )
-        ][:5]
-
-    async def crystallize_search_results(
-        self, db_pool, username: str, query: str, results: str
-    ) -> None:
-        """Forge a crystal from successful web search results.
-
-        The search result becomes part of Nate's permanent knowledge,
-        linked to the entities that triggered it.
-        """
-        if not _crystal_forge or not db_pool or not results or len(results) < 50:
-            return
-        entity_hints = self.get_entity_hints()
-        hint_tag = ", ".join(entity_hints[:3]) if entity_hints else query[:60]
-        crystal_text = f"[Web search: {hint_tag}]\n{results[:600]}"
-
-        try:
-            await _crystal_forge(
-                db_pool,
-                username,
-                f"Search query: {query}",
-                crystal_text,
-                user_name=username,
-                domain="research",
-                min_score=2,
-                origin_surface="voice_web_search",
-            )
-            self._crystallized_entities.update(e.lower() for e in entity_hints)
-            print(f"[ENTITY-GRAPH] crystallized search result for '{hint_tag}'")
-        except Exception as e:
-            logger.debug("Entity crystallization failed: %s", e)
-
-    async def crystallize_entity_graph(self, db_pool, username: str) -> None:
-        """At call end, crystallize the entity graph itself as relational knowledge.
-
-        Stores which entities were discussed together so future recall
-        can pre-load related topics.
-        """
-        if not _crystal_forge or not db_pool:
-            return
-        high_conf = [
-            (k, v) for k, v in self._entities.items()
-            if v >= 0.6 and k not in self._crystallized_entities
-        ]
-        if len(high_conf) < 2:
-            return
-
-        entity_names = [k.title() for k, _v in sorted(high_conf, key=lambda x: x[1], reverse=True)]
-        graph_text = f"Entity relationship observed in voice call: {', '.join(entity_names[:8])}"
-
-        try:
-            await _crystal_forge(
-                db_pool,
-                username,
-                f"Voice call entity graph: {', '.join(entity_names[:4])}",
-                graph_text,
-                user_name=username,
-                domain="research",
-                min_score=2,
-                origin_surface="voice_entity_graph",
-            )
-            print(f"[ENTITY-GRAPH] crystallized entity graph: {entity_names[:4]}")
-        except Exception as e:
-            logger.debug("Entity graph crystallization failed: %s", e)
-
-    def reset(self) -> None:
-        for task in self._preload_tasks.values():
-            if not task.done():
-                task.cancel()
-        self._entities.clear()
-        self._preloaded_context.clear()
-        self._preload_tasks.clear()
-        self._crystallized_entities.clear()
-        self._fragment_count = 0
-
-
 class WebSearchTrigger:
     """Detect when a caller is asking Nate to search the internet.
     Requires explicit search intent AND a searchable noun phrase."""
@@ -781,178 +562,22 @@ def _is_web_search_query(text: str) -> bool:
     return _web_trigger.should_trigger(text)
 
 
-# ---------------------------------------------------------------------------
-# PRECISION STRIKE — 3-stage web query reconstruction engine
-# ---------------------------------------------------------------------------
-# Stage 1: Spelling Assembler — collapse "B I G L I N O" → "Biglino"
-# Stage 2: Negative Constraint Filter — excise "not Mario Bellagio, but"
-# Stage 3: Contextual Token Extraction — keep only significant nouns (3-5 words)
-# ---------------------------------------------------------------------------
-
-_STOP_WORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "need", "must",
-    "i", "me", "my", "we", "our", "you", "your", "he", "him", "his",
-    "she", "her", "it", "its", "they", "them", "their",
-    "and", "or", "but", "if", "so", "then", "than", "that", "this",
-    "to", "of", "in", "on", "at", "by", "for", "with", "from", "up",
-    "about", "into", "over", "after", "as", "out",
-    "what", "who", "how", "when", "where", "which", "why",
-    "not", "no", "yes", "just", "also", "very", "really", "pretty",
-    "um", "uh", "like", "well", "okay", "ok", "hey", "hi", "oh",
-    "some", "any", "all", "each", "every", "both", "few", "more",
-    "used", "been", "know", "think", "said", "say",
-    "name", "called", "named", "italian", "french", "german", "english",
-    "spanish", "last", "first", "actually", "basically", "something",
-    "guy", "person", "man", "woman", "one", "thing", "stuff", "lot",
-    "kind", "type", "sort", "way", "part", "wrote", "write", "book",
-    "look", "get", "got", "went", "come", "came", "take", "took",
-    "make", "made", "let", "put", "tell", "told", "give", "gave",
-})
-
-
-def _stage1_assemble_spelling(text: str) -> str:
-    """Stage 1: Detect single letters separated by dashes/spaces and collapse them.
-
-    "B - I - G - L - I - N - O" → "Biglino"
-    "M A U R O" → "Mauro"
-    "B-I-L or B-I-G-L-I-O" → "Bil or Biglio"
-    """
-    result = text
-
-    # Pattern A: 3+ single alpha chars separated by dashes (M-A-U-R-O)
-    dash_spell = re.compile(r'\b([A-Za-z])(?:\s*[-–—]\s*[A-Za-z]){2,}\b')
-    def _collapse_dashed(m: re.Match) -> str:
-        chars = re.findall(r'[A-Za-z]', m.group(0))
-        return "".join(chars).capitalize()
-    result = dash_spell.sub(_collapse_dashed, result)
-
-    # Pattern B: 3+ single alpha chars separated by spaces (M A U R O)
-    # Find runs of single-letter words and join them
-    space_spell = re.compile(
-        r'(?:(?:^|(?<=\s))([A-Za-z])\s+){2,}([A-Za-z])(?=\s|$|[.,!?])'
-    )
-    def _collapse_spaced(m: re.Match) -> str:
-        chars = re.findall(r'\b([A-Za-z])\b', m.group(0))
-        if len(chars) >= 3:
-            return "".join(chars).capitalize()
-        return m.group(0)
-    result = space_spell.sub(_collapse_spaced, result)
-
-    # Capitalize any bare all-caps tokens that look like assembled names (>= 3 chars)
-    def _title_assembled(m: re.Match) -> str:
-        w = m.group(0)
-        if len(w) >= 3 and w.isalpha() and w.isupper():
-            return w.capitalize()
-        return w
-    result = re.sub(r'\b[A-Z]{3,}\b', _title_assembled, result)
-
-    return result
-
-
-def _stage2_negative_constraint_filter(text: str) -> str:
-    """Stage 2: Excise negative corrections — 'not Mario Bellagio, but' → removed.
-
-    Handles: "not X but", "no it's not X", "or maybe X", "I don't mean X"
-    The key: allow commas/punctuation in the span between "not" and "but".
-    """
-    patterns = [
-        r'\b(?:not|no)\s+[\w\s,.\'-]{1,40}?(?=\bbut\b|\bactually\b|\bit\'?s\b|\bthe\s+name\b)',
-        r'\b(?:i\s+don\'?t\s+mean|that\'?s\s+not)\s+[\w\s,]{1,30}?(?=[,.]|\bbut\b|\bit\'?s\b|$)',
-        r'\bor\s+(?:maybe|possibly|something\s+like)\s+[\w\s]{1,20}?(?=[,.]|$)',
-    ]
-    q = text
-    for p in patterns:
-        q = re.sub(p, " ", q, flags=re.I)
-
-    # Handle "X or Y" alternative spellings — keep only the longer variant
-    def _drop_shorter_alt(m: re.Match) -> str:
-        a, b = m.group(1).strip(), m.group(2).strip()
-        return b if len(b) >= len(a) else a
-    q = re.sub(r'\b([A-Z]\w{1,15})\s+or\s+([A-Z]\w{1,15})\b', _drop_shorter_alt, q)
-
-    return re.sub(r'\s{2,}', ' ', q).strip()
-
-
-def _stage3_contextual_tokens(text: str) -> str:
-    """Stage 3: Extract high-weight nouns/names, drop filler, return 3-7 word query.
-
-    Input: "Mauro Biglino used to be an Old Testament scribe for the Vatican"
-    Output: "Mauro Biglino Vatican Old Testament"
-    """
-    # Strip remaining conversational instructions
-    meta_strip = [
-        r'\b(?:look\s+(?:him|her|it|them|that|this)\s+up)\b',
-        r'\b(?:search|google|find|check)\b\s*(?:for\s+me|for\s+us|online|on\s+the\s+internet|real\s+quick)?\s*',
-        r'\b(?:on\s+the\s+internet|on\s+the\s+web|online)\b',
-        r'\b(?:can\s+you|could\s+you|would\s+you|please)\b',
-        r'\b(?:tell\s+me\s+about|give\s+me\s+info\s+on|i\s+want\s+to\s+know\s+about)\b',
-        r'\b(?:hey|hi|okay|ok|so|well|nate|little\s+nate)\b[,\s]*',
-        r'\b(?:um+|uh+|you\s+know|i\s+mean|right)\b[,\s]*',
-        r"\b(?:he'?s|she'?s|they'?re|it'?s|he\s+is|she\s+is)\b[,\s]*",
-        r"\b(?:and\s+)?(?:last\s+name|first\s+name)\b[,\s]*",
-    ]
-    q = text
-    for p in meta_strip:
-        q = re.sub(p, " ", q, flags=re.I)
-
-    q = re.sub(r"[^\w\s'-]", " ", q)
-    q = re.sub(r'\s{2,}', ' ', q).strip()
-
-    words = q.split()
-
-    # Keep significant words: not stop words, length > 3 (or capitalized proper nouns)
-    significant = []
-    for w in words:
-        w_lower = w.lower().strip("'-")
-        if not w_lower:
-            continue
-        if w_lower in _STOP_WORDS:
-            continue
-        # Skip very short lowercase tokens (STT noise like "uh", "or")
-        if len(w_lower) <= 3 and not w[0].isupper():
-            continue
-        significant.append(w)
-
-    # Deduplicate prefix-substrings: "Bil" + "Biglio" → keep only "Biglio"
-    lower_sigs = [s.lower() for s in significant]
-    deduped = []
-    for i, w in enumerate(significant):
-        wl = lower_sigs[i]
-        is_prefix_of_longer = any(
-            lower_sigs[j].startswith(wl) and len(lower_sigs[j]) > len(wl)
-            for j in range(len(significant)) if j != i
-        )
-        if is_prefix_of_longer and len(wl) <= 4:
-            continue
-        deduped.append(w)
-
-    # Cap at 7 significant tokens for a focused search
-    query = " ".join(deduped[:7])
-
-    if len(query) < 4:
-        fallback = re.sub(r'\b(?:um+|uh+)\b', '', text, flags=re.I)
-        fallback = re.sub(r'\s{2,}', ' ', fallback).strip()
-        return fallback[:200]
-
-    return query[:200]
-
-
 def _extract_web_query(text: str) -> str:
-    """Precision Strike — 3-stage web query reconstruction.
-
-    Stage 1: Assemble spelled letters (B-I-G-L-I-N-O → Biglino)
-    Stage 2: Excise negative constraints (not Mario Bellagio → removed)
-    Stage 3: Extract contextual tokens (Vatican, Old Testament, Mauro Biglino)
-
-    Even with STT letter drops, contextual tokens let the search engine
-    fuzzy-match to the correct result.
-    """
-    s1 = _stage1_assemble_spelling(text)
-    s2 = _stage2_negative_constraint_filter(s1)
-    s3 = _stage3_contextual_tokens(s2)
-    return s3
+    """Extract a clean search query from the caller's question.
+    Strips conversational filler, keeps the searchable core."""
+    filler = [
+        r"^(hey|hi|ok|okay|so|um|uh|well|like|you know|nate|little nate)\b[,\s]*",
+        r"\b(can you|could you|would you|please)\b\s*",
+        r"\b(search|google|look up|find out|look into)\b\s*(for me|for us|real quick)?\s*",
+        r"\b(tell me about|give me info on|i want to know about)\b\s*",
+    ]
+    q = text.strip()
+    for pattern in filler:
+        q = re.sub(pattern, "", q, flags=re.I).strip()
+    q = q.rstrip("?").strip()
+    if len(q) < 5:
+        q = text.strip()
+    return q[:200]
 
 
 class SearchTermExtractor:
@@ -1225,186 +850,52 @@ async def _inject_memory_context(grok_ws, username: str, memory_context: str) ->
 # WEB SEARCH — execute + inject
 # ---------------------------------------------------------------------------
 
-def _metaphone_similarity(a: str, b: str) -> float:
-    """Compare two words using Double Metaphone codes. Returns 0.0-1.0 similarity.
-
-    Falls back to letter-insertion heuristic when jellyfish is unavailable.
-    """
-    if not _jf:
-        return 0.0
-    try:
-        codes_a = _jf.metaphone(a)
-        codes_b = _jf.metaphone(b)
-        if not codes_a or not codes_b:
-            return 0.0
-        if codes_a == codes_b:
-            return 1.0
-        # partial prefix match (e.g., "PKLM" vs "PKL") — pro-rate by length
-        shorter = min(len(codes_a), len(codes_b))
-        matching = sum(1 for i in range(shorter) if codes_a[i] == codes_b[i])
-        return matching / max(len(codes_a), len(codes_b))
-    except Exception:
-        return 0.0
-
-
-def _generate_phonetic_variants(query: str) -> List[str]:
-    """Generate spelling variants for proper nouns to handle STT errors.
-
-    Two strategies:
-      1. Double Metaphone (jellyfish): consonant-cluster, vowel-swap matching
-      2. Letter-insertion heuristic: common STT drops (N, R, L, S, T, E)
-
-    Both strategies run; results are deduplicated and ranked by metaphone
-    similarity to the original so the best phonetic match is tried first.
-    """
-    words = query.split()
-    proper_nouns = [(i, w) for i, w in enumerate(words) if w[0].isupper() and len(w) >= 4]
-    if not proper_nouns:
-        return []
-
-    candidates: List[Tuple[str, float]] = []  # (variant_query, similarity_score)
-    dropped_letters = "nrlste"
-
-    for idx, noun in proper_nouns:
-        noun_lower = noun.lower()
-
-        # Strategy 1: letter insertion (handles dropped consonants)
-        for letter in dropped_letters:
-            for pos in range(1, len(noun)):
-                candidate = noun[:pos] + letter + noun[pos:]
-                candidate = candidate.capitalize()
-                if candidate.lower() != noun_lower:
-                    variant_words = words.copy()
-                    variant_words[idx] = candidate
-                    sim = _metaphone_similarity(noun, candidate) if _jf else 0.5
-                    candidates.append((" ".join(variant_words), sim))
-
-        # Strategy 2: vowel swaps (handles STT vowel confusion)
-        _VOWEL_SUBS = {"a": "ei", "e": "ai", "i": "ea", "o": "ou", "u": "oa"}
-        for pos in range(1, len(noun)):
-            ch = noun[pos].lower()
-            if ch in _VOWEL_SUBS:
-                for replacement in _VOWEL_SUBS[ch]:
-                    candidate = noun[:pos] + replacement + noun[pos + 1:]
-                    candidate = candidate.capitalize()
-                    if candidate.lower() != noun_lower:
-                        variant_words = words.copy()
-                        variant_words[idx] = candidate
-                        sim = _metaphone_similarity(noun, candidate) if _jf else 0.4
-                        candidates.append((" ".join(variant_words), sim))
-
-        # Strategy 3: consonant cluster correction (gl→gn, gn→gl, bl→br, etc.)
-        _CLUSTER_SUBS = {"gl": "gn", "gn": "gl", "bl": "br", "br": "bl",
-                         "cl": "cr", "cr": "cl", "sl": "sn", "sn": "sl",
-                         "tl": "tr", "tr": "tl", "pl": "pr", "pr": "pl"}
-        for pair, replacement in _CLUSTER_SUBS.items():
-            if pair in noun_lower:
-                candidate = noun_lower.replace(pair, replacement, 1).capitalize()
-                if candidate.lower() != noun_lower:
-                    variant_words = words.copy()
-                    variant_words[idx] = candidate
-                    sim = _metaphone_similarity(noun, candidate) if _jf else 0.6
-                    candidates.append((" ".join(variant_words), sim))
-
-    # Deduplicate and rank by metaphone similarity (highest first)
-    seen: set = set()
-    unique: List[str] = []
-    for variant, _sim in sorted(candidates, key=lambda x: x[1], reverse=True):
-        if variant not in seen:
-            seen.add(variant)
-            unique.append(variant)
-        if len(unique) >= 8:
-            break
-    return unique
-
-
-async def _web_search(query_text: str, username: str) -> Tuple[str, str]:
-    """Run a sanitized internet search with phonetic fallback retry.
-
-    Pipeline:
-      1. Stage 1-3 query reconstruction
-      2. Primary DuckDuckGo search
-      3. If weak/no results → generate phonetic variants → retry search
-    """
+async def _web_search(query_text: str, username: str) -> str:
+    """Run a sanitized internet search and return formatted context for Grok."""
     proxy = _get_voice_search_proxy()
     if proxy is None or not proxy.is_available:
         print("[VOICE-WEB-SEARCH] search proxy unavailable")
-        return "", ""
+        return ""
 
     clean_query = _extract_web_query(query_text)
-    print(f"[VOICE-WEB-SEARCH] raw='{query_text[:80]}' → clean='{clean_query}'")
     print(f"[VOICE-WEB-SEARCH] query='{clean_query}' user={username}")
 
-    async def _do_search(q: str) -> Optional[Dict]:
-        try:
-            return await asyncio.wait_for(
-                proxy.execute_search(q, coach_id=username, num_results=3),
-                timeout=8.0,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("[VOICE-WEB-SEARCH] search timed out for: %s", q[:60])
-            return None
-        except Exception as e:
-            logger.warning("[VOICE-WEB-SEARCH] search failed for '%s': %s", q[:60], e)
-            return None
+    try:
+        result = await asyncio.wait_for(
+            proxy.execute_search(clean_query, coach_id=username, num_results=3),
+            timeout=8.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[VOICE-WEB-SEARCH] search timed out after 8s")
+        return ""
+    except Exception as e:
+        logger.warning("[VOICE-WEB-SEARCH] search failed: %s", e)
+        return ""
 
-    def _extract_safe(result: Optional[Dict]) -> List[Dict]:
-        if not result or not result.get("success") or not result.get("results"):
-            return []
-        return [r for r in result["results"] if r.get("safe", False)]
+    if not result.get("success") or not result.get("results"):
+        print(f"[VOICE-WEB-SEARCH] no results: {result.get('error', 'empty')}")
+        return ""
 
-    # Primary search
-    result = await _do_search(clean_query)
-    safe_results = _extract_safe(result)
-
-    # Phonetic fallback: if primary returned no safe results, try variants
+    safe_results = [r for r in result["results"] if r.get("safe", False)]
     if not safe_results:
-        variants = _generate_phonetic_variants(clean_query)
-        if variants:
-            print(f"[VOICE-WEB-SEARCH] primary returned 0 results, trying {len(variants)} phonetic variants")
-            for variant in variants:
-                vresult = await _do_search(variant)
-                vsafe = _extract_safe(vresult)
-                if vsafe:
-                    print(f"[VOICE-WEB-SEARCH] phonetic hit: '{variant}' → {len(vsafe)} results")
-                    safe_results = vsafe
-                    clean_query = variant
-                    break
-            if not safe_results:
-                print("[VOICE-WEB-SEARCH] all phonetic variants returned 0 results")
-
-    if not safe_results:
-        print(f"[VOICE-WEB-SEARCH] no results after primary + phonetic retry")
-        return "", clean_query
+        print("[VOICE-WEB-SEARCH] all results filtered by security")
+        return ""
 
     formatted = proxy.format_for_nate(safe_results)
     print(f"[VOICE-WEB-SEARCH] {len(safe_results)} safe results, {len(formatted)} chars")
-    return formatted, clean_query
+    return formatted
 
 
-async def _inject_web_context(grok_ws, username: str, web_context: str,
-                              clean_query: str = "") -> bool:
+async def _inject_web_context(grok_ws, username: str, web_context: str) -> bool:
     """Inject internet search results into the live Grok session."""
     if not grok_ws or not web_context:
         return False
 
-    query_note = ""
-    if clean_query:
-        query_note = (
-            f"The user asked about: \"{clean_query}\"\n"
-            "Use this exact spelling when referring to the topic — "
-            "the speech-to-text may have misspelled names in the conversation so far. "
-            "Correct any earlier misspellings based on the search results.\n\n"
-        )
-
     context_msg = (
         f"[INTERNET SEARCH RESULTS — USE THIS TO ANSWER {username}'s QUESTION]\n"
-        f"{query_note}"
         "The following information was found via internet search. "
         "Summarize the key points conversationally — keep it brief and natural for a phone call. "
         "Do NOT read URLs aloud. Reference the source topic, not the domain name. "
-        "If the results show the correct spelling of a person or topic, USE THAT SPELLING "
-        "in your response (the caller's pronunciation may have been misheard). "
         "If the information is clinical/medical, remind them this is general information "
         "and they should discuss specifics with their healthcare provider.\n\n"
         f"{web_context}\n\n"
@@ -1682,10 +1173,6 @@ async def run_twilio_grok_xtts_bridge(
     # Patent 11: Neural Mirror session (initialized after username is known)
     _neural_mirror = None
 
-    # Patent 8, Claim 2: Predictive Entity Graph — pre-loads crystal memory
-    # for entities extracted from partial STT before search is triggered
-    _entity_graph: Optional[PredictiveEntityGraph] = None
-
     async def _record_ec_snapshot(reason: str) -> None:
         try:
             db_pool = ctx.get("db_pool")
@@ -1864,10 +1351,6 @@ async def run_twilio_grok_xtts_bridge(
                     if voice_crystallization_enabled:
                         await _record_ec_snapshot("turn")
 
-                    # Patent 8, Claim 2: feed transcript to Predictive Entity Graph
-                    if _entity_graph:
-                        asyncio.create_task(_entity_graph.on_transcript_fragment(user_txt))
-
                     if _is_memory_query(user_txt) and _search_dedup.should_search(user_txt) and session_username and ctx.get("db_pool"):
                         print(f"[VOICE-DEEP-SEARCH] memory query detected: '{user_txt[:80]}'")
                         try:
@@ -1895,78 +1378,24 @@ async def run_twilio_grok_xtts_bridge(
                     elif _is_web_search_query(user_txt) and _web_search_dedup.should_search(user_txt) and session_username:
                         print(f"[VOICE-WEB-SEARCH] web query detected: '{user_txt[:80]}'")
                         try:
-                            clean_q_preview = _extract_web_query(user_txt)
-
-                            # Predictive Entity Graph: augment search with pre-identified entities
-                            _entity_hint = ""
-                            if _entity_graph:
-                                hints = _entity_graph.get_entity_hints()
-                                preloaded = _entity_graph.get_preloaded_context()
-                                if hints:
-                                    _entity_hint = f" Related entities I've been tracking: {', '.join(hints[:3])}."
-                                    print(f"[ENTITY-GRAPH] augmenting search with hints: {hints[:3]}")
-                                if preloaded:
-                                    _entity_hint += f" I already have some context: {preloaded[:200]}"
-
-                            # Register-aware tone: match the user's energy
-                            _tone_hint = ""
-                            if _neural_mirror:
-                                try:
-                                    _nm_features = getattr(_neural_mirror, '_latest_features', None)
-                                    if _nm_features:
-                                        _nm_energy = getattr(_nm_features, 'energy_mean', 0.15)
-                                        _nm_pitch = getattr(_nm_features, 'pitch_variance', 500)
-                                        if _nm_energy > 0.25 and _nm_pitch > 1000:
-                                            _tone_hint = " Match their energy — be direct and sharp. "
-                                        elif _nm_energy < 0.1:
-                                            _tone_hint = " They're speaking softly — be warm and gentle. "
-                                except Exception:
-                                    pass
-
-                            preamble = (
-                                f"[SEARCH IN PROGRESS] The user is asking about: \"{clean_q_preview}\". "
-                                "Start your response now using what you know — acknowledge what they're "
-                                "asking about, say you're pulling up more details. Keep it brief and natural "
-                                "for a phone conversation — one or two sentences max."
-                                f"{_entity_hint}{_tone_hint}"
-                                " I will follow up momentarily with internet search results that you should "
-                                "then use to give a more complete answer."
+                            global _web_filler_idx
+                            wfiller = _WEB_SEARCH_FILLER_PHRASES[_web_filler_idx % len(_WEB_SEARCH_FILLER_PHRASES)]
+                            _web_filler_idx += 1
+                            wfiller_task = asyncio.create_task(
+                                _synthesize_with_fallback(wfiller, "connect", xtts_to_mulaw_state)
                             )
-                            try:
-                                await grok_ws.send(json.dumps({
-                                    "type": "conversation.item.create",
-                                    "item": {
-                                        "type": "message",
-                                        "role": "user",
-                                        "content": [{"type": "input_text", "text": preamble}],
-                                    },
-                                }))
-                                await grok_ws.send(json.dumps({"type": "response.create"}))
-                                print(f"[VOICE-WEB-SEARCH] preamble injected — Grok responding while search runs")
-                            except Exception as _pe:
-                                logger.warning("[VOICE-WEB-SEARCH] preamble injection failed: %s", _pe)
+                            wsearch_task = asyncio.create_task(
+                                _web_search(user_txt, session_username)
+                            )
+                            wfiller_audio = await wfiller_task
+                            if wfiller_audio:
+                                await _send_mulaw_to_twilio(wfiller_audio)
 
-                            # Fire search in background — results injected + crystallized asynchronously
-                            _eg_ref = _entity_graph
-                            _db_ref = ctx.get("db_pool")
-                            _uname_ref = session_username
-
-                            async def _background_search_and_inject():
-                                try:
-                                    web_context, final_q = await _web_search(user_txt, _uname_ref)
-                                    if web_context:
-                                        await _inject_web_context(grok_ws, _uname_ref, web_context, final_q)
-                                        # Crystallize successful search results for future recall
-                                        if _eg_ref and _db_ref:
-                                            await _eg_ref.crystallize_search_results(
-                                                _db_ref, _uname_ref, final_q, web_context
-                                            )
-                                    else:
-                                        print("[VOICE-WEB-SEARCH] no results — Grok continuing with internal knowledge")
-                                except Exception as _bse:
-                                    logger.warning("[VOICE-WEB-SEARCH] background search failed: %s", _bse)
-
-                            asyncio.create_task(_background_search_and_inject())
+                            web_context = await wsearch_task
+                            if web_context:
+                                await _inject_web_context(grok_ws, session_username, web_context)
+                            else:
+                                print("[VOICE-WEB-SEARCH] no results — Grok will respond naturally")
                         except Exception as e:
                             logger.warning("Web search pipeline failed (non-fatal): %s", e)
 
@@ -2038,14 +1467,6 @@ async def run_twilio_grok_xtts_bridge(
                         )
                     except Exception as _nme:
                         logger.debug("NeuralMirrorSession init failed: %s", _nme)
-
-                # Patent 8, Claim 2: init Predictive Entity Graph
-                if session_username and not _entity_graph:
-                    _entity_graph = PredictiveEntityGraph(
-                        db_pool=ctx.get("db_pool"),
-                        username=session_username,
-                    )
-                    print(f"[ENTITY-GRAPH] initialized for {session_username}")
 
                 # --- session lifecycle: acquire slot ---
                 try:
@@ -2135,7 +1556,6 @@ async def run_twilio_grok_xtts_bridge(
                     continue
 
                 # Patent 8: Turn detection on mulaw audio (backchannel DISABLED)
-                # Patent 12: Dynamic VAD — adjust silence threshold based on neural state
                 if _turn_detector or _neural_mirror:
                     chunk_energy = sum(abs(b - 0xFF) for b in mulaw_chunk) / max(len(mulaw_chunk), 1)
                     is_speech = chunk_energy > 45
@@ -2143,35 +1563,6 @@ async def run_twilio_grok_xtts_bridge(
                         _turn_detector.on_audio_frame(chunk_energy, is_speech, _media_chunk_count * 20.0)
                     if _neural_mirror and is_speech:
                         mirror_state = _neural_mirror.on_audio_chunk(mulaw_chunk)
-                        # Dynamic VAD: every 50 speech chunks (~1s), check if we need
-                        # to adjust the silence threshold based on vocal state
-                        if _media_chunk_count % 50 == 0 and mirror_state and grok_ws:
-                            try:
-                                _ms = mirror_state if isinstance(mirror_state, dict) else {}
-                                _jitter = _ms.get("jitter", 0.0)
-                                _pitch_var = _ms.get("pitch_variance", 0.0)
-                                _energy = _ms.get("energy_mean", 0.15)
-                                # High jitter + low energy = processing/vulnerable state → extend window
-                                # Low jitter + high pitch variance = question/engaged → shorten window
-                                if _jitter > 0.03 and _energy < 0.12:
-                                    _new_silence_ms = 2000  # reconsolidation window
-                                elif _pitch_var > 2000 and _energy > 0.2:
-                                    _new_silence_ms = 400   # rapid Q&A mode
-                                else:
-                                    _new_silence_ms = 700   # baseline
-                                await grok_ws.send(json.dumps({
-                                    "type": "session.update",
-                                    "session": {
-                                        "turn_detection": {
-                                            "type": "server_vad",
-                                            "silence_duration_ms": _new_silence_ms,
-                                            "threshold": 0.5,
-                                            "prefix_padding_ms": 300,
-                                        },
-                                    },
-                                }))
-                            except Exception:
-                                pass  # non-fatal — VAD stays at previous setting
                     # Backchannel clips disabled — causes double-talk collisions
 
                 if not _nate_speaking:
@@ -2423,15 +1814,6 @@ async def run_twilio_grok_xtts_bridge(
                             )
                 except Exception as _nm_err:
                     logger.debug("Neural Mirror finalize: %s", _nm_err)
-
-            # Patent 8, Claim 2: crystallize entity graph from the call
-            if _entity_graph and db_pool and session_username:
-                try:
-                    await _entity_graph.crystallize_entity_graph(db_pool, session_username)
-                    _entity_graph.reset()
-                    print(f"[ENTITY-GRAPH] finalized and crystallized for {session_username}")
-                except Exception as _eg_err:
-                    logger.debug("Entity graph finalize: %s", _eg_err)
 
             try:
                 from app.services.api_server import _get_auth_redis

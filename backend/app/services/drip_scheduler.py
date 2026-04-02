@@ -905,10 +905,16 @@ class DripScheduler:
                                 ON CONFLICT DO NOTHING
                                 """,
                                 profile.get("hardware_id", key),
-                                f"Your trial ends in {days_label}",
-                                f"Hey {user_name}, you have {days_label} left in your Threshold trial. "
-                                f"Upgrade to Inner Chamber ($49/mo) or Sovereign Circle ($149/mo) "
-                                f"to keep your progress and unlock full features.",
+                                (
+                                    "Last day of your trial"
+                                    if days_remaining <= 1.5
+                                    else f"Your trial ends in {days_label}"
+                                ),
+                                (
+                                    f"Hey {user_name}, last day of your trial. Upgrade now to keep access to Little Nate."
+                                    if days_remaining <= 1.5
+                                    else f"Hey {user_name}, your trial ends in {days_label}. Choose your plan to continue."
+                                ),
                                 json.dumps({"days_remaining": round(days_remaining, 1), "nudge_type": nudge_key}),
                             )
                         profile[nudge_key] = str(now)
@@ -933,19 +939,21 @@ class DripScheduler:
                     except Exception as e:
                         logger.warning("Trial expiry email failed for %s: %s", key, e)
 
-            # --- Trial expired ---
+            # --- Trial expired → Coach-only (stored payment method enables one-click upgrade) ---
             elif days_remaining <= 0 and status in ("TRIAL_ACTIVE", "ACTIVE", ""):
-                profile["subscription_status"] = "TRIAL_EXPIRED"
-                profile["trial_expired_at"] = str(now)
+                profile["subscription_status"] = "ACTIVE"
+                profile["subscription_plan"] = "COACH_ONLY"
+                profile["can_access_nate"] = False
                 profile["token_balance"] = 0
-                profile["_grace_period_end"] = str(now + timedelta(days=3))
+                profile["tier"] = "STANDARD"
+                profile["trial_expired_at"] = str(now)
+                profile.pop("_grace_period_end", None)
                 modified = True
                 expirations += 1
 
                 uname = profile.get("username") or key.split("_", 1)[-1] if "_" in key else key
                 await self._sync_zero_balance(uname)
 
-                # Send trial expired email
                 try:
                     from app.services.notifications_service import EmailService
                     email_svc = EmailService()
@@ -987,6 +995,7 @@ class DripScheduler:
                                 """UPDATE users SET
                                        subscription_status = COALESCE($2, subscription_status),
                                        token_balance = $3,
+                                       tier = COALESCE($5, tier),
                                        profile_data = profile_data || $4::jsonb
                                    WHERE hardware_id = $1""",
                                 hw_id,
@@ -997,8 +1006,12 @@ class DripScheduler:
                                     if k.startswith("_trial") or k in (
                                         "trial_expired_at", "_grace_period_end",
                                         "subscription_plan",
+                                        "can_access_nate",
+                                        "tier",
+                                        "subscription_status",
                                     )
                                 }),
+                                profile.get("tier"),
                             )
                 except Exception as e:
                     logger.warning("Trial sweep: PG save failed: %s", e)
