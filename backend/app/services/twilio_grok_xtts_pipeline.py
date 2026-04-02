@@ -146,7 +146,7 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
                     "SELECT user_text, ai_text, created_at, session_id FROM conversation_history "
                     "WHERE user_id = $1 AND created_at > NOW() - INTERVAL '7 days' "
                     "AND LENGTH(user_text) > 15 "
-                    "ORDER BY created_at DESC LIMIT 25",
+                    "ORDER BY created_at DESC LIMIT 500",
                     username,
                 )
                 print(f"[VOICE-MEMORY] conversation_history query for '{username}' returned {len(recent_rows)} rows")
@@ -161,7 +161,7 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
                         if a and len(a) > 15:
                             summaries.append(f"[{ts}] Nate: {a[:200]}")
                     if summaries:
-                        recent_summary = "\n".join(summaries[-20:])
+                        recent_summary = "\n".join(summaries[-200:])
                         print(f"[VOICE-MEMORY] built {len(summaries)} summary lines for prompt")
                     else:
                         print("[VOICE-MEMORY] rows found but all filtered out (too short)")
