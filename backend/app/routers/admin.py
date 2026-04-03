@@ -5516,3 +5516,33 @@ async def sse_imagery_generate(request: Request):
                             p["r2_url"] = url_map[p["phase_id"]]
                     await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
     return result
+
+@sse_router.post("/pipeline/approve")
+async def sse_pipeline_approve(request: Request):
+    body = await request.json()
+    prov_id = body.get("provenance_id")
+    if not prov_id: raise HTTPException(422, "provenance_id required")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE sse_ip_provenance SET status = 'approved' WHERE provenance_id = $1", prov_id)
+        r = await conn.fetchrow("SELECT story_plot_json, delivery_config_json FROM sse_ip_provenance WHERE provenance_id = $1", prov_id)
+        if not r: raise HTTPException(404, "provenance_id not found")
+        import json as _json
+        sp = _json.loads(r["story_plot_json"]) if isinstance(r["story_plot_json"], str) else dict(r["story_plot_json"] or {})
+        dc = _json.loads(r["delivery_config_json"]) if isinstance(r["delivery_config_json"], str) else dict(r["delivery_config_json"] or {})
+        storyboard_id = sp.get("id", "unknown")
+        delivery = dc or sp.get("delivery_config", {})
+        await conn.execute(
+            "INSERT INTO sse_cron_schedules (schedule_id, storyboard_id, schedule_type, cron_expression, enabled) "
+            "VALUES (gen_random_uuid(), $1, 'daily_panel', '0 3 * * *', true) "
+            "ON CONFLICT (storyboard_id, schedule_type) DO UPDATE SET enabled = true",
+            storyboard_id)
+        if delivery.get("monthly_recap", False):
+            await conn.execute(
+                "INSERT INTO sse_cron_schedules (schedule_id, storyboard_id, schedule_type, cron_expression, enabled) "
+                "VALUES (gen_random_uuid(), $1, 'monthly_recap', '0 4 1 * *', true) "
+                "ON CONFLICT (storyboard_id, schedule_type) DO UPDATE SET enabled = true",
+                storyboard_id)
+    orch = getattr(request.app.state, "sse_orchestrator", None)
+    if orch: await orch.reload()
+    return {"status": "approved", "storyboard_id": storyboard_id}

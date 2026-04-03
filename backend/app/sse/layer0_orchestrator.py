@@ -69,8 +69,13 @@ class SSEOrchestrator:
             replace_existing=True,
         )
 
-        self.scheduler.start()
+        if not self.scheduler.running:
+            self.scheduler.start()
         logger.info("SSEOrchestrator: started with %d schedule(s) + heartbeat", len(schedules))
+
+    async def reload(self):
+        """Re-read schedules without restarting the scheduler."""
+        await self.start()
 
     def shutdown(self):
         self.scheduler.shutdown(wait=False)
