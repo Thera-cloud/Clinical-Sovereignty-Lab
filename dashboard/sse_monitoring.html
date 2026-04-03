@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSE Monitor — Sovereign Sanctuary</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --void:#050510;--panel:#0A0F1E;--glass:rgba(10,15,30,0.65);--glass2:rgba(10,15,30,0.85);
+  --bdr:rgba(255,255,255,0.06);--bdr2:rgba(255,255,255,0.1);--bdr3:rgba(255,255,255,0.15);
+  --green:#00E5A0;--greeng:rgba(0,229,160,0.12);--greend:rgba(0,229,160,0.25);
+  --blue:#38BDF8;--blueg:rgba(56,189,248,0.12);
+  --purple:#A78BFA;--purpleg:rgba(167,139,250,0.12);
+  --amber:#FFB800;--amberg:rgba(255,184,0,0.12);
+  --red:#FF3B5C;--redg:rgba(255,59,92,0.12);
+  --gold:#C9A962;--goldg:rgba(201,169,98,0.12);
+  --t1:#E8EAF0;--t2:#8B92A8;--t3:#5A6178;--t4:#3A4058;
+  --serif:'Instrument Serif',Georgia,serif;
+  --sans:'DM Sans',-apple-system,sans-serif;
+  --mono:'JetBrains Mono',monospace;
+  --r:12px;--rs:8px;--rl:16px;
+  --blur:blur(20px);
+  --shadow:0 8px 32px rgba(0,0,0,0.4);
+  --glow-green:0 0 20px rgba(0,229,160,0.15);
+  --glow-blue:0 0 20px rgba(56,189,248,0.15);
+  --glow-gold:0 0 20px rgba(201,169,98,0.15);
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--void);color:var(--t1);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 20% 0%,rgba(0,229,160,0.03) 0%,transparent 60%),radial-gradient(ellipse at 80% 100%,rgba(56,189,248,0.02) 0%,transparent 60%);pointer-events:none;z-index:0}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--t4);border-radius:3px}
+
+.topbar{position:sticky;top:0;z-index:200;background:var(--glass2);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-bottom:1px solid var(--bdr);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between}
+.topbar-left{display:flex;align-items:center;gap:16px}
+.back-btn{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--rs);background:rgba(255,255,255,0.04);border:1px solid var(--bdr);color:var(--t2);text-decoration:none;font-size:18px;transition:.2s}
+.back-btn:hover{background:rgba(255,255,255,0.08);color:var(--t1);border-color:var(--bdr2)}
+.topbar-title{font-family:var(--serif);font-size:22px;color:var(--t1)}
+.topbar-title span{color:var(--green)}
+.topbar-right{display:flex;align-items:center;gap:16px}
+.pulse-indicator{display:flex;align-items:center;gap:8px;padding:6px 14px;border-radius:20px;background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.15);font-size:12px;color:var(--green);font-weight:500}
+.pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:heartbeat 2s ease-in-out infinite}
+.pulse-indicator.warn{background:var(--amberg);border-color:rgba(255,184,0,0.15);color:var(--amber)}
+.pulse-indicator.warn .pulse-dot{background:var(--amber)}
+.pulse-indicator.err{background:var(--redg);border-color:rgba(255,59,92,0.15);color:var(--red)}
+.pulse-indicator.err .pulse-dot{background:var(--red);animation:none}
+@keyframes heartbeat{0%,100%{transform:scale(1);opacity:1}25%{transform:scale(1.3);opacity:.7}50%{transform:scale(1);opacity:1}75%{transform:scale(1.15);opacity:.85}}
+
+.page{max-width:1200px;margin:0 auto;padding:24px;position:relative;z-index:1}
+
+.glass{background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--bdr);border-radius:var(--rl);box-shadow:var(--shadow);overflow:hidden}
+.glass-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--bdr)}
+.glass-title{font-family:var(--serif);font-size:16px;display:flex;align-items:center;gap:8px}
+.glass-body{padding:20px}
+
+.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+.metric-card{background:var(--glass);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--bdr);border-radius:var(--r);padding:20px;transition:all .3s;position:relative;overflow:hidden}
+.metric-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);opacity:0;transition:.3s}
+.metric-card:hover{border-color:var(--bdr2);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.metric-card:hover::before{opacity:1}
+.metric-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3);margin-bottom:8px;font-weight:500}
+.metric-value{font-family:var(--mono);font-size:28px;font-weight:500;line-height:1;color:var(--t1)}
+.metric-sub{font-size:11px;color:var(--t3);margin-top:6px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:var(--rs);font-size:12px;font-weight:600;font-family:var(--sans);cursor:pointer;transition:all .2s;border:none;white-space:nowrap;text-decoration:none}
+.btn-green{background:rgba(0,229,160,0.15);color:var(--green);border:1px solid rgba(0,229,160,0.2)}
+.btn-green:hover{background:rgba(0,229,160,0.25);box-shadow:var(--glow-green)}
+.btn-blue{background:var(--blueg);color:var(--blue);border:1px solid rgba(56,189,248,0.2)}
+.btn-blue:hover{background:rgba(56,189,248,0.2);box-shadow:var(--glow-blue)}
+.btn-red{background:var(--redg);color:var(--red);border:1px solid rgba(255,59,92,0.2)}
+.btn-red:hover{background:rgba(255,59,92,0.2)}
+.btn-gold{background:var(--goldg);color:var(--gold);border:1px solid rgba(201,169,98,0.2)}
+.btn-gold:hover{background:rgba(201,169,98,0.2);box-shadow:var(--glow-gold)}
+.btn-ghost{background:transparent;color:var(--t2);border:1px solid var(--bdr)}
+.btn-ghost:hover{background:rgba(255,255,255,0.04);color:var(--t1)}
+.btn-sm{padding:5px 10px;font-size:11px}
+
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap}
+.badge-green{background:var(--greeng);color:var(--green)}
+.badge-blue{background:var(--blueg);color:var(--blue)}
+.badge-purple{background:var(--purpleg);color:var(--purple)}
+.badge-amber{background:var(--amberg);color:var(--amber)}
+.badge-red{background:var(--redg);color:var(--red)}
+.badge-gold{background:var(--goldg);color:var(--gold)}
+.badge-gray{background:rgba(90,97,120,0.15);color:var(--t3)}
+
+.tbl{width:100%;border-collapse:separate;border-spacing:0}
+.tbl th{text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--t3);padding:10px 14px;border-bottom:1px solid var(--bdr);font-weight:600}
+.tbl td{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.03);font-size:12px;color:var(--t2)}
+.tbl tr:hover td{background:rgba(255,255,255,0.02)}
+.tbl tr:last-child td{border-bottom:none}
+
+.empty{text-align:center;padding:48px 20px;color:var(--t3)}
+.empty-icon{font-size:36px;margin-bottom:12px;opacity:.5}
+.empty-text{font-size:13px;line-height:1.6}
+.mb-16{margin-bottom:16px}
+.mb-24{margin-bottom:24px}
+
+.progress-bar{width:100%;height:10px;background:rgba(255,255,255,0.05);border-radius:5px;overflow:hidden;margin:6px 0}
+.progress-fill{height:100%;border-radius:5px;transition:width .6s ease}
+.progress-fill.green{background:linear-gradient(90deg,var(--green),rgba(0,229,160,0.5))}
+.progress-fill.amber{background:linear-gradient(90deg,var(--amber),rgba(255,184,0,0.5))}
+.progress-fill.red{background:linear-gradient(90deg,var(--red),rgba(255,59,92,0.5))}
+.cost-row{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.cost-label{font-size:12px;color:var(--t2);min-width:100px}
+.cost-value{font-family:var(--mono);font-size:13px;color:var(--t1);min-width:90px;text-align:right}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <a href="sse_story_generator.html" class="back-btn">←</a>
+    <div class="topbar-title"><span>SSE</span> Monitor</div>
+  </div>
+  <div class="topbar-right">
+    <div class="pulse-indicator" id="healthBadge"><div class="pulse-dot"></div><span id="healthText">Checking…</span></div>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- PIPELINE HEALTH ROW -->
+  <div class="metrics-grid mb-24">
+    <div class="metric-card"><div class="metric-label">Active Storyboards</div><div class="metric-value" id="mActiveStoryboards">—</div></div>
+    <div class="metric-card"><div class="metric-label">Panels Today</div><div class="metric-value" id="mPanelsToday">—</div></div>
+    <div class="metric-card"><div class="metric-label">Daily Cost</div><div class="metric-value" id="mDailyCost">—</div><div class="metric-sub">of $50 limit</div></div>
+    <div class="metric-card"><div class="metric-label">Circuit Breaker</div><div class="metric-value" id="mBreakerStatus">—</div></div>
+  </div>
+
+  <!-- ACTIVE STORYBOARDS -->
+  <div class="glass mb-24">
+    <div class="glass-header"><div class="glass-title">📋 Active Storyboards</div></div>
+    <div class="glass-body" style="padding:0;overflow-x:auto">
+      <table class="tbl" id="storyboardTable">
+        <thead><tr><th>Storyboard</th><th>Enrolled</th><th>Last Panel</th><th>Last Clip</th><th>Last Recap</th><th>Gap Status</th><th>Actions</th></tr></thead>
+        <tbody id="storyboardBody"><tr><td colspan="7" class="empty"><div class="empty-icon">📋</div><div class="empty-text">Loading…</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- GENERATION LOG -->
+  <div class="glass mb-24">
+    <div class="glass-header"><div class="glass-title">📜 Generation Log</div><div style="font-size:11px;color:var(--t3)">Auto-refresh 60s</div></div>
+    <div class="glass-body" style="padding:0;overflow-x:auto">
+      <table class="tbl" id="genLogTable">
+        <thead><tr><th>Time</th><th>Storyboard</th><th>User</th><th>Type</th><th>Status</th><th>Cost</th><th>R2 URL</th></tr></thead>
+        <tbody id="genLogBody"><tr><td colspan="7" class="empty"><div class="empty-icon">📜</div><div class="empty-text">Loading…</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- COST CIRCUIT BREAKER -->
+  <div class="glass mb-24">
+    <div class="glass-header"><div class="glass-title">⚡ Cost Circuit Breaker</div><button class="btn btn-red btn-sm" onclick="resetBreaker()">Reset Breaker</button></div>
+    <div class="glass-body">
+      <div class="cost-row">
+        <span class="cost-label">Daily Spend</span>
+        <div style="flex:1"><div class="progress-bar"><div class="progress-fill green" id="dailyBar" style="width:0%"></div></div></div>
+        <span class="cost-value" id="dailySpendVal">$0.00 / $50</span>
+      </div>
+      <div class="cost-row mb-16">
+        <span class="cost-label">Monthly Spend</span>
+        <div style="flex:1"><div class="progress-bar"><div class="progress-fill green" id="monthlyBar" style="width:0%"></div></div></div>
+        <span class="cost-value" id="monthlySpendVal">$0.00 / $500</span>
+      </div>
+      <table class="tbl" id="breakerTable">
+        <thead><tr><th>When</th><th>Storyboard</th><th>Spend at Trip</th><th>Resumed At</th><th>Status</th></tr></thead>
+        <tbody id="breakerBody"><tr><td colspan="5" class="empty"><div class="empty-text">No trips recorded</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HEARTBEAT LOG -->
+  <div class="glass mb-24">
+    <div class="glass-header"><div class="glass-title">💓 Heartbeat Log</div></div>
+    <div class="glass-body" style="padding:0;overflow-x:auto">
+      <table class="tbl">
+        <thead><tr><th>Time</th><th>Storyboards Checked</th><th>Gaps Found</th><th>Status</th></tr></thead>
+        <tbody id="heartbeatBody"><tr><td colspan="4" class="empty"><div class="empty-icon">💓</div><div class="empty-text">Loading…</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+var API = location.protocol + '//' + location.hostname + ':8000';
+
+function _authHeaders(ct) {
+  var t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
+  var h = {'Authorization': 'Bearer ' + t};
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+
+function _fmt(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  return d.toLocaleDateString('en-US', {month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'});
+}
+
+function _typeBadge(t) {
+  if (t === 'daily_panel') return '<span class="badge badge-blue">daily_panel</span>';
+  if (t === 'weekly_clip') return '<span class="badge badge-purple">weekly_clip</span>';
+  if (t === 'monthly_recap') return '<span class="badge badge-gold">monthly_recap</span>';
+  return '<span class="badge badge-gray">' + t + '</span>';
+}
+
+function _statusBadge(s) {
+  if (s === 'success') return '<span class="badge badge-green">success</span>';
+  if (s === 'failed') return '<span class="badge badge-red">failed</span>';
+  if (s === 'fallback' || s === 'substituted') return '<span class="badge badge-amber">' + s + '</span>';
+  return '<span class="badge badge-gray">' + s + '</span>';
+}
+
+function _gapBadge(g) {
+  if (g === 'on_schedule') return '<span class="badge badge-green">ON SCHEDULE</span>';
+  if (g === 'recovering') return '<span class="badge badge-amber">RECOVERING</span>';
+  return '<span class="badge badge-red">GAP</span>';
+}
+
+function _hbBadge(s) {
+  if (s === 'ok') return '<span class="badge badge-green">OK</span>';
+  if (s === 'gaps_detected') return '<span class="badge badge-amber">WARNING</span>';
+  return '<span class="badge badge-red">ALERT</span>';
+}
+
+async function loadMetrics() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/metrics', {headers: _authHeaders()});
+    if (!r.ok) return;
+    var d = await r.json();
+    document.getElementById('mActiveStoryboards').textContent = d.active_storyboards || 0;
+    document.getElementById('mPanelsToday').textContent = d.panels_today || 0;
+    var cost = parseFloat(d.cost_today || 0);
+    document.getElementById('mDailyCost').textContent = '$' + cost.toFixed(2);
+    var bs = d.circuit_breaker_status || 'clear';
+    var el = document.getElementById('mBreakerStatus');
+    el.textContent = bs.toUpperCase();
+    el.style.color = bs === 'tripped' ? 'var(--red)' : 'var(--green)';
+
+    var hb = document.getElementById('healthBadge');
+    var ht = document.getElementById('healthText');
+    hb.className = 'pulse-indicator';
+    if (bs === 'tripped') { hb.classList.add('err'); ht.textContent = 'Breaker Tripped'; }
+    else if ((d.gaps_detected || 0) > 0) { hb.classList.add('warn'); ht.textContent = 'Gaps Detected'; }
+    else { ht.textContent = 'All Nominal'; }
+  } catch(e) { console.warn('loadMetrics:', e); }
+}
+
+async function loadStoryboards() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/storyboards', {headers: _authHeaders()});
+    if (!r.ok) return;
+    var list = await r.json();
+    var tb = document.getElementById('storyboardBody');
+    if (!list.length) { tb.innerHTML = '<tr><td colspan="7" class="empty"><div class="empty-text">No active storyboards</div></td></tr>'; return; }
+    tb.innerHTML = list.map(function(s) {
+      return '<tr><td style="color:var(--t1);font-weight:500">' + (s.storyboard_id||'—') + '</td>'
+        + '<td>' + (s.enrolled_users||0) + '</td>'
+        + '<td>' + _fmt(s.last_panel) + '</td>'
+        + '<td>' + _fmt(s.last_clip) + '</td>'
+        + '<td>' + _fmt(s.last_recap) + '</td>'
+        + '<td>' + _gapBadge(s.gap_status) + '</td>'
+        + '<td style="display:flex;gap:4px">'
+        + '<button class="btn btn-blue btn-sm" onclick="forceRun(\'' + s.storyboard_id + '\',\'daily_panel\')">▶ Panel</button>'
+        + '<button class="btn btn-ghost btn-sm" onclick="pauseStoryboard(\'' + s.storyboard_id + '\')">⏸ Pause</button>'
+        + '</td></tr>';
+    }).join('');
+  } catch(e) { console.warn('loadStoryboards:', e); }
+}
+
+async function loadGenerationLog() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/generation-log', {headers: _authHeaders()});
+    if (!r.ok) return;
+    var list = await r.json();
+    var tb = document.getElementById('genLogBody');
+    if (!list.length) { tb.innerHTML = '<tr><td colspan="7" class="empty"><div class="empty-text">No generation entries yet</div></td></tr>'; return; }
+    tb.innerHTML = list.map(function(e) {
+      var link = e.r2_url ? '<a href="' + e.r2_url + '" target="_blank" style="color:var(--blue);text-decoration:none;font-family:var(--mono);font-size:10px">View</a>' : '—';
+      return '<tr><td style="font-family:var(--mono);font-size:11px">' + _fmt(e.generated_at) + '</td>'
+        + '<td>' + (e.storyboard_id||'—') + '</td>'
+        + '<td>' + (e.user_id||'—') + '</td>'
+        + '<td>' + _typeBadge(e.generation_type) + '</td>'
+        + '<td>' + _statusBadge(e.status) + '</td>'
+        + '<td style="font-family:var(--mono)">$' + parseFloat(e.cost||0).toFixed(2) + '</td>'
+        + '<td>' + link + '</td></tr>';
+    }).join('');
+  } catch(e) { console.warn('loadGenerationLog:', e); }
+}
+
+async function loadCircuitBreaker() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/circuit-breaker', {headers: _authHeaders()});
+    if (!r.ok) return;
+    var d = await r.json();
+    var daily = parseFloat(d.daily_spend || 0);
+    var monthly = parseFloat(d.monthly_spend || 0);
+    var dp = Math.min(daily / 50 * 100, 100);
+    var mp = Math.min(monthly / 500 * 100, 100);
+    var db = document.getElementById('dailyBar');
+    db.style.width = dp + '%';
+    db.className = 'progress-fill ' + (dp > 80 ? 'red' : dp > 50 ? 'amber' : 'green');
+    var mb = document.getElementById('monthlyBar');
+    mb.style.width = mp + '%';
+    mb.className = 'progress-fill ' + (mp > 80 ? 'red' : mp > 50 ? 'amber' : 'green');
+    document.getElementById('dailySpendVal').textContent = '$' + daily.toFixed(2) + ' / $50';
+    document.getElementById('monthlySpendVal').textContent = '$' + monthly.toFixed(2) + ' / $500';
+
+    var trips = d.trips || [];
+    var tb = document.getElementById('breakerBody');
+    if (!trips.length) { tb.innerHTML = '<tr><td colspan="5" class="empty"><div class="empty-text">No trips recorded</div></td></tr>'; return; }
+    tb.innerHTML = trips.map(function(t) {
+      return '<tr><td style="font-family:var(--mono);font-size:11px">' + _fmt(t.triggered_at) + '</td>'
+        + '<td>' + (t.storyboard_id||'—') + '</td>'
+        + '<td style="font-family:var(--mono)">$' + parseFloat(t.daily_spend||0).toFixed(2) + '</td>'
+        + '<td>' + _fmt(t.resumed_at) + '</td>'
+        + '<td>' + (t.status === 'tripped' ? '<span class="badge badge-red">TRIPPED</span>' : '<span class="badge badge-green">RESET</span>') + '</td></tr>';
+    }).join('');
+  } catch(e) { console.warn('loadCircuitBreaker:', e); }
+}
+
+async function loadHeartbeat() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/heartbeat', {headers: _authHeaders()});
+    if (!r.ok) return;
+    var list = await r.json();
+    var tb = document.getElementById('heartbeatBody');
+    if (!list.length) { tb.innerHTML = '<tr><td colspan="4" class="empty"><div class="empty-text">No heartbeat entries yet</div></td></tr>'; return; }
+    tb.innerHTML = list.map(function(h) {
+      return '<tr><td style="font-family:var(--mono);font-size:11px">' + _fmt(h.checked_at) + '</td>'
+        + '<td>' + (h.storyboards_checked||0) + '</td>'
+        + '<td>' + (h.gaps_found||0) + '</td>'
+        + '<td>' + _hbBadge(h.status) + '</td></tr>';
+    }).join('');
+  } catch(e) { console.warn('loadHeartbeat:', e); }
+}
+
+async function forceRun(sid, type) {
+  if (!confirm('Force-run ' + type + ' for ' + sid + '?')) return;
+  try {
+    var r = await fetch(API + '/api/sse/monitor/force-run', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({storyboard_id:sid, type:type})});
+    var d = await r.json();
+    alert(JSON.stringify(d, null, 2));
+    loadAll();
+  } catch(e) { alert('Force run failed: ' + e); }
+}
+
+async function pauseStoryboard(sid) {
+  if (!confirm('Pause all schedules for ' + sid + '?')) return;
+  try {
+    await fetch(API + '/api/sse/monitor/pause', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({storyboard_id:sid})});
+    loadAll();
+  } catch(e) { alert('Pause failed: ' + e); }
+}
+
+async function resetBreaker() {
+  if (!confirm('Reset cost circuit breaker?')) return;
+  try {
+    await fetch(API + '/api/sse/monitor/reset-breaker', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({})});
+    loadAll();
+  } catch(e) { alert('Reset failed: ' + e); }
+}
+
+function loadAll() { loadMetrics(); loadStoryboards(); loadGenerationLog(); loadCircuitBreaker(); loadHeartbeat(); }
+loadAll();
+setInterval(function() { loadMetrics(); }, 30000);
+setInterval(function() { loadGenerationLog(); loadStoryboards(); loadCircuitBreaker(); loadHeartbeat(); }, 60000);
+</script>
+</body>
+</html>

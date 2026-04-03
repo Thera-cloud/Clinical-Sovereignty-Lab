@@ -5384,6 +5384,104 @@ async def sse_pipeline_result(provenance_id: str, request: Request):
     result["estimated_cost"] = _parse_json_col(result.pop("estimated_cost_json", None))
     return result
 
+@sse_router.get("/monitor/metrics")
+async def sse_monitor_metrics(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        active = await c.fetchval("SELECT COUNT(*) FROM sse_cron_schedules WHERE enabled=true") or 0
+        panels = await c.fetchval("SELECT COUNT(*) FROM sse_delivery_generation_log WHERE generation_type='daily_panel' AND generated_at::date=CURRENT_DATE") or 0
+        cost = await c.fetchval("SELECT COALESCE(SUM(cost),0) FROM sse_delivery_generation_log WHERE generated_at::date=CURRENT_DATE") or 0
+        breaker = await c.fetchval("SELECT status FROM sse_cost_circuit_breaker WHERE status='tripped' ORDER BY triggered_at DESC LIMIT 1")
+        gaps = await c.fetchval("SELECT COUNT(*) FROM sse_delivery_heartbeat WHERE status='gaps_detected' AND checked_at > NOW()-INTERVAL '1 hour'") or 0
+    return {"active_storyboards": active, "panels_today": panels, "cost_today": float(cost), "circuit_breaker_status": breaker or "clear", "gaps_detected": gaps}
+
+@sse_router.get("/monitor/storyboards")
+async def sse_monitor_storyboards(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT cs.storyboard_id, "
+            "(SELECT COUNT(*) FROM sse_enrolled_users eu WHERE eu.storyboard_id=cs.storyboard_id AND eu.status='active') AS enrolled_users, "
+            "(SELECT MAX(gl.generated_at) FROM sse_delivery_generation_log gl WHERE gl.storyboard_id=cs.storyboard_id AND gl.generation_type='daily_panel' AND gl.status='success') AS last_panel, "
+            "(SELECT MAX(gl.generated_at) FROM sse_delivery_generation_log gl WHERE gl.storyboard_id=cs.storyboard_id AND gl.generation_type='weekly_clip' AND gl.status='success') AS last_clip, "
+            "(SELECT MAX(gl.generated_at) FROM sse_delivery_generation_log gl WHERE gl.storyboard_id=cs.storyboard_id AND gl.generation_type='monthly_recap' AND gl.status='success') AS last_recap "
+            "FROM sse_cron_schedules cs WHERE cs.enabled=true GROUP BY cs.storyboard_id")
+    result = []
+    for r in rows:
+        gap = "on_schedule"
+        if r["last_panel"]:
+            from datetime import datetime, timezone
+            hours = (datetime.now(timezone.utc) - r["last_panel"]).total_seconds() / 3600
+            if hours > 25: gap = "gap"
+            elif hours > 20: gap = "recovering"
+        else:
+            gap = "gap"
+        result.append({**dict(r), "last_panel": str(r["last_panel"]) if r["last_panel"] else None, "last_clip": str(r["last_clip"]) if r["last_clip"] else None, "last_recap": str(r["last_recap"]) if r["last_recap"] else None, "gap_status": gap})
+    return result
+
+@sse_router.get("/monitor/generation-log")
+async def sse_monitor_gen_log(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        rows = await c.fetch("SELECT log_id,storyboard_id,user_id,generation_type,generated_at,r2_url,score,cost,status,error_message FROM sse_delivery_generation_log ORDER BY generated_at DESC LIMIT 50")
+    return [dict(r) for r in rows]
+
+@sse_router.get("/monitor/circuit-breaker")
+async def sse_monitor_breaker(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        daily = await c.fetchval("SELECT COALESCE(SUM(cost),0) FROM sse_delivery_generation_log WHERE generated_at::date=CURRENT_DATE") or 0
+        monthly = await c.fetchval("SELECT COALESCE(SUM(cost),0) FROM sse_delivery_generation_log WHERE generated_at >= date_trunc('month',CURRENT_DATE)") or 0
+        trips = await c.fetch("SELECT breaker_id,storyboard_id,triggered_at,daily_spend,resumed_at,status FROM sse_cost_circuit_breaker ORDER BY triggered_at DESC LIMIT 20")
+    return {"daily_spend": float(daily), "monthly_spend": float(monthly), "trips": [dict(r) for r in trips]}
+
+@sse_router.get("/monitor/heartbeat")
+async def sse_monitor_heartbeat(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        rows = await c.fetch("SELECT heartbeat_id,checked_at,storyboards_checked,gaps_found,status,notes FROM sse_delivery_heartbeat ORDER BY checked_at DESC LIMIT 24")
+    return [dict(r) for r in rows]
+
+@sse_router.post("/monitor/force-run")
+async def sse_monitor_force_run(request: Request):
+    body = await request.json()
+    sid, gtype = body.get("storyboard_id"), body.get("type")
+    if not sid or gtype not in ("daily_panel", "weekly_clip", "monthly_recap"): raise HTTPException(422, "storyboard_id and type required")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    from app.sse.foundation import delivery_runtime as dr
+    fn = {"daily_panel": dr.generate_daily_panels, "weekly_clip": dr.generate_weekly_clips, "monthly_recap": dr.generate_monthly_recap}[gtype]
+    return await fn(sid, pool)
+
+@sse_router.post("/monitor/pause")
+async def sse_monitor_pause(request: Request):
+    body = await request.json()
+    sid = body.get("storyboard_id")
+    if not sid: raise HTTPException(422, "storyboard_id required")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        await c.execute("UPDATE sse_cron_schedules SET enabled=false WHERE storyboard_id=$1", sid)
+    return {"storyboard_id": sid, "status": "paused"}
+
+@sse_router.post("/monitor/reset-breaker")
+async def sse_monitor_reset_breaker(request: Request):
+    body = await request.json()
+    sid = body.get("storyboard_id", "")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    async with pool.acquire() as c:
+        if sid:
+            await c.execute("UPDATE sse_cost_circuit_breaker SET status='reset',resumed_at=NOW() WHERE storyboard_id=$1 AND status='tripped'", sid)
+        else:
+            await c.execute("UPDATE sse_cost_circuit_breaker SET status='reset',resumed_at=NOW() WHERE status='tripped'")
+    return {"storyboard_id": sid or "all", "status": "reset"}
+
 @sse_router.post("/imagery/generate")
 async def sse_imagery_generate(request: Request):
     body = await request.json()
