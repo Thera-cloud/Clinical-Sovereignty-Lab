@@ -439,7 +439,7 @@ function generateImagery() {
   fetch(API + '/api/sse/imagery/generate', {
     method: 'POST',
     headers: _authHeaders('application/json'),
-    body: JSON.stringify({ storyboard_id: _currentPlot.id, story_plot: _currentPlot })
+    body: JSON.stringify({ storyboard_id: _currentPlot.id, story_plot: _currentPlot, provenance_id: _currentProvId })
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {

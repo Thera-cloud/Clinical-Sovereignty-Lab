@@ -5500,4 +5500,19 @@ async def sse_imagery_generate(request: Request):
     story_plot = body.get("story_plot")
     if not story_plot: raise HTTPException(422, "story_plot required in body")
     from app.sse.layer6_imagination_engine import generate_story_imagery
-    return await generate_story_imagery(story_plot)
+    result = await generate_story_imagery(story_plot)
+    pool = getattr(request.app.state, "db_pool", None)
+    prov_id = body.get("provenance_id")
+    if pool and prov_id and result.get("results"):
+        import json as _json
+        url_map = {r["phase_id"]: r["r2_url"] for r in result["results"] if r.get("r2_url")}
+        if url_map:
+            async with pool.acquire() as conn:
+                row = await conn.fetchval("SELECT story_plot_json FROM sse_ip_provenance WHERE provenance_id = $1", prov_id)
+                if row:
+                    sp = _json.loads(row) if isinstance(row, str) else dict(row)
+                    for p in sp.get("panels", []):
+                        if p.get("phase_id") in url_map:
+                            p["r2_url"] = url_map[p["phase_id"]]
+                    await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
+    return result
