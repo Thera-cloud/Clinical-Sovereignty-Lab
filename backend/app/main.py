@@ -2873,6 +2873,17 @@ async def lifespan(app: FastAPI):
     except Exception as _via_err:
         print(f"   ⚠️  VoiceInfrastructureAuditor init failed: {_via_err}")
 
+    # SSE: Sovereign Story Engine Orchestrator
+    _sse_orchestrator = None
+    try:
+        from app.sse.layer0_orchestrator import SSEOrchestrator
+        _sse_orchestrator = SSEOrchestrator(db_pool=db_pool)
+        await _sse_orchestrator.start()
+        app.state.sse_orchestrator = _sse_orchestrator
+        print("   ✅ SSEOrchestrator started (daily panels + weekly clips + monthly recaps)")
+    except Exception as _sse_err:
+        print(f"   ⚠️  SSEOrchestrator init failed: {_sse_err}")
+
     # QUANTUM-CRYSTAL-ARCH: Therapeutic Identity Inference Engine
     _identity_engine_ok = False
     try:
@@ -3012,6 +3023,12 @@ async def lifespan(app: FastAPI):
             print("   ✅ VoiceInfrastructureAuditor stopped")
         except Exception as _via_stop:
             print(f"   ⚠️  VoiceInfrastructureAuditor shutdown: {_via_stop}")
+    if _sse_orchestrator:
+        try:
+            await _sse_orchestrator.stop()
+            print("   ✅ SSEOrchestrator stopped")
+        except Exception as _sse_stop:
+            print(f"   ⚠️  SSEOrchestrator shutdown: {_sse_stop}")
 
     # QUANTUM-CRYSTAL-ARCH: stop optional forge scheduler cleanly
     _quantum_orchestrator = getattr(app.state, "quantum_crystal_orchestrator", None)
