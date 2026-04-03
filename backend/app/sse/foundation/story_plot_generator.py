@@ -101,7 +101,7 @@ async def generate(narrative: dict[str, Any]) -> dict[str, Any]:
         panel_tone = phase.get("panel_tone", "action_sequence")
 
         scene_desc = f"{phase.get('description', '')} — {key_visual}".strip(" —")
-        grok_prompt = f"{scene_desc}, {suffix}"
+        grok_prompt = f"{scene_desc}, {suffix}, no text, no words, no lettering, no calligraphy, no writing on image"
 
         panels.append({
             "phase_id": mapping,
