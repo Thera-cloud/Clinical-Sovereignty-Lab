@@ -2710,16 +2710,40 @@ async def lifespan(app: FastAPI):
 
     # QUANTUM-CRYSTAL-ARCH: optional orchestrator wiring (feature-flagged)
     _quantum_orchestrator = None
-    if getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False):
+    # QUANTUM-CRYSTAL-ARCH: default enabled for co-activation + time crystal tracking
+    if getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", True):
         try:
             from app.services.quantum_crystal_orchestrator import QuantumCrystalOrchestrator
             _quantum_orchestrator = QuantumCrystalOrchestrator(db_pool=db_pool)
             app.state.quantum_crystal_orchestrator = _quantum_orchestrator
-            if getattr(settings, "ENABLE_TIME_CRYSTAL_FORGE", False):
+            # QUANTUM-CRYSTAL-ARCH: enable time crystal forge by default
+            if getattr(settings, "ENABLE_TIME_CRYSTAL_FORGE", True):
                 await _quantum_orchestrator.start_forge_scheduler()
             print("   ✅ QuantumCrystalOrchestrator initialized")
         except Exception as _qc_err:
             print(f"   ⚠️  QuantumCrystalOrchestrator init failed: {_qc_err}")
+
+    # QUANTUM-CRYSTAL-ARCH: CrystalGraph — relationship edges + meta-crystal synthesis
+    _crystal_graph = None
+    if db_pool and getattr(settings, "ENABLE_CRYSTAL_GRAPH", True):
+        try:
+            from app.services.crystal_graph import CrystalGraph
+            _crystal_graph = CrystalGraph(db_pool=db_pool, app_state=app.state)
+            app.state.crystal_graph = _crystal_graph
+
+            async def _crystal_graph_rebuild_loop():
+                await asyncio.sleep(120)
+                while True:
+                    try:
+                        await _crystal_graph.rebuild()
+                    except Exception as _cg_err:
+                        logger.warning("CrystalGraph rebuild failed: %s", _cg_err)
+                    await asyncio.sleep(4 * 3600)
+
+            asyncio.create_task(_crystal_graph_rebuild_loop())
+            print("   ✅ CrystalGraph initialized (rebuild every 4h)")
+        except Exception as _cg_err:
+            print(f"   ⚠️  CrystalGraph init failed: {_cg_err}")
 
     # QUANTUM-CRYSTAL-ARCH: wire cognitive stack services (Gaps 6/7/9)
     try:
@@ -2727,9 +2751,23 @@ async def lifespan(app: FastAPI):
         from app.services.helix_orchestrator import HelixOrchestrator
         from app.services.littlenate_inference import LittleNateInference
         app.state.nate_memory_crystallizer = NateMemoryCrystallizer(db_pool=db_pool, app_state=app.state)
+        # SOVEREIGN-VOICE: ODPE engine + L1 taxonomy wiring
+        _odpe = None
+        try:
+            from app.services.odpe_engine import ODPEEngine
+            from app.services.odpe_l1_taxonomy import ODPEL1Taxonomy
+            _odpe = ODPEEngine(db_pool=db_pool)
+            app.state.odpe_engine = _odpe
+            _l1_tax = ODPEL1Taxonomy(db_pool=db_pool)
+            app.state.odpe_l1_taxonomy = _l1_tax
+            _seeded = await _l1_tax.seed_to_db(db_pool)
+            print(f"   ✅ ODPEEngine + L1 Taxonomy wired ({_l1_tax.get_face_count()} faces, {_seeded} seeded to DB)")
+        except Exception as _odpe_err:
+            print(f"   ⚠️  ODPE engine init: {_odpe_err}")
         app.state.helix_orchestrator = HelixOrchestrator(
             db_pool=db_pool, app_state=app.state,
             fibre_manager=getattr(app.state, 'fibre_manager', None),
+            odpe_engine=_odpe,
         )
         _lni = LittleNateInference(app_state=app.state, db_pool=db_pool)
         _lni.bind(app.state)
@@ -2739,6 +2777,38 @@ async def lifespan(app: FastAPI):
         print("   ✅ NateMemoryCrystallizer + HelixOrchestrator + LittleNateInference + FederatedSearch wired")
     except Exception as _cog_err:
         print(f"   ⚠️  Cognitive stack wiring failed: {_cog_err}")
+
+    # SOVEREIGN-VOICE: CycleDetectionEngine + PredictiveEngine wiring
+    try:
+        from app.services.cycle_detection_engine import CycleDetectionEngine
+        _cde = CycleDetectionEngine(db_pool=db_pool, app_state=app.state)
+        app.state.cycle_detection_engine = _cde
+        print("   ✅ CycleDetectionEngine wired")
+    except Exception as _cde_err:
+        print(f"   ⚠️  CycleDetectionEngine: {_cde_err}")
+    try:
+        from app.services.sovereign_predictive_engine import SovereignPredictiveEngine
+        _spe = SovereignPredictiveEngine(db_pool=db_pool, app_state=app.state)
+        app.state.predictive_engine = _spe
+        print("   ✅ SovereignPredictiveEngine wired")
+    except Exception as _spe_err:
+        print(f"   ⚠️  SovereignPredictiveEngine: {_spe_err}")
+    try:
+        from app.services.code_cycle_detector import CodeCycleDetector
+        _ccd = CodeCycleDetector(db_pool=db_pool)
+        app.state.code_cycle_detector = _ccd
+        print("   ✅ CodeCycleDetector wired")
+    except Exception as _ccd_err:
+        print(f"   ⚠️  CodeCycleDetector: {_ccd_err}")
+
+    # QUANTUM-CRYSTAL-ARCH: ExaCrystallizationHook for real ExaFLOPS measurement
+    try:
+        from app.services.exa_crystallization_hook import ExaCrystallizationHook
+        _exa = ExaCrystallizationHook(db_pool=db_pool, app_state=app.state)
+        app.state.exa_crystallization_hook = _exa
+        print("   ✅ ExaCrystallizationHook wired (real ExaFLOPS methodology)")
+    except Exception as _exa_err:
+        print(f"   ⚠️  ExaCrystallizationHook: {_exa_err}")
 
     # SOVEREIGN-VOICE: prepaid voice billing system
     _voice_billing = None
@@ -2750,6 +2820,70 @@ async def lifespan(app: FastAPI):
         print("   ✅ VoiceBillingSystem started (PAUSED cleanup loop)")
     except Exception as _vb_err:
         print(f"   ⚠️  VoiceBillingSystem init failed: {_vb_err}")
+
+    # SOVEREIGN-VOICE: Distributed Voice Pool (request-response, no start/stop)
+    _voice_pool = None
+    try:
+        from app.services.distributed_voice_pool import DistributedVoicePool
+        _voice_pool = DistributedVoicePool(redis_client=getattr(wisdom_mesh, '_redis', None))
+        app.state.voice_pool = _voice_pool
+        print("   ✅ DistributedVoicePool initialized")
+    except Exception as _vp_err:
+        print(f"   ⚠️  DistributedVoicePool init failed: {_vp_err}")
+
+    # SOVEREIGN-VOICE: Voice Router (request-response, uses voice_pool)
+    _voice_router = None
+    try:
+        from app.services.voice_router import VoiceRouter
+        _voice_router = VoiceRouter(db_pool=db_pool, app_state=app.state)
+        app.state.voice_router = _voice_router
+        print("   ✅ VoiceRouter initialized")
+    except Exception as _vr_err:
+        print(f"   ⚠️  VoiceRouter init failed: {_vr_err}")
+
+    # SOVEREIGN-VOICE: Voice Pipeline Optimizer (request-response)
+    _voice_optimizer = None
+    try:
+        from app.services.voice_pipeline_optimizer import VoicePipelineOptimizer
+        _voice_optimizer = VoicePipelineOptimizer()
+        app.state.voice_pipeline_optimizer = _voice_optimizer
+        print("   ✅ VoicePipelineOptimizer initialized")
+    except Exception as _vo_err:
+        print(f"   ⚠️  VoicePipelineOptimizer init failed: {_vo_err}")
+
+    # SOVEREIGN-VOICE: Voice Call Center Agent (background, callback queue + outreach)
+    _voice_call_center = None
+    try:
+        from app.services.voice_call_center_agent import VoiceCallCenterAgent
+        _voice_call_center = VoiceCallCenterAgent(db_pool=db_pool, app_state=app.state)
+        await _voice_call_center.start()
+        app.state.voice_call_center_agent = _voice_call_center
+        print("   ✅ VoiceCallCenterAgent started (callback queue + outreach jitter)")
+    except Exception as _vcc_err:
+        print(f"   ⚠️  VoiceCallCenterAgent init failed: {_vcc_err}")
+
+    # SOVEREIGN-VOICE: Voice Infrastructure Auditor (3x daily, 10 checks)
+    _voice_infra_auditor = None
+    try:
+        from app.services.voice_infrastructure_auditor import VoiceInfrastructureAuditor
+        _voice_infra_auditor = VoiceInfrastructureAuditor(db_pool=db_pool, app_state=app.state)
+        await _voice_infra_auditor.start()
+        app.state.voice_infra_auditor = _voice_infra_auditor
+        print("   ✅ VoiceInfrastructureAuditor started (stagger 295s)")
+    except Exception as _via_err:
+        print(f"   ⚠️  VoiceInfrastructureAuditor init failed: {_via_err}")
+
+    # QUANTUM-CRYSTAL-ARCH: Therapeutic Identity Inference Engine
+    _identity_engine_ok = False
+    try:
+        from app.services.consent_privacy import ConsentPrivacyManager
+        app.state.consent_privacy = ConsentPrivacyManager(db_pool=db_pool)
+        from app.services.institutional_deployment import InstitutionalDeploymentManager
+        app.state.institutional_deployment = InstitutionalDeploymentManager(db_pool=db_pool)
+        _identity_engine_ok = True
+        print("   ✅ Therapeutic Identity Engine initialized (consent + institutional)")
+    except Exception as _tie_err:
+        print(f"   ⚠️  Therapeutic Identity Engine init failed: {_tie_err}")
 
     # ── HIVE DEFENSE v4.3: Startup Health Summary ──
     _healthy_count = 0
@@ -2824,7 +2958,14 @@ async def lifespan(app: FastAPI):
         ("cold_memory", getattr(app.state, "cold_memory", None) is not None),
         ("sentinel_orchestrator", _sentinel_orchestrator is not None),
         ("quantum_crystal_orchestrator", (not getattr(settings, "ENABLE_QUANTUM_CRYSTAL_ORCHESTRATOR", False)) or (_quantum_orchestrator is not None)),
+        ("crystal_graph", (not getattr(settings, "ENABLE_CRYSTAL_GRAPH", True)) or (_crystal_graph is not None)),  # QUANTUM-CRYSTAL-ARCH
         ("voice_billing", _voice_billing is not None),  # SOVEREIGN-VOICE
+        ("voice_pool", _voice_pool is not None),  # SOVEREIGN-VOICE
+        ("voice_router", _voice_router is not None),  # SOVEREIGN-VOICE
+        ("voice_pipeline_optimizer", _voice_optimizer is not None),  # SOVEREIGN-VOICE
+        ("voice_call_center_agent", _voice_call_center is not None),  # SOVEREIGN-VOICE
+        ("voice_infra_auditor", _voice_infra_auditor is not None),  # SOVEREIGN-VOICE
+        ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
     ]
     _hv4 = getattr(app.state, "hive_v4", {})
     _hive_services = [
@@ -2857,6 +2998,20 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("👋 Shutting down...")
+
+    # SOVEREIGN-VOICE: stop voice background agents
+    if _voice_call_center:
+        try:
+            await _voice_call_center.stop()
+            print("   ✅ VoiceCallCenterAgent stopped")
+        except Exception as _vcc_stop:
+            print(f"   ⚠️  VoiceCallCenterAgent shutdown: {_vcc_stop}")
+    if _voice_infra_auditor:
+        try:
+            await _voice_infra_auditor.stop()
+            print("   ✅ VoiceInfrastructureAuditor stopped")
+        except Exception as _via_stop:
+            print(f"   ⚠️  VoiceInfrastructureAuditor shutdown: {_via_stop}")
 
     # QUANTUM-CRYSTAL-ARCH: stop optional forge scheduler cleanly
     _quantum_orchestrator = getattr(app.state, "quantum_crystal_orchestrator", None)
@@ -3246,6 +3401,7 @@ app.include_router(auth)
 app.include_router(users)
 app.include_router(sessions_api.router)
 app.include_router(admin_api.router)
+app.include_router(admin_api.sse_router)
 app.include_router(coach_api.router)
 app.include_router(billing_api.router)
 app.include_router(billing_api.public_router)
@@ -3377,13 +3533,10 @@ try:
 except Exception as _rv_err:
     print(f"   ⚠️  Receipt Validation router failed: {_rv_err}")
 
-# Twilio Voice — Live call coaching
+# Twilio Voice — Live call coaching (/api/calls/*)
 try:
     from app.routers.twilio_voice import router as twilio_voice_router
     app.include_router(twilio_voice_router)
-    # Register /api/voice/* aliases when available (same handlers as /api/calls/*)
-    from app.routers.twilio_voice import voice_alias_router as twilio_voice_alias_router
-    app.include_router(twilio_voice_alias_router)
 except Exception as _tv_err:
     print(f"   ⚠️  Twilio Voice router failed: {_tv_err}")
 
@@ -3544,6 +3697,19 @@ try:
     app.include_router(voice_billing_router)
 except Exception as _vbr_err:
     print(f"   ⚠️  Voice billing router failed: {_vbr_err}")
+
+# QUANTUM-CRYSTAL-ARCH: voice identity enrollment, consent, drift review
+try:
+    from app.routers.voice_identity_api import router as voice_identity_router
+    app.include_router(voice_identity_router)
+except Exception as _vid_err:
+    print(f"   ⚠️  Voice identity router failed: {_vid_err}")
+
+try:
+    from app.routers.voice_edge_api import router as voice_edge_router  # SOVEREIGN-VOICE
+    app.include_router(voice_edge_router)
+except Exception as _ve_err:
+    print(f"   ⚠️  Voice edge router failed: {_ve_err}")
 
 
 # =============================================================================

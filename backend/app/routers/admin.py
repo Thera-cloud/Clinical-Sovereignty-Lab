@@ -3833,7 +3833,7 @@ async def list_promotional_specials(request: Request):
                 "current_redemptions": r["current_redemptions"],
                 "promo_code": r["promo_code"],
                 "active": r["active"],
-                "is_live": r["active"] and r["starts_at"] <= datetime.utcnow() < r["ends_at"],
+                "is_live": bool(r["active"] and r["starts_at"] and r["ends_at"] and r["starts_at"] <= datetime.now(timezone.utc) < r["ends_at"]),
             }
             for r in rows
         ],
@@ -5335,3 +5335,59 @@ async def admin_add_dojo(request: Request, user: dict = Depends(require_admin)):
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to add DOJO: {e}")
+
+
+# ── SSE Story Generator endpoints ─────────────────────────────────────
+from fastapi import UploadFile, File as FastFile
+
+sse_router = APIRouter(prefix="/api/sse", tags=["sse"], dependencies=[Depends(require_admin)])
+
+def _parse_json_col(val):
+    if val is None: return {}
+    return json.loads(val) if isinstance(val, str) else val
+
+@sse_router.post("/pipeline/run")
+async def sse_pipeline_run(request: Request, file: UploadFile = FastFile(...)):
+    from app.sse.foundation import pipeline
+    result = await pipeline.run_pipeline(await file.read(), file.content_type or "", file.filename or "upload", uploader_id="admin")
+    status = "failed" if "error" in result else "processing"
+    return {"provenance_id": result.get("provenance_id"), "status": status}
+
+@sse_router.get("/pipeline/status/{provenance_id}")
+async def sse_pipeline_status(provenance_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        return {"provenance_id": provenance_id, "status": "unknown", "story_plot_id": None}
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT status, story_plot_id FROM sse_ip_provenance WHERE provenance_id = $1", provenance_id)
+    if not row: raise HTTPException(404, "Not found")
+    return {"provenance_id": provenance_id, "status": row["status"], "story_plot_id": row["story_plot_id"]}
+
+@sse_router.get("/pipeline/queue")
+async def sse_pipeline_queue(request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: return []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT provenance_id, filename, status, story_plot_id, source_hash, upload_timestamp FROM sse_ip_provenance ORDER BY upload_timestamp DESC LIMIT 50")
+    return [dict(r) for r in rows]
+
+@sse_router.get("/pipeline/result/{provenance_id}")
+async def sse_pipeline_result(provenance_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "No database pool")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM sse_ip_provenance WHERE provenance_id = $1", provenance_id)
+    if not row: raise HTTPException(404, "Not found")
+    result = dict(row)
+    result["story_plot"] = _parse_json_col(result.pop("story_plot_json", None)) or None
+    result["delivery_config"] = _parse_json_col(result.pop("delivery_config_json", None))
+    result["estimated_cost"] = _parse_json_col(result.pop("estimated_cost_json", None))
+    return result
+
+@sse_router.post("/imagery/generate")
+async def sse_imagery_generate(request: Request):
+    body = await request.json()
+    story_plot = body.get("story_plot")
+    if not story_plot: raise HTTPException(422, "story_plot required in body")
+    from app.sse.layer6_imagination_engine import generate_story_imagery
+    return await generate_story_imagery(story_plot)
