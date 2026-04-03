@@ -7,6 +7,7 @@ Returns a complete story_plot JSON with delivery config and cost estimate.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from typing import Any
 
@@ -59,6 +60,13 @@ async def run_pipeline(
         story_plot_id=story_plot_id,
         db_pool=db_pool,
     )
+
+    if db_pool:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sse_ip_provenance SET story_plot_json=$1,delivery_config_json=$2,estimated_cost_json=$3 WHERE provenance_id=$4",
+                json.dumps(output["story_plot"]), json.dumps(output["delivery_config"]),
+                json.dumps(output["estimated_cost"]), provenance_id)
 
     return {
         "provenance_id": provenance_id,

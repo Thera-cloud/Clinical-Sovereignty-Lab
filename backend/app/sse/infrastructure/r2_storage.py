@@ -14,7 +14,7 @@ _R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "").strip()
 _R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY_ID", "").strip()
 _R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
 _R2_BUCKET = os.getenv("R2_BUCKET_NAME", "nate-vault").strip()
-_R2_PUBLIC_BASE = "https://vault.sovereign-sanctuary.com"
+_R2_PUBLIC_BASE = os.getenv("R2_CDN_BASE_URL", "https://vault.sovereign-sanctuary.com").strip()
 
 _client = None
 
