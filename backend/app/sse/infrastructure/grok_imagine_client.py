@@ -11,7 +11,7 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 _IMAGINE_URL = "https://api.x.ai/v1/images/generations"
-_VIDEO_URL = "https://api.x.ai/v1/video/generations"
+_VIDEO_URL = "https://api.x.ai/v1/videos/generations"
 
 _session: Optional[aiohttp.ClientSession] = None
 
@@ -94,7 +94,7 @@ async def generate_video(
             raise RuntimeError(f"Grok Video {resp.status}: {body[:300]}")
         data = await resp.json()
 
-    video_id = data.get("id", "")
+    video_id = data.get("request_id", "") or data.get("id", "")
     if not video_id:
         raise RuntimeError("Grok Video response missing video id")
     return video_id
@@ -106,7 +106,7 @@ async def poll_video_status(video_id: str) -> dict:
     Returns {"status": "processing"|"completed"|"failed", "url": str|None}.
     Caller handles polling loop with backoff.
     """
-    url = f"{_VIDEO_URL}/{video_id}"
+    url = f"https://api.x.ai/v1/videos/{video_id}"
     session = _get_session()
 
     async with session.get(url, headers=_headers()) as resp:
@@ -116,5 +116,5 @@ async def poll_video_status(video_id: str) -> dict:
         data = await resp.json()
 
     status = data.get("status", "processing")
-    video_url = data.get("url") or data.get("video_url")
+    video_url = (data.get("video") or {}).get("url") or data.get("url")
     return {"status": status, "url": video_url}
