@@ -1,0 +1,191 @@
+"""SSE Stage 5 — Delivery Runtime.
+
+Core generation functions for daily panels, weekly clips, monthly recaps,
+and gap recovery. Called by SSEOrchestrator.
+"""
+from __future__ import annotations
+import asyncio, hashlib, json, logging, uuid
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
+from app.sse.infrastructure import grok_imagine_client as grok, r2_storage
+
+logger = logging.getLogger(__name__)
+_BATCH, _COST_CAP, _IMG_COST, _VID_COST = 10, 50.0, 0.07, 0.25
+
+
+async def _log(c, sid, uid, gtype, url, prompt, score, cost, status, err=None):
+    await c.execute(
+        "INSERT INTO sse_delivery_generation_log "
+        "(log_id,storyboard_id,user_id,generation_type,r2_url,prompt_used,"
+        "score,cost,status,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        str(uuid.uuid4()), sid, uid, gtype, url, prompt, score, cost, status, err)
+
+
+async def _breaker(c, sid) -> bool:
+    spent = await c.fetchval(
+        "SELECT COALESCE(SUM(cost),0) FROM sse_delivery_generation_log "
+        "WHERE storyboard_id=$1 AND generated_at::date=CURRENT_DATE", sid)
+    if (spent or 0) >= _COST_CAP:
+        await c.execute(
+            "INSERT INTO sse_cost_circuit_breaker "
+            "(breaker_id,storyboard_id,daily_spend,reason,status) "
+            "VALUES($1,$2,$3,'daily_limit_exceeded','tripped')",
+            str(uuid.uuid4()), sid, float(spent))
+        return True
+    return False
+
+
+async def _poll_video(vid_id: str, max_wait: int = 300) -> dict:
+    backoff = 5
+    for _ in range(15):
+        await asyncio.sleep(backoff)
+        r = await grok.poll_video_status(vid_id)
+        if r["status"] != "processing":
+            return r
+        backoff = min(backoff * 2, 60)
+    return {"status": "timeout", "url": None}
+
+
+async def generate_daily_panels(sid: str, db_pool) -> dict[str, Any]:
+    gen = fail = 0; cost = 0.0; today = date.today().isoformat()
+    async with db_pool.acquire() as c:
+        if await _breaker(c, sid):
+            return {"storyboard_id": sid, "users_processed": 0,
+                    "panels_generated": 0, "panels_failed": 0, "cost": 0}
+        cfg = await c.fetchrow(
+            "SELECT delivery_config FROM sse_delivery_config "
+            "WHERE storyboard_id=$1 AND status='active' ORDER BY version DESC LIMIT 1", sid)
+        dc = json.loads(cfg["delivery_config"]) if cfg else {}
+        style = dc.get("panel_generation_style", "action_sequence")
+        users = await c.fetch(
+            "SELECT user_id,current_phase,ec_score FROM sse_enrolled_users "
+            "WHERE storyboard_id=$1 AND status='active'", sid)
+        for i in range(0, len(users), _BATCH):
+            for u in users[i:i+_BATCH]:
+                uid, phase = u["user_id"], u["current_phase"] or "the_becoming"
+                prompt = f"{phase} panel, {style} tone, therapeutic visual"
+                h = hashlib.md5(prompt.encode()).hexdigest()[:12]
+                key = f"stories/{uid}/daily_panel/{today}/{h}.png"
+                try:
+                    img = await grok.generate_image(prompt)
+                    url = await r2_storage.store_image(img, key)
+                    await _log(c, sid, uid, "daily_panel", url, prompt, 1.0, _IMG_COST, "success")
+                    gen += 1; cost += _IMG_COST
+                except Exception as e:
+                    await _log(c, sid, uid, "daily_panel", "", prompt, 0, 0, "failed", str(e)[:300])
+                    fail += 1
+    return {"storyboard_id": sid, "users_processed": len(users),
+            "panels_generated": gen, "panels_failed": fail, "cost": cost}
+
+
+async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    if (now.day - 1) // 7 + 1 >= 4:
+        return {"storyboard_id": sid, "clips_generated": 0,
+                "clips_failed": 0, "substitutions": 0, "cost": 0}
+    gen = fail = subs = 0; cost = 0.0
+    ws = (now - timedelta(days=now.weekday())).date()
+    async with db_pool.acquire() as c:
+        users = await c.fetch(
+            "SELECT user_id,current_phase FROM sse_enrolled_users "
+            "WHERE storyboard_id=$1 AND status='active'", sid)
+        for u in users:
+            uid = u["user_id"]
+            pc = await c.fetchval(
+                "SELECT COUNT(*) FROM sse_delivery_generation_log "
+                "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='daily_panel' "
+                "AND status='success' AND generated_at::date>=$3", sid, uid, ws)
+            if (pc or 0) < 4:
+                await _log(c, sid, uid, "weekly_clip", "", "fog_substitute",
+                           0.5, 0, "substituted", f"Only {pc}/7 panels")
+                subs += 1; continue
+            src = await c.fetchrow(
+                "SELECT r2_url FROM sse_delivery_generation_log "
+                "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='daily_panel' "
+                "AND status='success' ORDER BY score DESC,generated_at DESC LIMIT 1", sid, uid)
+            prompt = f"Weekly therapeutic clip for {u['current_phase'] or 'journey'}"
+            try:
+                vid_id = await grok.generate_video(prompt, src["r2_url"] if src else None)
+                r = await _poll_video(vid_id)
+                if r["status"] == "completed" and r.get("url"):
+                    url = await r2_storage.store_video(r["url"], f"stories/{uid}/weekly_clip/{ws}/{vid_id}.mp4")
+                    await _log(c, sid, uid, "weekly_clip", url, prompt, 1.0, _VID_COST, "success")
+                    gen += 1; cost += _VID_COST
+                else:
+                    raise RuntimeError(f"Video {r['status']}")
+            except Exception as e:
+                await _log(c, sid, uid, "weekly_clip", "", prompt, 0, 0, "failed", str(e)[:300])
+                fail += 1
+    return {"storyboard_id": sid, "clips_generated": gen,
+            "clips_failed": fail, "substitutions": subs, "cost": cost}
+
+
+async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
+    gen = fb = 0; cost = 0.0; ms = date.today().replace(day=1)
+    async with db_pool.acquire() as c:
+        users = await c.fetch(
+            "SELECT user_id FROM sse_enrolled_users "
+            "WHERE storyboard_id=$1 AND status='active'", sid)
+        for u in users:
+            uid = u["user_id"]
+            clips = await c.fetchval(
+                "SELECT COUNT(*) FROM sse_delivery_generation_log "
+                "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='weekly_clip' "
+                "AND status='success' AND generated_at::date>=$3", sid, uid, ms)
+            panels = await c.fetchval(
+                "SELECT COUNT(*) FROM sse_delivery_generation_log "
+                "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='daily_panel' "
+                "AND status='success' AND generated_at::date>=$3", sid, uid, ms)
+            if (clips or 0) < 2 or (panels or 0) < 20:
+                await _log(c, sid, uid, "monthly_recap", "", "slideshow_fallback",
+                           0.5, 0, "fallback", f"clips={clips} panels={panels}")
+                fb += 1; continue
+            prompt = "Monthly therapeutic recap — three-act structure"
+            try:
+                vid_id = await grok.generate_video(prompt)
+                r = await _poll_video(vid_id)
+                if r["status"] == "completed" and r.get("url"):
+                    url = await r2_storage.store_video(
+                        r["url"], f"stories/{uid}/monthly_recap/{ms}/{vid_id}.mp4")
+                    await _log(c, sid, uid, "monthly_recap", url, prompt,
+                               1.0, _VID_COST * 3, "success")
+                    gen += 1; cost += _VID_COST * 3
+                else:
+                    raise RuntimeError(f"Video {r['status']}")
+            except Exception as e:
+                await _log(c, sid, uid, "monthly_recap", "", prompt,
+                           0, 0, "failed", str(e)[:300])
+                fb += 1
+    return {"storyboard_id": sid, "recaps_generated": gen,
+            "fallbacks": fb, "cost": cost}
+
+
+async def check_and_recover_gaps(sid: str, db_pool) -> dict[str, Any]:
+    rec = abn = summ = 0; cutoff = date.today() - timedelta(days=3)
+    async with db_pool.acquire() as c:
+        gaps = await c.fetch(
+            "SELECT gap_id,user_id,gap_date,gap_type FROM sse_delivery_gap_log "
+            "WHERE storyboard_id=$1 AND recovered=false AND abandoned=false "
+            "ORDER BY gap_date DESC", sid)
+        for g in gaps:
+            if g["gap_type"] != "daily_panel":
+                await c.execute("UPDATE sse_delivery_gap_log SET abandoned=true WHERE gap_id=$1", g["gap_id"])
+                abn += 1; continue
+            if g["gap_date"] < cutoff:
+                try:
+                    img = await grok.generate_image(f"Week-in-review summary for {g['user_id']}")
+                    await r2_storage.store_image(img, f"stories/{g['user_id']}/recovery/{g['gap_date']}/summary.png")
+                    summ += 1
+                except Exception:
+                    pass
+                await c.execute("UPDATE sse_delivery_gap_log SET abandoned=true WHERE gap_id=$1", g["gap_id"])
+                abn += 1
+            else:
+                try:
+                    sub = await generate_daily_panels(sid, db_pool)
+                    if sub.get("panels_generated", 0) > 0:
+                        await c.execute("UPDATE sse_delivery_gap_log SET recovered=true WHERE gap_id=$1", g["gap_id"])
+                        rec += 1
+                except Exception:
+                    pass
+    return {"recovered_days": rec, "abandoned_days": abn, "summary_panels_generated": summ}
