@@ -5482,6 +5482,18 @@ async def sse_monitor_reset_breaker(request: Request):
             await c.execute("UPDATE sse_cost_circuit_breaker SET status='reset',resumed_at=NOW() WHERE status='tripped'")
     return {"storyboard_id": sid or "all", "status": "reset"}
 
+@sse_router.post("/intake/turn")
+async def sse_intake_turn(request: Request):
+    body = await request.json()
+    from app.services.intake_session import process_intake_turn
+    db = request.app.state.db_pool
+    return await process_intake_turn(body["user_id"], body.get("user_name", ""), body.get("turn", 1), body.get("user_message", ""), body.get("conversation_history", []), db)
+
+@sse_router.get("/intake/status/{user_id}")
+async def sse_intake_status(user_id: str, request: Request):
+    from app.services.intake_session import get_intake_status
+    return await get_intake_status(user_id, request.app.state.db_pool)
+
 @sse_router.post("/imagery/generate")
 async def sse_imagery_generate(request: Request):
     body = await request.json()

@@ -533,10 +533,98 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
           ),
         ),
         const SizedBox(height: 40),
-        _ShimmerGoldButton(label: "Let's Go", onPressed: _completeAndDismiss),
+        _ShimmerGoldButton(label: "Meet Little Nate", onPressed: _startIntake),
       ],
     ));
   }
+
+  void _startIntake() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => _IntakeConversationScreen(
+        profileWithToken: widget.profileWithToken,
+        onComplete: () {
+          Navigator.of(context).pop();
+          _completeAndDismiss();
+        },
+      ),
+    ));
+  }
+}
+
+// --- Intake Conversation Screen (10-turn Identity Forge) ---
+
+class _IntakeConversationScreen extends StatefulWidget {
+  final Map<String, dynamic> profileWithToken;
+  final VoidCallback onComplete;
+  const _IntakeConversationScreen({required this.profileWithToken, required this.onComplete});
+  @override State<_IntakeConversationScreen> createState() => _IntakeCSState();
+}
+
+class _IntakeCSState extends State<_IntakeConversationScreen> {
+  static const _bg = Color(0xFF050505), _cy = Color(0xFF4ECDC4), _gd = Color(0xFFC9A962), _ts = Color(0xFF888888);
+  final _ctrl = TextEditingController();
+  final _scr = ScrollController();
+  final List<Map<String, String>> _msgs = [];
+  List<Map<String, dynamic>> _hist = [];
+  int _turn = 1; bool _busy = false, _done = false;
+  String get _uid => (widget.profileWithToken['hardware_id'] ?? widget.profileWithToken['id'] ?? '').toString();
+  String get _name => (widget.profileWithToken['name'] ?? widget.profileWithToken['username'] ?? 'friend').toString();
+  String get _tok => (widget.profileWithToken['token'] ?? '').toString();
+  @override void initState() { super.initState();
+    final p = "Hi $_name. I'm Little Nate. Before we begin, I want to take a few minutes to get to know you — not through a form, but through a conversation. That's how I work. Is that okay?";
+    _msgs.add({'role': 'assistant', 'text': p}); _hist.add({'role': 'assistant', 'content': p});
+  }
+  Future<void> _send() async {
+    final t = _ctrl.text.trim(); if (t.isEmpty || _busy || _done) return;
+    setState(() { _msgs.add({'role': 'user', 'text': t}); _busy = true; }); _ctrl.clear(); _down();
+    try {
+      final r = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse/intake/turn'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_tok'},
+        body: jsonEncode({'user_id': _uid, 'user_name': _name, 'turn': _turn, 'user_message': t, 'conversation_history': _hist}),
+      ).timeout(const Duration(seconds: 30));
+      if (r.statusCode >= 200 && r.statusCode < 300) {
+        final d = jsonDecode(r.body);
+        setState(() { _turn = d['turn'] ?? _turn + 1; _msgs.add({'role': 'assistant', 'text': d['nate_message'] ?? ''});
+          _hist = List<Map<String, dynamic>>.from(d['conversation_history'] ?? _hist); _done = d['complete'] == true; });
+        _down(); if (_done) { await Future.delayed(const Duration(seconds: 3)); if (mounted) widget.onComplete(); }
+      }
+    } catch (e) { debugPrint('[Intake] $e'); }
+    if (mounted) setState(() => _busy = false);
+  }
+  void _down() => Future.delayed(const Duration(milliseconds: 100), () {
+    if (_scr.hasClients) _scr.animateTo(_scr.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+  });
+  @override void dispose() { _ctrl.dispose(); _scr.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) => Scaffold(backgroundColor: _bg,
+    appBar: AppBar(backgroundColor: _bg, elevation: 0,
+      title: Text('Getting to know you — $_turn/10', style: const TextStyle(color: _ts, fontSize: 14, fontFamily: 'DM Sans')),
+      leading: IconButton(icon: const Icon(Icons.close, color: _ts), onPressed: () => Navigator.pop(context))),
+    body: Column(children: [
+      LinearProgressIndicator(value: _turn / 10, backgroundColor: Colors.white10, valueColor: const AlwaysStoppedAnimation(_cy), minHeight: 2),
+      Expanded(child: ListView.builder(controller: _scr, padding: const EdgeInsets.all(16), itemCount: _msgs.length, itemBuilder: (_, i) {
+        final m = _msgs[i]; final n = m['role'] == 'assistant';
+        return Padding(padding: const EdgeInsets.only(bottom: 12), child: Row(crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: n ? MainAxisAlignment.start : MainAxisAlignment.end, children: [
+            if (n) Container(width: 32, height: 32, margin: const EdgeInsets.only(right: 8),
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: _cy),
+              child: const Center(child: Text('N', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)))),
+            Flexible(child: Container(padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: n ? const Color(0xFF111111) : _gd.withOpacity(0.15), borderRadius: BorderRadius.circular(12)),
+              child: Text(m['text'] ?? '', style: TextStyle(color: n ? Colors.white : _gd, fontSize: 15, fontFamily: 'DM Sans', height: 1.5)))),
+        ]));
+      })),
+      if (!_done) Container(padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        decoration: const BoxDecoration(color: Color(0xFF0A0A0A), border: Border(top: BorderSide(color: Color(0xFF222222)))),
+        child: Row(children: [
+          Expanded(child: TextField(controller: _ctrl, style: const TextStyle(color: Colors.white, fontSize: 15), maxLines: 3, minLines: 1,
+            decoration: InputDecoration(hintText: 'Share with Nate...', hintStyle: TextStyle(color: _ts.withOpacity(0.5)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+              filled: true, fillColor: const Color(0xFF111111), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
+            onSubmitted: (_) => _send())),
+          const SizedBox(width: 8),
+          IconButton(icon: Icon(_busy ? Icons.hourglass_top : Icons.send, color: _cy), onPressed: _busy ? null : _send),
+        ])),
+    ]));
 }
 
 // --- Helper widgets ---
