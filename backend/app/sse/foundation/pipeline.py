@@ -25,6 +25,7 @@ async def run_pipeline(
     mime_type: str,
     filename: str,
     uploader_id: str,
+    db_pool=None,
 ) -> dict[str, Any]:
     source_hash = hashlib.sha256(file_bytes).hexdigest()
 
@@ -32,6 +33,7 @@ async def run_pipeline(
         filename=filename,
         uploader_id=uploader_id,
         source_hash=source_hash,
+        db_pool=db_pool,
     )
 
     parse_result = await document_parser.parse(file_bytes, mime_type, filename)

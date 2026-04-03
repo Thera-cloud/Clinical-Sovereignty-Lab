@@ -5349,7 +5349,7 @@ def _parse_json_col(val):
 @sse_router.post("/pipeline/run")
 async def sse_pipeline_run(request: Request, file: UploadFile = FastFile(...)):
     from app.sse.foundation import pipeline
-    result = await pipeline.run_pipeline(await file.read(), file.content_type or "", file.filename or "upload", uploader_id="admin")
+    result = await pipeline.run_pipeline(await file.read(), file.content_type or "", file.filename or "upload", uploader_id="admin", db_pool=getattr(request.app.state, "db_pool", None))
     status = "failed" if "error" in result else "processing"
     return {"provenance_id": result.get("provenance_id"), "status": status}
 
