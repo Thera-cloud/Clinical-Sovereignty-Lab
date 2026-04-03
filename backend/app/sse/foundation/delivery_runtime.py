@@ -8,6 +8,7 @@ import asyncio, hashlib, json, logging, uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from app.sse.infrastructure import grok_imagine_client as grok, r2_storage
+from app.sse.foundation import vault_integration as vault
 
 logger = logging.getLogger(__name__)
 _BATCH, _COST_CAP, _IMG_COST, _VID_COST = 10, 50.0, 0.07, 0.25
@@ -70,6 +71,8 @@ async def generate_daily_panels(sid: str, db_pool) -> dict[str, Any]:
                     img = await grok.generate_image(prompt)
                     url = await r2_storage.store_image(img, key)
                     await _log(c, sid, uid, "daily_panel", url, prompt, 1.0, _IMG_COST, "success")
+                    try: await vault.register_panel_in_vault(uid, url, phase, sid, "daily_panel", style, db_pool)
+                    except Exception: logger.warning("Vault reg failed for %s/%s", sid, uid)
                     gen += 1; cost += _IMG_COST
                 except Exception as e:
                     await _log(c, sid, uid, "daily_panel", "", prompt, 0, 0, "failed", str(e)[:300])
@@ -110,6 +113,8 @@ async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
                 if r["status"] == "completed" and r.get("url"):
                     url = await r2_storage.store_video(r["url"], f"stories/{uid}/weekly_clip/{ws}/{vid_id}.mp4")
                     await _log(c, sid, uid, "weekly_clip", url, prompt, 1.0, _VID_COST, "success")
+                    try: await vault.register_panel_in_vault(uid, url, u["current_phase"] or "journey", sid, "weekly_clip", "cinematic", db_pool)
+                    except Exception: logger.warning("Vault reg failed for clip %s/%s", sid, uid)
                     gen += 1; cost += _VID_COST
                 else:
                     raise RuntimeError(f"Video {r['status']}")
@@ -149,6 +154,8 @@ async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
                         r["url"], f"stories/{uid}/monthly_recap/{ms}/{vid_id}.mp4")
                     await _log(c, sid, uid, "monthly_recap", url, prompt,
                                1.0, _VID_COST * 3, "success")
+                    try: await vault.register_panel_in_vault(uid, url, "monthly_recap", sid, "monthly_recap", "cinematic", db_pool)
+                    except Exception: logger.warning("Vault reg failed for recap %s/%s", sid, uid)
                     gen += 1; cost += _VID_COST * 3
                 else:
                     raise RuntimeError(f"Video {r['status']}")

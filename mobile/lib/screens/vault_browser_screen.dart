@@ -105,6 +105,12 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       final list = data is List ? data : (data['folders'] as List? ?? []);
       setState(() {
         _folders = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        // Pin "Sovereign Journey" folder first if it exists
+        final sjIdx = _folders.indexWhere((f) => f['name'] == 'Sovereign Journey');
+        if (sjIdx > 0) {
+          final sj = _folders.removeAt(sjIdx);
+          _folders.insert(0, sj);
+        }
         if (_folders.isNotEmpty && _selectedFolderId == null) {
           _selectedFolderId = _folders.first['id']?.toString();
         }
@@ -264,9 +270,12 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                 children: _folders.map((f) {
                   final id = f['id']?.toString();
                   final selected = id == _selectedFolderId;
+                  final isSJ = f['name'] == 'Sovereign Journey';
+                  final accent = isSJ ? const Color(0xFF00E5A0) : _VaultDesign.gold;
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
+                      avatar: isSJ ? Text(f['icon'] ?? '🌿', style: const TextStyle(fontSize: 14)) : null,
                       label: Text(f['name'] ?? '?', style: const TextStyle(fontSize: 12)),
                       selected: selected,
                       onSelected: (v) {
@@ -276,9 +285,9 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
                         });
                       },
                       backgroundColor: _VaultDesign.bgElevated,
-                      selectedColor: _VaultDesign.gold.withOpacity(0.3),
+                      selectedColor: accent.withOpacity(0.3),
                       labelStyle: TextStyle(
-                        color: selected ? _VaultDesign.gold : _VaultDesign.textSecondary,
+                        color: selected ? accent : _VaultDesign.textSecondary,
                       ),
                     ),
                   );
@@ -338,27 +347,54 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       );
     }
     if (_items.isEmpty) {
+      final sjFolder = _folders.any((f) => f['id']?.toString() == _selectedFolderId && f['name'] == 'Sovereign Journey');
+      final emptyMsg = sjFolder
+          ? 'Your journey panels will appear here'
+          : (_searchQuery.isNotEmpty ? 'No results' : 'No items yet');
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.folder_open, color: _VaultDesign.goldDim.withOpacity(0.5), size: 64),
+            Icon(sjFolder ? Icons.auto_awesome : Icons.folder_open,
+              color: sjFolder ? const Color(0xFF00E5A0).withOpacity(0.5) : _VaultDesign.goldDim.withOpacity(0.5), size: 64),
             const SizedBox(height: 12),
-            Text(
-              _searchQuery.isNotEmpty ? 'No results' : 'No items yet',
-              style: const TextStyle(color: _VaultDesign.textSecondary),
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: _searchQuery.isNotEmpty ? null : _showUploadOptions,
-              icon: const Icon(Icons.upload, color: _VaultDesign.gold, size: 18),
-              label: const Text('Upload', style: TextStyle(color: _VaultDesign.gold)),
-            ),
+            Text(emptyMsg, style: const TextStyle(color: _VaultDesign.textSecondary)),
+            if (!sjFolder) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: _searchQuery.isNotEmpty ? null : _showUploadOptions,
+                icon: const Icon(Icons.upload, color: _VaultDesign.gold, size: 18),
+                label: const Text('Upload', style: TextStyle(color: _VaultDesign.gold)),
+              ),
+            ],
           ],
         ),
       );
     }
-    return _isGrid ? _buildGrid() : _buildList();
+    final sjSelected = _folders.any((f) => f['id']?.toString() == _selectedFolderId && f['name'] == 'Sovereign Journey');
+    final pushItems = sjSelected ? _items.where((it) {
+      final d = it['dimensions'];
+      if (d is Map) return d['push_to_photos_requested'] == true;
+      return false;
+    }).toList() : <Map<String, dynamic>>[];
+    return Column(children: [
+      if (pushItems.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00E5A0).withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            const Icon(Icons.save_alt, color: Color(0xFF00E5A0), size: 18),
+            const SizedBox(width: 8),
+            Text('${pushItems.length} panel(s) expiring — save to photos',
+              style: const TextStyle(color: Color(0xFF00E5A0), fontSize: 12)),
+          ]),
+        ),
+      Expanded(child: _isGrid ? _buildGrid() : _buildList()),
+    ]);
   }
 
   Widget _buildGrid() {
