@@ -1,0 +1,17 @@
+{
+  "vault_item_id": "4ee95137-e872-4d6a-8148-8ed0633d5308",
+  "user_id": "test_user_sse_001",
+  "folder": "Sovereign Journey",
+  "file_name": "the_door_2026-04-03.png",
+  "file_type": "image/png",
+  "category": "SSE Panel",
+  "metadata": {
+    "phase_id": "the_door",
+    "storyboard_id": "you_can_walk_in_it_beloved",
+    "generation_type": "daily_panel",
+    "panel_tone": "meditative",
+    "core_character_suffix": "Still Surface",
+    "delivered_at": "2026-04-03T02:02:27.957802+00:00",
+    "expires_at": "2026-04-22T02:02:27.957802+00:00"
+  }
+}
