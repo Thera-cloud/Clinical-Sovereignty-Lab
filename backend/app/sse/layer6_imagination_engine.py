@@ -39,6 +39,10 @@ async def _process_panel(
     if not prompt:
         return {"phase_id": phase_id, "error": "empty grok_imagine_prompt"}
 
+    _NO_TEXT = "no text, no words, no lettering, no calligraphy, no writing on image"
+    if _NO_TEXT not in prompt:
+        prompt = f"{prompt}, {_NO_TEXT}"
+
     image_bytes = await grok_imagine_client.generate_image(prompt)
 
     content_hash = hashlib.sha256(image_bytes).hexdigest()[:8]
