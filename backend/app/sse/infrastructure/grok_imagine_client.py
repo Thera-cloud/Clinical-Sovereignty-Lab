@@ -1,0 +1,120 @@
+"""SSE Infrastructure — Grok Imagine + Video API client."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from typing import Optional
+
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+_IMAGINE_URL = "https://api.x.ai/v1/images/generations"
+_VIDEO_URL = "https://api.x.ai/v1/video/generations"
+
+_session: Optional[aiohttp.ClientSession] = None
+
+
+def _get_api_key() -> str:
+    return os.getenv("NATE_CHAT_KEY", "").strip()
+
+
+def _get_session() -> aiohttp.ClientSession:
+    global _session
+    if _session is None or _session.closed:
+        timeout = aiohttp.ClientTimeout(total=120, sock_read=90)
+        connector = aiohttp.TCPConnector(limit=10, keepalive_timeout=120)
+        _session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    return _session
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {_get_api_key()}",
+        "Content-Type": "application/json",
+    }
+
+
+async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
+    """Generate a static image via Grok Imagine API.
+
+    Returns raw image bytes downloaded from the response URL.
+    Raises RuntimeError on API failure.
+    """
+    key = _get_api_key()
+    if not key:
+        raise RuntimeError("NATE_CHAT_KEY not set — cannot call Grok Imagine")
+
+    payload = {"model": "grok-2-image", "prompt": prompt, "n": 1}
+    session = _get_session()
+
+    async with session.post(_IMAGINE_URL, json=payload, headers=_headers()) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Grok Imagine {resp.status}: {body[:300]}")
+        data = await resp.json()
+
+    images = data.get("data", [])
+    if not images:
+        raise RuntimeError("Grok Imagine returned no images")
+
+    image_url = images[0].get("url", "")
+    if not image_url:
+        raise RuntimeError("Grok Imagine response missing image URL")
+
+    async with session.get(image_url) as dl_resp:
+        if dl_resp.status != 200:
+            raise RuntimeError(f"Image download failed: {dl_resp.status}")
+        image_bytes = await dl_resp.read()
+
+    await asyncio.sleep(2)
+    return image_bytes
+
+
+async def generate_video(
+    prompt: str, source_image_url: Optional[str] = None
+) -> str:
+    """Start video generation via Grok Video API.
+
+    Returns a video_id string for polling. Does NOT wait for completion.
+    """
+    key = _get_api_key()
+    if not key:
+        raise RuntimeError("NATE_CHAT_KEY not set — cannot call Grok Video")
+
+    payload: dict = {"model": "grok-2-video", "prompt": prompt}
+    if source_image_url:
+        payload["image_url"] = source_image_url
+
+    session = _get_session()
+    async with session.post(_VIDEO_URL, json=payload, headers=_headers()) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Grok Video {resp.status}: {body[:300]}")
+        data = await resp.json()
+
+    video_id = data.get("id", "")
+    if not video_id:
+        raise RuntimeError("Grok Video response missing video id")
+    return video_id
+
+
+async def poll_video_status(video_id: str) -> dict:
+    """Poll Grok Video API for generation status.
+
+    Returns {"status": "processing"|"completed"|"failed", "url": str|None}.
+    Caller handles polling loop with backoff.
+    """
+    url = f"{_VIDEO_URL}/{video_id}"
+    session = _get_session()
+
+    async with session.get(url, headers=_headers()) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Grok Video poll {resp.status}: {body[:300]}")
+        data = await resp.json()
+
+    status = data.get("status", "processing")
+    video_url = data.get("url") or data.get("video_url")
+    return {"status": status, "url": video_url}
