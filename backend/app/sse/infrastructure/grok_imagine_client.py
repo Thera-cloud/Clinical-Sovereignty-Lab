@@ -17,7 +17,7 @@ _session: Optional[aiohttp.ClientSession] = None
 
 
 def _get_api_key() -> str:
-    return os.getenv("NATE_CHAT_KEY", "").strip()
+    return os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "").strip()
 
 
 def _get_session() -> aiohttp.ClientSession:
@@ -44,9 +44,9 @@ async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
     """
     key = _get_api_key()
     if not key:
-        raise RuntimeError("NATE_CHAT_KEY not set — cannot call Grok Imagine")
+        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Imagine")
 
-    payload = {"model": "grok-2-image", "prompt": prompt, "n": 1}
+    payload = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
     session = _get_session()
 
     async with session.post(_IMAGINE_URL, json=payload, headers=_headers()) as resp:
@@ -81,9 +81,9 @@ async def generate_video(
     """
     key = _get_api_key()
     if not key:
-        raise RuntimeError("NATE_CHAT_KEY not set — cannot call Grok Video")
+        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Video")
 
-    payload: dict = {"model": "grok-2-video", "prompt": prompt}
+    payload: dict = {"model": "grok-imagine-video", "prompt": prompt}
     if source_image_url:
         payload["image_url"] = source_image_url
 
