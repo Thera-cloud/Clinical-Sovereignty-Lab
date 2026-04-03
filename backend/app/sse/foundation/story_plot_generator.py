@@ -81,12 +81,23 @@ def _slugify(name: str) -> str:
     return slug
 
 
-async def generate(narrative: dict[str, Any]) -> dict[str, Any]:
+async def generate(narrative: dict[str, Any], user_id: str = None, db_pool=None) -> dict[str, Any]:
     doc_type = narrative.get("document_type", "narrative_arc")
     phases = narrative.get("phases_detected", [])
     story_name = narrative.get("story_name", "untitled")
     story_id = narrative.get("story_id") or f"storyboard_{_slugify(story_name)}_v1.0"
     audience = narrative.get("audience", "general")
+
+    char_vis, cult_ctx = "figure, indeterminate presentation", ""
+    if user_id and db_pool:
+        try:
+            async with db_pool.acquire() as c:
+                row = await c.fetchrow("SELECT character_visual,cultural_context FROM sse_identity_forge WHERE user_id=$1 AND status='complete'", user_id)
+            if row:
+                char_vis = row["character_visual"] or char_vis
+                cult_ctx = row["cultural_context"] or ""
+        except Exception:
+            pass
 
     panels: list[dict[str, Any]] = []
     new_spaces = 0
@@ -101,7 +112,9 @@ async def generate(narrative: dict[str, Any]) -> dict[str, Any]:
         panel_tone = phase.get("panel_tone", "action_sequence")
 
         scene_desc = f"{phase.get('description', '')} — {key_visual}".strip(" —")
-        grok_prompt = f"{scene_desc}, {suffix}, no text, no words, no lettering, no calligraphy, no writing on image"
+        biome_vis = f"environment: {biome}" if biome else ""
+        grok_prompt = f"{scene_desc}, character: {char_vis}, {biome_vis}, {suffix}, no text, no words, no lettering, no calligraphy, no writing on image".replace(", ,", ",")
+        audio = _build_audio_profile(biome, panel_tone)
 
         panels.append({
             "phase_id": mapping,
@@ -111,7 +124,7 @@ async def generate(narrative: dict[str, Any]) -> dict[str, Any]:
             "core_character_suffix": manifestation,
             "biome": biome,
             "sacred_space": sacred_space,
-            "audio_profile": _build_audio_profile(biome, panel_tone),
+            "audio_profile": f"{audio} [{cult_ctx}]" if cult_ctx else audio,
         })
 
         spaces_meta = narrative.get("spaces_detected", {})
