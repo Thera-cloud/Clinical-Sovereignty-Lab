@@ -10,7 +10,7 @@ import hashlib
 import logging
 from typing import Any
 
-from app.sse.foundation import (
+from . import (
     document_parser,
     ip_provenance,
     narrative_extractor,
