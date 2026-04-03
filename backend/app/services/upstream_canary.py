@@ -96,11 +96,13 @@ async def _check_azure_canary() -> bool:
             return True  # No config = not a failure
 
         import httpx
-        url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-15-preview"
+        base = endpoint.rstrip("/")
+        if not base.startswith("http"):
+            base = f"https://{base}"
+        url = f"{base}/openai/deployments/{deployment}/chat/completions?api-version=2024-12-01-preview"
         payload = {
             "messages": [{"role": "user", "content": "Respond with only the word: CANARY"}],
-            "max_tokens": 5,
-            "temperature": 0,
+            "max_completion_tokens": 5,
         }
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(url, json=payload, headers={"api-key": api_key})

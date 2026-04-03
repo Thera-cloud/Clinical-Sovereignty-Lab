@@ -246,6 +246,46 @@ class StrategicMemoryService:
                  briefing.get("notable_changes", []),
                  briefing.get("recommendations", []),
                  json.dumps(briefing.get("metadata", {})))
+            # QUANTUM-CRYSTAL-ARCH: crystallize coherence briefing into intelligence pool
+            if row:
+                try:
+                    gap = briefing.get("gap_analysis_summary", "")
+                    themes = briefing.get("trending_themes", [])
+                    recs = briefing.get("recommendations", [])
+                    crystal_parts = []
+                    if gap:
+                        crystal_parts.append(f"Gap analysis: {gap}")
+                    if themes:
+                        crystal_parts.append(f"Themes: {', '.join(themes[:5])}")
+                    if recs:
+                        crystal_parts.append(f"Recommendations: {'; '.join(recs[:3])}")
+                    if crystal_parts:
+                        crystal_text = "COHERENCE BRIEFING — " + " | ".join(crystal_parts)
+                        import hashlib
+                        content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
+                        await conn.execute(
+                            """INSERT INTO nate_intelligence_crystals
+                               (crystal_text, domain, scope, topics, source_count,
+                                generation, confidence, content_hash, origin_surface)
+                             VALUES ($1, 'coherence', 'global', $2, 1, 0, 0.60, $3,
+                                     'coherence_briefing')
+                             ON CONFLICT (content_hash) DO NOTHING""",
+                            crystal_text,
+                            themes[:10] if themes else [],
+                            content_hash,
+                        )
+                        from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                        if is_vectorize_configured():
+                            await index_wisdom(
+                                user_id="nate_crystal",
+                                wisdom_id=f"crystal_{content_hash[:16]}",
+                                insight_type="coherence_briefing",
+                                content=crystal_text,
+                                source="coherence_briefing",
+                                domain="coherence",
+                            )
+                except Exception as _cb_err:
+                    logger.debug("Coherence briefing crystallize non-fatal: %s", _cb_err)
             return dict(row)
 
     async def get_latest_coherence_briefing(self) -> Optional[Dict]:

@@ -280,6 +280,22 @@ class HelixOrchestrator:
 
         result.cycle_time_ms = (time.monotonic() - start) * 1000
 
+        # SOVEREIGN-VOICE: persist helix coherence history
+        if self._db_pool:
+            try:
+                import uuid as _uuid, json as _json
+                _ch_id = _uuid.uuid4()
+                asyncio.create_task(self._persist_coherence_history(
+                    _ch_id, result.cycle_id,
+                    synthesis.fused_coherence,
+                    synthesis.sovereignty_adjusted,
+                    len(helix_outputs),
+                    result.total_thought_nodes,
+                    result.cycle_time_ms,
+                ))
+            except Exception:
+                pass
+
         logger.info(
             ">>> [HELIX_ORCH] Cycle #%d — %d helices, %d thought-nodes, "
             "%d reflections, %.1fms — felt_sense=%s",
@@ -430,14 +446,21 @@ class HelixOrchestrator:
             import uuid as _uuid
             odpe_dict = odpe.to_dict() if hasattr(odpe, "to_dict") else {}
             cycle_uuid = _uuid.uuid5(_uuid.NAMESPACE_DNS, f"helix-cycle-{cycle_id}")
+            # QUANTUM-CRYSTAL-ARCH: include face_path and face_scores
+            _face_scores = {}
+            if odpe_dict.get("l1_top_paths"):
+                _face_scores["l1"] = odpe_dict["l1_top_paths"]
+            if odpe_dict.get("l2_top_paths"):
+                _face_scores["l2"] = odpe_dict["l2_top_paths"]
             async with self._db_pool.acquire() as conn:
                 await conn.execute("""
                     INSERT INTO odpe_signal_log
                         (cycle_id, dominant_signal, dodec_amplitude,
                          icosi_amplitude, resonance_ratio,
                          context_tokens_recommended, inference_tier,
-                         per_helix_signals)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                         per_helix_signals, face_path, face_scores,
+                         hierarchical_depth)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 """,
                     cycle_uuid,
                     str(odpe_dict.get("dominant_signal", "PROVISIONAL")),
@@ -447,9 +470,37 @@ class HelixOrchestrator:
                     int(odpe_dict.get("recommended_context_tokens", 500)),
                     str(odpe_dict.get("recommended_inference_tier", "domain_default")),
                     _json.dumps(odpe_dict.get("per_helix_signals", {})),
+                    str(odpe_dict.get("face_path", ""))[:200] or None,
+                    _json.dumps(_face_scores) if _face_scores else "{}",
+                    int(odpe_dict.get("hierarchical_depth", 0)),
                 )
         except Exception as e:
             logger.warning("HELIX_ORCH: ODPE signal log write failed: %s", e)
+
+    # ─── Coherence History Persistence ──────────────────────────
+
+    async def _persist_coherence_history(
+        self, history_id, cycle_id, fused_coherence,
+        sovereignty_adjusted, helix_count, thought_nodes, cycle_time_ms,
+    ):
+        """SOVEREIGN-VOICE: log helix coherence per cycle for longitudinal analysis."""
+        if not self._db_pool:
+            return
+        try:
+            import json as _json
+            async with self._db_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO helix_coherence_history
+                        (id, cycle_id, fused_coherence, sovereignty_adjusted,
+                         helix_count, thought_node_count, cycle_time_ms, recorded_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                """,
+                    history_id, cycle_id, round(fused_coherence, 5),
+                    round(sovereignty_adjusted, 5), helix_count,
+                    thought_nodes, round(cycle_time_ms, 2),
+                )
+        except Exception as e:
+            logger.warning("HELIX_ORCH: coherence_history write failed: %s", e)
 
     # ─── Persistence ────────────────────────────────────────────
 

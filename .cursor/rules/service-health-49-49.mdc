@@ -1,15 +1,15 @@
 ---
-description: All 94 services must remain healthy at startup. Never introduce changes that break the 94/94 health check.
+description: All 103 services must remain healthy at startup. Never introduce changes that break the 103/103 health check.
 alwaysApply: true
 ---
 
-# 94/94 Service Health Requirement
+# 103/103 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/94 services healthy` on boot. The target is **94/94 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/103 services healthy` on boot. The target is **103/103 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
-## Service Registry (94 total)
+## Service Registry (103 total)
 
-### Core Services (67)
+### Core Services (76)
 
 | # | Service | Source |
 |---|---------|--------|
@@ -81,6 +81,15 @@ The backend reports `STARTUP COMPLETE: N/94 services healthy` on boot. The targe
 | 65 | corporate_command_auditor | 3x daily Corporate Command 25-check trust scorecard |
 | 66 | hot_memory / warm_memory / cold_memory | Multi-tier memory (Redis / Azure warm / Azure cold) |
 | 67 | sentinel_orchestrator | Sentinel Defense Orchestrator — House of Mirrors wiring (SASE ban, DEFCON, Mirror Shell, Recon Report, Helix authorization) |
+| 68 | quantum_crystal_orchestrator | Quantum crystal orchestration (feature-flagged) |
+| 69 | voice_billing | Prepaid voice billing system (PAUSED cleanup loop) |
+| 70 | voice_pool | DistributedVoicePool — Redis job queues for STT/TTS workers |
+| 71 | voice_router | VoiceRouter — tier-based routing for STT/TTS/chat |
+| 72 | voice_pipeline_optimizer | VoicePipelineOptimizer — sentence-level TTS streaming |
+| 73 | voice_call_center_agent | VoiceCallCenterAgent — callback queue + outreach (30min cycle) |
+| 74 | voice_infra_auditor | VoiceInfrastructureAuditor — 10-check voice trust scorecard (3x daily, stagger 295s) |
+| 75 | identity_engine | Therapeutic Identity System — 14-service orchestration (enrollment, linguistic, narrative, liveness, OSD, roleplay, consent, mandatory reporting) |
+| 76 | six_quotient_growth_engine | Six-quotient assessment growth engine |
 
 ### Hive Defense Services (27)
 
@@ -94,7 +103,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `87/87 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `103/103 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

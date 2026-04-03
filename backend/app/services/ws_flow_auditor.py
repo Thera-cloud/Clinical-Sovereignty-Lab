@@ -25,19 +25,23 @@ AUDIT_HOURS = {5, 17, 23}
 AUDIT_EMAIL = "support@sovereignsanctuary.net"
 WS_URL = os.environ.get("WS_AUDIT_URL", "ws://bridge:8765")
 
-CLIENT_ACCOUNT = {
-    "username": "audit_client",
-    "password": "AuditClient2026!",
-    "expected_role": "CLIENT",
-    "hardware_id": "wsflow_audit_client_hw",
-}
+def _make_client_account():
+    nonce = f"{int(time.time() * 1000) % 100000}"
+    return {
+        "username": "audit_client",
+        "password": "AuditClient2026!",
+        "expected_role": "CLIENT",
+        "hardware_id": f"wsflow_audit_client_hw_{nonce}",
+    }
 
-COACH_ACCOUNT = {
-    "username": "audit_coach",
-    "password": "AuditCoach2026!",
-    "expected_role": "COACH",
-    "hardware_id": "wsflow_audit_coach_hw",
-}
+def _make_coach_account():
+    nonce = f"{int(time.time() * 1000) % 100000}"
+    return {
+        "username": "audit_coach",
+        "password": "AuditCoach2026!",
+        "expected_role": "COACH",
+        "hardware_id": f"wsflow_audit_coach_hw_{nonce}",
+    }
 
 CLIENT_TESTS = [
     {"label": "Client Metrics", "account": "client",
@@ -133,6 +137,11 @@ class WebSocketFlowAuditor:
             await asyncio.sleep(60)
 
     async def _build_and_send(self, now: datetime):
+        # Wait for Login Auditor to finish its audit_client connection cycle.
+        # Both auditors share audit_client/audit_coach accounts; the bridge
+        # enforces one connection per username and closes the earlier one
+        # with "Replaced by new connection" if both connect simultaneously.
+        await asyncio.sleep(15)
         results = await self._audit_all_flows()
         html = self._render_html(results, now)
 
@@ -157,46 +166,56 @@ class WebSocketFlowAuditor:
     async def _audit_all_flows(self) -> list:
         results = []
 
-        # Run client tests on a dedicated connection
-        client_results = await self._run_test_group(CLIENT_ACCOUNT, CLIENT_TESTS)
+        client_results = await self._run_test_group(_make_client_account(), CLIENT_TESTS)
         results.extend(client_results)
 
-        # Small gap between connection groups
         await asyncio.sleep(2)
 
-        # Run coach tests on a separate dedicated connection
-        coach_results = await self._run_test_group(COACH_ACCOUNT, COACH_TESTS)
+        coach_results = await self._run_test_group(_make_coach_account(), COACH_TESTS)
         results.extend(coach_results)
 
         return results
 
     async def _run_test_group(self, account: dict, tests: list) -> list:
-        """Run a group of tests on a single fresh WebSocket connection."""
-        results = []
-        ws = await self._login_ws(account)
+        """Run a group of tests on a single fresh WebSocket connection.
+        Retries once if the connection is replaced (bridge closed it for
+        a duplicate username from another auditor)."""
+        for attempt in range(2):
+            results = []
+            ws = await self._login_ws(account)
 
-        if ws is None:
-            for test in tests:
-                results.append({
-                    "label": test["label"],
-                    "status": "FAILED",
-                    "detail": f"No WS connection for {account['username']}",
-                    "ms": 0,
-                    "steps": {"login": "FAILED"},
-                })
-            return results
+            if ws is None:
+                for test in tests:
+                    results.append({
+                        "label": test["label"],
+                        "status": "FAILED",
+                        "detail": f"No WS connection for {account['username']}",
+                        "ms": 0,
+                        "steps": {"login": "FAILED"},
+                    })
+                return results
 
-        try:
-            for test in tests:
-                result = await self._test_flow(ws, test)
-                results.append(result)
-                await self._drain_between_tests(ws)
-        finally:
+            replaced = False
             try:
-                await ws.close()
-            except Exception:
-                pass
+                for test in tests:
+                    result = await self._test_flow(ws, test)
+                    results.append(result)
+                    if "Replaced" in result.get("detail", ""):
+                        replaced = True
+                        break
+                    await self._drain_between_tests(ws)
+            finally:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
 
+            if replaced and attempt == 0:
+                logger.info("WS Flow: connection replaced for %s, retrying in 10s",
+                            account["username"])
+                await asyncio.sleep(10)
+                continue
+            return results
         return results
 
     async def _login_ws(self, account: dict):

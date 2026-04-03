@@ -235,10 +235,10 @@ class LiminalResolveEngine:
             if state.status != "active":
                 return ""
 
-                if not detect_parts:
-                    return ""
+            if not detect_parts:
+                return ""
 
-                parts = detect_parts(user_text)
+            parts = detect_parts(user_text)
             state.parts_map = {
                 "dominant": parts.dominant,
                 "protector_active": parts.protector_active,
@@ -251,6 +251,19 @@ class LiminalResolveEngine:
                 "self_confidence": parts.self_confidence,
                 "co_active": parts.co_active,
             }
+
+            # SOVEREIGN-VOICE: P3-006 — log detected parts for feedback loop
+            if self._db_pool and parts and (parts.protector_active or parts.exile_surfacing or parts.firefighter_activated):
+                try:
+                    await self._db_pool.execute(
+                        """INSERT INTO parts_detection_feedback
+                            (session_id, user_text, detected_parts)
+                           VALUES ($1, $2, $3::jsonb)""",
+                        session_id or "", user_text[:500],
+                        json.dumps(state.parts_map),
+                    )
+                except Exception:
+                    pass
 
             state.shame_topology = track_shame_topology(
                 user_text, state.shame_topology
@@ -537,9 +550,9 @@ class LiminalResolveEngine:
                 if lr_crystal_count and lr_crystal_count >= 1:
                     return True
 
-                    if not detect_parts:
-                        return False
-                    parts = detect_parts(user_text)
+                if not detect_parts:
+                    return False
+                parts = detect_parts(user_text)
                 shame = track_shame_topology(user_text)
 
                 if (parts.exile_surfacing

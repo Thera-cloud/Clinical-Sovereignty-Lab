@@ -8,6 +8,7 @@ Uses the bridge's existing db_pool (no HTTP calls to backend).
 import hashlib
 import logging
 import re
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,16 @@ _CRYSTAL_SIGNALS = [
 
 _LONG_DISCLOSURE_RE = re.compile(r"\b(i |i'm |i've |my |me |myself)\b", re.I)
 
+_NATE_THERAPEUTIC_RE = re.compile(
+    r"\b(i hear you|what.{0,10}coming up|tell me more|sounds like|it makes sense|"
+    r"that.{0,10}painful|let.{0,10}sit with|notice|what.{0,10}feels like|"
+    r"i.{0,5}curious|when you say|part of you|underneath|what.{0,10}need)\b", re.I
+)
+
 _MIN_SCORE = 4
+_MIN_SCORE_VOICE = 2
 _MIN_USER_LEN = 40
+_MIN_USER_LEN_VOICE = 15
 
 
 async def recall_crystals_for_context(
@@ -48,6 +57,7 @@ async def recall_crystals_for_context(
     max_results: int = 8,
     source: str = "bridge_chat",
     affect_weight: float = 0.0,
+    query_text: str = "",
 ) -> str:
     if not db_pool or not hardware_id:
         return ""
@@ -58,42 +68,144 @@ async def recall_crystals_for_context(
                 hardware_id,
             )
 
-            # During LIMINAL RESOLVE, widen retrieval to 50 candidates for affect reranking
             user_limit = max(max_results // 2, 2)
             global_limit = max_results - user_limit
             if affect_weight > 0.0:
                 user_limit = max(user_limit, 25)
                 global_limit = max(global_limit, 25)
 
-            user_crystals = await conn.fetch(
-                """
-                SELECT id, crystal_text, confidence, domain, metadata
-                FROM nate_intelligence_crystals
-                WHERE user_id = $1
-                  AND confidence >= 0.30
-                  AND scope NOT IN ('archived')
-                  AND superseded_by IS NULL
-                ORDER BY created_at DESC, confidence DESC
-                LIMIT $2
-                """,
-                user_uuid,
-                user_limit,
-            )
+            _has_query = bool(query_text and len(query_text.strip()) >= 12)
+            _seen_ids: set = set()
 
-            global_crystals = await conn.fetch(
-                """
-                SELECT id, crystal_text, confidence, domain, metadata
-                FROM nate_intelligence_crystals
-                WHERE user_id IS NULL
-                  AND confidence >= 0.55
-                  AND scope NOT IN ('archived')
-                  AND superseded_by IS NULL
-                ORDER BY confidence DESC,
-                         last_recalled_at DESC NULLS LAST
-                LIMIT $1
-                """,
-                global_limit,
-            )
+            # --- USER CRYSTALS: topic-matched + cold-start + recent ---
+            user_crystals = []
+
+            if _has_query and user_uuid:
+                _topic_limit = max(user_limit // 2, 1)
+                _topic_rows = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1
+                      AND confidence >= 0.30
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $2)
+                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
+                                     plainto_tsquery('english', $2)) DESC
+                    LIMIT $3
+                    """,
+                    user_uuid, query_text.strip()[:200], _topic_limit,
+                )
+                for r in _topic_rows:
+                    if r["id"] not in _seen_ids:
+                        user_crystals.append(r)
+                        _seen_ids.add(r["id"])
+
+            if len(user_crystals) < user_limit and user_uuid:
+                _cold = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1
+                      AND confidence >= 0.30
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND (recall_count IS NULL OR recall_count = 0)
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                    """,
+                    user_uuid,
+                )
+                for r in _cold:
+                    if r["id"] not in _seen_ids:
+                        user_crystals.append(r)
+                        _seen_ids.add(r["id"])
+
+            _u_remaining = user_limit - len(user_crystals)
+            if _u_remaining > 0:
+                _recent = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1
+                      AND confidence >= 0.30
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                    ORDER BY created_at DESC, confidence DESC
+                    LIMIT $2
+                    """,
+                    user_uuid, _u_remaining + len(_seen_ids),
+                )
+                for r in _recent:
+                    if r["id"] not in _seen_ids and len(user_crystals) < user_limit:
+                        user_crystals.append(r)
+                        _seen_ids.add(r["id"])
+
+            # --- GLOBAL CRYSTALS: topic-matched + cold-start + high-confidence ---
+            global_crystals = []
+
+            if _has_query:
+                _g_topic_limit = max(global_limit // 2, 1)
+                _g_topic = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id IS NULL
+                      AND confidence >= 0.55
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $1)
+                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
+                                     plainto_tsquery('english', $1)) DESC
+                    LIMIT $2
+                    """,
+                    query_text.strip()[:200], _g_topic_limit,
+                )
+                for r in _g_topic:
+                    if r["id"] not in _seen_ids:
+                        global_crystals.append(r)
+                        _seen_ids.add(r["id"])
+
+            if len(global_crystals) < global_limit:
+                _g_cold = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id IS NULL
+                      AND confidence >= 0.55
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND (recall_count IS NULL OR recall_count = 0)
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                    """,
+                )
+                for r in _g_cold:
+                    if r["id"] not in _seen_ids:
+                        global_crystals.append(r)
+                        _seen_ids.add(r["id"])
+
+            _g_remaining = global_limit - len(global_crystals)
+            if _g_remaining > 0:
+                _g_top = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id IS NULL
+                      AND confidence >= 0.55
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                    ORDER BY confidence DESC,
+                             last_recalled_at DESC NULLS LAST
+                    LIMIT $1
+                    """,
+                    _g_remaining + len(_seen_ids),
+                )
+                for r in _g_top:
+                    if r["id"] not in _seen_ids and len(global_crystals) < global_limit:
+                        global_crystals.append(r)
+                        _seen_ids.add(r["id"])
 
             # Affect reranking during LIMINAL RESOLVE
             if affect_weight > 0.0:
@@ -130,7 +242,28 @@ async def recall_crystals_for_context(
                     hardware_id, db_pool, strip_task_framing=True,
                 )
 
-            crystals = list(user_crystals) + list(global_crystals)
+            # QUANTUM-CRYSTAL-ARCH: dedicated clinical DNA slot — six-quotient growth
+            # and clinical edge crystals that define HOW Nate responds
+            clinical_dna = []
+            _dna_rows = await conn.fetch(
+                """
+                SELECT id, crystal_text, confidence, domain, metadata
+                FROM nate_intelligence_crystals
+                WHERE user_id IS NULL
+                  AND confidence >= 0.85
+                  AND scope NOT IN ('archived')
+                  AND superseded_by IS NULL
+                  AND origin_surface IN ('growth_engine', 'clinical_edge_seed')
+                ORDER BY RANDOM()
+                LIMIT 2
+                """,
+            )
+            for r in _dna_rows:
+                if r["id"] not in _seen_ids:
+                    clinical_dna.append(r)
+                    _seen_ids.add(r["id"])
+
+            crystals = list(user_crystals) + clinical_dna + list(global_crystals)
             if not crystals:
                 return ""
 
@@ -157,6 +290,11 @@ async def recall_crystals_for_context(
                 crystal_ids,
             )
 
+            # QUANTUM-CRYSTAL-ARCH: record co-activation for crystals recalled together
+            if len(crystal_ids) >= 2:
+                import asyncio as _aio
+                _aio.create_task(_record_co_activation(db_pool, crystal_ids, source))
+
             lines = []
             if user_crystals:
                 lines.append(
@@ -167,6 +305,15 @@ async def recall_crystals_for_context(
                     conf = float(c["confidence"]) if c["confidence"] else 0
                     text = (c["crystal_text"] or "")[:300]
                     lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
+            if clinical_dna:
+                lines.append(
+                    "CLINICAL DNA (your lived growth lessons — these define "
+                    "HOW you respond, follow them precisely):"
+                )
+                for c in clinical_dna:
+                    conf = float(c["confidence"]) if c["confidence"] else 0
+                    text = (c["crystal_text"] or "")[:300]
+                    lines.append(f"- {text} (confidence: {conf:.2f})")
             if global_crystals:
                 lines.append(
                     "GENERAL KNOWLEDGE (validated therapeutic insights — "
@@ -224,6 +371,57 @@ async def _lazy_fill_affect_metadata(conn, crystal_id_text_pairs: list) -> None:
             )
     except Exception as e:
         logger.warning("crystal_recall_bridge: lazy affect fill: %s", e)
+
+
+async def _record_co_activation(db_pool, crystal_ids: list, source: str) -> None:
+    """Background: record which crystals were recalled together (co-activation).
+
+    Populates crystal_co_activation_events for graph analysis and
+    updates crystal_edges with co_activation edge type.
+    """
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, LEFT(content_hash, 16) as hash_prefix
+                   FROM nate_intelligence_crystals
+                   WHERE id = ANY($1::int[])
+                     AND content_hash IS NOT NULL AND content_hash != ''""",
+                crystal_ids,
+            )
+            hashes = sorted(set(r["hash_prefix"] for r in rows if r["hash_prefix"]))
+            if len(hashes) < 2:
+                return
+
+            now = datetime.now(timezone.utc)
+            bucket = now.replace(minute=(now.minute // 10) * 10, second=0, microsecond=0)
+            pairs = []
+            for i, a in enumerate(hashes):
+                for b in hashes[i + 1:]:
+                    pairs.append((source, a, b, bucket))
+
+            await conn.executemany(
+                """INSERT INTO crystal_co_activation_events
+                       (source, crystal_a, crystal_b, time_bucket, event_count, last_seen_at, created_at)
+                   VALUES ($1, $2, $3, $4, 1, NOW(), NOW())
+                   ON CONFLICT (source, COALESCE(session_id, ''), COALESCE(call_sid, ''), crystal_a, crystal_b, time_bucket)
+                   DO UPDATE SET event_count = crystal_co_activation_events.event_count + 1,
+                                 last_seen_at = NOW()""",
+                pairs,
+            )
+
+            edge_pairs = [(a, b, source) for _, a, b, _ in pairs]
+            await conn.executemany(
+                """INSERT INTO crystal_edges
+                       (crystal_a_hash, crystal_b_hash, similarity, edge_type,
+                        co_activation_count, last_co_activated_at, source)
+                   VALUES ($1, $2, 0.0, 'co_activation', 1, NOW(), $3)
+                   ON CONFLICT (crystal_a_hash, crystal_b_hash)
+                   DO UPDATE SET co_activation_count = crystal_edges.co_activation_count + 1,
+                                 last_co_activated_at = NOW()""",
+                edge_pairs,
+            )
+    except Exception as e:
+        logger.warning("crystal_recall_bridge: co-activation recording: %s", e)
 
 
 async def retrieve_anticipatory_crystals(
@@ -288,7 +486,9 @@ async def crystallize_from_conversation(
     """
     if not db_pool or not hardware_id:
         return
-    if len(user_text) < _MIN_USER_LEN:
+    is_voice = origin_surface == "voice_call"
+    effective_min_len = _MIN_USER_LEN_VOICE if is_voice else _MIN_USER_LEN
+    if len(user_text) < effective_min_len:
         return
 
     score = 0
@@ -301,8 +501,16 @@ async def crystallize_from_conversation(
 
     if len(user_text) > 200 and _LONG_DISCLOSURE_RE.search(user_text):
         score += 2
+    # QUANTUM-CRYSTAL-ARCH: boost from shorter first-person disclosures
+    elif len(user_text) > 80 and _LONG_DISCLOSURE_RE.search(user_text):
+        score += 1
 
-    if score < min_score:
+    # QUANTUM-CRYSTAL-ARCH: if Nate reflected therapeutically, the exchange matters
+    if nate_response and _NATE_THERAPEUTIC_RE.search(nate_response):
+        score += 2
+
+    effective_min_score = _MIN_SCORE_VOICE if is_voice else min_score
+    if score < effective_min_score:
         return
 
     # Build concise crystal text from user disclosure + Nate's reflection
@@ -336,8 +544,149 @@ async def crystallize_from_conversation(
                 crystal_text, matched_domain, content_hash, user_uuid, origin_surface,
             )
             logger.info(
-                "crystal_bridge: forged crystal for %s (score=%d, domain=%s)",
-                name_tag, score, matched_domain,
+                "crystal_bridge: forged crystal for %s (score=%d, domain=%s, surface=%s)",
+                name_tag, score, matched_domain, origin_surface,
             )
+
+        # QUANTUM-CRYSTAL-ARCH: Vectorize embedding so crystal is semantically searchable
+        try:
+            from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(user_uuid) if user_uuid else "nate_crystal",
+                    wisdom_id=f"crystal_{content_hash[:16]}",
+                    insight_type=f"crystal_{matched_domain}",
+                    content=crystal_text,
+                    source=origin_surface,
+                    domain=matched_domain,
+                )
+        except Exception as _vec_err:
+            logger.debug("crystal_bridge: vectorize failed (non-fatal): %s", _vec_err)
     except Exception as e:
         logger.warning("crystallize_from_conversation: %s", e)
+
+
+async def crystallize_session_summary(
+    db_pool,
+    hardware_id: str,
+    turns: list,
+    user_name: str = "",
+    origin_surface: str = "bridge_chat",
+    session_id: str = "",
+) -> int:
+    """
+    Create a comprehensive session-level crystal from multiple conversation turns.
+
+    Unlike per-turn crystallization which captures individual disclosures,
+    this captures the session arc: themes across turns, emotional trajectory,
+    and key commitments. Returns number of crystals created.
+
+    QUANTUM-CRYSTAL-ARCH: session summary crystals are the primary mechanism
+    for converting lived therapeutic interaction into retrievable wisdom.
+    """
+    if not db_pool or not hardware_id or not turns:
+        return 0
+
+    name_tag = user_name or hardware_id[:12]
+    created = 0
+
+    try:
+        async with db_pool.acquire() as conn:
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+                hardware_id,
+            )
+
+            user_texts = []
+            nate_texts = []
+            for t in turns:
+                u = t.get("user_text") or t.get("text") or ""
+                a = t.get("ai_text") or t.get("nate_text") or t.get("assistant_text") or ""
+                if u:
+                    user_texts.append(u.strip())
+                if a:
+                    nate_texts.append(a.strip())
+
+            if not user_texts:
+                return 0
+
+            all_user = " ".join(user_texts)
+
+            themes = []
+            for pattern, pat_domain, weight in _CRYSTAL_SIGNALS:
+                if pattern.search(all_user):
+                    match_text = pattern.pattern.replace(r"\b", "").replace("(", "").replace(")", "")
+                    themes.append(match_text.split("|")[0].strip())
+            themes = themes[:8]
+
+            session_crystal = (
+                f"SESSION SUMMARY ({name_tag}, {len(user_texts)} turns, {origin_surface}): "
+                f"Client discussed: {all_user[:600]}."
+            )
+            if nate_texts:
+                session_crystal += f" Nate reflected: {' '.join(nate_texts)[:400]}."
+            if themes:
+                session_crystal += f" Themes: {', '.join(themes)}."
+
+            content_hash = hashlib.sha256(session_crystal.encode()).hexdigest()
+
+            await conn.execute(
+                """INSERT INTO nate_intelligence_crystals
+                    (crystal_text, domain, scope, topics, source_count,
+                     generation, confidence, content_hash, user_id, origin_surface)
+                VALUES ($1, 'clinical', 'user', $2, $3, 0, 0.55, $4, $5, $6)
+                ON CONFLICT (content_hash) DO NOTHING""",
+                session_crystal,
+                themes if themes else [],
+                len(user_texts),
+                content_hash,
+                user_uuid,
+                origin_surface,
+            )
+            created += 1
+            logger.info(
+                "crystal_bridge: session summary crystal for %s (%d turns, surface=%s)",
+                name_tag, len(user_texts), origin_surface,
+            )
+
+            emotional_turns = []
+            for u in user_texts:
+                e_score = 0
+                for pattern, _, weight in _CRYSTAL_SIGNALS:
+                    if pattern.search(u):
+                        e_score += weight
+                if e_score >= 3 or (len(u) > 100 and _LONG_DISCLOSURE_RE.search(u)):
+                    emotional_turns.append(u)
+
+            for i, key_turn in enumerate(emotional_turns[:5]):
+                key_crystal = f"{name_tag} disclosed: \"{key_turn[:400]}\""
+                key_hash = hashlib.sha256(key_crystal.encode()).hexdigest()
+                result = await conn.execute(
+                    """INSERT INTO nate_intelligence_crystals
+                        (crystal_text, domain, scope, topics, source_count,
+                         generation, confidence, content_hash, user_id, origin_surface)
+                    VALUES ($1, 'clinical', 'user', '{}', 1, 0, 0.50, $2, $3, $4)
+                    ON CONFLICT (content_hash) DO NOTHING""",
+                    key_crystal, key_hash, user_uuid, origin_surface,
+                )
+                if "INSERT 0 1" in str(result):
+                    created += 1
+
+        try:
+            from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(user_uuid) if user_uuid else "nate_crystal",
+                    wisdom_id=f"crystal_{content_hash[:16]}",
+                    insight_type=f"session_summary_{origin_surface}",
+                    content=session_crystal,
+                    source=origin_surface,
+                    domain="clinical",
+                )
+        except Exception as _vec_err:
+            logger.debug("crystal_bridge: session vectorize non-fatal: %s", _vec_err)
+
+    except Exception as e:
+        logger.warning("crystallize_session_summary: %s", e)
+
+    return created

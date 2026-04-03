@@ -1,7 +1,7 @@
 """
 Cloudflare Vectorize + Workers AI embedding service.
 
-Generates 1024-dim embeddings via Workers AI (@cf/baai/bge-large-en-v1.5) and upserts
+Generates 384-dim embeddings via Workers AI (@cf/baai/bge-small-en-v1.5) and upserts
 vectors into Cloudflare Vectorize indexes for semantic search across all content.
 
 Seven Vectorize indexes:
@@ -49,7 +49,7 @@ def reload_cf_token(new_token: str):
     _session = None
     logger.info("Cloudflare API token hot-reloaded")
 
-_EMBEDDING_MODEL = os.getenv("VECTORIZE_EMBEDDING_MODEL", "@cf/baai/bge-large-en-v1.5")
+_EMBEDDING_MODEL = os.getenv("VECTORIZE_EMBEDDING_MODEL", "@cf/baai/bge-small-en-v1.5")
 _WORKERS_AI_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/" + _EMBEDDING_MODEL
 _VECTORIZE_URL = "https://api.cloudflare.com/client/v4/accounts/{account_id}/vectorize/v2/indexes/{index_name}"
 
@@ -139,7 +139,7 @@ def _make_vector_id(source: str, record_id: str) -> str:
 
 
 async def generate_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
-    """Generate embeddings via Workers AI (default: bge-large-en-v1.5, 1024-dim)."""
+    """Generate embeddings via Workers AI (default: bge-small-en-v1.5, 384-dim)."""
     global _consecutive_auth_failures, _circuit_open_until
 
     if not is_vectorize_configured() or not texts:
@@ -1112,7 +1112,7 @@ async def verify_retrieval_quality(user_id: str = "audit_client") -> Dict:
 
 # ─── Enterprise Vectorize Index Provisioning ──────────────────────────
 
-ENTERPRISE_INDEX_DIMENSIONS = 1024
+ENTERPRISE_INDEX_DIMENSIONS = 384
 ENTERPRISE_INDEX_METRIC = "cosine"
 
 

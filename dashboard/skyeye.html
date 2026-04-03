@@ -319,7 +319,10 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .ci-bar-fill{height:100%;border-radius:6px;background:linear-gradient(90deg,#5a4820,#d4a84b,#f0d080);transition:width 1.5s ease;position:relative}
 .ci-bar-glow{position:absolute;right:-2px;top:0;bottom:0;width:16px;background:linear-gradient(90deg,transparent,rgba(240,208,128,.4));border-radius:0 6px 6px 0;animation:ci-glow 2s ease infinite}
 @keyframes ci-glow{0%,100%{opacity:.5}50%{opacity:1}}
-.ci-bar-marks{display:flex;justify-content:space-between;font-family:monospace;font-size:10px;color:#5a5850;padding:0 2px}
+.ci-bar-marks{position:relative;height:16px;font-family:monospace;font-size:10px;color:#5a5850}
+.ci-bar-marks span{position:absolute;transform:translateX(-50%)}
+.ci-bar-marks span:first-child{transform:translateX(0)}
+.ci-bar-marks span:last-child{transform:translateX(-100%)}
 .ci-bar-marks .ci-active{color:#d4a84b}
 .ci-rate{margin-top:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:#8a8678}
 .ci-rate strong{color:#f0e6d0;font-weight:500}
@@ -1956,7 +1959,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
           <div class="ci-bar-fill" id="ci-bar-fill" style="width:0%"><div class="ci-bar-glow"></div></div>
         </div>
         <div class="ci-bar-marks">
-          <span class="ci-active">0</span><span>1.809</span><span>5.015</span><span>10.0</span><span>15.552</span>
+          <span class="ci-active" style="left:0%">0</span><span style="left:11.63%">1.809</span><span style="left:32.25%">5.015</span><span style="left:64.29%">10.0</span><span style="left:100%">15.552</span>
         </div>
         <div class="ci-rate">
           <div><strong>Crystals:</strong> <span class="ci-mono" id="ci-crystal-count">—</span></div>
@@ -1970,7 +1973,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
       <div class="ci-stats">
         <div class="ci-stat"><div class="ci-stat-val" id="ci-st-crystals" style="color:#1d9e75">—</div><div class="ci-stat-lbl">Total Crystals</div></div>
         <div class="ci-stat"><div class="ci-stat-val" id="ci-st-nodes" style="color:#378add">—</div><div class="ci-stat-lbl">Active Nodes</div></div>
-        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-systems" style="color:#d85a30">5</div><div class="ci-stat-lbl">Systems</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-st-systems" style="color:#d85a30">6</div><div class="ci-stat-lbl">Systems</div></div>
         <div class="ci-stat"><div class="ci-stat-val" id="ci-st-health" style="color:#7f77dd">—</div><div class="ci-stat-lbl">Healthy</div></div>
         <div class="ci-stat"><div class="ci-stat-val" id="ci-st-rate" style="color:#d4a84b">—</div><div class="ci-stat-lbl">Crystal Rate</div></div>
       </div>
@@ -6034,10 +6037,18 @@ function ciRenderStatus(d) {
   var total = totals.total_crystals || 0;
   var rate = totals.rate_per_hour || 0;
   var last24 = totals.last_24h || 0;
-  var exa = d.exa_flops || (total * 0.00008);
+  var wm = d.wisdom_metrics || {};
+  var exaObj = d.exa_flops || {};
+  var exa;
+  if (typeof exaObj === 'number') {
+    exa = exaObj;
+  } else {
+    exa = (wm.knowledge_exaflops || 0) + (wm.wisdom_exaflops || 0);
+    if (exa === 0) exa = exaObj.vanity_number || (total * 0.00008);
+  }
 
   var el = function(id){ return document.getElementById(id); };
-  el('ci-exa-val').textContent = exa.toFixed(3);
+  el('ci-exa-val').textContent = exa.toFixed(2);
   el('ci-crystal-count').textContent = _ciNum(total);
   el('ci-rate-val').textContent = _ciNum(rate);
   el('ci-24h-val').textContent = _ciNum(last24);
@@ -6046,6 +6057,32 @@ function ciRenderStatus(d) {
 
   var pct = Math.min((exa / 15.552) * 100, 100);
   el('ci-bar-fill').style.width = pct + '%';
+
+  var compEl = document.querySelector('.ci-exa-comp');
+  if (compEl && typeof exaObj === 'object' && exaObj.milestones) {
+    var ms = exaObj.milestones;
+    var lines = ms.map(function(m) {
+      var reached = m.fully_reached ? ' — reached' : (m.reached_by_count ? ' — crystals met' : '');
+      var cProg = Math.round(m.crystal_progress_pct || 0);
+      return '<div class="ci-exa-comp-line">' + _ciEsc(m.label) + ' <span>' + cProg + '%</span>' + reached + '</div>';
+    });
+    compEl.innerHTML = lines.join('');
+  }
+
+  if (wm.knowledge_exaflops || wm.wisdom_exaflops) {
+    var wmEl = document.getElementById('ci-wisdom-split');
+    if (!wmEl) {
+      wmEl = document.createElement('div');
+      wmEl.id = 'ci-wisdom-split';
+      wmEl.style.cssText = 'display:flex;gap:20px;margin-top:8px;font-size:11px;color:#8a8678;font-family:monospace';
+      var barWrap = document.querySelector('.ci-bar-wrap');
+      if (barWrap) barWrap.parentNode.insertBefore(wmEl, barWrap);
+    }
+    wmEl.innerHTML =
+      '<span>Knowledge: <span style="color:#C9A962">' + (wm.knowledge_exaflops || 0).toFixed(3) + '</span> ExaFLOPS (' + _ciNum(total - (wm.user_scoped_crystals || 0)) + ' crystals)</span>' +
+      '<span>Wisdom: <span style="color:#4ECDC4">' + (wm.wisdom_exaflops || 0).toFixed(4) + '</span> ExaFLOPS (' + _ciNum(wm.lived_origin_crystals || 0) + ' lived-experience)</span>' +
+      '<span>Clinical DNA: <span style="color:#9D4EDD">' + _ciNum(wm.clinical_dna_crystals || 0) + '</span></span>';
+  }
 
   var nodes = d.nodes || [];
   var ac = d.autonomous_controller || {};

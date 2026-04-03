@@ -900,3 +900,31 @@ class CycleDetectionEngine:
             return max(0.2, min(detected / total_domains, 1.0))
         except Exception:
             return 0.5
+
+    # QUANTUM-CRYSTAL-ARCH: background sweep for all active users
+    async def sweep_all_users(self) -> int:
+        """Run cycle detection for all users with sufficient conversation history."""
+        if not self.db_pool:
+            return 0
+        detected = 0
+        try:
+            async with self.db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """SELECT DISTINCT user_id FROM conversation_history
+                       WHERE created_at > NOW() - INTERVAL '180 days'
+                       GROUP BY user_id HAVING COUNT(*) >= 20"""
+                )
+            for row in rows:
+                try:
+                    result = await self.detect_cycles(row["user_id"])
+                    if any(
+                        r.get("status") == "cycles_detected"
+                        for r in (result.get("results") or {}).values()
+                    ):
+                        detected += 1
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning("CycleDetectionEngine sweep failed: %s", e)
+        logger.info("CycleDetectionEngine sweep: %d users with detected cycles", detected)
+        return detected

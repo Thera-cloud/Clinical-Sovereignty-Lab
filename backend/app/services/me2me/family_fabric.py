@@ -72,6 +72,32 @@ class FamilyFabricService:
             logger.error("Shared memory addition failed: %s", e)
             return False
 
+    async def record_transgenerational_pattern(
+        self,
+        pattern_id: str,
+        pattern_name: str,
+        description: str,
+        confidence: float = 0.5,
+    ) -> bool:
+        # SOVEREIGN-VOICE: P5-004 — write detected transgenerational patterns
+        if not self._db:
+            return False
+        try:
+            async with self._db.acquire() as conn:
+                await conn.execute(
+                    """INSERT INTO transgenerational_patterns
+                        (pattern_id, pattern_name, description, families_observed, confidence)
+                       VALUES ($1, $2, $3, 1, $4)
+                       ON CONFLICT (pattern_id) DO UPDATE SET
+                        families_observed = transgenerational_patterns.families_observed + 1,
+                        confidence = GREATEST(transgenerational_patterns.confidence, EXCLUDED.confidence)""",
+                    pattern_id, pattern_name, description, confidence,
+                )
+                return True
+        except Exception as e:
+            logger.warning("Transgenerational pattern write failed: %s", e)
+            return False
+
     async def get_fabric(self, family_id: str) -> Optional[FamilyFabric]:
         """Get the family fabric for a family."""
         if not self._db:

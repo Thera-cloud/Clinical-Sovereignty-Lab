@@ -376,8 +376,9 @@ Current auditor stagger delays (seconds after audit hour starts):
 | 270 | Wisdom Pipeline |
 | 280 | Settings Tab |
 | 290 | Coach Hierarchy |
+| 295 | Voice Infrastructure |
 
-**The 300s ceiling is firm** — the Trust Enforcer fires at minute >= 10 (600s). All auditors must complete well before that. A stagger of 290s means the auditor starts at ~4:50 into the window and should finish within 30–60s (REST checks are fast). New auditors should use the next available 10s slot.
+**The 300s ceiling is firm** — the Trust Enforcer fires at minute >= 10 (600s). All auditors must complete well before that. A stagger of 295s means the auditor starts at ~4:55 into the window and should finish within 30–60s (REST checks are fast). New auditors should use the next available 5s slot (300 is the hard ceiling).
 
 ## 35. Auditor Registration — 5 Locations Must Stay in Sync (Updated)
 
@@ -760,7 +761,7 @@ if (resp.status === 401) {
 
 If a user's session is truly expired, the WebSocket connection itself will reject the login — that's the authoritative check, not a REST API probe.
 
-## 69. Auditor Stagger Assignments (Updated Feb 2026)
+## 69. Auditor Stagger Assignments (Updated Mar 2026)
 
 | Stagger | Auditor |
 |---|---|
@@ -787,3 +788,4 @@ If a user's session is truly expired, the WebSocket connection itself will rejec
 | 270 | Wisdom Pipeline |
 | 280 | Settings Tab |
 | 290 | Coach Hierarchy |
+| 295 | Voice Infrastructure |

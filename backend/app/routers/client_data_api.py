@@ -445,6 +445,83 @@ async def get_coach_info(
     }
 
 
+@router.post("/ai-consent")
+async def store_ai_consent(request: Request, user=Depends(_require_auth)):
+    """Store AI data processing consent timestamp in the user's profile."""
+    body = await request.json()
+    consent_ts = body.get("ai_consent_granted_at")
+    if not consent_ts:
+        raise HTTPException(400, "ai_consent_granted_at required")
+
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        return {"status": "stored_locally_only"}
+
+    username = user.get("username", "") if isinstance(user, dict) else str(user)
+    if not username:
+        raise HTTPException(400, "Could not resolve username")
+
+    try:
+        await db_pool.execute(
+            """
+            UPDATE users SET profile_data = jsonb_set(
+                COALESCE(profile_data, '{}'::jsonb),
+                '{ai_consent_granted_at}',
+                to_jsonb($1::text)
+            )
+            WHERE username = $2
+            """,
+            consent_ts, username,
+        )
+    except Exception as e:
+        logger.warning("ai-consent write failed for %s: %s", username, e)
+        raise HTTPException(500, "Failed to store consent")
+
+    return {"status": "ok", "ai_consent_granted_at": consent_ts}
+
+
+@router.get("/health-check")
+async def client_health_check(request: Request, user=Depends(_require_auth)):
+    """Enhanced health check that includes ai_consent_granted_at for consent gate."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    username = user.get("username", "") if isinstance(user, dict) else str(user)
+
+    result = {
+        "vault_ready": True,
+        "memory_ready": True,
+        "needs_backfill": False,
+        "server_entry_count": 0,
+        "last_server_entry_at": None,
+        "ai_consent_granted_at": None,
+    }
+
+    if db_pool and username:
+        try:
+            row = await db_pool.fetchrow(
+                "SELECT profile_data->>'ai_consent_granted_at' as consent FROM users WHERE username = $1",
+                username,
+            )
+            if row and row["consent"]:
+                result["ai_consent_granted_at"] = row["consent"]
+        except Exception as e:
+            logger.warning("health-check consent lookup failed: %s", e)
+
+        try:
+            ch_row = await db_pool.fetchrow(
+                "SELECT COUNT(*) as cnt, MAX(created_at) as last_at "
+                "FROM conversation_history WHERE user_id = $1",
+                username,
+            )
+            if ch_row:
+                result["server_entry_count"] = ch_row["cnt"] or 0
+                if ch_row["last_at"]:
+                    result["last_server_entry_at"] = ch_row["last_at"].isoformat()
+        except Exception as e:
+            logger.warning("health-check conversation count failed: %s", e)
+
+    return result
+
+
 def _load_registry() -> dict:
     """Load user registry from JSON backup. Matches bridge load_registry()."""
     paths = [

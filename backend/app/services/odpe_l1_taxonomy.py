@@ -15,6 +15,7 @@ The L1 taxonomy operates as a lookup table, not an AI model. Each L1 face has:
 Patent-Pending — Claims 64-79
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -201,6 +202,32 @@ class ODPEL1Taxonomy:
 
     def get_l0_keys(self) -> List[str]:
         return list(self._taxonomy.keys())
+
+    async def seed_to_db(self, db_pool) -> int:
+        """Seed the L1 taxonomy to PostgreSQL. Idempotent via ON CONFLICT."""
+        if not db_pool:
+            return 0
+        inserted = 0
+        async with db_pool.acquire() as conn:
+            for l0_key, faces in self._taxonomy.items():
+                for face in faces:
+                    try:
+                        await conn.execute(
+                            """INSERT INTO odpe_l1_taxonomy
+                                (l0_face_key, l1_index, l1_label, keywords, clinical_weight)
+                               VALUES ($1, $2, $3, $4::jsonb, $5)
+                               ON CONFLICT (l0_face_key, l1_index) DO NOTHING""",
+                            face["l0_face_key"],
+                            face["l1_index"],
+                            face["l1_label"],
+                            json.dumps(face["keywords"]),
+                            face["clinical_weight"],
+                        )
+                        inserted += 1
+                    except Exception:
+                        pass
+        logger.info("ODPE L1 taxonomy: seeded %d faces to PostgreSQL", inserted)
+        return inserted
 
     def health(self) -> Dict[str, Any]:
         return {

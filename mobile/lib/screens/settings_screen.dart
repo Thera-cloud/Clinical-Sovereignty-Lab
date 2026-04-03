@@ -709,14 +709,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
             onPressed: () {
               Navigator.pop(ctx);
-              if (isUpgrade) {
-                if (isNativeIOS) {
+              if (isNativeIOS) {
+                if (isUpgrade) {
                   _processUpgradeViaIAP(planKey);
                 } else {
-                  _processUpgradePayment(planKey, newName);
-                }
-              } else {
-                if (isNativeIOS) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('To downgrade, go to Settings > Apple ID > Subscriptions on your device.'),
@@ -724,21 +720,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                       duration: Duration(seconds: 5),
                     ),
                   );
-                } else {
-                  _sendWs({
-                    'type': 'change_subscription',
-                    'plan': planKey,
-                  });
-                  setState(() {
-                    _profile['subscription_plan'] = planKey;
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Plan change scheduled — $currentName access continues this cycle'),
-                      backgroundColor: const Color(0xFF1A1A1A),
-                    ),
-                  );
                 }
+              } else {
+                _openStripeCheckoutForPlanChange(planKey, newName, isUpgrade);
               }
             },
             child: Text(
@@ -751,47 +735,50 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
-  Future<void> _processUpgradePayment(String planKey, String planName) async {
+  Future<void> _openStripeCheckoutForPlanChange(String planKey, String planName, bool isUpgrade) async {
     final token = _profile['token'] ?? '';
     final username = _profile['username'] ?? '';
-    final hwId = _profile['hardware_id'] ?? '';
     if (username.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not found. Please re-login.'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('User not found. Please re-login.'), backgroundColor: Colors.red),
+        );
+      }
       return;
     }
 
-    final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/api/?$'), '').replaceAll(RegExp(r'/+$'), '');
-
     try {
       final resp = await http.post(
-        Uri.parse('$base/api/billing/subscription/upgrade'),
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/checkout'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'user_id': hwId.isNotEmpty ? hwId : username,
-          'new_plan': planKey,
-          'proration': true,
+          'tier': planKey,
+          'success_url': 'https://app.sovereignsanctuary.net/payment-success',
+          'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
         }),
       ).timeout(const Duration(seconds: 15));
 
       if (!mounted) return;
 
       if (resp.statusCode == 200) {
-        setState(() {
-          _profile['subscription_plan'] = planKey;
-          _profile['tier'] = planKey == 'TOP_TIER' ? 'TOP_TIER' : 'STANDARD';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upgraded to $planName!'), backgroundColor: const Color(0xFF22C55E)),
-        );
+        final data = jsonDecode(resp.body);
+        final url = data['checkout_url'];
+        if (url != null) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Complete your ${isUpgrade ? "upgrade" : "plan change"} in the browser'),
+              backgroundColor: const Color(0xFF1A1A1A),
+            ),
+          );
+        }
       } else {
         final body = jsonDecode(resp.body);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upgrade failed: ${body['detail'] ?? resp.statusCode}'), backgroundColor: Colors.red),
+          SnackBar(content: Text('${body['detail'] ?? 'Could not start checkout'}'), backgroundColor: Colors.red),
         );
       }
     } catch (e) {

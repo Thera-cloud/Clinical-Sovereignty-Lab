@@ -1102,6 +1102,52 @@ class CoachingMeshEngine:
             if session.get("dojo_context") == "coach_nate" and session.get("session_type"):
                 await self._update_coach_nate_progress(conn, session, participants)
 
+            # QUANTUM-CRYSTAL-ARCH: crystallize group coaching session insights
+            try:
+                messages = await conn.fetch(
+                    """SELECT sender_id, content, message_type
+                       FROM coaching_mesh_messages
+                       WHERE session_id = $1 AND content IS NOT NULL
+                       ORDER BY created_at""",
+                    session_id,
+                )
+                if messages and len(messages) >= 3:
+                    session_text = " | ".join(
+                        f"[{m['message_type']}] {m['content'][:200]}"
+                        for m in messages if m["content"]
+                    )[:2000]
+                    crystal_text = (
+                        f"GROUP COACHING SESSION — {session.get('title', 'Untitled')}: "
+                        f"{len(messages)} exchanges across {len(participants)} participants. "
+                        f"Key content: {session_text}"
+                    )
+                    import hashlib
+                    content_hash = hashlib.sha256(crystal_text.encode()).hexdigest()
+                    await conn.execute(
+                        """INSERT INTO nate_intelligence_crystals
+                           (crystal_text, domain, scope, topics, source_count,
+                            generation, confidence, content_hash, origin_surface)
+                         VALUES ($1, 'coaching', 'global', '{}', $2, 0, 0.55, $3,
+                                 'coaching_mesh')
+                         ON CONFLICT (content_hash) DO NOTHING""",
+                        crystal_text, len(messages), content_hash,
+                    )
+                    try:
+                        from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                        if is_vectorize_configured():
+                            await index_wisdom(
+                                user_id="nate_crystal",
+                                wisdom_id=f"crystal_{content_hash[:16]}",
+                                insight_type="coaching_mesh_session",
+                                content=crystal_text,
+                                source="coaching_mesh",
+                                domain="coaching",
+                            )
+                    except Exception:
+                        pass
+            except Exception as _cm_err:
+                logger.debug("Mesh session crystallize non-fatal: %s", _cm_err)
+
         return {
             "session_id": session_id,
             "ended": True,

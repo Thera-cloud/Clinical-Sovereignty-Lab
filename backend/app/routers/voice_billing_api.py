@@ -44,7 +44,7 @@ def _twiml_connect(params: Dict[str, str]) -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<Response>\n"
-        '    <Say voice="Polly.Matthew">Hello, Little Nate is on the call now. Go ahead and start sharing.</Say>\n'
+        '    <Say voice="Polly.Matthew">Hello, I\'m connecting you to Little Nate now. You can start sharing and he will catch up and respond.</Say>\n'  # SOVEREIGN-VOICE
         "    <Connect>\n"
         f'        <Stream url="{TWILIO_MEDIA_STREAM_URL}">\n'
         f"{param_xml}\n"

@@ -31,6 +31,7 @@ Patent-Pending — Claims 64-71
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -207,6 +208,15 @@ class ODPEResult:
     evaluation_time_ms: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
+        # QUANTUM-CRYSTAL-ARCH: include L1/L2 scores for face path persistence
+        l1_top = {}
+        if self.l1_scores:
+            sorted_l1 = sorted(self.l1_scores.items(), key=lambda x: x[1], reverse=True)
+            l1_top = {k: round(v, 4) for k, v in sorted_l1[:10]}
+        l2_top = {}
+        if self.l2_scores:
+            sorted_l2 = sorted(self.l2_scores.items(), key=lambda x: x[1], reverse=True)
+            l2_top = {k: round(v, 4) for k, v in sorted_l2[:10]}
         return {
             "per_helix_signals": self.per_helix_signals,
             "per_helix_amplitudes": self.per_helix_amplitudes,
@@ -223,6 +233,8 @@ class ODPEResult:
             "hierarchical_depth": self.hierarchical_depth,
             "oscillation_profile": self.oscillation_profile,
             "evaluation_time_ms": round(self.evaluation_time_ms, 3),
+            "l1_top_paths": l1_top,
+            "l2_top_paths": l2_top,
         }
 
 
@@ -1004,6 +1016,12 @@ class ODPEEngine:
         result.evaluation_time_ms = (time.monotonic() - start) * 1000
         self._last_result = result
 
+        # QUANTUM-CRYSTAL-ARCH: persist L0 face activation counts
+        if self._db_pool:
+            asyncio.ensure_future(self._persist_face_activations(
+                dodec_scores, icosi_scores, result.l1_scores,
+            ))
+
         logger.info(
             ">>> [ODPE] Cycle #%d — dominant=%s, context=%d, tier=%s, "
             "bias=%.3f, locked=%d, tension=%d, noise=%.2f, depth=L%d, "
@@ -1038,6 +1056,60 @@ class ODPEEngine:
             "last_face_path": last.face_path if last else None,
             "last_hierarchical_depth": last.hierarchical_depth if last else 0,
         }
+
+    async def _persist_face_activations(
+        self,
+        dodec_scores: List[float],
+        icosi_scores: Dict[str, float],
+        l1_scores: Dict[str, float],
+    ) -> None:
+        """QUANTUM-CRYSTAL-ARCH: persist L0 face activation counts to
+        odpe_face_activations so dashboards can render per-face heatmaps."""
+        if not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                for idx, score in enumerate(dodec_scores):
+                    if score > 0.01:
+                        await conn.execute(
+                            """INSERT INTO odpe_face_activations
+                                (topology, face_index, activation_count, cumulative_score, last_score, last_activated)
+                               VALUES ('dodec', $1, 1, $2, $2, NOW())
+                               ON CONFLICT (topology, face_index) DO UPDATE SET
+                                   activation_count = odpe_face_activations.activation_count + 1,
+                                   cumulative_score = odpe_face_activations.cumulative_score + $2,
+                                   last_score = $2,
+                                   last_activated = NOW()""",
+                            str(idx), round(float(score), 4),
+                        )
+                for face_key, score in icosi_scores.items():
+                    if score > 0.01:
+                        await conn.execute(
+                            """INSERT INTO odpe_face_activations
+                                (topology, face_index, activation_count, cumulative_score, last_score, last_activated)
+                               VALUES ('icosi', $1, 1, $2, $2, NOW())
+                               ON CONFLICT (topology, face_index) DO UPDATE SET
+                                   activation_count = odpe_face_activations.activation_count + 1,
+                                   cumulative_score = odpe_face_activations.cumulative_score + $2,
+                                   last_score = $2,
+                                   last_activated = NOW()""",
+                            str(face_key), round(float(score), 4),
+                        )
+                for path, score in (l1_scores or {}).items():
+                    if score > 0.05:
+                        await conn.execute(
+                            """INSERT INTO odpe_face_activations
+                                (topology, face_index, activation_count, cumulative_score, last_score, last_activated)
+                               VALUES ('l1', $1, 1, $2, $2, NOW())
+                               ON CONFLICT (topology, face_index) DO UPDATE SET
+                                   activation_count = odpe_face_activations.activation_count + 1,
+                                   cumulative_score = odpe_face_activations.cumulative_score + $2,
+                                   last_score = $2,
+                                   last_activated = NOW()""",
+                            str(path)[:64], round(float(score), 4),
+                        )
+        except Exception as e:
+            logger.debug("ODPE face activation persist (non-fatal): %s", e)
 
     async def boost_from_cycle(self, cycle_detection: Dict[str, Any]) -> Optional[str]:
         """

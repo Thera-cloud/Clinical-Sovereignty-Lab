@@ -43,7 +43,12 @@ _GROK_MODEL = os.getenv("NATE_CHAT_MODEL", "grok-4-1-fast-non-reasoning")
 
 _WORKERS_AI_URL = os.getenv("WORKERS_AI_URL", "")
 _WORKERS_AI_TOKEN = os.getenv("WORKERS_AI_TOKEN", "")
-_WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.1-8b-instruct")
+_WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+
+# Azure OpenAI (fast fallback when Workers AI is down and Grok is slow)
+_AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+_AZURE_KEY = os.getenv("AZURE_API_KEY", "")
+_AZURE_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4.1")
 
 _inference_banner_printed = False
 
@@ -78,6 +83,7 @@ def _reload_inference_env():
     """Always sync globals from os.environ (fixes Docker/import-order races; pick up new .env)."""
     global _SOVEREIGN_URL, _GROK_URL, _GROK_KEY, _GROK_MODEL
     global _WORKERS_AI_URL, _WORKERS_AI_TOKEN, _WORKERS_AI_MODEL
+    global _AZURE_ENDPOINT, _AZURE_KEY, _AZURE_CHAT_DEPLOYMENT
 
     _SOVEREIGN_URL = _strip_env(os.getenv("SOVEREIGN_INFERENCE_URL", ""))
     _GROK_URL = _strip_env(os.getenv("NATE_CHAT_URL", ""))
@@ -85,12 +91,17 @@ def _reload_inference_env():
     _GROK_MODEL = _strip_env(os.getenv("NATE_CHAT_MODEL", "")) or "grok-4-1-fast-non-reasoning"
     _WORKERS_AI_URL = _strip_env(os.getenv("WORKERS_AI_URL", ""))
     _WORKERS_AI_TOKEN = _strip_env(os.getenv("WORKERS_AI_TOKEN", ""))
-    _WORKERS_AI_MODEL = _strip_env(os.getenv("WORKERS_AI_MODEL", "")) or "@cf/meta/llama-3.1-8b-instruct"
+    _WORKERS_AI_MODEL = _strip_env(os.getenv("WORKERS_AI_MODEL", "")) or "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    _AZURE_ENDPOINT = _strip_env(os.getenv("AZURE_OPENAI_ENDPOINT", ""))
+    _AZURE_KEY = _strip_env(os.getenv("AZURE_API_KEY", ""))
+    _AZURE_CHAT_DEPLOYMENT = _strip_env(os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "")) or "gpt-4.1"
 
     if _is_placeholder_secret(_GROK_KEY):
         _GROK_KEY = ""
     if _is_placeholder_secret(_WORKERS_AI_TOKEN):
         _WORKERS_AI_TOKEN = ""
+    if _is_placeholder_secret(_AZURE_KEY):
+        _AZURE_KEY = ""
 
 
 def inference_configuration_gaps() -> List[str]:
@@ -100,6 +111,7 @@ def inference_configuration_gaps() -> List[str]:
     grok_ok = bool(_GROK_URL and _GROK_KEY)
     workers_ok = bool(_WORKERS_AI_URL and _WORKERS_AI_TOKEN)
     ollama_ok = bool(_SOVEREIGN_URL)
+    azure_ok = bool(_AZURE_ENDPOINT and _AZURE_KEY)
 
     if not grok_ok:
         if not _GROK_URL:
@@ -123,7 +135,7 @@ def inference_configuration_gaps() -> List[str]:
             "or http://host.docker.internal:11434 from Docker Desktop."
         )
 
-    if grok_ok or workers_ok or ollama_ok:
+    if grok_ok or workers_ok or ollama_ok or azure_ok:
         return []
     return gaps
 
@@ -162,6 +174,7 @@ def inference_providers_configured() -> bool:
         (_GROK_URL and _GROK_KEY)
         or (_WORKERS_AI_URL and _WORKERS_AI_TOKEN)
         or _SOVEREIGN_URL
+        or (_AZURE_ENDPOINT and _AZURE_KEY)
     )
 
 
@@ -177,6 +190,8 @@ def _ensure_config():
         configured.append("Workers AI")
     if _SOVEREIGN_URL:
         configured.append("Sovereign")
+    if _AZURE_ENDPOINT and _AZURE_KEY:
+        configured.append("Azure")
 
     if not _inference_banner_printed:
         _inference_banner_printed = True
@@ -246,6 +261,7 @@ def get_routing_stats() -> Dict:
         "grok_configured": bool(_GROK_URL and _GROK_KEY),
         "workers_ai_configured": bool(_WORKERS_AI_URL and _WORKERS_AI_TOKEN),
         "sovereign_configured": bool(_SOVEREIGN_URL),
+        "azure_configured": bool(_AZURE_ENDPOINT and _AZURE_KEY),
         "any_provider_configured": inference_providers_configured(),
     }
 
@@ -256,13 +272,15 @@ def log_inference_config() -> None:
     grok = bool(_GROK_URL and _GROK_KEY)
     workers = bool(_WORKERS_AI_URL and _WORKERS_AI_TOKEN)
     sovereign = bool(_SOVEREIGN_URL)
+    azure = bool(_AZURE_ENDPOINT and _AZURE_KEY)
     lines = [
         "[INFERENCE] Providers:",
         f"  Grok (NATE_CHAT_*): {'✓' if grok else '✗'}",
         f"  Workers AI:         {'✓' if workers else '✗'}",
         f"  Sovereign Ollama:   {'✓' if sovereign else '✗'}",
+        f"  Azure OpenAI:       {'✓' if azure else '✗'}",
     ]
-    if not (grok or workers or sovereign):
+    if not (grok or workers or sovereign or azure):
         lines.append("[INFERENCE] ⚠️ No provider configured — see full checklist in logs (inference setup help).")
         logger.warning("%s", format_inference_setup_help())
     for line in lines:
@@ -284,42 +302,46 @@ def _first_configured_provider(*preference: str) -> str:
             return p
         if p == "workers_ai" and _WORKERS_AI_URL and _WORKERS_AI_TOKEN:
             return p
+        if p == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
+            return p
     return preference[0] if preference else "grok"
 
 
 def _resolve_provider_for_signal(odpe_signal: Optional[str] = None, domain: str = "general") -> str:
     """ODPE-aware routing decision for interactive therapy/coding chat.
 
-    LOCKED/PROMOTED/PROVISIONAL/None → workers_ai (free) → grok
-    TENSION/DEEP_TENSION (clinical)  → grok (clinical depth via Foundry) → workers_ai
-    TENSION/DEEP_TENSION (coding)    → sovereign 14B (zero cost) → grok → workers_ai
+    LOCKED/PROMOTED/PROVISIONAL/None → workers_ai (free) → grok → sovereign → azure
+    TENSION/DEEP_TENSION (clinical)  → grok (clinical depth) → workers_ai → sovereign → azure
+    TENSION/DEEP_TENSION (coding)    → sovereign 14B (zero cost) → grok → workers_ai → azure
     NOISE → skip (handled before this is called)
 
-    Skips providers that are not configured so the primary is always viable when any provider exists.
+    Azure is emergency-only fallback. Zero-cost providers first.
     """
     if domain == "coding" and odpe_signal in ("TENSION", "DEEP_TENSION"):
-        return _first_configured_provider("sovereign", "grok", "workers_ai")
+        return _first_configured_provider("sovereign", "grok", "workers_ai", "azure")
 
     if odpe_signal in ("LOCKED", "PROMOTED", None, "PROVISIONAL"):
-        return _first_configured_provider("workers_ai", "grok", "sovereign")
+        return _first_configured_provider("workers_ai", "grok", "sovereign", "azure")
 
     if odpe_signal in ("TENSION", "DEEP_TENSION", "LIMINAL_RESOLVE"):
-        return _first_configured_provider("grok", "workers_ai", "sovereign")
+        return _first_configured_provider("grok", "workers_ai", "sovereign", "azure")
 
-    return _first_configured_provider("workers_ai", "grok", "sovereign")
+    return _first_configured_provider("workers_ai", "grok", "sovereign", "azure")
 
 
 _FALLBACK_CHAIN = {
-    "workers_ai": ["grok", "sovereign"],
-    "grok": ["workers_ai", "sovereign"],
-    "sovereign": ["workers_ai", "grok"],
+    "workers_ai": ["grok", "sovereign", "azure"],
+    "grok": ["workers_ai", "sovereign", "azure"],
+    "sovereign": ["workers_ai", "grok", "azure"],
+    "azure": ["grok", "workers_ai", "sovereign"],
 }
 
 # TTFT ceilings (seconds) — reroute to next provider if first token exceeds this
 _TTFT_CEILING = {
-    "sovereign": 5.0,
-    "grok": 8.0,
-    "workers_ai": 3.0,
+    "sovereign": 30.0,
+    "grok": 15.0,
+    "workers_ai": 8.0,
+    "azure": 10.0,
 }
 
 
@@ -426,6 +448,8 @@ async def _try_stream(provider: str, messages: List[Dict],
     """Attempt to stream from a single provider. Returns None on failure."""
     if provider == "workers_ai" and _WORKERS_AI_URL and _WORKERS_AI_TOKEN:
         return _stream_workers_ai(messages, temperature, max_tokens)
+    if provider == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
+        return _stream_azure(messages, temperature, max_tokens)
     if provider == "grok" and _GROK_URL and _GROK_KEY:
         return _stream_grok(messages, temperature, max_tokens)
     if provider == "sovereign" and _SOVEREIGN_URL:
@@ -445,6 +469,7 @@ async def generate_streaming(
     temperature: float = 0.7,
     max_tokens: int = 1500,
     domain: str = "general",
+    image_data_url: Optional[str] = None,
 ) -> AsyncIterator[Tuple[str, str]]:
     """
     Stream tokens from the ODPE-selected provider with automatic fallback.
@@ -470,6 +495,12 @@ async def generate_streaming(
 
     from app.websocket.cli_prompt_budget import trim_prompt_to_ceiling
 
+    # SOVEREIGN-VOICE: if image present, prefer vision-capable providers
+    if image_data_url:
+        _vision_providers = [p for p in providers_to_try if p in ("azure", "grok")]
+        if _vision_providers:
+            providers_to_try = _vision_providers + [p for p in providers_to_try if p not in _vision_providers]
+
     for provider in providers_to_try:
         if provider in seen:
             continue
@@ -479,10 +510,19 @@ async def generate_streaming(
             _sp, _um = trim_prompt_to_ceiling(
                 system_prompt, user_message, provider, max_tokens
             )
-            messages = [
-                {"role": "system", "content": _sp},
-                {"role": "user", "content": _um},
-            ]
+            if image_data_url and provider in ("azure", "grok"):
+                messages = [
+                    {"role": "system", "content": _sp},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": _um},
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ]},
+                ]
+            else:
+                messages = [
+                    {"role": "system", "content": _sp},
+                    {"role": "user", "content": _um},
+                ]
             _chars_in = len(_sp) + len(_um)
 
             if provider == "sovereign":
@@ -527,6 +567,22 @@ async def generate_streaming(
                     continue
                 _sovereign_stats["total_workers_ai"] += 1
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
+                return
+
+            elif provider == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
+                logger.info("ODPE→Azure OpenAI (odpe=%s, deployment=%s)", odpe_signal, _AZURE_CHAT_DEPLOYMENT)
+                _provider_chars = 0
+                async for delta in _with_ttft_ceiling(
+                    _stream_azure(messages, temperature, max_tokens), "azure"
+                ):
+                    _provider_chars += len(delta)
+                    _chars_out += len(delta)
+                    yield (delta, "azure")
+                if _provider_chars == 0:
+                    logger.warning("Azure OpenAI returned 0 chunks — falling back to next provider")
+                    continue
+                _sovereign_stats["total_azure_fallback"] += 1
+                asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=_chars_out, duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return
 
             elif provider == "grok" and _GROK_URL and _GROK_KEY:
@@ -625,6 +681,12 @@ async def generate_complete(
                 _sovereign_stats["total_workers_ai"] += 1
                 asyncio.ensure_future(_track(provider="workers_ai", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
                 return (text, "workers_ai")
+
+            elif provider == "azure" and _AZURE_ENDPOINT and _AZURE_KEY:
+                text = await _complete_azure(messages, temperature, max_tokens)
+                _sovereign_stats["total_azure_fallback"] += 1
+                asyncio.ensure_future(_track(provider="azure", chars_in=_chars_in, chars_out=len(text), duration_ms=int((time.monotonic() - _t0) * 1000), domain=domain, odpe_signal=odpe_signal or "PROVISIONAL"))
+                return (text, "azure")
 
             elif provider == "grok" and _GROK_URL and _GROK_KEY:
                 for attempt in range(2):
@@ -883,6 +945,102 @@ async def _complete_grok(
         return text
 
 
+# --- Azure OpenAI (fast fallback — uses existing Azure resource) ---
+
+_azure_session: Optional[aiohttp.ClientSession] = None
+
+
+def _get_azure_session() -> aiohttp.ClientSession:
+    global _azure_session
+    if _azure_session is None or _azure_session.closed:
+        timeout = aiohttp.ClientTimeout(total=30, sock_read=25)
+        connector = aiohttp.TCPConnector(limit=20, keepalive_timeout=120)
+        _azure_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
+    return _azure_session
+
+
+def _azure_chat_url() -> str:
+    endpoint = _AZURE_ENDPOINT.rstrip("/")
+    if not endpoint.startswith("https://"):
+        endpoint = f"https://{endpoint}"
+    return f"{endpoint}/openai/deployments/{_AZURE_CHAT_DEPLOYMENT}/chat/completions?api-version=2024-06-01"
+
+
+async def _stream_azure(
+    messages: List[Dict], temperature: float, max_tokens: int
+) -> AsyncIterator[str]:
+    """Stream from Azure OpenAI Chat Completions — fast fallback."""
+    url = _azure_chat_url()
+    headers = {
+        "api-key": _AZURE_KEY,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    t0 = time.time()
+    session = _get_azure_session()
+    async with session.post(url, json=payload, headers=headers) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Azure OpenAI {resp.status}: {body[:300]}")
+        first_token_time = None
+        token_count = 0
+        async for line in resp.content:
+            decoded = line.decode("utf-8", errors="ignore").strip()
+            if not decoded.startswith("data: "):
+                continue
+            data_str = decoded[6:]
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {}).get("content") or ""
+                if delta:
+                    if first_token_time is None:
+                        first_token_time = time.time()
+                        print(f">>> [AZURE] First token in {first_token_time - t0:.1f}s")
+                    token_count += 1
+                    yield delta
+            except (json.JSONDecodeError, IndexError, KeyError):
+                continue
+        elapsed = time.time() - t0
+        print(f">>> [AZURE] Stream complete: {token_count} chunks in {elapsed:.1f}s (deployment={_AZURE_CHAT_DEPLOYMENT})")
+
+
+async def _complete_azure(
+    messages: List[Dict], temperature: float, max_tokens: int
+) -> str:
+    """Non-streaming Azure OpenAI for fallback."""
+    url = _azure_chat_url()
+    headers = {
+        "api-key": _AZURE_KEY,
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    t0 = time.time()
+    session = _get_azure_session()
+    async with session.post(url, json=payload, headers=headers) as resp:
+        if resp.status != 200:
+            body = await resp.text()
+            raise RuntimeError(f"Azure OpenAI {resp.status}: {body[:300]}")
+        data = await resp.json()
+        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        print(f">>> [AZURE] Complete done in {time.time() - t0:.1f}s ({len(text)} chars)")
+        return text
+
+
 # --- Workers AI (LOCKED/PROMOTED — zero cost) ---
 
 async def _stream_workers_ai(
@@ -927,6 +1085,8 @@ async def _stream_workers_ai(
             try:
                 chunk = json.loads(data_str)
                 delta = chunk.get("response", "")
+                if not isinstance(delta, str):
+                    delta = ""
                 if not delta and "choices" in chunk:
                     delta = chunk["choices"][0].get("delta", {}).get("content", "")
                 if delta:

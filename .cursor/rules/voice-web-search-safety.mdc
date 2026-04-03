@@ -1,0 +1,108 @@
+---
+description: Voice-initiated web search safety, null handling, and query reconstruction
+alwaysApply: true
+---
+
+# Voice Web Search Pipeline
+
+## Pipeline Flow
+
+```
+Caller asks question → _is_web_search_query() detects intent
+  OR → SearchContinuationTracker detects follow-up language
+→ Thinking cue injected ("Hmm, let me think about that") — NOT chatbot language
+→ _extract_web_query() reconstructs clean query (4-stage Precision Strike)
+→ Entity Graph augments with pre-identified entities
+→ _background_search_and_inject() fires as asyncio.create_task
+→ SecureSearchProxy.execute_search() → DuckDuckGo (primary) / Bing (fallback)
+→ If 0 results → phonetic variant retry → crystal fuzzy match retry
+→ Results sanitized, injection-scanned, formatted
+→ Injected into Grok via conversation.item.create
+→ 300ms pause (Gap 3/5: let Grok process context)
+→ THEN response.create fires
+→ Successful results crystallized + recorded in SearchContinuationTracker
+```
+
+## Six Gap Fixes (Mar 2026)
+
+| Gap | Problem | Fix |
+|---|---|---|
+| 1 | 10s hard cooldown blocks voice follow-ups (2-4s apart) | Burst allowance: 3 searches in 15s window, then 10s hard cooldown |
+| 2 | STT mangles proper nouns → DuckDuckGo returns 0 results | Crystal-history fuzzy match: Levenshtein distance ≤ 3 against known names |
+| 3/5 | Grok responds before search results are committed to context | Sequenced injection: item.create → 300ms pause → response.create |
+| 4 | "Let me search" is chatbot language, breaks therapeutic immersion | Thinking cue: "Hmm, let me think about that" — never mentions searching |
+| 6 | "Tell me more" doesn't trigger search (no explicit search keywords) | SearchContinuationTracker: 2-min window, re-queries with prior search terms |
+
+## SearchContinuationTracker (Gap 6)
+
+When a search runs and returns results, the tracker records the clean query and username. For the next 2 minutes, if the user says continuation language ("tell me more," "what else," "dig deeper," "continue"), the tracker returns the prior search terms plus any new keywords from the current utterance.
+
+Continuation patterns bypass the `WebSearchTrigger` entirely — they don't need explicit search keywords because the prior context establishes search intent.
+
+## WebSearchTrigger Exclusion Fix
+
+The `_EXCLUSION_PATTERNS` no longer block searches when explicit search intent is present. Previously, "search up what we talked about" was blocked by the "we talked about" exclusion (a memory-seeking phrase). Now: if explicit search keywords (`search`, `look up`, `google`, etc.) are detected, exclusions are bypassed.
+
+## Precision Strike — 4-Stage Query Reconstruction
+
+Voice STT produces noisy transcripts. The query must be cleaned before searching:
+
+| Stage | What It Does | Example |
+|---|---|---|
+| Stage 0: Dictated URL Conversion | "wjr.com forward slash school-talks" → "site:wjr.com school talks" | Handles spoken punctuation |
+| Stage 1: Spelling Assembler | Collapses spelled-out letters: "B-I-G-L-I-N-O" → "Biglino" | Handles dash-separated and space-separated letter runs |
+| Stage 2: Negative Constraint Filter | Removes corrections: "not Mario Bellagio, but..." → removed | Handles "not X but", "I don't mean X", "or maybe X" |
+| Stage 3: Contextual Token Extraction | Keeps significant nouns, prioritizes proper nouns, caps at 10 tokens | "Mauro Biglino Vatican Old Testament scribe" |
+
+Stage 3 now prioritizes proper nouns (capitalized words) over common words. Up to 5 proper nouns are always kept, then common words fill remaining slots (up to 10 total). This prevents "Dr Robert Livernois school talks" from losing "Livernois" or "talks" to the 7-word cap.
+
+## Rate Limiter Burst Allowance (Gap 1)
+
+The `RateLimiter` in `search_proxy.py` uses a burst window instead of a hard per-query cooldown:
+
+- **Burst window**: 3 searches allowed within 15 seconds
+- **Hard cooldown**: 10 seconds AFTER the burst window expires
+- **Session limit**: 10 searches per session (unchanged)
+- **Hourly limit**: 20 searches per hour (unchanged)
+
+This allows rapid follow-up queries ("Tell me more" → "Who else?" → "When was that?") without being rate-limited, while still preventing abuse.
+
+## Crystal Fuzzy Match (Gap 2)
+
+When both primary search and phonetic variants return 0 results, the pipeline checks the user's crystal history for known proper nouns and runs Levenshtein distance matching:
+
+1. Recall 20 crystals for the user via `_crystal_recall`
+2. Extract all capitalized words (≥ 4 chars) from crystal text as known names
+3. For each proper noun in the search query, find the closest crystal name within edit distance ≤ 3
+4. If a match is found, substitute the corrected spelling and retry the search
+
+Example: STT produces "Liver Noy" → crystal history contains "Livernois" → edit distance 3 → auto-correct → search succeeds.
+
+## Null Safety (Critical — Mar 2026 Fix)
+
+DuckDuckGo can return results with `None` values for title or body fields. `SearchSanitizer.strip_html()` must guard against `None` input:
+
+```python
+@staticmethod
+def strip_html(text: str) -> str:
+    if not text:
+        return ""
+    # ... regex operations ...
+```
+
+Without this guard, `re.sub(pattern, replacement, None)` throws `TypeError: expected string or bytes-like object, got 'NoneType'`.
+
+## Rules
+
+1. **Memory search takes priority over web search.** If `_is_memory_query()` returns true, web search is skipped entirely.
+2. **Continuation searches bypass the trigger.** If a search ran in the last 2 minutes and the user uses continuation language, re-search with prior terms.
+3. **Never fire response.create before search results are injected.** The thinking cue gets its own response.create, but the search results injection uses item.create → 300ms pause → response.create.
+4. **Thinking cues must be therapeutically natural.** "Hmm, let me think about that" — never "Let me search" or "Looking it up."
+5. **Web search results limited to 3.** More than 3 produces verbose summaries unsuitable for voice.
+6. **8-second timeout.** If search exceeds timeout, Grok answers naturally without results.
+7. **Never inject raw URLs into the Grok prompt.** The injection template instructs Grok to reference topics, not domains.
+8. **Entity Graph augments searches.** Pre-identified entities from the conversation are appended to the search query when the query is too short.
+9. **All sanitizer methods must handle `None` input.** Any method that receives data from external search APIs must guard against `None` values before passing to regex or string operations.
+10. **Exclusions don't block explicit search intent.** If the user says "search up what we talked about," the explicit search keyword overrides the memory-seeking exclusion pattern.
+11. **Burst rate limiter replaces hard cooldown.** 3 searches in 15s, then 10s cooldown. Never revert to a per-query hard cooldown.
+12. **Crystal fuzzy match is the last resort.** Only fires after primary search AND phonetic variants both return 0 results. Edit distance threshold is 3.

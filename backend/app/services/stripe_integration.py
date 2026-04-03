@@ -451,6 +451,19 @@ class StripeService:
                 pass
         return self._sovereign_proxy
 
+    async def _resolve_user_id(self, user_id: str) -> str:
+        """Resolve hardware_id/username to UUID for DB queries.
+
+        Auth may return a hardware_id string (e.g. 'CLIENT_FOO_ID') instead
+        of a UUID.  This method normalises to the actual users.id UUID.
+        """
+        row = await self.db.fetchrow(
+            "SELECT id::text AS uid FROM users "
+            "WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+            user_id,
+        )
+        return row["uid"] if row else user_id
+
     async def _notify_bridge_reload(self, username: str):
         """Publish Redis messages so the bridge reloads this user from PG."""
         try:
@@ -470,10 +483,13 @@ class StripeService:
         
         HIVE DEFENSE v4.3: Routes through SovereignStripeProxy for minimized PII.
         """
+        # Resolve hardware_id/username → UUID for DB queries
+        db_uid = await self._resolve_user_id(user_id)
+
         # Check if user already has a customer ID
         row = await self.db.fetchrow(
             "SELECT stripe_customer_id FROM users WHERE id = $1",
-            user_id
+            db_uid
         )
         
         if row and row['stripe_customer_id']:
@@ -487,7 +503,7 @@ class StripeService:
                 customer_id = result["customer_id"]
                 await self.db.execute(
                     "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-                    customer_id, user_id
+                    customer_id, db_uid
                 )
                 return customer_id
             # Fallback if proxy fails
@@ -503,7 +519,7 @@ class StripeService:
         # Store customer ID
         await self.db.execute(
             "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-            customer.id, user_id
+            customer.id, db_uid
         )
         
         return customer.id
@@ -528,6 +544,9 @@ class StripeService:
         if tier == SubscriptionTier.TRIAL:
             raise HTTPException(400, "Cannot checkout for trial tier")
         
+        # Resolve hardware_id/username → UUID for downstream DB queries
+        db_uid = await self._resolve_user_id(user_id)
+
         customer_id = await self.get_or_create_customer(user_id, email, name)
 
         annual_key_map = {
@@ -545,7 +564,7 @@ class StripeService:
         # Check if upgrading from existing subscription
         existing = await self.db.fetchrow(
             "SELECT stripe_subscription_id FROM subscriptions WHERE user_id = $1 AND status = 'ACTIVE'",
-            user_id
+            db_uid
         )
         
         if existing and existing['stripe_subscription_id']:
@@ -572,7 +591,7 @@ class StripeService:
                 if count < max_count:
                     # User not already a founding member
                     existing_founding = await self.db.fetchval(
-                        "SELECT is_founding_member FROM users WHERE id = $1", user_id
+                        "SELECT is_founding_member FROM users WHERE id = $1", db_uid
                     )
                     if not existing_founding:
                         founding_eligible = True
@@ -1286,13 +1305,14 @@ class StripeService:
     
     async def get_subscription_status(self, user_id: str) -> SubscriptionResponse:
         """Get user's current subscription status."""
-        
+        db_uid = await self._resolve_user_id(user_id)
+
         sub = await self.db.fetchrow(
             """
             SELECT tier, status, current_period_end, cancel_at_period_end, stripe_subscription_id
             FROM subscriptions WHERE user_id = $1 AND status IN ('ACTIVE', 'PAST_DUE')
             """,
-            user_id
+            db_uid
         )
         
         if not sub:
@@ -1314,7 +1334,7 @@ class StripeService:
             JOIN subscriptions s ON si.subscription_id = s.id
             WHERE s.user_id = $1
             """,
-            user_id
+            db_uid
         )
         
         # Calculate total
@@ -1344,10 +1364,11 @@ class StripeService:
         
         HIVE DEFENSE v4.3: Routes through SovereignStripeProxy.
         """
-        
+        db_uid = await self._resolve_user_id(user_id)
+
         sub = await self.db.fetchrow(
             "SELECT stripe_subscription_id FROM subscriptions WHERE user_id = $1 AND status = 'ACTIVE'",
-            user_id
+            db_uid
         )
         
         if not sub or not sub['stripe_subscription_id']:
@@ -1363,12 +1384,12 @@ class StripeService:
                 if at_period_end:
                     await self.db.execute(
                         "UPDATE subscriptions SET cancel_at_period_end = TRUE WHERE user_id = $1",
-                        user_id
+                        db_uid
                     )
                 else:
                     await self.db.execute(
                         "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE user_id = $1",
-                        user_id
+                        db_uid
                     )
                 return True
             _logger.warning("SovereignStripeProxy cancel failed, using direct API")
@@ -1381,13 +1402,13 @@ class StripeService:
             )
             await self.db.execute(
                 "UPDATE subscriptions SET cancel_at_period_end = TRUE WHERE user_id = $1",
-                user_id
+                db_uid
             )
         else:
             stripe.Subscription.delete(sub['stripe_subscription_id'])
             await self.db.execute(
                 "UPDATE subscriptions SET status = 'CANCELLED', cancelled_at = NOW() WHERE user_id = $1",
-                user_id
+                db_uid
             )
         
         return True
@@ -1710,6 +1731,10 @@ class StripeWebhookHandler:
                         print(f">>> [STRIPE] DOJO activation failed: {e}")
                 return
 
+            if checkout_type == 'voice_block':
+                await self._handle_voice_block(session, metadata)
+                return
+
             pack_type = metadata.get('pack_type')
             if pack_type:
                 config = PACK_CONFIGS[PackType(pack_type)]
@@ -1726,6 +1751,72 @@ class StripeWebhookHandler:
                     session['payment_intent'], expires_at
                 )
     
+    async def _handle_voice_block(self, session: Dict, metadata: Dict):  # QUANTUM-CRYSTAL-ARCH
+        """Handle voice block purchase via main webhook (consolidated from voice_billing_api)."""
+        try:
+            from app.services.voice_billing import VoiceBillingSystem
+        except ImportError:
+            print(">>> [STRIPE] voice_billing module unavailable — skipping voice block credit")
+            return
+
+        phone = metadata.get("phone", "")
+        seconds = int(metadata.get("seconds", "1200"))
+        customer_id = session.get("customer", "")
+        payment_id = session.get("payment_intent", "")
+        amount_cents = session.get("amount_total", 0)
+
+        user_id = metadata.get("user_id", "")
+        if not user_id and phone:
+            row = await self.db.fetchrow(
+                "SELECT username FROM users WHERE profile_data->>'phone' = $1 LIMIT 1",
+                phone,
+            )
+            if row:
+                user_id = row["username"]
+        if not user_id:
+            user_id = phone
+
+        if not user_id:
+            print(">>> [STRIPE] Voice block webhook: no user_id or phone in metadata")
+            return
+
+        billing = VoiceBillingSystem(self.db)
+        new_balance = await billing.credit_seconds(
+            user_id=user_id,
+            phone=phone,
+            seconds=seconds,
+            stripe_customer_id=customer_id,
+            stripe_payment_id=payment_id,
+            amount_cents=amount_cents,
+        )
+
+        print(f">>> [STRIPE] Voice block credited: user={user_id[:8]}, seconds={seconds}, balance={new_balance}")
+
+        if phone:
+            try:
+                await self.db.execute(
+                    "UPDATE voice_leads SET converted = TRUE WHERE phone = $1", phone
+                )
+            except Exception:
+                pass
+
+        try:
+            import asyncio
+            from app.services.voice_notifications import send_recharge_confirmation_sms
+            name = ""
+            if phone:
+                row = await self.db.fetchrow(
+                    "SELECT COALESCE(name, profile_data->>'name', '') AS name "
+                    "FROM users WHERE profile_data->>'phone' = $1 LIMIT 1",
+                    phone,
+                )
+                name = row["name"] if row else ""
+            asyncio.create_task(
+                send_recharge_confirmation_sms(phone, name, seconds // 60, new_balance // 60)
+            )
+        except Exception as e:
+            print(f">>> [STRIPE] Voice confirmation SMS failed: {e}")
+
     async def _handle_invoice_paid(self, invoice: Dict):
         """Handle successful invoice payment."""
         
@@ -2072,9 +2163,16 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
     
     @router.post("/checkout", response_model=CreateCheckoutResponse)
     async def create_checkout(request: CreateCheckoutRequest, user_id: str = Depends(get_current_user_id)):
-        user = await db_pool.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
+        user = await db_pool.fetchrow(
+            "SELECT profile_data->>'email' AS email, "
+            "COALESCE(name, profile_data->>'name') AS name "
+            "FROM users WHERE hardware_id = $1 OR username = $1",
+            user_id,
+        )
+        if not user:
+            raise HTTPException(404, "User not found")
         return await service.create_subscription_checkout(
-            user_id, user['email'], user['name'],
+            user_id, user['email'] or '', user['name'] or '',
             request.tier, request.success_url, request.cancel_url,
             promo_code=request.promo_code
         )
@@ -2100,9 +2198,16 @@ def create_billing_router(db_pool: asyncpg.Pool) -> APIRouter:
     
     @router.post("/coaching/purchase", response_model=CreateCheckoutResponse)
     async def purchase_coaching_pack(request: PurchaseCoachingPackRequest, user_id: str = Depends(get_current_user_id)):
-        user = await db_pool.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
+        user = await db_pool.fetchrow(
+            "SELECT profile_data->>'email' AS email, "
+            "COALESCE(name, profile_data->>'name') AS name "
+            "FROM users WHERE hardware_id = $1 OR username = $1",
+            user_id,
+        )
+        if not user:
+            raise HTTPException(404, "User not found")
         return await service.purchase_coaching_pack(
-            user_id, user['email'], user['name'],
+            user_id, user['email'] or '', user['name'] or '',
             request.pack_type, request.success_url, request.cancel_url
         )
     

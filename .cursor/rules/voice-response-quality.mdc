@@ -1,0 +1,64 @@
+---
+description: Voice response quality rules — prevents chain-of-thought narration and clinical jargon on live calls
+globs: backend/app/services/twilio_grok_xtts_pipeline.py
+alwaysApply: false
+---
+
+# Voice Response Quality
+
+Grok Rex speaks directly to callers on a live phone line. Every word Grok generates is spoken aloud. Two failure modes have caused bad caller experiences:
+
+## Failure Mode 1: Chain-of-Thought Narration (Mar 2026)
+
+Grok narrated its reasoning process to the caller: "First, I need to confirm the time difference. Step 1: Understanding..." This is internal reasoning that should never be vocalized.
+
+**Root cause**: The system prompt said "under 25 words" but Grok overrode the constraint on analytical questions and generated a 2505-character step-by-step breakdown spoken aloud.
+
+**Prevention**: Both voice prompts (`_get_voice_system_prompt` and `_build_grounded_voice_prompt`) must include:
+
+```python
+"ABSOLUTE VOICE RULES (NEVER BREAK):\n"
+"- NEVER narrate your reasoning process aloud. No 'Step 1', 'First I need to', "
+"'Let me break this down', 'Let me think about'. Just answer directly.\n"
+"- If asked a factual question (dates, math, time zones), give the answer directly in "
+"one sentence without showing your work.\n\n"
+```
+
+**Never remove these rules.** Without them, Grok defaults to verbose analytical responses on factual questions.
+
+## Failure Mode 2: Clinical Jargon Spoken to Caller (Mar 2026)
+
+Grok told the caller "narrative escalation for healing" — internal therapeutic terminology that a therapist would never say to a client.
+
+**Root cause**: Crystal memory and conversation history contain clinical shorthand. Grok echoed this terminology directly instead of translating to plain language.
+
+**Prevention**: The prompt must include:
+
+```python
+"- NEVER use clinical or technical jargon with the caller. No 'narrative escalation', "
+"'therapeutic frame', 'attachment pattern'. Speak in plain, warm language.\n"
+```
+
+## Rules
+
+1. **Both prompt functions must have the ABSOLUTE VOICE RULES block.** `_get_voice_system_prompt()` (fallback) and `_build_grounded_voice_prompt()` (primary). If one has it and the other doesn't, the fallback path will produce bad responses.
+
+2. **Voice response length should be 1-4 sentences max.** A response over 500 characters on a phone call is almost always too long. The prompt constraint ("under 25 words" or "2-4 sentences") must never be weakened.
+
+3. **Never add reasoning instructions to voice prompts.** Phrases like "think step by step", "break it down", "explain your reasoning" must NEVER appear in any voice system prompt. These are text-mode instructions that cause chain-of-thought narration on voice.
+
+4. **Crystal memory injected into voice prompts may contain clinical terms.** The prompt must instruct Grok to translate clinical shorthand into plain language. The memory block is for Grok's understanding, not for reading aloud verbatim.
+
+5. **After any voice prompt change**, test with a live call before deploying. Text that reads fine in a prompt can sound terrible when spoken aloud by Grok Rex.
+
+## Verification After Voice Prompt Changes
+
+```bash
+# Check both prompts have the ABSOLUTE VOICE RULES block:
+grep -c "ABSOLUTE VOICE RULES" backend/app/services/twilio_grok_xtts_pipeline.py
+# Expected: 2 (one per prompt function)
+
+# Check no reasoning instructions leaked in:
+grep -iE "step.by.step|break.it.down|explain.your.reasoning|show.your.work" backend/app/services/twilio_grok_xtts_pipeline.py
+# Expected: only the "without showing your work" PREVENTION line, never an instruction TO show work
+```

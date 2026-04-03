@@ -72,8 +72,8 @@ async def edge_tts(request: Request):
         return JSONResponse({"error": "TTS processing failed"}, status_code=502)
 
 
-@router.get("/health")
-async def voice_health(request: Request):
+@router.get("/edge/health")
+async def voice_edge_health(request: Request):
     """Voice pipeline health for edge worker provider probing."""
     voice_router = getattr(request.app.state, "voice_router", None)
     pool = getattr(request.app.state, "voice_pool", None)

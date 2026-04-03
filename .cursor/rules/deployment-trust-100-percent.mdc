@@ -74,6 +74,7 @@ After deploying backend changes, follow this exact sequence to ensure all 23 aud
 | Nate Check-In | 8/8 | Inactivity outreach, snooze, dedup, nudges |
 | QuickBooks Sync | 10/10 | Admin QB connection, sync pipeline, API endpoints |
 | Corporate Command | 21/21 | Corp roster, billing, import, Coach QB, Corp QB API + DB |
+| Voice Infrastructure | 10/10 | Admission controller, voice pool, router, pipeline, DB |
 
 ## Common Failures and Fixes
 

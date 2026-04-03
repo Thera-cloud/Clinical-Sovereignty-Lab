@@ -54,18 +54,18 @@ All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
 
 | Field | Value |
 |---|---|
-| Condition | `URI Path equals /ws` (`http.request.uri.path eq "/ws"`) |
+| Condition | `starts_with(http.request.uri.path, "/ws")` |
 | Override: Terminates | On |
 | Override: Fallback Pool | `ws-primary` |
 | Override: Session Affinity | By Cloudflare cookie and Client IP fallback |
 
-All `/ws` WebSocket connections route exclusively to the primary VPS. The clone has no bridge and returns 503 for `/ws`.
+All paths starting with `/ws` route exclusively to the primary VPS. This covers both `/ws` (bridge WebSocket) and `/ws/nate-media-stream` (Twilio voice media stream). The clone has no bridge and returns 503 for WebSocket connections.
 
-### Twilio Media Stream path (critical)
+### Twilio Media Stream path (FIXED Mar 30, 2026)
 
-Twilio `<Stream>` uses **`/ws/nate-media-stream`**, not `/ws`. The rule **`URI Path equals /ws` does NOT match** `/ws/nate-media-stream`, so **~33% of media-stream upgrades can hit the clone** (same `sovereign-core` pool as REST). That causes intermittent “Polly greeting then dead air / hang up” if the clone is stale, misconfigured for WS, or missing voice init.
+Twilio `<Stream>` uses **`/ws/nate-media-stream`**. Previously the rule used `eq "/ws"` which did NOT match, causing ~33% of media stream connections to hit the clone VPS (dead air on voice calls). Fixed by changing to `starts_with(http.request.uri.path, "/ws")`.
 
-**Fix (Cloudflare):** extend the override to all API WebSockets, e.g. add a second custom rule or use **`http.request.uri.path starts_with "/ws"`** → fallback pool **`ws-primary`** (same as bridge). Alternatively a dedicated rule: path equals `/ws/nate-media-stream` → `ws-primary`.
+**Never revert to `eq "/ws"`.** Both `/ws` and `/ws/nate-media-stream` MUST route to the primary.
 
 ## Clone VPS Architecture
 
@@ -94,7 +94,7 @@ Twilio `<Stream>` uses **`/ws/nate-media-stream`**, not `/ws`. The rule **`URI P
 
 1. **REST API traffic distributes across primary (67%) and clone (33%).** Both origins use `sovereign-core-health` monitor. If the clone goes unhealthy, all traffic routes to primary.
 
-2. **WebSocket traffic ALWAYS goes to primary** (bridge **`/ws`** and Twilio **`/ws/nate-media-stream`**). The Custom Rule must cover every path the app upgrades to WebSocket; path-equals `/ws` alone is insufficient for media streams. Never add the clone to `ws-primary` — it has no bridge.
+2. **WebSocket traffic ALWAYS goes to primary** (bridge **`/ws`** and Twilio **`/ws/nate-media-stream`**). The Custom Rule uses `starts_with(http.request.uri.path, "/ws")` to cover all WebSocket paths. Never add the clone to `ws-primary` — it has no bridge.
 
 3. **Clone reads from primary's PostgreSQL and Redis via VPC.** The clone's `docker-compose.clone.yml` sets `POSTGRES_HOST=10.120.0.2`, `REDIS_HOST=10.120.0.2`. This uses DO's internal backbone with zero egress cost.
 

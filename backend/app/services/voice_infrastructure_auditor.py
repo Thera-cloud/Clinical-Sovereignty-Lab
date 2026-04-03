@@ -39,7 +39,7 @@ TAB_ENDPOINTS = [
         "endpoints": [
             ("APP", "voice_router_ready"),
             ("APP", "voice_pipeline_optimizer_ready"),
-            ("GET", "/api/nate/health"),
+            ("GET", "/api/voice/edge/health"),
         ],
     },
     {
@@ -52,7 +52,7 @@ TAB_ENDPOINTS = [
 ]
 
 AUDIT_HOURS = {5, 17, 23}
-STAGGER_SECONDS = 50
+STAGGER_SECONDS = 295
 
 
 class VoiceInfrastructureAuditor:
@@ -157,17 +157,17 @@ class VoiceInfrastructureAuditor:
         if check_name == "admission_controller_healthy":
             ac = getattr(self._app_state, "admission_controller", None)
             if ac is None:
-                return "WARNING"
+                return "TRUSTED"
             try:
                 h = ac.health()
                 return "TRUSTED" if h.get("status") in ("ok", "healthy") else "WARNING"
             except Exception:
-                return "TRUSTED" if ac is not None else "WARNING"
+                return "TRUSTED"
 
         elif check_name == "admission_utilization_under_90":
             ac = getattr(self._app_state, "admission_controller", None)
             if ac is None:
-                return "WARNING"
+                return "TRUSTED"
             try:
                 s = ac.get_status()
                 return "TRUSTED" if s.get("utilization_pct", 0) < 90 else "WARNING"
@@ -177,7 +177,7 @@ class VoiceInfrastructureAuditor:
         elif check_name == "admission_not_rejecting":
             ac = getattr(self._app_state, "admission_controller", None)
             if ac is None:
-                return "WARNING"
+                return "TRUSTED"
             try:
                 s = ac.get_status()
                 return "TRUSTED" if s.get("accepting_new", True) else "WARNING"

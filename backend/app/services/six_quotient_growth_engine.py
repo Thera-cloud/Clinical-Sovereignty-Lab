@@ -355,6 +355,20 @@ class SixQuotientGrowthEngine:
                     "Growth crystal forged: %s anti-patterns in %s context",
                     anti_patterns, q_label,
                 )
+                # QUANTUM-CRYSTAL-ARCH: Vectorize embedding
+                try:
+                    from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                    if is_vectorize_configured():
+                        await index_wisdom(
+                            user_id="nate_crystal",
+                            wisdom_id=f"crystal_{content_hash[:16]}",
+                            insight_type="growth_engine_clinical",
+                            content=crystal_text,
+                            source="growth_engine",
+                            domain="clinical",
+                        )
+                except Exception as _v:
+                    logger.debug("Growth engine: vectorize non-fatal: %s", _v)
         except Exception as e:
             logger.warning("Growth crystallization failed: %s", e)
 
@@ -460,6 +474,20 @@ class SixQuotientGrowthEngine:
                         "Persistent weakness crystal: %s (%d anti-patterns in 24h)",
                         quotient, stats["negative"],
                     )
+                    # QUANTUM-CRYSTAL-ARCH: Vectorize persistent weakness crystal
+                    try:
+                        from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                        if is_vectorize_configured():
+                            await index_wisdom(
+                                user_id="nate_crystal",
+                                wisdom_id=f"crystal_{content_hash[:16]}",
+                                insight_type="growth_persistent_weakness",
+                                content=crystal_text,
+                                source="growth_engine",
+                                domain="clinical",
+                            )
+                    except Exception as _v:
+                        logger.debug("Growth persistent: vectorize non-fatal: %s", _v)
 
                 # Store daily quotient snapshot
                 await self._store_quotient_snapshot(conn, quotient_stats, len(rows))

@@ -443,6 +443,7 @@ class NateMemoryCrystallizer:
                 hours_since_decay = (now - self._last_decay).total_seconds() / 3600
                 if hours_since_decay >= 6:
                     await self._decay_cycle(now)
+                    await self._warm_cold_crystals()
                     self._last_decay = now
 
                 # GAP 5: Meta-crystal synthesis on 6h cycle
@@ -1700,6 +1701,12 @@ class NateMemoryCrystallizer:
             face_path = cluster.get("face_path", None)
             if not face_path and self._is_blue:
                 face_path = "bridge:mac-blue"
+            elif not face_path:
+                # SOVEREIGN-VOICE: auto-generate 3-segment face_path for L2 population
+                _cl_topics = cluster.get("topics", [])
+                _t1 = _cl_topics[0] if _cl_topics else "general"
+                _t2 = _cl_topics[1] if len(_cl_topics) > 1 else "observation"
+                face_path = f"{domain}/{_t1}/{_t2}"
 
             # ── Store crystal: BLUE (SQLite) or GREEN (PostgreSQL) ──
             if self._is_blue and self._local_store:
@@ -1792,12 +1799,13 @@ class NateMemoryCrystallizer:
                         try:
                             async with self._db_pool.acquire() as l2conn:
                                 await l2conn.execute("""
-                                    INSERT INTO odpe_l2_faces (l1_face_path, l2_label, activation_count, last_activated)
-                                    VALUES ($1, $2, 1, NOW())
+                                    INSERT INTO odpe_l2_faces
+                                        (l1_face_path, l2_label, face_path, activation_count, last_activated)
+                                    VALUES ($1, $2, $3, 1, NOW())
                                     ON CONFLICT (l1_face_path, l2_label) DO UPDATE SET
                                         activation_count = odpe_l2_faces.activation_count + 1,
                                         last_activated = NOW()
-                                """, l1_path, l2_label)
+                                """, l1_path, l2_label, face_path)
                         except Exception as _face_err:
                             logger.warning("Crystal ODPE L2 face upsert failed: %s", _face_err)
 
@@ -2146,6 +2154,60 @@ class NateMemoryCrystallizer:
                 pruned_total += _cnt
 
             logger.info("Decay cycle: time_archived=%s, confidence_pruned=%d", archived, pruned_total)
+
+    async def _warm_cold_crystals(self):
+        """Proactively warm cold crystals by matching them against recent conversation topics.
+
+        Runs every 6h alongside decay. Finds cold crystals (recall_count=0) whose
+        content matches recent conversation keywords, then gives them a single
+        recall increment so they exit the cold pool and enter the normal rotation.
+        """
+        if self._is_blue or not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                topics_row = await conn.fetch("""
+                    SELECT DISTINCT LEFT(user_text, 100) as snippet
+                    FROM conversation_history
+                    WHERE LENGTH(user_text) > 30
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """)
+                if not topics_row:
+                    return
+
+                keywords = set()
+                for row in topics_row:
+                    for word in (row["snippet"] or "").split():
+                        w = word.strip(".,!?\"'()[]{}:;").lower()
+                        if len(w) >= 5 and w.isalpha():
+                            keywords.add(w)
+
+                if len(keywords) < 3:
+                    return
+
+                query_str = " | ".join(list(keywords)[:30])
+                warmed = await conn.execute("""
+                    UPDATE nate_intelligence_crystals
+                    SET recall_count = 1,
+                        last_recalled_at = NOW(),
+                        updated_at = NOW()
+                    WHERE id IN (
+                        SELECT id FROM nate_intelligence_crystals
+                        WHERE (recall_count IS NULL OR recall_count = 0)
+                          AND scope NOT IN ('archived')
+                          AND superseded_by IS NULL
+                          AND to_tsvector('english', crystal_text) @@ to_tsquery('english', $1)
+                        ORDER BY confidence DESC
+                        LIMIT 100
+                    )
+                """, query_str)
+                _cnt = int(warmed.split()[-1]) if isinstance(warmed, str) and warmed.split()[-1].isdigit() else 0
+                if _cnt > 0:
+                    logger.info("Crystal warming: %d cold crystals matched recent topics", _cnt)
+        except Exception as e:
+            logger.warning("Crystal warming failed: %s", e)
 
     # ── Recall tracking ──
 

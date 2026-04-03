@@ -18,10 +18,37 @@ def twilio_mulaw_to_pcm16(mulaw_bytes: bytes, state: Optional[List]) -> bytes:
     return pcm_16k
 
 
+def twilio_mulaw_to_pcm24k(mulaw_bytes: bytes, state: Optional[List]) -> bytes:
+    """Twilio 8 kHz μ-law → 16-bit PCM mono 24 kHz for Grok native pcm16 input."""
+    if not mulaw_bytes:
+        return b""
+    pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+    if state is None:
+        state = []
+    if len(state) == 0:
+        state.append(None)
+    pcm_24k, st = audioop.ratecv(pcm_8k, 2, 1, 8000, 24000, state[0])
+    state[0] = st
+    return pcm_24k
+
+
 def strip_wav_header(wav_bytes: bytes) -> bytes:
     if len(wav_bytes) >= 44 and wav_bytes[:4] == b"RIFF" and wav_bytes[8:12] == b"WAVE":
         return wav_bytes[44:]
     return wav_bytes
+
+
+def grok_pcm16_to_twilio_mulaw(pcm_16k_bytes: bytes, state: Optional[List]) -> bytes:
+    """Grok 16 kHz 16-bit mono PCM → 8 kHz μ-law for Twilio."""
+    if not pcm_16k_bytes:
+        return b""
+    if state is None:
+        state = []
+    if len(state) == 0:
+        state.append(None)
+    pcm_8k, st = audioop.ratecv(pcm_16k_bytes, 2, 1, 16000, 8000, state[0])
+    state[0] = st
+    return audioop.lin2ulaw(pcm_8k, 2)
 
 
 def xtts_pcm_to_twilio_mulaw(pcm_24k_bytes: bytes, state: Optional[List]) -> bytes:

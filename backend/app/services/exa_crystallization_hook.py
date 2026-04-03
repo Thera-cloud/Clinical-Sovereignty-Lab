@@ -117,7 +117,7 @@ class ExaCrystallizationHook:
         try:
             async with self._db_pool.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT crystal_count, C_emo
+                    SELECT crystal_count, c_emo
                     FROM nevedal_domain_state WHERE domain = 'coding'
                 """)
                 if not row:
@@ -162,7 +162,7 @@ class ExaCrystallizationHook:
         try:
             async with self._db_pool.acquire() as conn:
                 state = await conn.fetchrow("""
-                    SELECT C_emo, p_ent, gamma_env, T_tunnel, crystal_count, beta
+                    SELECT c_emo, p_ent, gamma_env, t_tunnel, crystal_count, beta
                     FROM nevedal_domain_state WHERE domain = 'coding'
                 """)
                 if not state:
@@ -175,15 +175,19 @@ class ExaCrystallizationHook:
                 for ms in EXA_MILESTONES:
                     crystal_pct = min(100, crystal_count / ms["crystals"] * 100)
                     c_emo_pct = min(100, c_emo / ms["c_emo_target"] * 100) if ms["c_emo_target"] > 0 else 0
+                    reached_crystals = crystal_count >= ms["crystals"]
+                    reached_coherence = c_emo >= ms["c_emo_target"]
                     milestones.append({
                         **ms,
                         "crystal_progress_pct": round(crystal_pct, 1),
                         "c_emo_progress_pct": round(c_emo_pct, 1),
-                        "reached": crystal_count >= ms["crystals"],
+                        "reached_by_count": reached_crystals,
+                        "reached_by_coherence": reached_coherence,
+                        "fully_reached": reached_crystals and reached_coherence,
                     })
 
                 recent_log = await conn.fetch("""
-                    SELECT C_emo, crystal_count, created_at
+                    SELECT c_emo, crystal_count, created_at
                     FROM nevedal_coherence_log
                     WHERE domain = 'coding'
                     ORDER BY created_at DESC LIMIT 24
@@ -203,7 +207,7 @@ class ExaCrystallizationHook:
                     "crystal_count": crystal_count,
                     "p_ent": round(float(state["p_ent"] or 0), 4),
                     "gamma_env": round(float(state["gamma_env"] or 0), 4),
-                    "t_tunnel": round(float(state["T_tunnel"] or 0), 4),
+                    "t_tunnel": round(float(state["t_tunnel"] or 0), 4),
                     "acceleration_mode": accel,
                     "milestones": milestones,
                     "coherence_trend": [

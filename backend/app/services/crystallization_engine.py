@@ -657,6 +657,30 @@ class CrystallizationOrchestrator:
 
 
 # ---------------------------------------------------------------------------
+# Stub Workers for types awaiting full implementation
+# ---------------------------------------------------------------------------
+
+class _StubWorker(BaseCrystallizationWorker):
+    """Placeholder worker — logs a no-op instead of raising ValueError."""
+
+    async def execute(self) -> dict:
+        return {"summary": f"{self.job.job_type.value}: awaiting implementation", "insights_generated": 0}
+
+
+for _ct in (
+    CrystallizationType.NEVEDAL_RECALIBRATION,
+    CrystallizationType.CROSS_SESSION_PATTERNS,
+    CrystallizationType.MEMORY_TIER_MIGRATION,
+    CrystallizationType.NIGHT_SCHOOL_REFINEMENT,
+    CrystallizationType.RESISTANCE_MAPPING,
+    CrystallizationType.EMOTIONAL_ARC_SYNTHESIS,
+    CrystallizationType.CRYSTAL_CONSOLIDATION,
+    CrystallizationType.MODALITY_WEIGHT_TUNING,
+):
+    CrystallizationWorkerFactory._registry[_ct] = _StubWorker
+
+
+# ---------------------------------------------------------------------------
 # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE Worker
 # ---------------------------------------------------------------------------
 
@@ -843,6 +867,20 @@ class LiminalResolveWorker(BaseCrystallizationWorker):
                            ON CONFLICT DO NOTHING""",
                         crystal_text, content_hash, s["user_id"], meta,
                     )
+                    # QUANTUM-CRYSTAL-ARCH: Vectorize anticipatory crystal
+                    try:
+                        from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+                        if is_vectorize_configured():
+                            await index_wisdom(
+                                user_id=s["user_id"],
+                                wisdom_id=f"crystal_{content_hash[:16]}",
+                                insight_type="anticipatory_liminal",
+                                content=crystal_text,
+                                source="crystallization_engine",
+                                domain="liminal_resolve",
+                            )
+                    except Exception as _v:
+                        logger.debug("CrystallizationEngine: vectorize non-fatal: %s", _v)
                     generated += 1
             return generated
         except Exception as e:

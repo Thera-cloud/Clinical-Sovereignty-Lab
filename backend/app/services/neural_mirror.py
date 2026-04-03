@@ -569,16 +569,35 @@ class VoiceEEGAutoencoder:
             return False
 
     def encode(self, feature_vector: np.ndarray) -> Optional[np.ndarray]:
-        """Encode a 90-dim feature vector to 32-dim latent space."""
-        if self._model is None or self._torch is None or not self._trained:
-            return None
+        """Encode a 90-dim feature vector to 32-dim latent space.
+
+        Falls back to deterministic projection when the autoencoder
+        hasn't been trained yet so the fingerprint / trajectory always
+        accumulate samples from day one.
+        """
+        if self._model is not None and self._torch is not None and self._trained:
+            try:
+                with self._torch.no_grad():
+                    x = self._torch.tensor(feature_vector, dtype=self._torch.float32).unsqueeze(0)
+                    z = self._model.encode(x)
+                    return z.squeeze(0).numpy()
+            except Exception as e:
+                logger.debug("Autoencoder encode failed: %s", e)
+
+        # Deterministic projection fallback: average non-overlapping
+        # windows of the 90-dim feature into LATENT_DIM (32) values so
+        # that the fingerprint can accumulate from the first call.
         try:
-            with self._torch.no_grad():
-                x = self._torch.tensor(feature_vector, dtype=self._torch.float32).unsqueeze(0)
-                z = self._model.encode(x)
-                return z.squeeze(0).numpy()
-        except Exception as e:
-            logger.debug("Autoencoder encode failed: %s", e)
+            fv = np.asarray(feature_vector, dtype=np.float32)
+            if fv.size < LATENT_DIM:
+                fv = np.pad(fv, (0, LATENT_DIM - fv.size))
+            stride = fv.size // LATENT_DIM
+            latent = np.array(
+                [fv[i * stride:(i + 1) * stride].mean() for i in range(LATENT_DIM)],
+                dtype=np.float32,
+            )
+            return latent
+        except Exception:
             return None
 
     def train_on_batch(
@@ -609,6 +628,39 @@ class VoiceEEGAutoencoder:
         self._trained = True
         logger.info("Autoencoder trained: %d samples, %d epochs, loss=%.6f", len(feature_vectors), epochs, final_loss)
         return final_loss
+
+    def bootstrap_heuristic(self, n_samples: int = 500, epochs: int = 50) -> float:
+        """QUANTUM-CRYSTAL-ARCH: Pre-train with synthetic voice features.
+
+        Generates samples spanning realistic voice parameter ranges so the
+        autoencoder learns a meaningful latent manifold before any real data
+        arrives.  Returns final reconstruction loss.
+        """
+        if self._model is None or self._torch is None:
+            return float("inf")
+        if self._trained:
+            return 0.0
+
+        rng = np.random.default_rng(42)
+        synthetic = np.zeros((n_samples, FEATURE_DIM), dtype=np.float32)
+
+        for i in range(n_samples):
+            pitch_mean = rng.normal(180.0, 60.0)
+            pitch_var = rng.exponential(500.0)
+            energy = rng.uniform(0.05, 0.35)
+            speech_rate = rng.normal(3.5, 1.0)
+            pause_ratio = rng.uniform(0.1, 0.5)
+
+            base = np.array([pitch_mean, pitch_var, energy, speech_rate, pause_ratio], dtype=np.float32)
+            base_normed = (base - base.mean()) / (base.std() + 1e-8)
+
+            vec = rng.normal(0, 0.3, FEATURE_DIM).astype(np.float32)
+            vec[:len(base_normed)] = base_normed
+            synthetic[i] = vec
+
+        loss = self.train_on_batch([synthetic[i] for i in range(n_samples)], epochs=epochs, lr=1e-3)
+        logger.info("VoiceEEGAutoencoder bootstrap: %d synthetic samples, loss=%.6f", n_samples, loss)
+        return loss
 
     def save_weights(self) -> Optional[bytes]:
         """Save model weights to bytes."""

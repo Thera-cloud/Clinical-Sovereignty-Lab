@@ -1,0 +1,56 @@
+---
+description: Voice call memory, learning, and storage lifecycle — what fires when and in what order
+alwaysApply: true
+---
+
+# Voice Call Memory Lifecycle
+
+Every voice call has 3 phases. Each phase activates specific subsystems. Missing any one degrades Nate's memory or clinical quality.
+
+## Phase 1: Call Start (Session Init)
+
+| System | What It Does | Source |
+|---|---|---|
+| Crystal Recall | `recall_crystals_for_context()` with `source="voice_call"` | `_build_grounded_voice_prompt()` |
+| Conversation History | `SELECT FROM conversation_history` by username, LIMIT 25, LENGTH > 15 | `_build_grounded_voice_prompt()` |
+| System Prompt | Memory + personality + voice expression guidance assembled | `_build_grounded_voice_prompt()` |
+| Voice Slot | Redis slot acquired via `acquire_voice_slot()` | Media stream handler |
+| Neural Mirror | `NeuralMirrorSession` initialized after username resolved | After login |
+| Entity Graph | `PredictiveEntityGraph` initialized after username resolved | After login |
+
+## Phase 2: During Call (Real-Time)
+
+| System | Trigger | What It Does |
+|---|---|---|
+| Entity Graph | Every STT fragment | Extracts proper nouns, pre-loads crystal memory before user finishes speaking |
+| Web Search | `_is_web_search_query()` detects search intent | DuckDuckGo search → results injected into Grok via `conversation.item.create` |
+| Deep Memory Search | `_is_memory_query()` detects "do you remember" patterns | 4 parallel searches (FTS, ILIKE, crystal recall, Vectorize) |
+| EC Snapshots | Every user turn (if heavy crystallization enabled) | `_record_ec_snapshot("turn")` captures emotional coherence state |
+| Search Crystallization | After successful web search | `_entity_graph.crystallize_search_results()` stores search results as crystals |
+
+## Phase 3: Call End (Finalization — `finally:` block)
+
+Fires in this order after Twilio stream stops or WebSocket closes:
+
+| Order | System | Gate | What It Does |
+|---|---|---|---|
+| 1 | Call limit task cancel | Always | Cancels `_call_limit_task` |
+| 2 | Grok WS close | Always | Closes Grok Realtime WebSocket |
+| 3 | EC task cancel | Always | Cancels background EC snapshot task |
+| 4 | Voice slot release | `slot_acquired` | Redis slot freed |
+| 5 | Voice minutes logging | `duration >= 1s` | `add_voice_minutes()` to `voice_call_usage` |
+| 6 | Lightweight crystal forge | `_crystal_forge` exists | Each user turn >= 40 chars → `crystallize_from_conversation()` + Vectorize |
+| 7 | Heavy crystallization | `ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true` | Full conversation → `conversation_history` INSERT + Vectorize + EC final snapshot + biometrics + therapeutic insights |
+| 8 | Neural Mirror finalize | `_neural_mirror` exists | EEG trace → `virtual_eeg_traces` table |
+| 9 | Entity Graph crystallize | `_entity_graph` exists | High-confidence entity relationships → crystals |
+| 10 | Redis cleanup | Always | Delete `nate:call_context:{call_sid}` |
+
+## Rules
+
+1. **Lightweight crystal forge (step 6) fires even when heavy crystallization is off.** It's the minimum viable learning from every call.
+2. **Heavy crystallization (step 7) is gated by `ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION`.** Currently `true` in production. It adds: `conversation_history` INSERT, Vectorize indexing, EC snapshots, `voice_session_biometrics`, `voice_filler_events`, therapeutic insight harvesting to `_harvest_buffer`, and quantum crystal co-activation.
+3. **Crystal recall uses `source="voice_call"`** — this tags recall logs correctly for the Time Crystal Forge.
+4. **Memory search by username, not hardware_id** — `conversation_history.user_id` stores usernames for voice sessions.
+5. **Entity Graph pre-loading reduces response latency** — crystals for mentioned entities are fetched BEFORE the user finishes speaking, so Grok has context ready when it generates a response.
+6. **Web search results are crystallized** — successful searches are stored as research-domain crystals via `crystallize_search_results()` so Nate remembers what was found.
+7. **If any finalization step fails, subsequent steps still run** — each step is wrapped in its own `try/except`. A crystallization failure must not prevent voice slot release or Neural Mirror finalization.

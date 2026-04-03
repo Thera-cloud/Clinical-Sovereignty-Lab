@@ -29,6 +29,9 @@ email-validator~=2.1.0
 httpx~=0.27.0
 aiohttp~=3.9.1
 
+# AWS S3-compatible (Cloudflare R2)
+boto3>=1.34.0
+
 # Web Search (DuckDuckGo fallback - no API key required)
 ddgs>=9.0.0
 

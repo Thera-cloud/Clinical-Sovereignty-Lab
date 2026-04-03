@@ -163,3 +163,4 @@ wireguard/*/privatekey
 # Mobile development backup files
 mobile/lib/*.backup*
 mobile/lib/**/*.backup*
+backend/resources/therapeutic_library/imagery_guides/.wrangler/

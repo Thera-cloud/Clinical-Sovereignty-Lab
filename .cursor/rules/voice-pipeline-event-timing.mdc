@@ -1,0 +1,47 @@
+---
+description: Event timing and counter lifecycle for real-time voice pipeline — prevents double-talk and counter bugs
+alwaysApply: true
+---
+
+# Voice Pipeline Event Timing
+
+## Grok Response Lifecycle (Exact Order)
+
+For every Grok response, events arrive in THIS order:
+
+```
+1. response.output_audio.delta (N times)     ← audio chunks, _nate_speaking = True
+2. response.output_audio_transcript.done      ← full text transcript
+3. response.output_audio.done                 ← audio stream finished
+```
+
+The text transcript arrives BEFORE `audio.done`. Any state reset or counter read that relies on "all audio sent" must happen in `audio.done`, NOT in the text handler.
+
+## Counter Lifecycle
+
+| Counter | Increment Point | Log Point | Reset Point |
+|---|---|---|---|
+| `_rex_audio_chunk_count` | `_on_grok_audio_delta()` (+1 per chunk) | `_on_grok_audio_done()` (print total) | `_on_grok_audio_done()` (after logging) |
+
+**Never reset `_rex_audio_chunk_count` in `_on_grok_text()`.** The text handler fires before `audio.done`, causing the logged count to always show 0.
+
+## `_nate_speaking` Flag Lifecycle
+
+| Event | Action |
+|---|---|
+| First `response.output_audio.delta` | Set `True` |
+| `response.output_audio.done` | Set `False` |
+
+When `True`: caller mic audio is NOT forwarded to Grok. This prevents Grok's VAD from hearing its own voice or silence during playback and generating extra responses.
+
+## `_spoken_response_ids` Deduplication
+
+Grok sends the same text in `response.output_audio_transcript.done` and `response.done`. The first event adds the `resp_id` to the set; subsequent events are skipped. Cleared at session start.
+
+## Rules
+
+1. **Never reset counters in text handlers.** Text arrives before `audio.done`.
+2. **`_nate_speaking` must be set on the FIRST delta, not on session start.** Setting it too early blocks caller audio.
+3. **`_nate_speaking` must be cleared in `audio.done`, not in the text handler.** Clearing too early unblocks caller audio while Nate is still speaking.
+4. **Every `nonlocal` declaration for counters must include ALL mutating functions.** If a function resets a counter, it needs `nonlocal` access. Missing `nonlocal` creates a local shadow that doesn't affect the outer scope.
+5. **Audio gating (`_nate_speaking`) and response dedup (`_spoken_response_ids`) are independent.** One prevents double-talk, the other prevents double-synthesis. Both must remain active.

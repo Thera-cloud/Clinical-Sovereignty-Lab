@@ -1,0 +1,48 @@
+---
+description: Grok Rex native voice architecture — 1-hop audio pipeline, event routing, and locked parameters
+alwaysApply: true
+---
+
+# Grok Rex Native Voice Pipeline
+
+## Architecture
+
+When `GROK_NATIVE_VOICE=true`, Grok speaks directly to Twilio via `audio/pcmu` (G.711 u-law at 8kHz). No Azure TTS, no Edge TTS, no intermediate synthesis. This is a 1-hop audio pipeline: Grok → Twilio.
+
+```
+Twilio answers → Polly <Say> greeting → <Connect><Stream> opens
+→ Caller speaks (mulaw) → raw mulaw forwarded to Grok → Grok VAD detects speech
+→ Grok generates audio (pcmu) → response.output_audio.delta events
+→ base64 mulaw forwarded to Twilio → Caller hears Rex
+```
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROK_NATIVE_VOICE` | `false` | Master switch for native audio pipeline |
+| `GROK_VOICE` | `Rex` | Grok voice selection (prefixed with `human_` in session config) |
+
+## Audio Mode Is Static Per Call
+
+`_audio_mode` is set ONCE at call start: `"native"` if `GROK_NATIVE_VOICE` is true, `"tts"` otherwise. It NEVER changes mid-call. There is no fallback from native to TTS during a call.
+
+## Event Routing (Critical)
+
+Grok sends audio via both xAI and OpenAI-style event names. The listener must handle BOTH:
+
+| Event | Action |
+|---|---|
+| `response.output_audio.delta` / `response.audio.delta` | Forward base64 payload to Twilio |
+| `response.output_audio.done` / `response.audio.done` | Mark Nate as not speaking, reset chunk counter |
+| `response.output_audio_transcript.done` / `response.audio_transcript.done` | Log transcript only — NEVER synthesize via TTS |
+
+## Rules
+
+1. **Azure TTS is completely silenced when `_audio_mode == "native"`.** The `_on_grok_text()` handler logs the transcript and returns immediately — no TTS synthesis, no fallback timer.
+2. **Audio input format must match session config.** When `GROK_NATIVE_VOICE` is true, always send raw mulaw to Grok (the `payload` from Twilio media events). Never convert to PCM16. The check uses the static `GROK_NATIVE_VOICE` flag, not the dynamic `_audio_mode`.
+3. **Never add mid-call fallback from Rex to Azure.** A previous fallback mechanism caused double-chatter (Rex + Onyx speaking simultaneously) and broke subsequent responses by switching audio input format. The fallback was removed permanently.
+4. **`_rex_audio_chunk_count` resets in `_on_grok_audio_done()`, not in the text handler.** The text transcript arrives BEFORE `audio.done`, so resetting in the text handler always shows 0 chunks.
+5. **`_nate_speaking` gates caller audio.** When true, caller mic audio is NOT forwarded to Grok. Set to true on first audio delta, cleared on `audio.done`.
+6. **Session config: `modalities` goes in `response.create`, NOT `session.update`.** xAI's Realtime API ignores `modalities` in `session.update`. The session config sets `voice`, `input/output` audio formats, and `turn_detection`. The `modalities: ["audio"]` is sent separately.
+7. **Polly greeting is separate from Grok.** The TwiML `<Say>` plays BEFORE the stream connects. There is NO Grok greeting prompt. Never add `conversation.item.create` + `response.create` at session start.

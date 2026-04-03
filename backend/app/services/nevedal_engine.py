@@ -27,6 +27,57 @@ from collections import deque
 import struct
 
 # =============================================================================
+# QUANTUM-CRYSTAL-ARCH: Coherence governance stubs for CLI repair pipeline
+# =============================================================================
+
+@dataclass
+class CoherenceImpactAssessment:
+    c_emo_before: float = 0.0
+    c_emo_after: float = 0.0
+    p_ent_delta: float = 0.0
+    t_tunnel_delta: float = 0.0
+    gamma_env_delta: float = 0.0
+    clinical_justification: str = ""
+    clinician_approved: bool = False
+
+
+class ViolationTaxonomy:
+    COMPLIANT = "compliant"
+    MINOR = "minor"
+    MODERATE = "moderate"
+    SEVERE = "severe"
+    CRITICAL = "critical"
+
+    @staticmethod
+    def classify(assessment: CoherenceImpactAssessment) -> str:
+        regression = max(0.0, assessment.c_emo_before - assessment.c_emo_after)
+        if regression > 0.30:
+            return ViolationTaxonomy.CRITICAL
+        if regression > 0.20:
+            return ViolationTaxonomy.SEVERE
+        if regression > 0.10:
+            return ViolationTaxonomy.MODERATE
+        if regression > 0.05:
+            return ViolationTaxonomy.MINOR
+        return ViolationTaxonomy.COMPLIANT
+
+
+class SystemCoherenceProxy:
+    async def compute(self, db_pool=None, redis_client=None) -> float:
+        if not db_pool:
+            return 0.0
+        try:
+            async with db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT C_emo FROM nevedal_domain_state "
+                    "WHERE domain = 'coding' LIMIT 1"
+                )
+                return float(row["c_emo"]) if row else 0.0
+        except Exception:
+            return 0.0
+
+
+# =============================================================================
 # CONSTANTS (Calibrated for therapeutic context)
 # =============================================================================
 
@@ -1154,6 +1205,49 @@ class NevedalEngine:
                         "therapeutic_value": event.therapeutic_value,
                     })),
                 )
+                # SOVEREIGN-VOICE: log coherence event for longitudinal tracking
+                try:
+                    _domain = event.trigger_context or "general"
+                    await conn.execute("""
+                        INSERT INTO nevedal_coherence_log
+                            (domain, C_emo, p_ent, T_tunnel, gamma_env)
+                        VALUES ($1, $2, $3, $4, $5)
+                    """,
+                        _domain,
+                        round(event.peak_c_emo, 5),
+                        round(event.avg_p_ent, 5),
+                        0.37,
+                        round(event.avg_gamma_env, 5),
+                    )
+                except Exception as _cl_err:
+                    print(f">>> [NEVEDAL] coherence_log write: {_cl_err}")
+
+                # SOVEREIGN-VOICE: upsert domain state with actual Nevedal parameters
+                try:
+                    _domain = event.trigger_context or "general"
+                    _crystal_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM nate_intelligence_crystals"
+                    ) or 0
+                    await conn.execute("""
+                        INSERT INTO nevedal_domain_state
+                            (domain, C_emo, p_ent, gamma_env, crystal_count, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, NOW())
+                        ON CONFLICT (domain) DO UPDATE SET
+                            C_emo = EXCLUDED.C_emo,
+                            p_ent = EXCLUDED.p_ent,
+                            gamma_env = EXCLUDED.gamma_env,
+                            crystal_count = EXCLUDED.crystal_count,
+                            updated_at = NOW()
+                    """,
+                        _domain,
+                        round(event.peak_c_emo, 5),
+                        round(event.avg_p_ent, 5),
+                        round(event.avg_gamma_env, 5),
+                        _crystal_count,
+                    )
+                except Exception as _ds_err:
+                    print(f">>> [NEVEDAL] domain_state write: {_ds_err}")
+
         except Exception as e:
             print(f">>> [NEVEDAL] Failed to persist CEE event: {e}")
 

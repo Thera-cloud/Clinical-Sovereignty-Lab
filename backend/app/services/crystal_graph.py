@@ -148,14 +148,8 @@ class CrystalGraph:
             if not rows:
                 break
             for r in rows:
-                node = _CrystalNode(
-                    id=r["id"],
-                    content_hash=r["content_hash"],
-                    domain=r["domain"],
-                    confidence=float(r["confidence"] or 0.5),
-                    terms=_extract_terms(r["crystal_text"]),
-                    text_preview=r["crystal_text"][:200],
-                )
+                # QUANTUM-CRYSTAL-ARCH: use CrystalNode(dict(r)), not _CrystalNode
+                node = CrystalNode(dict(r))
                 self._nodes[node.id] = node
                 hash_to_node[node.content_hash] = node
             _offset += _page_size
@@ -169,7 +163,7 @@ class CrystalGraph:
             for node in batch:
                 try:
                     results = await semantic_search_all(
-                        node.text_preview,
+                        node.text[:200],
                         user_id="",
                         top_k=10,
                         index_subset=["wisdom"],

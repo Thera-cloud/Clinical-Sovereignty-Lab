@@ -76,6 +76,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "nate_checkin_audit_sent",
     "quickbooks_audit_sent",
     "corporate_command_audit_sent",
+    "voice_infra_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -105,6 +106,7 @@ AUDITOR_LABELS = {
     "nate_checkin_audit_sent": "Nate Check-In",
     "quickbooks_audit_sent": "QuickBooks Sync",
     "corporate_command_audit_sent": "Corporate Command",
+    "voice_infra_audit_sent": "Voice Infrastructure",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -538,6 +540,7 @@ class TrustEnforcer:
             "nate_checkin_audit_sent": "nate_checkin_check_count",
             "quickbooks_audit_sent": "quickbooks_check_count",
             "corporate_command_audit_sent": "corporate_command_check_count",
+            "voice_infra_audit_sent": "voice_infra_check_count",
         }
         return mapping.get(activity_type, "")
 

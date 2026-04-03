@@ -3275,6 +3275,24 @@ async def receive_crystal_heartbeat(request: Request):
     return {"ok": True, "node_id": node_id}
 
 
+async def _get_exa_status_or_fallback(request: Request, total_crystals: int):
+    """QUANTUM-CRYSTAL-ARCH: Use real ExaFLOPS methodology, fall back to crystal count."""
+    exa_hook = getattr(request.app.state, "exa_crystallization_hook", None)
+    if exa_hook:
+        try:
+            status = await exa_hook.get_exa_status()
+            if status.get("status") == "ok":
+                return status
+        except Exception as _e:
+            logger.debug("EXA status call failed, using fallback: %s", _e)
+    return {
+        "status": "fallback",
+        "note": "ExaFLOPS methodology pending — nevedal_domain_state not yet seeded",
+        "crystal_count": total_crystals,
+        "vanity_number": round(total_crystals * 0.00008, 2),
+    }
+
+
 @router.get("/admin/crystal-network/status", dependencies=[Depends(require_admin)])
 async def crystal_network_status(request: Request):
     """Return crystal counts per node for the network dashboard."""
@@ -3445,6 +3463,44 @@ async def crystal_network_status(request: Request):
         except Exception:
             pass
 
+    # QUANTUM-CRYSTAL-ARCH: Knowledge vs Wisdom ExaFLOPS split
+    wisdom_metrics = {
+        "user_scoped_crystals": 0,
+        "lived_origin_crystals": 0,
+        "clinical_dna_crystals": 0,
+        "knowledge_exaflops": round(total_crystals * 0.00008, 4),
+        "wisdom_exaflops": 0.0,
+    }
+    try:
+        async with db_pool.acquire() as wm_conn:
+            _wm_row = await wm_conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS user_scoped,
+                    COUNT(*) FILTER (WHERE origin_surface IN
+                        ('bridge_chat','voice_call','family_sanctuary',
+                         'group_coaching','private_coaching','coached_response',
+                         'growth_engine','clinical_edge_seed')) AS lived_origin,
+                    COUNT(*) FILTER (WHERE origin_surface IN
+                        ('growth_engine','clinical_edge_seed')) AS clinical_dna,
+                    AVG(confidence) FILTER (WHERE user_id IS NOT NULL) AS avg_user_conf
+                FROM nate_intelligence_crystals
+                WHERE scope != 'archived' AND superseded_by IS NULL
+            """)
+            if _wm_row:
+                _user_scoped = _wm_row["user_scoped"] or 0
+                _lived = _wm_row["lived_origin"] or 0
+                _dna = _wm_row["clinical_dna"] or 0
+                _avg_conf = float(_wm_row["avg_user_conf"] or 0.5)
+                wisdom_metrics["user_scoped_crystals"] = _user_scoped
+                wisdom_metrics["lived_origin_crystals"] = _lived
+                wisdom_metrics["clinical_dna_crystals"] = _dna
+                _wisdom_base = _user_scoped + _lived
+                wisdom_metrics["wisdom_exaflops"] = round(
+                    _wisdom_base * _avg_conf * 0.00008, 4
+                )
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "nodes": nodes,
@@ -3459,7 +3515,106 @@ async def crystal_network_status(request: Request):
             "last_1h": rate_per_hour,
             "rate_per_hour": rate_per_hour,
         },
-        "exa_flops": round(total_crystals * 0.00008, 2),
+        "exa_flops": await _get_exa_status_or_fallback(request, total_crystals),
+        "wisdom_metrics": wisdom_metrics,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CRYSTAL INTELLIGENCE — Yield Tracking
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/admin/crystal-network/yield", dependencies=[Depends(require_admin)])
+async def crystal_yield_metrics(request: Request, days: int = 7):
+    """QUANTUM-CRYSTAL-ARCH: crystals-per-session yield metrics."""
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Database not available")
+
+    async with db_pool.acquire() as conn:
+        _interval = f"{days} days"
+        chat_yield = await conn.fetchrow("""
+            WITH chat_sessions AS (
+                SELECT COUNT(DISTINCT user_id) AS unique_users,
+                       COUNT(*) AS total_turns
+                FROM conversation_history
+                WHERE created_at > NOW() - $1::interval
+                  AND LENGTH(user_text) > 15
+            ),
+            chat_crystals AS (
+                SELECT COUNT(*) AS cnt
+                FROM nate_intelligence_crystals
+                WHERE origin_surface = 'bridge_chat'
+                  AND user_id IS NOT NULL
+                  AND scope != 'archived'
+                  AND created_at > NOW() - $1::interval
+            )
+            SELECT cs.unique_users AS sessions, cc.cnt AS crystals,
+                   CASE WHEN cs.unique_users > 0
+                        THEN ROUND(cc.cnt::numeric / cs.unique_users, 2)
+                        ELSE 0 END AS yield_per_session
+            FROM chat_sessions cs, chat_crystals cc
+        """, _interval)
+
+        voice_yield = await conn.fetchrow("""
+            WITH vs AS (
+                SELECT COUNT(*) AS sessions
+                FROM voice_sessions
+                WHERE started_at > NOW() - $1::interval
+            ),
+            vc AS (
+                SELECT COUNT(*) AS cnt
+                FROM nate_intelligence_crystals
+                WHERE origin_surface = 'voice_call'
+                  AND user_id IS NOT NULL
+                  AND scope != 'archived'
+                  AND created_at > NOW() - $1::interval
+            )
+            SELECT vs.sessions, vc.cnt AS crystals,
+                   CASE WHEN vs.sessions > 0
+                        THEN ROUND(vc.cnt::numeric / vs.sessions, 2)
+                        ELSE 0 END AS yield_per_session
+            FROM vs, vc
+        """, _interval)
+
+        by_surface = await conn.fetch("""
+            SELECT origin_surface, COUNT(*) AS count,
+                   AVG(confidence) AS avg_confidence,
+                   COUNT(*) FILTER (WHERE user_id IS NOT NULL) AS user_scoped
+            FROM nate_intelligence_crystals
+            WHERE created_at > NOW() - $1::interval
+              AND scope != 'archived'
+              AND origin_surface IN ('bridge_chat','voice_call','family_sanctuary',
+                                     'group_coaching','private_coaching','growth_engine')
+            GROUP BY origin_surface
+            ORDER BY count DESC
+        """, _interval)
+
+    return {
+        "status": "ok",
+        "period_days": days,
+        "chat": {
+            "sessions": chat_yield["sessions"] if chat_yield else 0,
+            "crystals": chat_yield["crystals"] if chat_yield else 0,
+            "yield_per_session": float(chat_yield["yield_per_session"]) if chat_yield else 0,
+            "target": 5.0,
+        },
+        "voice": {
+            "sessions": voice_yield["sessions"] if voice_yield else 0,
+            "crystals": voice_yield["crystals"] if voice_yield else 0,
+            "yield_per_session": float(voice_yield["yield_per_session"]) if voice_yield else 0,
+            "target": 3.0,
+        },
+        "by_surface": [
+            {
+                "surface": r["origin_surface"],
+                "count": r["count"],
+                "avg_confidence": round(float(r["avg_confidence"] or 0), 3),
+                "user_scoped": r["user_scoped"],
+            }
+            for r in by_surface
+        ],
     }
 
 

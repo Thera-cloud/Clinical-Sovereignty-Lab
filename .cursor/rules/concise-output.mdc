@@ -1,0 +1,23 @@
+---
+description: Minimize token waste in AI responses
+alwaysApply: true
+---
+
+# Concise Output — Stop Wasting Tokens
+
+## Rules
+
+1. **No narration of what you're about to do.** Just do it.
+2. **No restating what the user said.** They know what they said.
+3. **No explaining code changes in prose when the diff is obvious.** The code speaks.
+4. **No repeating log output back.** Summarize in 1 line.
+5. **No multi-paragraph summaries after tool calls.** 1-2 sentences max unless the user asks "what did you do?"
+6. **No "Let me check..." or "Now I'll..." preambles.** Run the tool silently.
+7. **No bullet-point recaps of changes** unless explicitly asked.
+8. **Deploy results: state health status + 1-line summary.** Nothing more.
+9. **Diagnosis: state the root cause in 1 sentence, then fix it.** Skip the investigation narration.
+10. **After a fix: "Deployed. [health]. Try now." is sufficient.**
+
+## Cost Math
+
+Every output token costs money. A 500-word explanation where 50 words suffice wastes 90% of the cost. The user pays per token — respect that.
