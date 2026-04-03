@@ -5339,8 +5339,22 @@ async def admin_add_dojo(request: Request, user: dict = Depends(require_admin)):
 
 # ── SSE Story Generator endpoints ─────────────────────────────────────
 from fastapi import UploadFile, File as FastFile
+from app.services.api_server import get_current_user as _sse_auth
 
 sse_router = APIRouter(prefix="/api/sse", tags=["sse"], dependencies=[Depends(require_admin)])
+sse_client_router = APIRouter(prefix="/api/sse-client", tags=["sse-client"])
+
+@sse_client_router.post("/intake/turn")
+async def sse_client_intake_turn(request: Request, _user: dict = Depends(_sse_auth)):
+    body = await request.json()
+    from app.services.intake_session import process_intake_turn
+    uid = body.get("user_id") or _user.get("hardware_id", "")
+    return await process_intake_turn(uid, body.get("user_name", ""), body.get("turn", 1), body.get("user_message", ""), body.get("conversation_history", []), request.app.state.db_pool)
+
+@sse_client_router.get("/intake/status/{user_id}")
+async def sse_client_intake_status(user_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    from app.services.intake_session import get_intake_status
+    return await get_intake_status(user_id, request.app.state.db_pool)
 
 def _parse_json_col(val):
     if val is None: return {}

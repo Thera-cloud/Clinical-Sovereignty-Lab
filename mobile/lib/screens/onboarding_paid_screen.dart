@@ -578,7 +578,7 @@ class _IntakeCSState extends State<_IntakeConversationScreen> {
     final t = _ctrl.text.trim(); if (t.isEmpty || _busy || _done) return;
     setState(() { _msgs.add({'role': 'user', 'text': t}); _busy = true; }); _ctrl.clear(); _down();
     try {
-      final r = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse/intake/turn'),
+      final r = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/intake/turn'),
         headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $_tok'},
         body: jsonEncode({'user_id': _uid, 'user_name': _name, 'turn': _turn, 'user_message': t, 'conversation_history': _hist}),
       ).timeout(const Duration(seconds: 30));

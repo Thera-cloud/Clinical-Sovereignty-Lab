@@ -35,6 +35,17 @@ async def process_intake_turn(
 
     intake_data = await extract_intake_data(conversation_history, db_pool, user_id)
     closing = _CLOSING.replace("{name}", user_name)
+    try:
+        storyboard = (intake_data or {}).get("recommended_storyboard", "you_can_walk_in_it_beloved")
+        async with db_pool.acquire() as c:
+            await c.execute(
+                "INSERT INTO sse_enrolled_users (enrollment_id, user_id, storyboard_id) "
+                "VALUES (gen_random_uuid(), $1, $2) "
+                "ON CONFLICT (user_id, storyboard_id) DO NOTHING",
+                user_id, storyboard)
+        logger.info("SSE intake complete: enrolled %s in %s", user_id, storyboard)
+    except Exception as e:
+        logger.warning("SSE enrollment insert failed for %s: %s", user_id, e)
     return {
         "turn": 10,
         "nate_message": closing,
