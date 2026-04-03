@@ -30,8 +30,9 @@ async def create_record(
     filename: str,
     uploader_id: str,
     source_hash: str,
+    db_pool=None,
 ) -> str:
-    pool = await _get_pool()
+    pool = db_pool or await _get_pool()
     if pool is None:
         provenance_id = str(uuid.uuid4())
         logger.warning("ip_provenance: no db_pool — returning ephemeral id %s", provenance_id)
@@ -60,8 +61,9 @@ async def update_status(
     provenance_id: str,
     status: str,
     story_plot_id: Optional[str] = None,
+    db_pool=None,
 ) -> None:
-    pool = await _get_pool()
+    pool = db_pool or await _get_pool()
     if pool is None:
         logger.warning("ip_provenance: no db_pool — skipping status update for %s", provenance_id)
         return

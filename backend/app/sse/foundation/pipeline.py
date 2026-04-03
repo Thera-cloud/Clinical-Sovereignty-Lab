@@ -39,7 +39,7 @@ async def run_pipeline(
     parse_result = await document_parser.parse(file_bytes, mime_type, filename)
 
     if "error" in parse_result:
-        await ip_provenance.update_status(provenance_id, "failed_ocr_required")
+        await ip_provenance.update_status(provenance_id, "failed_ocr_required", db_pool=db_pool)
         return {
             "provenance_id": provenance_id,
             "error": parse_result,
@@ -57,6 +57,7 @@ async def run_pipeline(
         provenance_id,
         "complete",
         story_plot_id=story_plot_id,
+        db_pool=db_pool,
     )
 
     return {
