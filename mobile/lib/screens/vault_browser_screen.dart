@@ -120,10 +120,19 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     }
   }
 
+  bool get _isSovereignJourneySelected {
+    if (_selectedFolderId == null) return false;
+    return _folders.any((f) => f['id']?.toString() == _selectedFolderId && f['name'] == 'Sovereign Journey');
+  }
+
   Future<void> _loadItems() async {
     final folderId = _selectedFolderId ?? _folders.firstOrNull?['id']?.toString();
     if (folderId == null) {
       setState(() => _items = []);
+      return;
+    }
+    if (_isSovereignJourneySelected) {
+      await _loadSSEPanels();
       return;
     }
     final uri = Uri.parse('$_baseUrl/api/v1/vault/folders/$folderId/items').replace(
@@ -148,6 +157,50 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     } else {
       throw Exception('Failed to load items: ${resp.statusCode}');
     }
+  }
+
+  Future<void> _loadSSEPanels() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/sse-client/journey/panels');
+      final resp = await http.get(uri, headers: _authHeaders).timeout(const Duration(seconds: 10));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final data = jsonDecode(resp.body);
+        final panels = data['panels'] as List? ?? [];
+        final archetype = data['archetype'] as Map? ?? {};
+        final mapped = panels.map<Map<String, dynamic>>((p) {
+          final m = Map<String, dynamic>.from(p as Map);
+          return {
+            'id': m['panel_id'] ?? '',
+            'display_name': '${(m['panel_type'] ?? 'panel').toString().replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
+            'content_type': 'sse_panel',
+            'created_at': m['generated_at'],
+            'thumbnail_url': m['r2_url'],
+            'starred': false,
+            '_sse': m,
+            '_archetype': archetype,
+          };
+        }).toList();
+        if (archetype['archetype_image_url'] != null) {
+          mapped.insert(0, {
+            'id': 'archetype',
+            'display_name': '${archetype['archetype_hint'] ?? 'Your Archetype'}',
+            'content_type': 'sse_archetype',
+            'thumbnail_url': archetype['archetype_image_url'],
+            'starred': false,
+            '_sse': {'r2_url': archetype['archetype_image_url'], 'narrative_text': 'This is you in the Thera-World.'},
+          });
+        }
+        setState(() => _items = mapped);
+      }
+    } catch (e) {
+      setState(() => _items = []);
+    }
+  }
+
+  String _fmtDate(dynamic d) {
+    if (d == null) return '';
+    final s = d.toString();
+    return s.length >= 10 ? s.substring(0, 10) : s;
   }
 
   Future<void> _searchItems() async {
@@ -689,6 +742,11 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
   }
 
   void _openItem(Map<String, dynamic> item) {
+    final isSSE = item['content_type'] == 'sse_panel' || item['content_type'] == 'sse_archetype';
+    if (isSSE) {
+      _openSSEPanel(item);
+      return;
+    }
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -703,7 +761,6 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
           _toggleStar(item);
           Navigator.pop(ctx);
         },
-        // Sovereign Circle: Organize with Nate
         extraActions: _isSovereignCircle ? [
           VaultExtraAction(
             icon: Icons.auto_fix_high,
@@ -721,6 +778,56 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
             },
           ),
         ] : null,
+      ),
+    );
+  }
+
+  void _openSSEPanel(Map<String, dynamic> item) {
+    final sse = item['_sse'] as Map<String, dynamic>? ?? {};
+    final imgUrl = sse['r2_url']?.toString() ?? '';
+    final narrative = sse['narrative_text']?.toString() ?? '';
+    final biome = sse['biome']?.toString() ?? '';
+    final tone = sse['panel_tone']?.toString() ?? '';
+    final panelId = item['id']?.toString() ?? '';
+    // Mark as viewed
+    if (panelId.isNotEmpty && panelId != 'archetype') {
+      http.post(Uri.parse('$_baseUrl/api/sse-client/panel/$panelId/viewed'), headers: _authHeaders);
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _VaultDesign.bgChamber,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85, minChildSize: 0.4, maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollCtrl) => ListView(controller: scrollCtrl, padding: const EdgeInsets.all(16), children: [
+          if (imgUrl.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(imgUrl, fit: BoxFit.cover, height: 300, width: double.infinity),
+            ),
+          const SizedBox(height: 16),
+          if (narrative.isNotEmpty)
+            Text(narrative, style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 15, height: 1.6)),
+          const SizedBox(height: 12),
+          if (biome.isNotEmpty || tone.isNotEmpty)
+            Wrap(spacing: 8, children: [
+              if (biome.isNotEmpty) Chip(label: Text(biome.replaceAll('_', ' '), style: const TextStyle(fontSize: 11, color: Color(0xFF00E5A0))), backgroundColor: const Color(0xFF00E5A0).withOpacity(0.12)),
+              if (tone.isNotEmpty) Chip(label: Text(tone, style: const TextStyle(fontSize: 11, color: _VaultDesign.gold)), backgroundColor: _VaultDesign.gold.withOpacity(0.12)),
+            ]),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.chat_bubble_outline, size: 18),
+            label: const Text('Ask Nate About This'),
+            style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final msg = '[Story Panel] $narrative\nBiome: $biome | Tone: $tone';
+              Navigator.pop(context, msg);
+            },
+          ),
+        ]),
       ),
     );
   }

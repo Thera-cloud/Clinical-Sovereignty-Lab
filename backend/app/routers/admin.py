@@ -5464,6 +5464,33 @@ async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Dep
         await conn.execute("UPDATE sse_missions SET status='paused' WHERE mission_id=$1 AND user_id=$2", mission_id, uid)
     return {"status": "paused", "mission_id": mission_id}
 
+
+@sse_client_router.get("/journey/panels")
+async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT panel_id, panel_type, r2_url, narrative_text, biome, character_manifest, "
+            "panel_tone, generated_at, crystal_domains_used, viewed_at "
+            "FROM sse_panel_log WHERE user_id=$1 ORDER BY generated_at DESC LIMIT 50", uid)
+        j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id=$1", uid)
+        f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id=$1", uid)
+    return {
+        "archetype": dict(f) if f else {},
+        "journey": dict(j) if j else {},
+        "panels": [dict(r) for r in rows]
+    }
+
+
+@sse_client_router.post("/panel/{panel_id}/viewed")
+async def sse_panel_viewed(panel_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE sse_panel_log SET viewed_at=now() WHERE panel_id=$1", panel_id)
+    return {"status": "marked_viewed", "panel_id": panel_id}
+
+
 def _parse_json_col(val):
     if val is None: return {}
     return json.loads(val) if isinstance(val, str) else val
@@ -5777,3 +5804,55 @@ async def sse_backfill_all(request: Request):
         except Exception:
             failed += 1
     return {"processed": processed, "succeeded": succeeded, "failed": failed}
+
+
+@sse_router.get("/monitor/users-summary")
+async def sse_monitor_users_summary(request: Request):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT j.user_id, j.current_biome, j.dominant_character, j.panels_generated,
+                   j.last_panel_at, j.panel_sequence,
+                   f.archetype_hint, f.archetype_image_url,
+                   (SELECT count(*) FROM sse_quests q WHERE q.user_id=j.user_id AND q.status='active') as active_quests,
+                   (SELECT count(*) FROM sse_missions m WHERE m.user_id=j.user_id AND m.status='active') as active_missions
+            FROM sse_user_journeys j LEFT JOIN sse_identity_forge f ON j.user_id=f.user_id
+            ORDER BY j.last_panel_at DESC NULLS LAST""")
+    return [dict(r) for r in rows]
+
+
+@sse_router.post("/thera-world/preview")
+async def sse_thera_world_preview(request: Request):
+    body = await request.json()
+    from app.sse.thera_world_engine import generate_journey_panel
+    return await generate_journey_panel(body["user_id"], request.app.state.db_pool)
+
+
+@sse_router.post("/admin/journey/override")
+async def sse_journey_override(request: Request):
+    body = await request.json()
+    uid = body.get("user_id")
+    action = body.get("action")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        j = await conn.fetchrow("SELECT * FROM sse_user_journeys WHERE user_id=$1", uid)
+        if not j:
+            raise HTTPException(404, "No journey for user")
+        if action == "force_biome_transition":
+            tb = body.get("target_biome", "fortress_plains")
+            await conn.execute("UPDATE sse_user_journeys SET current_biome=$1, panel_sequence=0 WHERE user_id=$2", tb, uid)
+            await conn.execute("INSERT INTO sse_admin_alerts(user_id,alert_type,title,detail) VALUES($1,'admin_override','Biome forced to '||$2,$3)", uid, tb, f"Admin override: {j['current_biome']} → {tb}")
+            return {"status": "ok", "action": action, "new_biome": tb}
+        elif action == "pause_journey":
+            await conn.execute("UPDATE sse_user_journeys SET journey_metadata=journey_metadata||'{\"paused\":true}'::jsonb WHERE user_id=$1", uid)
+            await conn.execute("INSERT INTO sse_admin_alerts(user_id,alert_type,title) VALUES($1,'admin_override','Journey paused')", uid)
+            return {"status": "ok", "action": action}
+        elif action == "resume_journey":
+            await conn.execute("UPDATE sse_user_journeys SET journey_metadata=journey_metadata-'paused' WHERE user_id=$1", uid)
+            await conn.execute("INSERT INTO sse_admin_alerts(user_id,alert_type,title) VALUES($1,'admin_override','Journey resumed')", uid)
+            return {"status": "ok", "action": action}
+        elif action == "reset_panel_sequence":
+            await conn.execute("UPDATE sse_user_journeys SET panel_sequence=0 WHERE user_id=$1", uid)
+            return {"status": "ok", "action": action}
+        else:
+            raise HTTPException(422, f"Unknown action: {action}")

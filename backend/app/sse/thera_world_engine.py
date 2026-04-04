@@ -484,6 +484,45 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
                 "SELECT alert_id, alert_type, title, detail, created_at, acknowledged "
                 "FROM sse_admin_alerts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10", user_id)
             status["alerts"] = [dict(a) for a in alerts]
+
+            # Crystal health + coherence enrichment
+            try:
+                uid_row = await conn.fetchrow("SELECT id FROM users WHERE username=$1", user_id)
+                if uid_row:
+                    _uuid = uid_row["id"]
+                    crystal_stats = await conn.fetchrow(
+                        "SELECT count(*) as total, "
+                        "count(*) FILTER (WHERE confidence >= 0.8) as locked_count "
+                        "FROM nate_intelligence_crystals WHERE user_id=$1", _uuid)
+                    top_domains = await conn.fetch(
+                        "SELECT domain, count(*) as cnt FROM nate_intelligence_crystals "
+                        "WHERE user_id=$1 AND domain IS NOT NULL GROUP BY domain ORDER BY cnt DESC LIMIT 5", _uuid)
+                    old_count = await conn.fetchval(
+                        "SELECT count(*) FROM nate_intelligence_crystals "
+                        "WHERE user_id=$1 AND created_at < now() - interval '30 days'", _uuid)
+                    total = crystal_stats["total"] if crystal_stats else 0
+                    trend = "gaining" if total > (old_count or 0) * 1.1 else ("declining" if total < (old_count or 0) * 0.9 else "stable")
+                    status["crystal_health"] = {
+                        "total": total, "locked": crystal_stats["locked_count"] if crystal_stats else 0,
+                        "top_domains": [{"domain": d["domain"], "count": d["cnt"]} for d in top_domains],
+                        "growth_trend": trend}
+                    coherence = await conn.fetchrow(
+                        "SELECT coherence_pct, growth_pct, quantum_pct FROM nevedal_metrics "
+                        "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", user_id)
+                    if coherence:
+                        status["coherence"] = dict(coherence)
+            except Exception:
+                pass
+
+            # Identity forge data
+            try:
+                forge = await conn.fetchrow(
+                    "SELECT archetype_hint, archetype_image_url, character_visual "
+                    "FROM sse_identity_forge WHERE user_id=$1", user_id)
+                if forge:
+                    status["forge"] = dict(forge)
+            except Exception:
+                pass
     except Exception as e:
         logger.warning("get_user_sse_status failed for %s: %s", user_id, e)
 

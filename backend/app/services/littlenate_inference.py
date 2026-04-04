@@ -351,10 +351,7 @@ class LittleNateInference:
         if story_context:  # QUANTUM-CRYSTAL-ARCH
             if story_context.get("phase_id"):
                 parts.append(
-                    f"[STORY JOURNEY]\nThis person is on a healing journey. Their current story phase is "
-                    f"'{story_context['phase_id']}' — {story_context.get('narrative', '')}. "
-                    f"You may gently reference their story journey if it connects naturally to what they're sharing. "
-                    f"Do not force story references. Let the conversation lead.\n")
+                    f"[STORY JOURNEY] Phase: {story_context['phase_id']}. Reference their healing journey naturally if relevant.\n")
             aq = story_context.get("active_quest")
             if aq:
                 parts.append(f"[ACTIVE QUEST] They're working on: {aq['goal']}. Reference naturally if relevant.\n")

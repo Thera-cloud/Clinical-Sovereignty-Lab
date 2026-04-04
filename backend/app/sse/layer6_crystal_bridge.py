@@ -18,10 +18,17 @@ logger = logging.getLogger(__name__)
 _CRISIS_KEYWORDS = {"crisis", "shutdown", "dissociation", "suicidal", "self-harm", "destabilized"}
 _CONFRONT_KEYWORDS = {"confrontation", "descent", "exposure", "provocation"}
 
+_story_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_STORY_CACHE_TTL = 300  # 5 minutes
+
 
 async def get_user_story_context(user_id: str, db_pool) -> dict[str, Any] | None:
     """Get the user's current storyboard panel context for prompt injection."""
-    import json
+    import json, time
+    now = time.monotonic()
+    cached = _story_cache.get(user_id)
+    if cached and (now - cached[0]) < _STORY_CACHE_TTL:
+        return cached[1]
     ctx: dict[str, Any] = {}
     try:
         async with db_pool.acquire() as conn:
@@ -50,7 +57,9 @@ async def get_user_story_context(user_id: str, db_pool) -> dict[str, Any] | None
     except Exception as e:
         logger.warning("get_user_story_context failed for %s: %s", user_id, e)
         return None
-    return ctx if ctx else None
+    result = ctx if ctx else None
+    _story_cache[user_id] = (now, result)
+    return result
 
 
 async def get_user_crystals_for_panel(
