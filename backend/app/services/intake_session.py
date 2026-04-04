@@ -36,7 +36,7 @@ async def process_intake_turn(
     intake_data = await extract_intake_data(conversation_history, db_pool, user_id)
     closing = _CLOSING.replace("{name}", user_name)
     try:
-        storyboard = (intake_data or {}).get("recommended_storyboard", "you_can_walk_in_it_beloved")
+        storyboard = "you_can_walk_in_it_beloved"
         async with db_pool.acquire() as c:
             await c.execute(
                 "INSERT INTO sse_enrolled_users (enrollment_id, user_id, storyboard_id) "
