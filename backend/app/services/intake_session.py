@@ -36,7 +36,25 @@ async def process_intake_turn(
     intake_data = await extract_intake_data(conversation_history, db_pool, user_id)
     closing = _CLOSING.replace("{name}", user_name)
     try:
-        storyboard = "you_can_walk_in_it_beloved"
+        # Validate recommended storyboard against approved storyboards in DB
+        raw_rec = (intake_data or {}).get("recommended_storyboard", "")
+        approved = []
+        try:
+            async with db_pool.acquire() as vc:
+                approved = [r["storyboard_id"] for r in await vc.fetch(
+                    "SELECT DISTINCT storyboard_id FROM sse_delivery_config WHERE status = 'active'"
+                )]
+        except Exception:
+            pass
+        # Try exact match first, then fuzzy match on keywords
+        storyboard = "you_can_walk_in_it_beloved"  # default fallback
+        if raw_rec in approved:
+            storyboard = raw_rec
+        else:
+            for sid in approved:
+                if any(w in raw_rec.lower() for w in sid.replace("_", " ").split() if len(w) > 3):
+                    storyboard = sid
+                    break
         async with db_pool.acquire() as c:
             await c.execute(
                 "INSERT INTO sse_enrolled_users (enrollment_id, user_id, storyboard_id) "
