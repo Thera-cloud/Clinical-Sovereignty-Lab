@@ -19,6 +19,40 @@ _CRISIS_KEYWORDS = {"crisis", "shutdown", "dissociation", "suicidal", "self-harm
 _CONFRONT_KEYWORDS = {"confrontation", "descent", "exposure", "provocation"}
 
 
+async def get_user_story_context(user_id: str, db_pool) -> dict[str, Any] | None:
+    """Get the user's current storyboard panel context for prompt injection."""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT storyboard_id FROM sse_enrolled_users WHERE user_id = $1", user_id
+            )
+            if not row:
+                return None
+            sb_id = row["storyboard_id"]
+            prov = await conn.fetchrow(
+                "SELECT story_plot_json FROM sse_ip_provenance WHERE storyboard_id = $1 AND status = 'approved'",
+                sb_id,
+            )
+            if not prov or not prov["story_plot_json"]:
+                return None
+        import json
+        plot = prov["story_plot_json"] if isinstance(prov["story_plot_json"], dict) else json.loads(prov["story_plot_json"])
+        panels = plot.get("panels", [])
+        if not panels:
+            return None
+        p = panels[0]
+        return {
+            "storyboard_id": sb_id,
+            "phase_id": p.get("phase_id", ""),
+            "narrative": p.get("narrative", ""),
+            "panel_tone": p.get("panel_tone", ""),
+            "phase_description": p.get("phase_description", p.get("scene_description", "")),
+        }
+    except Exception as e:
+        logger.warning("get_user_story_context failed for %s: %s", user_id, e)
+        return None
+
+
 async def get_user_crystals_for_panel(
     user_id: str, phase: str, db_pool
 ) -> list[dict[str, Any]]:

@@ -200,12 +200,22 @@ class LittleNateInference:
             except Exception as e:
                 logger.warning("LittleNateInference: Quantum eval failed: %s", e)
 
+        # Step 5.5: SSE story context (never breaks chat) # QUANTUM-CRYSTAL-ARCH
+        _story_ctx = None
+        if self._db_pool and user_id != "anonymous":
+            try:
+                from app.sse.layer6_crystal_bridge import get_user_story_context
+                _story_ctx = await get_user_story_context(user_id, self._db_pool)
+            except Exception:
+                pass
+
         # Step 6: Build enriched prompt (if SDH didn't already build it)
         if enriched_prompt is None:
             enriched_prompt = self._build_enriched_prompt(
                 prompt, synthesis_directive, crystals, quantum_eval,
                 conversation_context=conversation_context,
                 silence_spark=silence_spark,
+                story_context=_story_ctx,
             )
 
         if self._quantum_orchestrator:
@@ -308,6 +318,7 @@ class LittleNateInference:
         quantum_eval: Optional[Dict],
         conversation_context: str = "",
         silence_spark: Optional[str] = None,
+        story_context: Optional[Dict] = None,
     ) -> str:
         parts = []
 
@@ -336,6 +347,14 @@ class LittleNateInference:
             gw = quantum_eval.get("generative_wisdom", {})
             if gw.get("novel_insight"):
                 parts.append(f"[EMERGENT INSIGHT] {gw['novel_insight']}\n")
+
+        if story_context and story_context.get("phase_id"):  # QUANTUM-CRYSTAL-ARCH
+            parts.append(
+                f"[STORY JOURNEY]\nThis person is on a healing journey. Their current story phase is "
+                f"'{story_context['phase_id']}' — {story_context.get('narrative', '')}. "
+                f"You may gently reference their story journey if it connects naturally to what they're sharing. "
+                f"Do not force story references. Let the conversation lead.\n"
+            )
 
         if silence_spark:
             parts.append(f"[CONVERSATION SPARK] {silence_spark}\n")
