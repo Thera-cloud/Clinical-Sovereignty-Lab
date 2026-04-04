@@ -1765,10 +1765,17 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                       onTap: () {
                         _markNudgeOpened(nudgeId);
                         Navigator.pop(ctx);
-                        // If the nudge has an action, handle it
-                        final action = nudge['action']?.toString();
+                        final meta = nudge['metadata'] is String ? jsonDecode(nudge['metadata']) : (nudge['metadata'] ?? {});
+                        final action = meta['action']?.toString() ?? nudge['action']?.toString();
                         if (action == 'start_session') {
                           _addSystemMsg("Nate says: $body");
+                        } else if (action == 'open_intake') {
+                          Navigator.push(context, MaterialPageRoute(
+                            builder: (_) => IntakeConversationScreen(
+                              profileWithToken: widget.currentUserProfile ?? {},
+                              onComplete: () { Navigator.pop(context); _checkSseIntake(); },
+                            ),
+                          ));
                         }
                       },
                     ),
