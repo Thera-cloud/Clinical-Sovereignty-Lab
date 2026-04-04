@@ -103,6 +103,9 @@ class SSEOrchestrator:
                 logger.error("SSE daily_panel %s error: %s", storyboard_id, e)
 
     async def _run_weekly_clips(self, storyboard_id: str):
+        # TODO Phase 5: Select best 3 journey panels from week → Grok Video Extend from
+        #   Frame → chain clips → upload to Cloudflare Stream → push notification to user.
+        #   Include quest/mission panels if active. Family recap aggregates member panels.
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr
@@ -114,6 +117,9 @@ class SSEOrchestrator:
                 logger.error("SSE weekly_clip %s error: %s", storyboard_id, e)
 
     async def _run_monthly_recap(self, storyboard_id: str):
+        # TODO Phase 5: Select best panels + weekly clips → narrative voiceover via Grok TTS →
+        #   compose 3-min video → upload to Cloudflare Stream + R2 + IPFS hash.
+        #   Family recap: aggregate family member panels into shared video.
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr

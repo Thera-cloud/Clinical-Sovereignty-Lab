@@ -69,6 +69,7 @@ async def process_intake_turn(
         "nate_message": closing,
         "complete": True,
         "intake_data": intake_data,
+        "archetype_image_url": (intake_data or {}).get("archetype_image_url"),
         "conversation_history": conversation_history,
     }
 

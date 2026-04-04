@@ -348,13 +348,19 @@ class LittleNateInference:
             if gw.get("novel_insight"):
                 parts.append(f"[EMERGENT INSIGHT] {gw['novel_insight']}\n")
 
-        if story_context and story_context.get("phase_id"):  # QUANTUM-CRYSTAL-ARCH
-            parts.append(
-                f"[STORY JOURNEY]\nThis person is on a healing journey. Their current story phase is "
-                f"'{story_context['phase_id']}' — {story_context.get('narrative', '')}. "
-                f"You may gently reference their story journey if it connects naturally to what they're sharing. "
-                f"Do not force story references. Let the conversation lead.\n"
-            )
+        if story_context:  # QUANTUM-CRYSTAL-ARCH
+            if story_context.get("phase_id"):
+                parts.append(
+                    f"[STORY JOURNEY]\nThis person is on a healing journey. Their current story phase is "
+                    f"'{story_context['phase_id']}' — {story_context.get('narrative', '')}. "
+                    f"You may gently reference their story journey if it connects naturally to what they're sharing. "
+                    f"Do not force story references. Let the conversation lead.\n")
+            aq = story_context.get("active_quest")
+            if aq:
+                parts.append(f"[ACTIVE QUEST] They're working on: {aq['goal']}. Reference naturally if relevant.\n")
+            am = story_context.get("active_mission")
+            if am:
+                parts.append(f"[ACTIVE MISSION] Relational work with {am['target']} ({am['type']}). Reference gently.\n")
 
         if silence_spark:
             parts.append(f"[CONVERSATION SPARK] {silence_spark}\n")

@@ -2,6 +2,17 @@
 
 Generates daily journey panels for every active client using crystal memory,
 biome progression, and character manifestation. Independent of workbook enrollment.
+
+# ---------- Phase 6: Family Sanctuary Story Integration ----------
+# TODO: Couples — shared relational story space. Partner NPCs appear as
+#   distant figures in each other's panels (never named, always archetypal).
+# TODO: Dependents — age-gated biomes (brighter, gentler imagery).
+#   Simplified intake. Adult trauma themes MUST NOT leak into child panels.
+# TODO: Family coherence — family-level story thread when multiple members
+#   are active. Shared biome events (storms, seasons) sync across members.
+# TODO: Relational crystal linking — crystals from family therapy sessions
+#   create cross-member NPC appearances (e.g. "The Bridge Builder").
+# -----------------------------------------------------------------
 """
 from __future__ import annotations
 
@@ -138,6 +149,17 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
     except Exception as e:
         logger.warning("get_therapeutic_profile failed for %s: %s", user_id, e)
 
+    cc = profile.get("crystal_count", 0)
+    sc = profile.get("session_count", 0)
+    if cc >= 50 and sc >= 10:
+        profile["data_richness"] = "rich"
+    elif cc >= 10 and sc >= 3:
+        profile["data_richness"] = "moderate"
+    elif cc >= 1 or sc >= 1:
+        profile["data_richness"] = "thin"
+    else:
+        profile["data_richness"] = "empty"
+
     _profile_cache[user_id] = (now, profile)
     return profile
 
@@ -183,7 +205,9 @@ async def determine_character(profile: dict) -> Tuple[str, str]:
 
 
 async def compose_journey_narrative(
-    profile: dict, journey: dict, biome: dict, character: Tuple[str, str], db_pool
+    profile: dict, journey: dict, biome: dict, character: Tuple[str, str], db_pool,
+    last_panel_summary: str = "", last_panel_npcs: list = None, panel_sequence: int = 0,
+    user_id: str = "",
 ) -> dict:
     """Use LLM to compose a scene narrative. Falls back to template on failure."""
     import httpx
@@ -195,6 +219,21 @@ async def compose_journey_narrative(
     quest_goal = profile["active_quests"][0]["goal"] if profile.get("active_quests") else "none"
     mission_target = profile["active_missions"][0]["relationship_target"] if profile.get("active_missions") else "none"
     arc = journey.get("therapeutic_arc", "exploration")
+    richness = profile.get("data_richness", "moderate")
+
+    # For empty/thin users, pull intake themes as narrative source material
+    intake_themes = ""
+    if richness in ("empty", "thin") and user_id:
+        try:
+            async with db_pool.acquire() as conn:
+                conv_hist = await conn.fetchval(
+                    "SELECT conversation_history FROM sse_identity_forge WHERE user_id = $1", user_id)
+            if conv_hist:
+                turns = json.loads(conv_hist) if isinstance(conv_hist, str) else conv_hist
+                user_turns = [m["content"] for m in turns if m.get("role") == "user"]
+                intake_themes = "; ".join(t[:80] for t in user_turns[2:8] if t)
+        except Exception:
+            pass
 
     fallback = {
         "narrative_text": f"In the {biome_name.replace('_', ' ')}, the {char_name} watches and waits. The path forward is becoming clearer.",
@@ -208,16 +247,32 @@ async def compose_journey_narrative(
     if not url or not key:
         return fallback
 
+    richness_guidance = {
+        "rich": f"Recent therapeutic themes: {crystal_summaries}\n",
+        "moderate": f"Recent therapeutic themes: {crystal_summaries}\n",
+        "thin": f"User's intake themes (limited crystal data): {intake_themes or crystal_summaries}\nFocus on biome atmosphere with hints from these themes.\n",
+        "empty": f"User's intake themes: {intake_themes or 'just beginning'}\nFocus on pure biome atmosphere, character exploration, world-building.\n",
+    }
+
+    npc_names = ", ".join(n.get("name", "") for n in (last_panel_npcs or []) if n.get("name"))
+    continuity_block = (
+        f"Previous scene: {last_panel_summary or 'This is the opening scene.'}\n"
+        f"NPCs present last time: {npc_names or 'none yet'}\n"
+        f"This is panel {panel_sequence + 1} in the {biome_name} biome.\n"
+        "Generate the NEXT scene that continues from where we left off.\n"
+    )
+
     sys_prompt = (
         "You are a therapeutic narrative composer for the Sovereign Story Engine. "
         "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
         "for a user's daily story panel.\n\n"
         f"User's current biome: {biome_name} — {biome_desc}\n"
         f"Core character present: {char_name}\n"
-        f"Recent therapeutic themes: {crystal_summaries}\n"
+        f"{richness_guidance.get(richness, richness_guidance['moderate'])}"
         f"Active quest: {quest_goal}\n"
         f"Active mission: {mission_target}\n"
-        f"Therapeutic arc: {arc}\n\n"
+        f"Therapeutic arc: {arc}\n"
+        f"{continuity_block}\n"
         "The scene should:\n"
         "- Reflect where the user is therapeutically (not literally — metaphorically)\n"
         "- Include the core character manifestation naturally in the landscape\n"
@@ -256,9 +311,19 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     from app.sse.infrastructure.grok_imagine_client import generate_image
     from app.sse.infrastructure.r2_storage import store_image
 
+    # One panel per day maximum — quest/mission panels count too
+    try:
+        async with db_pool.acquire() as conn:
+            today_exists = await conn.fetchval(
+                "SELECT panel_id FROM sse_panel_log WHERE user_id = $1 AND generated_at::date = CURRENT_DATE", user_id)
+            if today_exists:
+                return {"skipped": True, "reason": "panel_exists_today", "panel_id": str(today_exists)}
+    except Exception:
+        pass
+
     journey = await get_or_create_journey(user_id, db_pool)
     profile = await get_therapeutic_profile(user_id, db_pool)
-    await check_biome_transition(user_id, profile, journey, db_pool)
+    transitioned = await check_biome_transition(user_id, profile, journey, db_pool)
 
     journey_fresh = None
     try:
@@ -274,13 +339,78 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     current_biome_name = journey.get("current_biome", "dark_forest")
     biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == current_biome_name), BIOME_THRESHOLDS[0])
     character = await determine_character(profile)
-    narrative = await compose_journey_narrative(profile, journey, biome, character, db_pool)
 
-    image_bytes = await generate_image(narrative["image_prompt"])
-    content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    r2_key = f"sse/journey/{user_id}/{today}/{content_hash}.png"
-    r2_url = await store_image(image_bytes, r2_key)
+    last_summary = journey.get("last_panel_summary", "") or ""
+    last_npcs = journey.get("last_panel_npcs") or []
+    if isinstance(last_npcs, str):
+        last_npcs = json.loads(last_npcs)
+    panel_seq = journey.get("panel_sequence", 0) or 0
+    if transitioned:
+        panel_seq = 0
+
+    narrative = await compose_journey_narrative(
+        profile, journey, biome, character, db_pool,
+        last_panel_summary=last_summary, last_panel_npcs=last_npcs,
+        panel_sequence=panel_seq, user_id=user_id)
+
+    image_prompt = narrative.get("image_prompt", "")
+    if not image_prompt:
+        image_prompt = f"{biome['description']}, a solitary figure, {character[1]}, painterly style"
+
+    # Archetype protagonist reference
+    jmeta = journey.get("journey_metadata") or {}
+    if isinstance(jmeta, str):
+        jmeta = json.loads(jmeta)
+    arch_hint = jmeta.get("archetype_hint", "")
+    if arch_hint:
+        image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
+
+    # Blend active quest/mission NPCs into image
+    current_npcs: list = []
+    try:
+        for q in profile.get("active_quests", []):
+            pn = q.get("progress_notes", [])
+            if isinstance(pn, str):
+                pn = json.loads(pn)
+            if pn and pn[0].get("npcs"):
+                current_npcs.extend(pn[0]["npcs"][:2])
+        for m in profile.get("active_missions", []):
+            pn = m.get("progress_notes", [])
+            if isinstance(pn, str):
+                pn = json.loads(pn)
+            if pn and pn[0].get("npcs"):
+                current_npcs.extend(pn[0]["npcs"][:1])
+    except Exception:
+        pass
+    for npc in current_npcs[:3]:
+        frag = npc.get("visual_prompt_fragment", "")
+        if frag:
+            image_prompt += f", {frag}"
+
+    image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
+    image_prompt += f", {character[1]}"
+
+    r2_url = ""
+    try:
+        image_bytes = await generate_image(image_prompt)
+        content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        r2_key = f"sse/journey/{user_id}/{today}/{content_hash}.png"
+        r2_url = await store_image(image_bytes, r2_key)
+    except Exception as e:
+        logger.warning("Journey image generation failed for %s: %s", user_id, e)
+        # Reserve panel fallback
+        reserves = jmeta.get("reserve_prompts") or []
+        if reserves:
+            try:
+                ib = await generate_image(reserves[0])
+                ih = hashlib.md5(reserves[0].encode()).hexdigest()[:12]
+                r2_url = await store_image(ib, f"sse/journey/{user_id}/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/{ih}.png")
+            except Exception:
+                pass
+
+    nar_text = narrative.get("narrative_text", "")
+    new_summary = (nar_text.split(".")[0] + ".") if nar_text and "." in nar_text else nar_text[:100]
 
     panel_id = str(uuid.uuid4())
     try:
@@ -291,19 +421,30 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 "biome, character_manifest, narrative_text, panel_tone, crystal_domains_used) "
                 "VALUES ($1,$2,'journey',$3,'thera_world',$4,$5,$6,$7,$8,$9,$10::jsonb)",
                 panel_id, user_id, journey.get("journey_id"), r2_url,
-                narrative["image_prompt"][:500], current_biome_name, character[0],
-                narrative["narrative_text"], narrative["panel_tone"],
+                image_prompt[:500], current_biome_name, character[0],
+                nar_text, narrative.get("panel_tone", "meditative"),
                 json.dumps(profile.get("top_domains", [])))
             await conn.execute(
                 "UPDATE sse_user_journeys SET last_panel_at = NOW(), "
-                "panels_generated = panels_generated + 1, dominant_character = $1 "
-                "WHERE user_id = $2", character[0], user_id)
+                "panels_generated = panels_generated + 1, dominant_character = $1, "
+                "last_panel_summary = $2, last_panel_npcs = $3::jsonb, panel_sequence = $4 "
+                "WHERE user_id = $5",
+                character[0], new_summary,
+                json.dumps(current_npcs[:5]), panel_seq + 1, user_id)
+            # Store reserve prompts after first successful panel
+            if r2_url and (journey.get("panels_generated") or 0) == 0:
+                r1 = f"{biome['description']}, {character[1]}, peaceful dawn, painterly style, muted warm palette, no text"
+                r2 = f"{biome['description']}, {character[1]}, twilight path forward, painterly style, muted warm palette, no text"
+                await conn.execute(
+                    "UPDATE sse_user_journeys SET journey_metadata = "
+                    "jsonb_set(COALESCE(journey_metadata, '{}'), '{reserve_prompts}', $1::jsonb) "
+                    "WHERE user_id = $2", json.dumps([r1, r2]), user_id)
     except Exception as e:
         logger.warning("generate_journey_panel DB write failed for %s: %s", user_id, e)
 
     return {"panel_id": panel_id, "r2_url": r2_url, "biome": current_biome_name,
-            "character": character[0], "narrative": narrative["narrative_text"],
-            "panel_tone": narrative["panel_tone"]}
+            "character": character[0], "narrative": nar_text,
+            "panel_tone": narrative.get("panel_tone", "meditative"), "transitioned": transitioned}
 
 
 async def get_user_sse_status(user_id: str, db_pool) -> dict:

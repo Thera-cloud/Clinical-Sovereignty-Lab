@@ -5404,6 +5404,66 @@ async def sse_client_vault(user_id: str, request: Request, _user: dict = Depends
                            "title": p.get("scene_description", "")[:80]}
                           for p in sp.get("panels", []) if p.get("r2_url")]}
 
+@sse_client_router.post("/quest/create")
+async def sse_create_quest(request: Request, _user: dict = Depends(_sse_auth)):
+    from app.sse.quest_mission_engine import create_quest
+    body = await request.json()
+    uid = _user.get("user_id") or _user.get("username", "")
+    return await create_quest(uid, body.get("goal", ""), request.app.state.db_pool)
+
+@sse_client_router.post("/mission/create")
+async def sse_create_mission(request: Request, _user: dict = Depends(_sse_auth)):
+    from app.sse.quest_mission_engine import create_mission
+    body = await request.json()
+    uid = _user.get("user_id") or _user.get("username", "")
+    return await create_mission(uid, body.get("relationship_target", ""), body.get("relationship_type", ""), request.app.state.db_pool)
+
+@sse_client_router.get("/quests")
+async def sse_list_quests(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    async with request.app.state.db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC", uid)
+    return {"quests": [dict(r) for r in rows]}
+
+@sse_client_router.get("/missions")
+async def sse_list_missions(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    async with request.app.state.db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT * FROM sse_missions WHERE user_id=$1 AND status='active' ORDER BY started_at DESC", uid)
+    return {"missions": [dict(r) for r in rows]}
+
+@sse_client_router.post("/quest/{quest_id}/complete")
+async def sse_complete_quest(quest_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE sse_quests SET status='completed', completed_at=NOW() WHERE quest_id=$1 AND user_id=$2", quest_id, uid)
+        await conn.execute("INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) VALUES ($1, 'quest_completed', 'Quest Completed', $2)", uid, quest_id)
+    return {"status": "completed", "quest_id": quest_id}
+
+@sse_client_router.post("/quest/{quest_id}/pause")
+async def sse_pause_quest(quest_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    async with request.app.state.db_pool.acquire() as conn:
+        await conn.execute("UPDATE sse_quests SET status='paused' WHERE quest_id=$1 AND user_id=$2", quest_id, uid)
+    return {"status": "paused", "quest_id": quest_id}
+
+@sse_client_router.post("/mission/{mission_id}/complete")
+async def sse_complete_mission(mission_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE sse_missions SET status='completed', completed_at=NOW() WHERE mission_id=$1 AND user_id=$2", mission_id, uid)
+        await conn.execute("INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) VALUES ($1, 'mission_completed', 'Mission Completed', $2)", uid, mission_id)
+    return {"status": "completed", "mission_id": mission_id}
+
+@sse_client_router.post("/mission/{mission_id}/pause")
+async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("user_id") or _user.get("username", "")
+    async with request.app.state.db_pool.acquire() as conn:
+        await conn.execute("UPDATE sse_missions SET status='paused' WHERE mission_id=$1 AND user_id=$2", mission_id, uid)
+    return {"status": "paused", "mission_id": mission_id}
+
 def _parse_json_col(val):
     if val is None: return {}
     return json.loads(val) if isinstance(val, str) else val
@@ -5676,3 +5736,44 @@ async def sse_monitor_user(user_id: str, request: Request):
     if not pool: raise HTTPException(503, "no db")
     from app.sse.thera_world_engine import get_user_sse_status
     return await get_user_sse_status(user_id, pool)
+
+@sse_router.post("/admin/assign-workbook")
+async def sse_assign_workbook(request: Request):
+    body = await request.json()
+    uid, sid = body.get("user_id", ""), body.get("storyboard_id", "")
+    if not uid or not sid: raise HTTPException(422, "user_id and storyboard_id required")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO sse_enrolled_users (enrollment_id, user_id, storyboard_id, source) VALUES (gen_random_uuid(), $1, $2, 'coach_assigned') "
+            "ON CONFLICT (user_id, storyboard_id) DO UPDATE SET source='coach_assigned', status='active'", uid, sid)
+        await conn.execute("INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) VALUES ($1, 'workbook_assigned', 'Workbook Assigned', $2)", uid, f"Storyboard: {sid}")
+    return {"assigned": True, "user_id": uid, "storyboard_id": sid}
+
+@sse_router.post("/admin/backfill-intake/{user_id}")
+async def sse_backfill_intake(user_id: str, request: Request):
+    pool = request.app.state.db_pool
+    from app.sse.layer1_identity_forge import extract_intake_data
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT conversation_history FROM sse_identity_forge WHERE user_id=$1", user_id)
+    if not row or not row["conversation_history"]: raise HTTPException(404, "no intake data")
+    conv = json.loads(row["conversation_history"]) if isinstance(row["conversation_history"], str) else row["conversation_history"]
+    result = await extract_intake_data(conv, pool, user_id)
+    return {"user_id": user_id, "result": result}
+
+@sse_router.post("/admin/backfill-intake-all")
+async def sse_backfill_all(request: Request):
+    pool = request.app.state.db_pool
+    from app.sse.layer1_identity_forge import extract_intake_data
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, conversation_history FROM sse_identity_forge WHERE archetype_hint IS NULL AND conversation_history IS NOT NULL")
+    processed, succeeded, failed = 0, 0, 0
+    for r in rows:
+        processed += 1
+        try:
+            conv = json.loads(r["conversation_history"]) if isinstance(r["conversation_history"], str) else r["conversation_history"]
+            await extract_intake_data(conv, pool, r["user_id"])
+            succeeded += 1
+        except Exception:
+            failed += 1
+    return {"processed": processed, "succeeded": succeeded, "failed": failed}

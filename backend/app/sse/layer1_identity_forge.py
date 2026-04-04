@@ -5,7 +5,7 @@ data and crystallizes key fields for Little Nate's memory.
 """
 from __future__ import annotations
 
-import json, logging, os, re, uuid
+import hashlib, json, logging, os, re, uuid
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,71 @@ def get_intake_prompt(turn: int, user_name: str) -> str:
     return ""
 
 
+def _keyword_fallback_extraction(conversation: list) -> dict:
+    """Extract intake fields directly from conversation turns when LLM fails."""
+    user_turns = [m["content"] for m in conversation if m.get("role") == "user"]
+    data: dict = {}
+    if len(user_turns) >= 2:
+        data["presenting_concern"] = user_turns[1][:300]
+    if len(user_turns) >= 5:
+        text = user_turns[4].lower()
+        data["cultural_context"] = user_turns[4][:200]
+        if any(w in text for w in ("god", "jesus", "christ", "church", "pray", "bible", "faith")):
+            data["spiritual_framework"] = "christian"
+        elif any(w in text for w in ("universe", "energy", "spirit", "meditation")):
+            data["spiritual_framework"] = "spiritual"
+        else:
+            data["spiritual_framework"] = "other"
+    if len(user_turns) >= 6:
+        data["wound_indicator"] = user_turns[5][:300]
+    if len(user_turns) >= 7:
+        data["strength_indicator"] = user_turns[6][:300]
+    if len(user_turns) >= 8:
+        data["character_visual"] = user_turns[7][:300]
+        vis = user_turns[7].lower()
+        for hint in ("warrior", "sage", "healer", "guardian", "explorer", "seraph"):
+            if hint in vis:
+                data["archetype_hint"] = hint
+                break
+        data.setdefault("archetype_hint", "explorer")
+    if len(user_turns) >= 9:
+        stext = user_turns[8].lower()
+        if any(w in stext for w in ("god", "jesus", "christ", "church", "pray", "bible")):
+            data.setdefault("spiritual_framework", "christian")
+    if len(user_turns) >= 10:
+        data["language_notes"] = user_turns[9][:200]
+    return data
+
+
+async def _generate_archetype_image(user_id: str, data: dict, db_pool) -> str | None:
+    """Generate archetype image from character_visual + archetype_hint, store in R2."""
+    char_vis = data.get("character_visual", "")
+    archetype = data.get("archetype_hint", "explorer")
+    if not char_vis:
+        return None
+    try:
+        from app.sse.infrastructure.grok_imagine_client import generate_image
+        from app.sse.infrastructure.r2_storage import store_image
+        prompt = (f"{char_vis[:200]}, standing at the edge of a dark misty forest, "
+                  f"{archetype} archetype, painterly style, muted warm palette with golden light accents, "
+                  f"no text, no words, no lettering")
+        image_bytes = await generate_image(prompt)
+        r2_key = f"sse/archetype/{user_id}/archetype.png"
+        r2_url = await store_image(image_bytes, r2_key)
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE sse_identity_forge SET archetype_image_url = $1 WHERE user_id = $2",
+                r2_url, user_id)
+            await conn.execute(
+                "UPDATE sse_user_journeys SET journey_metadata = "
+                "jsonb_set(COALESCE(journey_metadata, '{}'), '{archetype_image_url}', to_jsonb($1::text)) "
+                "WHERE user_id = $2", r2_url, user_id)
+        return r2_url
+    except Exception as e:
+        logger.warning("Archetype image generation failed for %s: %s", user_id, e)
+        return None
+
+
 async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict:
     """Call Grok to extract structured identity data from the 10-turn intake."""
     import httpx
@@ -70,7 +135,7 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
         "Extract identity and clinical data from this intake conversation. "
         "Return JSON only with these keys: character_visual, cultural_context, "
         "spiritual_framework (christian|secular|spiritual|other), "
-        "archetype_hint (warrior|sage|healer|guardian|explorer|child), "
+        "archetype_hint (warrior|sage|healer|guardian|explorer|seraph|custom), "
         "presenting_concern, wound_indicator, strength_indicator, "
         "recommended_storyboard, clinical_eligibility_estimate (0.0-1.0), "
         "safety_flags (array), language_notes."
@@ -87,6 +152,12 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
             data = json.loads(m.group()) if m else {}
     except Exception as e:
         logger.warning("Identity extraction failed: %s", e)
+
+    if not data.get("character_visual"):
+        logger.warning("LLM extraction returned empty for %s — falling back to keyword extraction", user_id)
+        fallback = _keyword_fallback_extraction(conversation)
+        for k, v in fallback.items():
+            data.setdefault(k, v)
 
     pc = data.get("presenting_concern", "").lower()
     if any(w in pc for w in ("father", "son", "shame", "man", "legacy")):
@@ -106,6 +177,15 @@ async def extract_intake_data(conversation: list, db_pool, user_id: str) -> dict
     ph = ",".join(f"${i+1}" for i in range(len(vals)))
     async with db_pool.acquire() as conn:
         await conn.execute(f"INSERT INTO sse_identity_forge ({cols}) VALUES({ph},'complete',NOW()) ON CONFLICT(user_id) DO UPDATE SET {upd},status='complete',completed_at=NOW()", *vals)
+
+    if not data.get("archetype_hint"):
+        logger.error("INTAKE EXTRACTION FAILED for %s — archetype_hint is NULL after LLM + fallback", user_id)
+    if not data.get("character_visual"):
+        logger.error("INTAKE EXTRACTION FAILED for %s — character_visual is NULL after LLM + fallback", user_id)
+
+    archetype_url = await _generate_archetype_image(user_id, data, db_pool)
+    if archetype_url:
+        data["archetype_image_url"] = archetype_url
 
     try:
         from app.websocket.crystal_recall_bridge import crystallize_from_conversation
