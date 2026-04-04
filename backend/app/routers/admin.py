@@ -5356,6 +5356,54 @@ async def sse_client_intake_status(user_id: str, request: Request, _user: dict =
     from app.services.intake_session import get_intake_status
     return await get_intake_status(user_id, request.app.state.db_pool)
 
+@sse_client_router.get("/storyboard")
+async def sse_client_storyboard(request: Request, _user: dict = Depends(_sse_auth)):
+    pool = request.app.state.db_pool
+    uid = _user.get("hardware_id", "")
+    async with pool.acquire() as conn:
+        enrollment = await conn.fetchrow(
+            "SELECT storyboard_id FROM sse_enrolled_users WHERE user_id=$1 AND status='active'", uid)
+        if not enrollment:
+            return {"enrolled": False, "message": "Complete Identity Forge intake to begin your story"}
+        sid = enrollment["storyboard_id"]
+        prov = await conn.fetchrow(
+            "SELECT story_plot_json FROM sse_ip_provenance "
+            "WHERE story_plot_json->>'id' = $1 AND status='approved' LIMIT 1", sid)
+        if not prov:
+            return {"enrolled": True, "storyboard_id": sid, "panels": []}
+        sp = prov["story_plot_json"] if isinstance(prov["story_plot_json"], dict) else json.loads(prov["story_plot_json"])
+        panels = [{"phase_id": p.get("phase_id"), "r2_url": p.get("r2_url"),
+                    "title": p.get("scene_description", "")[:80], "narrative": p.get("scene_description", ""),
+                    "panel_tone": p.get("panel_tone")}
+                   for p in sp.get("panels", []) if p.get("r2_url")]
+    return {"enrolled": True, "storyboard_id": sid, "panels": panels}
+
+@sse_client_router.get("/vault/{user_id}")
+async def sse_client_vault(user_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT generation_type, generated_at, r2_url, storyboard_id "
+            "FROM sse_delivery_generation_log WHERE user_id=$1 AND status='success' "
+            "ORDER BY generated_at DESC LIMIT 50", user_id)
+        if rows:
+            return {"items": [{"type": r["generation_type"], "r2_url": r["r2_url"],
+                               "delivered_at": str(r["generated_at"]), "storyboard_id": r["storyboard_id"]}
+                              for r in rows]}
+        enrollment = await conn.fetchrow(
+            "SELECT storyboard_id FROM sse_enrolled_users WHERE user_id=$1 AND status='active'", user_id)
+        if not enrollment:
+            return {"items": []}
+        prov = await conn.fetchrow(
+            "SELECT story_plot_json FROM sse_ip_provenance "
+            "WHERE story_plot_json->>'id' = $1 AND status='approved' LIMIT 1", enrollment["storyboard_id"])
+        if not prov:
+            return {"items": []}
+        sp = prov["story_plot_json"] if isinstance(prov["story_plot_json"], dict) else json.loads(prov["story_plot_json"])
+        return {"items": [{"type": "panel", "phase_id": p.get("phase_id"), "r2_url": p.get("r2_url"),
+                           "title": p.get("scene_description", "")[:80]}
+                          for p in sp.get("panels", []) if p.get("r2_url")]}
+
 def _parse_json_col(val):
     if val is None: return {}
     return json.loads(val) if isinstance(val, str) else val
@@ -5531,6 +5579,34 @@ async def sse_imagery_generate(request: Request):
                     await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
     return result
 
+@sse_router.post("/imagery/regenerate-panel")
+async def sse_imagery_regenerate_panel(request: Request):
+    body = await request.json()
+    prov_id, phase_id, custom_prompt = body.get("provenance_id"), body.get("phase_id"), body.get("custom_prompt", "")
+    if not prov_id or not phase_id or not custom_prompt:
+        raise HTTPException(422, "provenance_id, phase_id, custom_prompt required")
+    pool = request.app.state.db_pool
+    import json as _json, hashlib
+    async with pool.acquire() as conn:
+        row = await conn.fetchval("SELECT story_plot_json FROM sse_ip_provenance WHERE provenance_id = $1", prov_id)
+        if not row: raise HTTPException(404, "provenance not found")
+        sp = _json.loads(row) if isinstance(row, str) else dict(row)
+        panel = next((p for p in sp.get("panels", []) if p.get("phase_id") == phase_id), None)
+        if not panel: raise HTTPException(404, f"panel {phase_id} not found")
+        suffix = panel.get("core_character_suffix", "")
+        full_prompt = custom_prompt + (" " + suffix if suffix else "") + " --no text, watermark, logo"
+        from app.sse.infrastructure.grok_imagine_client import generate_image
+        from app.sse.infrastructure.r2_storage import store_image
+        image_bytes = await generate_image(full_prompt)
+        content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
+        storyboard_id = sp.get("id", "unknown")
+        r2_key = f"sse/staging/{storyboard_id}/{phase_id}/{content_hash}.png"
+        r2_url = await store_image(image_bytes, r2_key)
+        panel["grok_imagine_prompt"] = custom_prompt
+        panel["r2_url"] = r2_url
+        await conn.execute("UPDATE sse_ip_provenance SET story_plot_json = $1 WHERE provenance_id = $2", _json.dumps(sp), prov_id)
+    return {"phase_id": phase_id, "r2_url": r2_url, "prompt_used": full_prompt}
+
 @sse_router.post("/pipeline/approve")
 async def sse_pipeline_approve(request: Request):
     body = await request.json()
@@ -5557,6 +5633,17 @@ async def sse_pipeline_approve(request: Request):
                 "VALUES (gen_random_uuid(), $1, 'monthly_recap', '0 4 1 * *', true) "
                 "ON CONFLICT (storyboard_id, schedule_type) DO UPDATE SET enabled = true",
                 storyboard_id)
+        await conn.execute(
+            "UPDATE sse_delivery_config SET status='replaced' WHERE storyboard_id=$1 AND status='active'",
+            storyboard_id)
+        await conn.execute(
+            "INSERT INTO sse_delivery_config (config_id, storyboard_id, delivery_config) "
+            "VALUES (gen_random_uuid(), $1, $2::jsonb)", storyboard_id, _json.dumps(delivery))
+        await conn.execute(
+            "INSERT INTO sse_cron_schedules (schedule_id, storyboard_id, schedule_type, cron_expression, enabled) "
+            "VALUES (gen_random_uuid(), $1, 'weekly_clip', '0 3 * * 0', true) "
+            "ON CONFLICT (storyboard_id, schedule_type) DO UPDATE SET enabled = true",
+            storyboard_id)
     orch = getattr(request.app.state, "sse_orchestrator", None)
     if orch: await orch.reload()
     return {"status": "approved", "storyboard_id": storyboard_id}

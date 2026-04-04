@@ -139,7 +139,19 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 .cost-display{font-family:var(--mono);font-size:24px;color:var(--green);text-align:center;padding:16px 0}
 
 .actions-row{display:flex;gap:10px;padding:16px 0;justify-content:flex-end;border-top:1px solid var(--bdr);margin-top:16px}
-.hidden{display:none}
+.hidden{display:none!important}
+
+/* PANEL EDIT MODAL */
+.modal-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center}
+.modal-box{background:var(--panel);border:1px solid var(--bdr2);border-radius:var(--rl);width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;box-shadow:0 16px 64px rgba(0,0,0,0.6)}
+.modal-box .panel-preview{width:100%;max-height:300px;object-fit:contain;background:#000;border-radius:var(--rl) var(--rl) 0 0}
+.modal-body{padding:20px}
+.modal-body textarea{width:100%;min-height:80px;background:rgba(255,255,255,0.06);border:1px solid var(--bdr2);border-radius:var(--rs);color:#ffffff;font-family:var(--sans);font-size:13px;padding:10px;resize:vertical;line-height:1.5}
+.modal-body textarea:focus{outline:none;border-color:var(--blue)}
+.modal-label{font-size:10px;text-transform:uppercase;letter-spacing:1.2px;color:var(--t3);margin-bottom:6px;font-weight:600}
+.modal-meta{display:flex;gap:8px;margin-bottom:14px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.modal-error{color:var(--red);font-size:12px;margin-top:8px;display:none}
 </style>
 </head>
 <body>
@@ -231,12 +243,34 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 
 </div>
 
+<!-- PANEL EDIT MODAL -->
+<div class="modal-overlay hidden" id="panelModal" onclick="if(event.target===this)closePanelModal()">
+  <div class="modal-box">
+    <img class="panel-preview" id="modalImg" src="" alt="">
+    <div class="modal-body">
+      <div class="modal-meta">
+        <span class="badge badge-blue" id="modalPhase"></span>
+        <span class="badge badge-amber" id="modalTone"></span>
+      </div>
+      <div class="modal-label">Grok Imagine Prompt</div>
+      <textarea id="modalPrompt"></textarea>
+      <div class="modal-error" id="modalError"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closePanelModal()">Cancel</button>
+        <button class="btn btn-blue" id="modalRegenBtn" onclick="regeneratePanel()">🖼 Regenerate Image</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
+console.log('[SSE Story Generator v2.1] loaded at', new Date().toISOString());
 var API = location.origin;
 var _selectedFile = null;
 var _currentProvId = null;
 var _currentPlot = null;
 var _pollTimer = null;
+var _editPhaseId = null;
 
 function _authHeaders(ct) {
   var t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
@@ -385,6 +419,8 @@ function selectStory(pid) {
       (d.story_plot.panels || []).forEach(function(p) {
         var card = document.createElement('div');
         card.className = 'panel-card';
+        card.style.cursor = 'pointer';
+        card.onclick = function() { console.log('Card clicked, panel keys:', Object.keys(p), 'prompt:', (p.grok_imagine_prompt||'').substring(0,60)); openPanelModal(p); };
         var imgHtml = p.r2_url
           ? '<img src="' + esc(p.r2_url) + '" alt="' + esc(p.phase_id) + '">'
           : '<span>' + esc(p.phase_id) + '</span>';
@@ -475,6 +511,47 @@ function deleteStory(pid) {
 }
 
 function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+/* --- PANEL EDIT MODAL --- */
+function openPanelModal(p) {
+  if (!p || !p.phase_id) { console.warn('openPanelModal: no valid panel data'); return; }
+  console.log('Panel data:', JSON.stringify(p));
+  _editPhaseId = p.phase_id;
+  document.getElementById('modalImg').src = p.r2_url || '';
+  document.getElementById('modalImg').style.display = p.r2_url ? 'block' : 'none';
+  document.getElementById('modalPhase').textContent = p.phase_id;
+  document.getElementById('modalTone').textContent = p.panel_tone || '';
+  document.getElementById('modalPrompt').value = p.grok_imagine_prompt || '';
+  document.getElementById('modalError').style.display = 'none';
+  document.getElementById('modalRegenBtn').disabled = false;
+  document.getElementById('modalRegenBtn').textContent = '🖼 Regenerate Image';
+  document.getElementById('panelModal').classList.remove('hidden');
+}
+function closePanelModal() { document.getElementById('panelModal').classList.add('hidden'); _editPhaseId = null; }
+function regeneratePanel() {
+  var btn = document.getElementById('modalRegenBtn');
+  var prompt = document.getElementById('modalPrompt').value.trim();
+  if (!prompt) { document.getElementById('modalError').textContent = 'Prompt cannot be empty'; document.getElementById('modalError').style.display = 'block'; return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating…';
+  document.getElementById('modalError').style.display = 'none';
+  fetch(API + '/api/sse/imagery/regenerate-panel', {
+    method: 'POST', headers: _authHeaders('application/json'),
+    body: JSON.stringify({ provenance_id: _currentProvId, phase_id: _editPhaseId, custom_prompt: prompt })
+  })
+  .then(function(r) { if (!r.ok) return r.json().then(function(e) { throw new Error(e.detail || 'Request failed'); }); return r.json(); })
+  .then(function(d) {
+    var el = document.getElementById('pimg-' + d.phase_id);
+    if (el) el.innerHTML = '<img src="' + esc(d.r2_url) + '" alt="' + esc(d.phase_id) + '">';
+    document.getElementById('modalImg').src = d.r2_url;
+    document.getElementById('modalImg').style.display = 'block';
+    if (_currentPlot) { var pp = (_currentPlot.panels || []).find(function(x){return x.phase_id===d.phase_id}); if(pp){pp.r2_url=d.r2_url;pp.grok_imagine_prompt=prompt;} }
+    btn.disabled = false; btn.textContent = '🖼 Regenerate Image';
+  })
+  .catch(function(e) {
+    btn.disabled = false; btn.textContent = '🖼 Regenerate Image';
+    document.getElementById('modalError').textContent = e.message; document.getElementById('modalError').style.display = 'block';
+  });
+}
 
 loadQueue();
 </script>

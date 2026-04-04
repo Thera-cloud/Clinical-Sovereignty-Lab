@@ -81,6 +81,9 @@ class SSEOrchestrator:
         self.scheduler.shutdown(wait=False)
         logger.info("SSEOrchestrator: shut down")
 
+    async def stop(self):
+        self.shutdown()
+
     async def _run_daily_panels(self, storyboard_id: str):
         async with self._semaphore:
             try:
