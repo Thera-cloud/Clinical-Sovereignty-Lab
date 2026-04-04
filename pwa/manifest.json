@@ -1,0 +1,16 @@
+{
+  "name": "Sovereign Sanctuary",
+  "short_name": "Little Nate",
+  "description": "Your therapeutic companion",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050505",
+  "theme_color": "#4ECDC4",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["health", "lifestyle"],
+  "lang": "en-US"
+}

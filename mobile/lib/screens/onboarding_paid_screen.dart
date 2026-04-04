@@ -540,7 +540,7 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
 
   void _startIntake() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _IntakeConversationScreen(
+      builder: (_) => IntakeConversationScreen(
         profileWithToken: widget.profileWithToken,
         onComplete: () {
           Navigator.of(context).pop();
@@ -553,14 +553,14 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
 
 // --- Intake Conversation Screen (10-turn Identity Forge) ---
 
-class _IntakeConversationScreen extends StatefulWidget {
+class IntakeConversationScreen extends StatefulWidget {
   final Map<String, dynamic> profileWithToken;
   final VoidCallback onComplete;
-  const _IntakeConversationScreen({required this.profileWithToken, required this.onComplete});
-  @override State<_IntakeConversationScreen> createState() => _IntakeCSState();
+  const IntakeConversationScreen({super.key, required this.profileWithToken, required this.onComplete});
+  @override State<IntakeConversationScreen> createState() => _IntakeCSState();
 }
 
-class _IntakeCSState extends State<_IntakeConversationScreen> {
+class _IntakeCSState extends State<IntakeConversationScreen> {
   static const _bg = Color(0xFF050505), _cy = Color(0xFF4ECDC4), _gd = Color(0xFFC9A962), _ts = Color(0xFF888888);
   final _ctrl = TextEditingController();
   final _scr = ScrollController();

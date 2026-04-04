@@ -28,6 +28,7 @@ import 'screens/settings_screen.dart';
 import 'screens/billing_screens.dart';
 import 'services/export_service.dart';
 import 'screens/coaching_mesh_screen.dart';
+import 'screens/onboarding_paid_screen.dart';
 import 'screens/community_mesh_screen.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
@@ -1266,6 +1267,9 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
   // ── Sovereign Vault upload progress ──
   UploadProgressState _uploadProgressState = UploadProgressState.idle();
 
+  // ── SSE Story Journey ──
+  bool _sseIntakePending = false;
+
   // Nevedal biometric integration
   final NevedalService _nevedal = NevedalService();
 
@@ -1479,6 +1483,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
 
         // Request pending nudges from Nate
         _socket?.sink.add(jsonEncode({"type": "get_pending_nudges"}));
+
+        _checkSseIntake();
 
         if (_socket != null) {
           final sessionId = data['session_id'] as String? ??
@@ -1887,6 +1893,22 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         }
       },
     );
+  }
+
+  Future<void> _checkSseIntake() async {
+    try {
+      final uid = widget.currentUserProfile?['hardware_id'] ?? widget.username ?? '';
+      final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+      if (uid.isEmpty || tok.isEmpty) return;
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/intake/status/$uid'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        setState(() => _sseIntakePending = data['completed'] != true);
+      }
+    } catch (_) {}
   }
 
   void _updateMetricsFromProfile(Map<String, dynamic> profile) {
@@ -3586,6 +3608,34 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                   _buildQuickStat("Q", _metrics['Quantum'] ?? 0.5, const Color(0xFFFFD700)),
                   MoodIndicator(mood: _metrics['mood_current'] ?? 'neutral'),
                 ],
+              ),
+            ),
+          // SSE Story Journey banner
+          if (_sseIntakePending)
+            GestureDetector(
+              onTap: () async {
+                await Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => IntakeConversationScreen(
+                    profileWithToken: widget.currentUserProfile ?? {},
+                    onComplete: () => Navigator.pop(context),
+                  ),
+                ));
+                if (mounted) _checkSseIntake();
+              },
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFF1A1A2E), Color(0xFF0A0A1A)]),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.auto_stories, color: Color(0xFFC9A962), size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(child: Text('Begin Your Story Journey', style: TextStyle(color: Color(0xFFE8D5A3), fontSize: 13, fontWeight: FontWeight.w500))),
+                  const Icon(Icons.arrow_forward_ios, color: Color(0xFF8B7355), size: 14),
+                ]),
               ),
             ),
           // Main content area - Background visual + Chat overlay
