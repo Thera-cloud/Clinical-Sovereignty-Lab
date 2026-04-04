@@ -5408,33 +5408,33 @@ async def sse_client_vault(user_id: str, request: Request, _user: dict = Depends
 async def sse_create_quest(request: Request, _user: dict = Depends(_sse_auth)):
     from app.sse.quest_mission_engine import create_quest
     body = await request.json()
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     return await create_quest(uid, body.get("goal", ""), request.app.state.db_pool)
 
 @sse_client_router.post("/mission/create")
 async def sse_create_mission(request: Request, _user: dict = Depends(_sse_auth)):
     from app.sse.quest_mission_engine import create_mission
     body = await request.json()
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     return await create_mission(uid, body.get("relationship_target", ""), body.get("relationship_type", ""), request.app.state.db_pool)
 
 @sse_client_router.get("/quests")
 async def sse_list_quests(request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     async with request.app.state.db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC", uid)
     return {"quests": [dict(r) for r in rows]}
 
 @sse_client_router.get("/missions")
 async def sse_list_missions(request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     async with request.app.state.db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM sse_missions WHERE user_id=$1 AND status='active' ORDER BY started_at DESC", uid)
     return {"missions": [dict(r) for r in rows]}
 
 @sse_client_router.post("/quest/{quest_id}/complete")
 async def sse_complete_quest(quest_id: str, request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         await conn.execute("UPDATE sse_quests SET status='completed', completed_at=NOW() WHERE quest_id=$1 AND user_id=$2", quest_id, uid)
@@ -5443,14 +5443,14 @@ async def sse_complete_quest(quest_id: str, request: Request, _user: dict = Depe
 
 @sse_client_router.post("/quest/{quest_id}/pause")
 async def sse_pause_quest(quest_id: str, request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     async with request.app.state.db_pool.acquire() as conn:
         await conn.execute("UPDATE sse_quests SET status='paused' WHERE quest_id=$1 AND user_id=$2", quest_id, uid)
     return {"status": "paused", "quest_id": quest_id}
 
 @sse_client_router.post("/mission/{mission_id}/complete")
 async def sse_complete_mission(mission_id: str, request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         await conn.execute("UPDATE sse_missions SET status='completed', completed_at=NOW() WHERE mission_id=$1 AND user_id=$2", mission_id, uid)
@@ -5459,7 +5459,7 @@ async def sse_complete_mission(mission_id: str, request: Request, _user: dict = 
 
 @sse_client_router.post("/mission/{mission_id}/pause")
 async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     async with request.app.state.db_pool.acquire() as conn:
         await conn.execute("UPDATE sse_missions SET status='paused' WHERE mission_id=$1 AND user_id=$2", mission_id, uid)
     return {"status": "paused", "mission_id": mission_id}
@@ -5467,7 +5467,7 @@ async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Dep
 
 @sse_client_router.get("/journey/panels")
 async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("user_id") or _user.get("username", "")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         rows = await conn.fetch(
