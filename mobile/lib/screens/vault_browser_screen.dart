@@ -105,11 +105,12 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
       final list = data is List ? data : (data['folders'] as List? ?? []);
       setState(() {
         _folders = list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        // Pin "Sovereign Journey" folder first if it exists
+        // Ensure "Sovereign Journey" tab always exists (virtual — backed by SSE panels, not vault_folders)
         final sjIdx = _folders.indexWhere((f) => f['name'] == 'Sovereign Journey');
-        if (sjIdx > 0) {
-          final sj = _folders.removeAt(sjIdx);
-          _folders.insert(0, sj);
+        if (sjIdx < 0) {
+          _folders.insert(0, <String, dynamic>{'id': '__sse_journey__', 'name': 'Sovereign Journey', 'icon': '🌿', 'item_count': 0, 'is_system': true});
+        } else if (sjIdx > 0) {
+          _folders.insert(0, _folders.removeAt(sjIdx));
         }
         if (_folders.isNotEmpty && _selectedFolderId == null) {
           _selectedFolderId = _folders.first['id']?.toString();
