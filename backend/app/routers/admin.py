@@ -5647,3 +5647,32 @@ async def sse_pipeline_approve(request: Request):
     orch = getattr(request.app.state, "sse_orchestrator", None)
     if orch: await orch.reload()
     return {"status": "approved", "storyboard_id": storyboard_id}
+
+@sse_router.get("/monitor/alerts")
+async def sse_monitor_alerts(request: Request, acknowledged: str = "all"):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    q = "SELECT alert_id,user_id,alert_type,title,detail,metadata,acknowledged,created_at FROM sse_admin_alerts"
+    if acknowledged == "false": q += " WHERE acknowledged = false"
+    elif acknowledged == "true": q += " WHERE acknowledged = true"
+    q += " ORDER BY created_at DESC LIMIT 100"
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(q)
+    return {"alerts": [dict(r) for r in rows]}
+
+@sse_router.post("/monitor/alerts/acknowledge")
+async def sse_monitor_alerts_ack(request: Request):
+    body = await request.json()
+    aid = body.get("alert_id")
+    if not aid: raise HTTPException(422, "alert_id required")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE sse_admin_alerts SET acknowledged = true WHERE alert_id = $1::uuid", aid)
+    return {"status": "acknowledged"}
+
+@sse_router.get("/monitor/user/{user_id}")
+async def sse_monitor_user(user_id: str, request: Request):
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool: raise HTTPException(503, "no db")
+    from app.sse.thera_world_engine import get_user_sse_status
+    return await get_user_sse_status(user_id, pool)

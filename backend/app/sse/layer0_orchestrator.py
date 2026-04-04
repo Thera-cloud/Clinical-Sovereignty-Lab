@@ -69,6 +69,13 @@ class SSEOrchestrator:
             replace_existing=True,
         )
 
+        self.scheduler.add_job(
+            self._run_journey_panels,
+            CronTrigger(minute="15", hour="3"),
+            id="sse_journey_panels", name="SSE Thera-World journey panels",
+            replace_existing=True,
+        )
+
         if not self.scheduler.running:
             self.scheduler.start()
         logger.info("SSEOrchestrator: started with %d schedule(s) + heartbeat", len(schedules))
@@ -116,6 +123,27 @@ class SSEOrchestrator:
                             result.get("fallbacks", 0))
             except Exception as e:
                 logger.error("SSE monthly_recap %s error: %s", storyboard_id, e)
+
+    async def _run_journey_panels(self):
+        """Generate Thera-World journey panels for all active clients."""
+        async with self._semaphore:
+            ok = fail = 0
+            try:
+                from app.sse.thera_world_engine import generate_journey_panel
+                async with self.db_pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        "SELECT username FROM users "
+                        "WHERE role='CLIENT' AND subscription_status IN ('ACTIVE','TRIAL_ACTIVE')")
+                for r in rows:
+                    try:
+                        await generate_journey_panel(r["username"], self.db_pool)
+                        ok += 1
+                    except Exception as e:
+                        fail += 1
+                        logger.warning("Journey panel failed for %s: %s", r["username"], e)
+                logger.info("SSE journey panels: %d generated, %d failed", ok, fail)
+            except Exception as e:
+                logger.error("SSE journey panels batch error: %s", e)
 
     async def _heartbeat_check(self):
         """Check for generation gaps and write heartbeat record."""
