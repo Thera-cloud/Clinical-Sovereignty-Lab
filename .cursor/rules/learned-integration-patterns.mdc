@@ -608,7 +608,7 @@ static const String environment = 'production';
 
 ## 52. Service Health Denominator Requires Deployed Files
 
-The `_service_checks` list at the end of `lifespan()` in `main.py` defines the expected service count (currently 80). Every entry in that list must have its corresponding Python files deployed to the server. A service that exists locally but not on the server will fail to import, causing a `try/except` to catch it and set the variable to `None`, which registers as `False` in the health check.
+The `_service_checks` list at the end of `lifespan()` in `main.py` defines the expected service count (currently 112). Every entry in that list must have its corresponding Python files deployed to the server. A service that exists locally but not on the server will fail to import, causing a `try/except` to catch it and set the variable to `None`, which registers as `False` in the health check.
 
 **Rule**: After adding any service to `_service_checks`, verify the file is deployed:
 

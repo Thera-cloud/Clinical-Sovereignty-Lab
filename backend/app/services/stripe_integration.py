@@ -1780,6 +1780,18 @@ class StripeWebhookHandler:
             print(">>> [STRIPE] Voice block webhook: no user_id or phone in metadata")
             return
 
+        stripe_session_id = session.get("id", "")
+        if stripe_session_id:
+            try:
+                already = await self.db.fetchval(
+                    "SELECT 1 FROM voice_transactions WHERE stripe_payment_id = $1 LIMIT 1",
+                    stripe_session_id)
+                if already:
+                    print(f">>> [STRIPE] Voice block already credited for session {stripe_session_id} — skipping")
+                    return
+            except Exception:
+                pass
+
         billing = VoiceBillingSystem(self.db)
         new_balance = await billing.credit_seconds(
             user_id=user_id,

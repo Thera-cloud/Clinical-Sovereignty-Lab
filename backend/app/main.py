@@ -132,8 +132,8 @@ async def lifespan(app: FastAPI):
     try:
         from app.routers.sendgrid_inbound import router as _sg_router
         _sg_router._db_pool = db_pool
-    except Exception:
-        pass
+    except Exception as _sg_err:
+        print(f"   ⚠️  SendGrid inbound router db_pool injection failed: {_sg_err}")
 
     # Register Stripe billing router (needs db_pool at creation time)
     try:
@@ -754,8 +754,8 @@ async def lifespan(app: FastAPI):
             from app.services.quakete.ramp_up import QuaketeRampUp
             if _trail_map and _ion_pool:
                 _ramp_up = QuaketeRampUp(trail_map=_trail_map, ion_pool=_ion_pool)
-        except Exception:
-            pass
+        except Exception as _ramp_err:
+            print(f"   ⚠️  QuaketeRampUp init failed: {_ramp_err}")
 
         # --- Notifications Service (shared adapter) ---
         # The Platinum services call notifications.send_notification(user_id, ...)
@@ -2297,8 +2297,8 @@ async def lifespan(app: FastAPI):
             _sdo_shield = get_shield()
             if _sdo_notify:
                 _sdo_shield.set_notification_system(_sdo_notify)
-        except Exception:
-            pass
+        except Exception as _shield_err:
+            print(f"   ⚠️  AdminContactShield init failed: {_shield_err}")
 
         _sdo_recon = DefconReconReporter(db_pool=db_pool, notification_system=_sdo_notify)
 
@@ -2977,6 +2977,14 @@ async def lifespan(app: FastAPI):
         ("voice_call_center_agent", _voice_call_center is not None),  # SOVEREIGN-VOICE
         ("voice_infra_auditor", _voice_infra_auditor is not None),  # SOVEREIGN-VOICE
         ("identity_engine", _identity_engine_ok),  # QUANTUM-CRYSTAL-ARCH
+        ("littlenate_inference", getattr(app.state, "littlenate_inference", None) is not None),
+        ("nate_memory_crystallizer", getattr(app.state, "nate_memory_crystallizer", None) is not None),
+        ("helix_orchestrator", getattr(app.state, "helix_orchestrator", None) is not None),
+        ("federated_search", getattr(app.state, "federated_search", None) is not None),
+        ("odpe_engine", getattr(app.state, "odpe_engine", None) is not None),
+        ("cycle_detection_engine", getattr(app.state, "cycle_detection_engine", None) is not None),
+        ("exa_crystallization_hook", getattr(app.state, "exa_crystallization_hook", None) is not None),
+        ("sse_orchestrator", getattr(app.state, "sse_orchestrator", None) is not None),
     ]
     _hv4 = getattr(app.state, "hive_v4", {})
     _hive_services = [
@@ -3518,8 +3526,8 @@ app.include_router(me2me_api.router)
 app.include_router(hive_defense_api.router)
 try:
     app.include_router(hive_defense_api.helix_public_router)
-except Exception:
-    pass
+except Exception as _helix_pub_err:
+    print(f"   ⚠️  Helix public router failed: {_helix_pub_err}")
 app.include_router(assessments_api.router)
 app.include_router(trust_enforcer_api.router)
 
@@ -3728,6 +3736,25 @@ try:
     app.include_router(voice_edge_router)
 except Exception as _ve_err:
     print(f"   ⚠️  Voice edge router failed: {_ve_err}")
+
+
+# QUANTUM-CRYSTAL-ARCH: conditional routers — mount if dependencies are satisfied
+for _rmod, _ralias in [
+    ("app.routers.patient_sovereignty", "patient_sovereignty_router"),
+    ("app.routers.sovereign_completions_api", "sovereign_completions_router"),
+    ("app.routers.cli_analytics_api", "cli_analytics_router"),
+    ("app.routers.oauth_api", "oauth_router"),
+    ("app.routers.nightly_audit_api", "nightly_audit_router"),
+    ("app.routers.cloudflare_realtime_api", "cf_realtime_router"),
+    ("app.routers.monetization_control_api", "monetization_router"),
+    ("app.routers.cycle_api", "cycle_router"),
+    ("app.routers.predictive_api", "predictive_router"),
+]:
+    try:
+        _mod = __import__(_rmod, fromlist=["router"])
+        app.include_router(_mod.router)
+    except Exception as _rmount_err:
+        print(f"   ⚠️  {_rmod.split('.')[-1]} router failed: {_rmount_err}")
 
 
 # =============================================================================

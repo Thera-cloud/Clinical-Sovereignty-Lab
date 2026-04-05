@@ -4309,7 +4309,13 @@ class _FamilySanctuaryScreenState extends State<FamilySanctuaryScreen> with Widg
 
       // ERRORS
       case 'error':
-        _showError(data['message'] ?? 'An error occurred');
+        final errMsg = (data['message'] ?? 'An error occurred').toString();
+        _showError(errMsg);
+        if (errMsg.contains('UPGRADE_REQUIRED') || errMsg.contains('COACH_ONLY') || errMsg.contains('Not authenticated')) {
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) Navigator.pop(context);
+          });
+        }
         break;
         
       default:

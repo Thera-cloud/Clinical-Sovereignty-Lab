@@ -7274,12 +7274,15 @@ function ctEsc(str) {
 }
 
 // ── Hash-based deep link support ──
-if (location.hash === '#command-terminal') {
-  setTimeout(function() {
-    var nav = document.querySelector('.nav-item[data-tab="command-terminal"]');
-    if (nav) switchTab('command-terminal', nav);
-  }, 500);
-}
+(function() {
+  var _hashTab = location.hash ? location.hash.substring(1) : '';
+  if (_hashTab) {
+    setTimeout(function() {
+      var nav = document.querySelector('.nav-item[data-tab="' + _hashTab + '"]');
+      if (nav) switchTab(_hashTab, nav);
+    }, 500);
+  }
+})();
 </script>
 </body>
 </html>

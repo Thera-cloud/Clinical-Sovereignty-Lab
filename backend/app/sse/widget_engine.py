@@ -111,6 +111,10 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
     try:
         async with db_pool.acquire() as conn:
+            # Resolve UUID for crystal queries (crystals use UUID, SSE tables use text)
+            _user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
+
             # Current biome
             jrow = await conn.fetchrow(
                 "SELECT current_biome FROM sse_user_journeys WHERE user_id=$1", user_id)
@@ -139,10 +143,12 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                 return _content("milestone", biome, primary=f"Quest complete: {cq['goal']}",
                                 secondary="Your growth is real.", action="open_quest")
 
-            # 3. Crisis crystal in last 24h
-            crisis = await conn.fetchrow(
-                "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id=$1 AND domain='clinical' AND confidence >= 0.8 AND created_at >= $2 ORDER BY confidence DESC LIMIT 1",
-                user_id, now - timedelta(hours=24))
+            # 3. Crisis crystal in last 24h (use resolved UUID)
+            crisis = None
+            if _user_uuid:
+                crisis = await conn.fetchrow(
+                    "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id=$1 AND domain='clinical' AND confidence >= 0.8 AND created_at >= $2 ORDER BY confidence DESC LIMIT 1",
+                    _user_uuid, now - timedelta(hours=24))
             if crisis and any(kw in (crisis["crystal_text"] or "").lower() for kw in _CRISIS_KEYWORDS):
                 return _content("encouragement", biome,
                                 primary="You're not alone in this. Reach out when you're ready.",
@@ -167,11 +173,13 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                                     secondary="Your mission awaits.", action="open_chat",
                                     action_id=str(am["mission_id"]))
 
-            # 6. Meaningful session yesterday (high-confidence crystal)
+            # 6. Meaningful session yesterday (high-confidence crystal, use resolved UUID)
             yesterday = today_start - timedelta(days=1)
-            reflection = await conn.fetchrow(
-                "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id=$1 AND confidence >= 0.7 AND created_at BETWEEN $2 AND $3 ORDER BY confidence DESC LIMIT 1",
-                user_id, yesterday, today_start)
+            reflection = None
+            if _user_uuid:
+                reflection = await conn.fetchrow(
+                    "SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id=$1 AND confidence >= 0.7 AND created_at BETWEEN $2 AND $3 ORDER BY confidence DESC LIMIT 1",
+                    _user_uuid, yesterday, today_start)
             if reflection and reflection["crystal_text"]:
                 text = reflection["crystal_text"]
                 snippet = text[:120] + "…" if len(text) > 120 else text

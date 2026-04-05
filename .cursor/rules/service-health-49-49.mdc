@@ -1,15 +1,15 @@
 ---
-description: All 103 services must remain healthy at startup. Never introduce changes that break the 103/103 health check.
+description: All 112 services must remain healthy at startup. Never introduce changes that break the 112/112 health check.
 alwaysApply: true
 ---
 
-# 103/103 Service Health Requirement
+# 112/112 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/103 services healthy` on boot. The target is **103/103 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/112 services healthy` on boot. The target is **112/112 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
-## Service Registry (103 total)
+## Service Registry (112 total)
 
-### Core Services (76)
+### Core Services (85)
 
 | # | Service | Source |
 |---|---------|--------|
@@ -90,6 +90,15 @@ The backend reports `STARTUP COMPLETE: N/103 services healthy` on boot. The targ
 | 74 | voice_infra_auditor | VoiceInfrastructureAuditor — 10-check voice trust scorecard (3x daily, stagger 295s) |
 | 75 | identity_engine | Therapeutic Identity System — 14-service orchestration (enrollment, linguistic, narrative, liveness, OSD, roleplay, consent, mandatory reporting) |
 | 76 | six_quotient_growth_engine | Six-quotient assessment growth engine |
+| 77 | crystal_graph | Crystal supersession graph (feature-flagged) |
+| 78 | littlenate_inference | Core LittleNate inference pipeline |
+| 79 | nate_memory_crystallizer | Crystal promotion engine |
+| 80 | helix_orchestrator | Helix think() pipeline orchestrator |
+| 81 | federated_search | Federated search coordinator (DB + Vectorize) |
+| 82 | odpe_engine | Oscillating Dual-Process Echo evaluator |
+| 83 | cycle_detection_engine | Therapeutic cycle detection |
+| 84 | exa_crystallization_hook | Exa research crystallization |
+| 85 | sse_orchestrator | SSE delivery pipeline scheduler |
 
 ### Hive Defense Services (27)
 
@@ -103,7 +112,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `103/103 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `112/112 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

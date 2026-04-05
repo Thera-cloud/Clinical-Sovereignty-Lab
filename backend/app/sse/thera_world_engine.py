@@ -114,7 +114,7 @@ async def get_therapeutic_profile(user_id: str, db_pool) -> dict:
     try:
         async with db_pool.acquire() as conn:
             uid = await conn.fetchval(
-                "SELECT id FROM users WHERE username = $1", user_id)
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 LIMIT 1", user_id)
 
             if uid:
                 profile["crystal_count"] = await conn.fetchval(
@@ -232,8 +232,8 @@ async def compose_journey_narrative(
                 turns = json.loads(conv_hist) if isinstance(conv_hist, str) else conv_hist
                 user_turns = [m["content"] for m in turns if m.get("role") == "user"]
                 intake_themes = "; ".join(t[:80] for t in user_turns[2:8] if t)
-        except Exception:
-            pass
+        except Exception as _intake_err:
+            logger.warning("TheraWorld: intake theme extraction failed: %s", _intake_err)
 
     fallback = {
         "narrative_text": f"In the {biome_name.replace('_', ' ')}, the {char_name} watches and waits. The path forward is becoming clearer.",
@@ -285,8 +285,13 @@ async def compose_journey_narrative(
     )
 
     try:
+        _hdrs = {"Content-Type": "application/json"}
+        if "azure" in url.lower() or "services.ai" in url.lower():
+            _hdrs["api-key"] = key
+        else:
+            _hdrs["Authorization"] = f"Bearer {key}"
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            r = await client.post(url, headers=_hdrs,
                 json={"model": model, "max_tokens": 400, "temperature": 0.7,
                       "messages": [{"role": "system", "content": sys_prompt},
                                    {"role": "user", "content": "Generate today's journey panel."}]})
@@ -318,8 +323,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 "SELECT panel_id FROM sse_panel_log WHERE user_id = $1 AND generated_at::date = CURRENT_DATE", user_id)
             if today_exists:
                 return {"skipped": True, "reason": "panel_exists_today", "panel_id": str(today_exists)}
-    except Exception:
-        pass
+    except Exception as _dup_err:
+        logger.warning("generate_journey_panel dedup check failed: %s", _dup_err)
 
     journey = await get_or_create_journey(user_id, db_pool)
     profile = await get_therapeutic_profile(user_id, db_pool)
@@ -331,8 +336,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
             row = await conn.fetchrow("SELECT * FROM sse_user_journeys WHERE user_id = $1", user_id)
             if row:
                 journey_fresh = dict(row)
-    except Exception:
-        pass
+    except Exception as _jf_err:
+        logger.warning("generate_journey_panel journey refresh failed: %s", _jf_err)
     if journey_fresh:
         journey = journey_fresh
 
@@ -380,8 +385,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 pn = json.loads(pn)
             if pn and pn[0].get("npcs"):
                 current_npcs.extend(pn[0]["npcs"][:1])
-    except Exception:
-        pass
+    except Exception as _npc_err:
+        logger.warning("NPC enrichment failed: %s", _npc_err)
     for npc in current_npcs[:3]:
         frag = npc.get("visual_prompt_fragment", "")
         if frag:
@@ -406,8 +411,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 ib = await generate_image(reserves[0])
                 ih = hashlib.md5(reserves[0].encode()).hexdigest()[:12]
                 r2_url = await store_image(ib, f"sse/journey/{user_id}/{datetime.now(timezone.utc).strftime('%Y-%m-%d')}/{ih}.png")
-            except Exception:
-                pass
+            except Exception as _retry_err:
+                logger.warning("Journey image retry failed for %s: %s", user_id, _retry_err)
 
     nar_text = narrative.get("narrative_text", "")
     new_summary = (nar_text.split(".")[0] + ".") if nar_text and "." in nar_text else nar_text[:100]
@@ -487,7 +492,8 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
 
             # Crystal health + coherence enrichment
             try:
-                uid_row = await conn.fetchrow("SELECT id FROM users WHERE username=$1", user_id)
+                uid_row = await conn.fetchrow(
+                    "SELECT id FROM users WHERE hardware_id=$1 OR username=$1 LIMIT 1", user_id)
                 if uid_row:
                     _uuid = uid_row["id"]
                     crystal_stats = await conn.fetchrow(
@@ -508,11 +514,11 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
                         "growth_trend": trend}
                     coherence = await conn.fetchrow(
                         "SELECT coherence_pct, growth_pct, quantum_pct FROM nevedal_metrics "
-                        "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", user_id)
+                        "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", _uuid)
                     if coherence:
                         status["coherence"] = dict(coherence)
-            except Exception:
-                pass
+            except Exception as _coh_err:
+                logger.warning("get_user_sse_status coherence query failed: %s", _coh_err)
 
             # Identity forge data
             try:
@@ -521,8 +527,8 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
                     "FROM sse_identity_forge WHERE user_id=$1", user_id)
                 if forge:
                     status["forge"] = dict(forge)
-            except Exception:
-                pass
+            except Exception as _forge_err:
+                logger.warning("get_user_sse_status forge query failed: %s", _forge_err)
     except Exception as e:
         logger.warning("get_user_sse_status failed for %s: %s", user_id, e)
 

@@ -21779,7 +21779,7 @@ Coach Reflection on Session {session_id}:
                             "detail": "Your plan is scheduling-only. Sanctuary is not available."
                         }))
                         continue
-                    if _sanc_plan not in ("STANDARD", "TOP_TIER",
+                    if _sanc_plan not in ("STANDARD", "TOP_TIER", "TRIAL",
                                           "FAMILY_MEMBER", "FAMILY_DEPENDENT"):
                         await websocket.send(json.dumps({
                             "type": "error",

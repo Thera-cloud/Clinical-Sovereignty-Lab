@@ -82,6 +82,7 @@ class SSEOrchestrator:
 
     async def reload(self):
         """Re-read schedules without restarting the scheduler."""
+        self.scheduler.remove_all_jobs()
         await self.start()
 
     def shutdown(self):
@@ -138,15 +139,17 @@ class SSEOrchestrator:
                 from app.sse.thera_world_engine import generate_journey_panel
                 async with self.db_pool.acquire() as conn:
                     rows = await conn.fetch(
-                        "SELECT username FROM users "
-                        "WHERE role='CLIENT' AND subscription_status IN ('ACTIVE','TRIAL_ACTIVE')")
+                        "SELECT hardware_id FROM users "
+                        "WHERE role='CLIENT' AND subscription_status IN ('ACTIVE','TRIAL_ACTIVE') "
+                        "AND hardware_id IS NOT NULL AND hardware_id != ''")
                 for r in rows:
                     try:
-                        await generate_journey_panel(r["username"], self.db_pool)
+                        await generate_journey_panel(r["hardware_id"], self.db_pool)
                         ok += 1
                     except Exception as e:
                         fail += 1
-                        logger.warning("Journey panel failed for %s: %s", r["username"], e)
+                        logger.warning("Journey panel failed for %s: %s", r["hardware_id"], e)
+                    await asyncio.sleep(2)
                 logger.info("SSE journey panels: %d generated, %d failed", ok, fail)
             except Exception as e:
                 logger.error("SSE journey panels batch error: %s", e)

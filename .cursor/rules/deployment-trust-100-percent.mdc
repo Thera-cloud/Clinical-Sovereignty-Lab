@@ -27,7 +27,7 @@ After deploying backend changes, follow this exact sequence to ensure all 23 aud
 
 5. **Restart backend** — `docker restart nate_backend` (or `docker compose up -d backend` if env vars changed).
 
-6. **Wait for startup** — confirm `STARTUP COMPLETE: 85/85 services healthy` and `ALL SYSTEMS NOMINAL` and `SKYEYE_AUDIT_TOKEN registered in Redis`.
+6. **Wait for startup** — confirm `STARTUP COMPLETE: 112/112 services healthy` and `ALL SYSTEMS NOMINAL` and `SKYEYE_AUDIT_TOKEN registered in Redis`.
    ```bash
    ssh root@68.183.168.75 "docker logs nate_backend --since 2m 2>&1 | grep -E 'STARTUP|NOMINAL|SKYEYE_AUDIT'"
    ```

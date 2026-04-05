@@ -63,5 +63,5 @@ docker inspect nate_backend --format '{{range .Mounts}}{{.Destination}} -> {{.So
 
 # Confirm full health
 docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'
-# Expected: 93/93 services healthy — ALL SYSTEMS NOMINAL
+# Expected: 112/112 services healthy — ALL SYSTEMS NOMINAL
 ```
