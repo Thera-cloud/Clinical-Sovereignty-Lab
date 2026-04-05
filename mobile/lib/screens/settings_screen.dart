@@ -2095,10 +2095,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 showModalBottomSheet(context: context, backgroundColor: _Design.bgCard, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))), builder: (_) {
                   final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
                   return Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('Add Little Nate Widget', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.w600)),
+                    const Text('Add Sovereign Sanctuary Widget', style: TextStyle(color: _Design.gold, fontSize: 18, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 16),
-                    Text(isIOS ? '1. Long press your home screen\n2. Tap the + button (top left)\n3. Search "Little Nate"\n4. Choose Small or Medium size\n5. Tap "Add Widget"'
-                        : '1. Long press your home screen\n2. Tap "Widgets"\n3. Find "Sovereign Sanctuary"\n4. Drag Little Nate widget to your screen',
+                    Text(isIOS ? '1. Long press your home screen\n2. Tap the + button (top left)\n3. Search "Sovereign Sanctuary"\n4. Choose Small or Medium size\n5. Tap "Add Widget"'
+                        : '1. Long press your home screen\n2. Tap "Widgets"\n3. Find "Sovereign Sanctuary"\n4. Drag the widget to your screen',
                         style: const TextStyle(color: _Design.textPrimary, fontSize: 14, height: 1.6)),
                     const SizedBox(height: 24),
                   ]));

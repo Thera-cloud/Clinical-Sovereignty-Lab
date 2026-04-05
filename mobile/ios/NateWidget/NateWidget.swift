@@ -133,7 +133,7 @@ struct NateWidget: Widget {
                 NateWidgetSmallView(entry: entry)
             }
         }
-        .configurationDisplayName("Little Nate")
+        .configurationDisplayName("Sovereign Sanctuary")
         .description("Daily therapeutic touchpoint")
         .supportedFamilies([.systemSmall, .systemMedium])
     }

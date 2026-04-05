@@ -1269,6 +1269,10 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
 
   // ── SSE Story Journey ──
   bool _sseIntakePending = false;
+  Map<String, dynamic>? _recapData;
+  bool _recapDismissed = false;
+  Timer? _recapTimer;
+  final Set<int> _dismissedSuggestions = {};
 
   // Nevedal biometric integration
   final NevedalService _nevedal = NevedalService();
@@ -1376,6 +1380,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     _loadCustomVocabulary();
     _initTts();
     _chatController.addListener(_onDraftChanged);
+    _fetchRecap();
   }
 
   void _onDraftChanged() {
@@ -1916,6 +1921,44 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         setState(() => _sseIntakePending = data['completed'] != true);
       }
     } catch (_) {}
+  }
+
+  Future<void> _fetchRecap() async {
+    try {
+      final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+      if (tok.isEmpty) return;
+      final resp = await http.get(
+        Uri.parse('$defaultApiBaseUrl/api/sse-client/recap'),
+        headers: {'Authorization': 'Bearer $tok'},
+      );
+      if (resp.statusCode == 200 && mounted) {
+        final data = jsonDecode(resp.body);
+        if (data['journey'] != null || (data['active_quests'] as List?)?.isNotEmpty == true) {
+          setState(() => _recapData = data);
+          _recapTimer = Timer(const Duration(seconds: 30), () {
+            if (mounted) setState(() => _recapDismissed = true);
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _dismissRecap() {
+    _recapTimer?.cancel();
+    setState(() => _recapDismissed = true);
+  }
+
+  Widget _recapBtn(String label, VoidCallback onTap) {
+    return GestureDetector(onTap: onTap, child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.5))),
+      child: Text(label, style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 11, fontWeight: FontWeight.w500)),
+    ));
+  }
+
+  void _sendPresetMessage(String text) {
+    _chatController.text = text;
+    _sendMessage();
   }
 
   void _updateMetricsFromProfile(Map<String, dynamic> profile) {
@@ -3459,6 +3502,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     _audioSub?.cancel();
     _talkingTimer?.cancel();
     _reconnectTimer?.cancel();
+    _recapTimer?.cancel();
     _chatController.dispose();
     _scrollController.dispose();
     _tts.stop();
@@ -3645,6 +3689,44 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                 ]),
               ),
             ),
+          // Recap card — shown after login when journey data exists
+          if (_recapData != null && !_recapDismissed && !_sseIntakePending)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A1A),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.5)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Welcome back${_recapData!["user_name"] != null ? ", ${_recapData!["user_name"]}" : ""}.',
+                    style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                if (_recapData!["journey"] != null)
+                  Text('\u{1F5FA} Journey: ${(_recapData!["journey"]["biome"] ?? "unknown").toString().replaceAll("_", " ")} — Panel ${_recapData!["journey"]["panel_count"] ?? 0}',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                if ((_recapData!["active_quests"] as List?)?.isNotEmpty == true)
+                  Text('\u{2694} Quest: ${_recapData!["active_quests"][0]["goal"] ?? "Active"} (Day ${_recapData!["active_quests"][0]["days_active"] ?? 0})',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                if ((_recapData!["active_missions"] as List?)?.isNotEmpty == true)
+                  Text('\u{1F91D} Mission: ${_recapData!["active_missions"][0]["relationship_target"] ?? "Active"} (Day ${_recapData!["active_missions"][0]["days_active"] ?? 0})',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                if (_recapData!["crystal_insight"] != null)
+                  Padding(padding: const EdgeInsets.only(top: 4),
+                    child: Text('\u{1F4A1} ${(_recapData!["crystal_insight"] as String).length > 80 ? (_recapData!["crystal_insight"] as String).substring(0, 80) + "..." : _recapData!["crystal_insight"]}',
+                        style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 11, fontStyle: FontStyle.italic))),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 4, children: [
+                  _recapBtn('Continue Journey', () { _dismissRecap(); _sendPresetMessage("Let's talk about my journey today"); }),
+                  if ((_recapData!["active_quests"] as List?)?.isNotEmpty == true)
+                    _recapBtn('Work on Quest', () { _dismissRecap(); _sendPresetMessage("I want to work on my ${_recapData!["active_quests"][0]["goal"] ?? "quest"}"); }),
+                  if ((_recapData!["active_missions"] as List?)?.isNotEmpty == true)
+                    _recapBtn('Talk About Mission', () { _dismissRecap(); _sendPresetMessage("Let's talk about my mission with ${_recapData!["active_missions"][0]["relationship_target"] ?? "my relationship"}"); }),
+                  _recapBtn('Just Chat', _dismissRecap),
+                ]),
+              ]),
+            ),
           // Main content area - Background visual + Chat overlay
           Expanded(
             child: Stack(
@@ -3702,31 +3784,49 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                                 ],
                               ),
                             );
+                            final bool hasQuestSuggestion = isNate && !_dismissedSuggestions.contains(i) && msg.toLowerCase().contains('make this a quest');
+                            final bool hasMissionSuggestion = isNate && !_dismissedSuggestions.contains(i) && msg.toLowerCase().contains('could be a mission');
+                            Widget suggestionRow = const SizedBox.shrink();
+                            if (hasQuestSuggestion || hasMissionSuggestion) {
+                              suggestionRow = Padding(padding: const EdgeInsets.only(top: 4, left: 20), child: Wrap(spacing: 8, children: [
+                                _recapBtn(hasQuestSuggestion ? 'Start Quest' : 'Start Mission', () {
+                                  setState(() => _dismissedSuggestions.add(i));
+                                  _sendPresetMessage(hasQuestSuggestion ? "Yes, let's make that a quest" : "Yes, let's start that mission");
+                                }),
+                                _recapBtn('Not right now', () => setState(() => _dismissedSuggestions.add(i))),
+                              ]));
+                            }
                             if (isNate && _canUseTtsReadAloud()) {
                               final nateText = msg.replaceFirst("Little Nate: ", "");
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(child: textWidget),
-                                    const SizedBox(width: 4),
-                                    GestureDetector(
-                                      onTap: () => _speakNateMessage(nateText),
-                                      child: Icon(
-                                        _isTalking ? Icons.volume_up : Icons.volume_up_outlined,
-                                        color: const Color(0xFFC9A962),
-                                        size: 18,
+                              return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(child: textWidget),
+                                      const SizedBox(width: 4),
+                                      GestureDetector(
+                                        onTap: () => _speakNateMessage(nateText),
+                                        child: Icon(
+                                          _isTalking ? Icons.volume_up : Icons.volume_up_outlined,
+                                          color: const Color(0xFFC9A962),
+                                          size: 18,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              );
+                                suggestionRow,
+                              ]);
                             }
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                              child: textWidget,
-                            );
+                            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                                child: textWidget,
+                              ),
+                              suggestionRow,
+                            ]);
                           },
                         ),
                       ),

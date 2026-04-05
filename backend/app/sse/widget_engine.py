@@ -125,7 +125,7 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
             # 1. Biome transition today
             alert = await conn.fetchrow(
-                "SELECT content FROM sse_admin_alerts WHERE user_id=$1 AND alert_type='biome_transition' AND created_at >= $2",
+                "SELECT detail FROM sse_admin_alerts WHERE user_id=$1 AND alert_type='biome_transition' AND created_at >= $2",
                 user_id, today_start)
             if alert:
                 return _content("milestone", biome, primary="You've entered a new biome.",
@@ -133,10 +133,10 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
             # 2. Quest completed today
             cq = await conn.fetchrow(
-                "SELECT title FROM sse_quests WHERE user_id=$1 AND status='completed' AND completed_at >= $2",
+                "SELECT goal FROM sse_quests WHERE user_id=$1 AND status='completed' AND completed_at >= $2",
                 user_id, today_start)
             if cq:
-                return _content("milestone", biome, primary=f"Quest complete: {cq['title']}",
+                return _content("milestone", biome, primary=f"Quest complete: {cq['goal']}",
                                 secondary="Your growth is real.", action="open_quest")
 
             # 3. Crisis crystal in last 24h
@@ -150,22 +150,22 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
             # 4. Active quest (30% chance goal)
             aq = await conn.fetchrow(
-                "SELECT id, title FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
+                "SELECT quest_id, goal FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
             if aq and random.random() < 0.3:
-                return _content("goal", biome, primary=aq["title"],
+                return _content("goal", biome, primary=aq["goal"],
                                 secondary="Keep going.", action="open_quest",
-                                action_id=str(aq["id"]))
+                                action_id=str(aq["quest_id"]))
 
             # 5. Active mission + no session in 3+ days
             am = await conn.fetchrow(
-                "SELECT id, title FROM sse_missions WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
+                "SELECT mission_id, relationship_target FROM sse_missions WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
             if am:
                 last_sess = await conn.fetchval(
                     "SELECT MAX(created_at) FROM conversation_history WHERE user_id=$1", user_id)
                 if not last_sess or last_sess < three_days_ago:
-                    return _content("mission_reminder", biome, primary=am["title"],
+                    return _content("mission_reminder", biome, primary=am["relationship_target"],
                                     secondary="Your mission awaits.", action="open_chat",
-                                    action_id=str(am["id"]))
+                                    action_id=str(am["mission_id"]))
 
             # 6. Meaningful session yesterday (high-confidence crystal)
             yesterday = today_start - timedelta(days=1)
@@ -180,7 +180,7 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
             # 7. No check-in in 3+ days
             last_checkin = await conn.fetchval(
-                "SELECT MAX(created_at) FROM sse_panel_log WHERE user_id=$1 AND panel_type='checkin'", user_id)
+                "SELECT MAX(generated_at) FROM sse_panel_log WHERE user_id=$1 AND panel_type='checkin'", user_id)
             if not last_checkin or last_checkin < three_days_ago:
                 return _content("check_in", biome, primary="How are you today?",
                                 secondary="Tap to check in with Little Nate", action="open_checkin")
@@ -197,7 +197,7 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
 
             # 10. Default: journey panel or power word
             panel = await conn.fetchrow(
-                "SELECT panel_id, r2_url, narrative_text FROM sse_panel_log WHERE user_id=$1 AND r2_url IS NOT NULL ORDER BY created_at DESC LIMIT 1", user_id)
+                "SELECT panel_id, r2_url, narrative_text FROM sse_panel_log WHERE user_id=$1 AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", user_id)
             if panel and panel["r2_url"]:
                 narr = panel["narrative_text"] or ""
                 snippet = narr[:100] + "…" if len(narr) > 100 else narr

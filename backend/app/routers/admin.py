@@ -5467,19 +5467,29 @@ async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Dep
 
 @sse_client_router.get("/journey/panels")
 async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse_auth)):
-    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    hw_id = _user.get("hardware_id") or _user.get("user_id") or ""
+    uname = _user.get("username") or ""
+    ids = [i for i in {hw_id, uname} if i]
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT panel_id, panel_type, r2_url, narrative_text, biome, character_manifest, "
+        rows_j = await conn.fetch(
+            "SELECT panel_id::text as id, panel_type, r2_url, narrative_text, biome, character_manifest, "
             "panel_tone, generated_at, crystal_domains_used, viewed_at "
-            "FROM sse_panel_log WHERE user_id=$1 ORDER BY generated_at DESC LIMIT 50", uid)
+            "FROM sse_panel_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
+        rows_w = await conn.fetch(
+            "SELECT log_id::text as id, 'workbook' as panel_type, r2_url, "
+            "prompt_used as narrative_text, storyboard_id::text as biome, "
+            "generation_type as panel_tone, generated_at, NULL::timestamptz as viewed_at "
+            "FROM sse_delivery_generation_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
+        uid = hw_id or uname
         j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id=$1", uid)
         f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id=$1", uid)
+    merged = sorted([dict(r) for r in rows_j] + [dict(r) for r in rows_w],
+                     key=lambda x: x.get("generated_at") or "", reverse=True)[:50]
     return {
         "archetype": dict(f) if f else {},
         "journey": dict(j) if j else {},
-        "panels": [dict(r) for r in rows]
+        "panels": merged
     }
 
 
@@ -5512,10 +5522,49 @@ async def sse_client_checkin(request: Request, _user: dict = Depends(_sse_auth))
     pool = request.app.state.db_pool
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO sse_panel_log (panel_id, user_id, panel_type, narrative_text, created_at) VALUES (gen_random_uuid()::text, $1, 'checkin', $2, now())",
+            "INSERT INTO sse_panel_log (panel_id, user_id, panel_type, source_type, narrative_text) VALUES (gen_random_uuid(), $1, 'checkin', 'checkin', $2)",
             uid, emotion)
     msg = "I see you. I'm here." if emotion == "struggling" else "Thanks for checking in. I'm here."
     return {"message": msg, "acknowledged": True}
+
+@sse_client_router.get("/recap")
+async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    pool = request.app.state.db_pool
+    ids = [uid, uname] if uid != uname else [uid]
+    result: dict = {"user_name": _user.get("name") or uname, "journey": None, "active_quests": [], "active_missions": [], "workbooks": [], "crystal_insight": None, "last_panel_url": None, "widget_content": None}
+    try:
+        async with pool.acquire() as conn:
+            j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
+            idf = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
+            pcnt = await conn.fetchval("SELECT count(*) FROM sse_panel_log WHERE user_id = ANY($1)", ids)
+            if j:
+                result["journey"] = {"biome": j["current_biome"], "phase": j["dominant_character"], "panel_count": pcnt or 0,
+                                     "archetype_hint": (idf["archetype_hint"] if idf else None), "archetype_image_url": (idf["archetype_image_url"] if idf else None)}
+            quests = await conn.fetch("SELECT quest_id::text, goal, started_at FROM sse_quests WHERE user_id = ANY($1) AND status='active' ORDER BY started_at DESC LIMIT 3", ids)
+            for q in quests:
+                days = (datetime.now(timezone.utc) - q["started_at"]).days if q["started_at"] else 0
+                result["active_quests"].append({"quest_id": q["quest_id"], "goal": q["goal"], "days_active": days})
+            missions = await conn.fetch("SELECT mission_id::text, relationship_target, started_at FROM sse_missions WHERE user_id = ANY($1) AND status='active' ORDER BY started_at DESC LIMIT 3", ids)
+            for m in missions:
+                days = (datetime.now(timezone.utc) - m["started_at"]).days if m["started_at"] else 0
+                result["active_missions"].append({"mission_id": m["mission_id"], "relationship_target": m["relationship_target"], "days_active": days})
+            wbooks = await conn.fetch("SELECT storyboard_id, current_phase FROM sse_enrolled_users WHERE user_id = ANY($1) AND status='active'", ids)
+            for w in wbooks:
+                prov = await conn.fetchrow("SELECT filename FROM sse_ip_provenance WHERE story_plot_id = $1 LIMIT 1", w["storyboard_id"])
+                result["workbooks"].append({"storyboard_title": w["storyboard_id"], "source": prov["filename"] if prov else None})
+            crystal = await conn.fetchval("SELECT crystal_text FROM nate_intelligence_crystals WHERE user_id = ANY($1) AND confidence >= 0.5 ORDER BY created_at DESC LIMIT 1", ids)
+            if crystal:
+                result["crystal_insight"] = crystal[:200]
+            lp = await conn.fetchval("SELECT r2_url FROM sse_panel_log WHERE user_id = ANY($1) AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", ids)
+            result["last_panel_url"] = lp
+    except Exception as e:
+        logger.warning("sse_client_recap: %s", e)
+    cached = _widget_cache.get(uid)
+    if cached:
+        result["widget_content"] = cached[1]
+    return result
 
 
 def _parse_json_col(val):
