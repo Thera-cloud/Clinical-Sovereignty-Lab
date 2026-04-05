@@ -8484,6 +8484,11 @@ class AzureCortex:
                 print(f">>> [AI] Empty response for {uid} - sent fallback message")
             else:
                 _sanitized = sanitize_ai_response(full_response, _role)
+                try:
+                    from app.services.response_sanitizer import sanitize_response as _scrub
+                    _sanitized = _scrub(_sanitized)
+                except Exception:
+                    pass
                 if _sanitized != full_response:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
                     await self._send(uid, _sanitized)

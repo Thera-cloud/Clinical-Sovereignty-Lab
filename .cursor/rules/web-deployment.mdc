@@ -1,0 +1,48 @@
+# Web Deployment Protocol
+
+## When to Deploy
+- After ANY change to files in mobile/lib/
+- After ANY change to files in dashboard/
+- After backend changes that affect client-facing APIs
+- NEVER deploy without building first
+
+## Deployment Command
+Run the deploy script from project root:
+```bash
+./deploy-web.sh
+```
+This script handles: flutter build web → scp to GREEN → Cloudflare cache purge.
+Do NOT manually scp individual files. Always use the full script.
+
+## Pre-Deploy Checklist
+1. All changes committed to git
+2. Protected files verified (bridge_server.py, main.py, littlenate_inference.py max line budgets checked)
+3. `flutter build web` compiles without errors
+4. No uncommitted changes to .cursorrules protected files
+
+## Backend Deployment (separate from web)
+Backend files deploy via scp to GREEN individually:
+```bash
+scp <file> root@68.183.168.75:/opt/clinical-sovereignty-lab/<path>
+ssh root@68.183.168.75 "docker compose -f /opt/clinical-sovereignty-lab/docker-compose.prod.yml restart backend && sleep 8 && docker logs nate_backend --tail 5"
+```
+
+Dashboard HTML files deploy to BOTH locations:
+```bash
+scp <file> root@68.183.168.75:/opt/clinical-sovereignty-lab/dashboard/
+scp <file> root@68.183.168.75:/var/www/sovereign-command/
+```
+
+## Post-Deploy Verification
+1. Check backend health: 104/104 services
+2. Verify app loads: https://app.sovereignsanctuary.net
+3. Verify command loads: https://command.sovereignsanctuary.net
+4. Test the specific feature that was changed
+5. Check browser console for errors (F12)
+
+## NEVER
+- Deploy without committing first
+- Skip the cache purge (users will see stale content)
+- Deploy dashboard files to only one location (must go to BOTH /dashboard/ and /var/www/sovereign-command/)
+- Modify deploy-web.sh (contains API credentials)
+- Commit deploy-web.sh to git (it's in .gitignore)

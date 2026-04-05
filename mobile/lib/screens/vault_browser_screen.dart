@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../widgets/vault_preview_window.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'nate_organizer_screen.dart';
 
 // Design tokens
@@ -818,16 +819,25 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               if (tone.isNotEmpty) Chip(label: Text(tone, style: const TextStyle(fontSize: 11, color: _VaultDesign.gold)), backgroundColor: _VaultDesign.gold.withOpacity(0.12)),
             ]),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.chat_bubble_outline, size: 18),
-            label: const Text('Ask Nate About This'),
-            style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
-            onPressed: () {
-              Navigator.pop(ctx);
-              final msg = '[Story Panel] $narrative\nBiome: $biome | Tone: $tone';
-              Navigator.pop(context, msg);
-            },
-          ),
+          Row(children: [
+            if (imgUrl.isNotEmpty) Padding(padding: const EdgeInsets.only(right: 8), child: OutlinedButton.icon(
+              icon: const Icon(Icons.download, size: 18),
+              label: const Text('Download'),
+              style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.gold, side: BorderSide(color: _VaultDesign.gold.withOpacity(0.5))),
+              onPressed: () => launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication),
+            )),
+            Expanded(child: ElevatedButton.icon(
+              icon: const Icon(Icons.chat_bubble_outline, size: 18),
+              label: const Text('Ask Nate About This'),
+              style: ElevatedButton.styleFrom(backgroundColor: _VaultDesign.gold, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(ctx);
+                final pType = (item['_sse']?['panel_type'] ?? 'journey').toString();
+                final msg = '[Story Panel: $pType] Biome: $biome. ${narrative.length > 120 ? '${narrative.substring(0, 120)}…' : narrative}';
+                Navigator.pop(context, msg);
+              },
+            )),
+          ]),
         ]),
       ),
     );
@@ -870,7 +880,8 @@ class _VaultItemCard extends StatelessWidget {
     final ct = (item['content_type'] ?? 'document').toString();
     final date = item['created_at'] ?? item['updated_at'] ?? '';
     final starred = item['starred'] ?? false;
-    final isImage = ct.contains('image') || ct.contains('upload_image');
+    final isImage = ct.contains('image') || ct.contains('upload_image') || ct.contains('sse_');
+    final thumb = item['thumbnail_url']?.toString();
 
     return GestureDetector(
       onTap: onTap,
@@ -886,11 +897,10 @@ class _VaultItemCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  isImage ? Icons.image : Icons.description,
-                  color: _VaultDesign.gold,
-                  size: 32,
-                ),
+                if (isImage && thumb != null)
+                  ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(thumb, width: 32, height: 32, fit: BoxFit.cover))
+                else
+                  Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 32),
                 const Spacer(),
                 GestureDetector(
                   onTap: onStar,
@@ -968,14 +978,13 @@ class _VaultItemTile extends StatelessWidget {
     final ct = (item['content_type'] ?? 'document').toString();
     final date = item['created_at'] ?? item['updated_at'] ?? '';
     final starred = item['starred'] ?? false;
-    final isImage = ct.contains('image') || ct.contains('upload_image');
+    final isImage = ct.contains('image') || ct.contains('upload_image') || ct.contains('sse_');
+    final thumb = item['thumbnail_url']?.toString();
 
     return ListTile(
-      leading: Icon(
-        isImage ? Icons.image : Icons.description,
-        color: _VaultDesign.gold,
-        size: 28,
-      ),
+      leading: (isImage && thumb != null)
+          ? ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(thumb, width: 48, height: 48, fit: BoxFit.cover))
+          : Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 28),
       title: Text(
         name,
         style: const TextStyle(color: _VaultDesign.textPrimary, fontSize: 14),

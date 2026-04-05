@@ -164,3 +164,4 @@ wireguard/*/privatekey
 mobile/lib/*.backup*
 mobile/lib/**/*.backup*
 backend/resources/therapeutic_library/imagery_guides/.wrangler/
+deploy-web.sh
