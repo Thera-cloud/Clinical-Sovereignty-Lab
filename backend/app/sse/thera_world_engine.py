@@ -241,9 +241,10 @@ async def compose_journey_narrative(
         "panel_tone": "meditative",
     }
 
-    url = os.getenv("NATE_CHAT_URL", "")
-    key = os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "")
-    model = os.getenv("NATE_CHAT_MODEL", "grok-3-mini")
+    from app.services.nate_ai_config import NATE_CHAT_URL as _cfg_url, NATE_CHAT_KEY as _cfg_key, NATE_CHAT_MODEL as _cfg_model
+    url = _cfg_url
+    key = _cfg_key
+    model = _cfg_model
     if not url or not key:
         return fallback
 
