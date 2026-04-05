@@ -1789,8 +1789,8 @@ class StripeWebhookHandler:
                 if already:
                     print(f">>> [STRIPE] Voice block already credited for session {stripe_session_id} — skipping")
                     return
-            except Exception:
-                pass
+            except Exception as _idem_err:
+                _logger.warning("Voice block idempotency check failed (proceeding): %s", _idem_err)
 
         billing = VoiceBillingSystem(self.db)
         new_balance = await billing.credit_seconds(

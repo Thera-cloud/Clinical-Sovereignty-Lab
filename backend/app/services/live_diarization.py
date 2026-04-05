@@ -166,7 +166,7 @@ class LiveDiarizationSession:
                 self._state.qos_degraded = result.qos_degraded
 
         if self._enrollment and not self._greeting_checked and self._state.audio_chunks_processed <= 200:
-            pass
+            pass  # Deferred: early enrollment/greeting — requires ENABLE_VOICE_IDENTITY (Patent 11, item #6)
 
     async def process_greeting(self, pcm_audio_4s: bytes) -> None:
         """

@@ -126,14 +126,8 @@ class _OnboardingPaidScreenState extends State<OnboardingPaidScreen>
   }
 
   Future<void> _savePaidOnboardingSeenHttp(String userId) async {
-    try {
-      final apiBaseUrl = AppConfig.apiBaseUrl;
-      await http.post(
-        Uri.parse('$apiBaseUrl/api/v1/user/paid-onboarding-seen'),
-        headers: {'X-User-Id': userId, 'Content-Type': 'application/json'},
-        body: jsonEncode({'seen': true}),
-      ).timeout(const Duration(seconds: 5));
-    } catch (_) {}
+    // No REST endpoint exists for this; WS path (set_paid_onboarding_seen) is authoritative.
+    // Kept as a no-op stub so callers compile without change.
   }
 
   String get _tierName => widget.tier.toUpperCase().contains('TOP') ? 'Sovereign Circle' : 'Inner Chamber';
