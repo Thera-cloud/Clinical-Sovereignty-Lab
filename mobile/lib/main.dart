@@ -34,6 +34,9 @@ import 'services/nevedal_flutter.dart';
 import 'config/app_config.dart';
 import 'widgets/vault_attachment_button.dart';
 import 'widgets/upload_progress_indicator.dart';
+import 'widgets/nate_home_widget.dart';
+import 'package:home_widget/home_widget.dart';
+import 'screens/checkin_screen.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -173,6 +176,9 @@ void main() {
     debugLog("UNCAUGHT (handled): $error");
     return true;
   };
+
+  // ── Home Screen Widget initialization ──
+  NateWidgetService.initialize();
 
   // ── HIVE DEFENSE v4.3: Device Shield — run full security check on launch ──
   if (!kIsWeb) {
@@ -6235,11 +6241,14 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
   // Resolve dynamically so `/#/?ws=...` overrides apply without rebuilding.
   String get _serverUrl => defaultWsUrl;
 
+  String? _pendingWidgetAction;
+
   @override
   void initState() {
     super.initState();
     _connectToBridge();
     _checkBiometricLogin();
+    _checkWidgetLaunch();
     if (widget.registrationSuccess) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -6250,6 +6259,14 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
         ));
       });
     }
+  }
+
+  Future<void> _checkWidgetLaunch() async {
+    if (kIsWeb) return;
+    try {
+      final uri = await HomeWidget.initiallyLaunchedFromHomeWidget();
+      if (uri != null) _pendingWidgetAction = uri.queryParameters['action'];
+    } catch (_) {}
   }
 
   /// Check if saved biometric credentials exist for quick login.
@@ -6582,6 +6599,7 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
             token,
             profile,
           );
+          NateWidgetService.fetchAndUpdate(token);
         }
 
         // ---------------------------------------------------------------
@@ -6750,6 +6768,12 @@ class _LobbyScreenState extends State<LobbyScreen> with TickerProviderStateMixin
             }
 
             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => nextScreen));
+            if (_pendingWidgetAction == 'open_checkin' && role == 'CLIENT') {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                Navigator.push(context, MaterialPageRoute(builder: (_) => CheckinScreen(profile: profileWithToken)));
+              });
+            }
           }
         });
         

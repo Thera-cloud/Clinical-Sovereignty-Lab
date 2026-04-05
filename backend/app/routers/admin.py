@@ -5490,6 +5490,33 @@ async def sse_panel_viewed(panel_id: str, request: Request, _user: dict = Depend
         await conn.execute("UPDATE sse_panel_log SET viewed_at=now() WHERE panel_id=$1", panel_id)
     return {"status": "marked_viewed", "panel_id": panel_id}
 
+_widget_cache: dict = {}
+
+@sse_client_router.get("/widget")
+async def sse_client_widget(request: Request, _user: dict = Depends(_sse_auth)):
+    import time as _t
+    from app.sse.widget_engine import get_widget_content
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    cached = _widget_cache.get(uid)
+    if cached and (_t.time() - cached[0]) < 3600:
+        return cached[1]
+    data = await get_widget_content(uid, request.app.state.db_pool)
+    _widget_cache[uid] = (_t.time(), data)
+    return data
+
+@sse_client_router.post("/checkin")
+async def sse_client_checkin(request: Request, _user: dict = Depends(_sse_auth)):
+    body = await request.json()
+    emotion = body.get("emotion", "okay")
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO sse_panel_log (panel_id, user_id, panel_type, narrative_text, created_at) VALUES (gen_random_uuid()::text, $1, 'checkin', $2, now())",
+            uid, emotion)
+    msg = "I see you. I'm here." if emotion == "struggling" else "Thanks for checking in. I'm here."
+    return {"message": msg, "acknowledged": True}
+
 
 def _parse_json_col(val):
     if val is None: return {}

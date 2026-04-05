@@ -79,6 +79,9 @@ dependencies:
   crypto: ^3.0.3
   path: ^1.9.0
   
+  # Home Screen Widget
+  home_widget: ^0.7.0
+
   # ZEFCP Layer 1 Physical Transport
   flutter_blue_plus: ^1.32.0
   nfc_manager: ^3.3.0

@@ -13,6 +13,7 @@ import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../widgets/vault_preview_window.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/web_download.dart';
 import 'nate_organizer_screen.dart';
 
 // Design tokens
@@ -824,7 +825,13 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               icon: const Icon(Icons.download, size: 18),
               label: const Text('Download'),
               style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.gold, side: BorderSide(color: _VaultDesign.gold.withOpacity(0.5))),
-              onPressed: () => launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication),
+              onPressed: () async {
+                if (kIsWeb) {
+                  await downloadUrlToDevice(imgUrl, 'sovereign_journey_${DateTime.now().millisecondsSinceEpoch}.png');
+                } else {
+                  launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication);
+                }
+              },
             )),
             Expanded(child: ElevatedButton.icon(
               icon: const Icon(Icons.chat_bubble_outline, size: 18),
