@@ -264,7 +264,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
 </div>
 
 <script>
-var API = location.protocol + '//' + location.hostname + ':8000';
+var API = location.origin;
 
 function _authHeaders(ct) {
   var t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
