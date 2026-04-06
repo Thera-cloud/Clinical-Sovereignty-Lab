@@ -50,7 +50,26 @@ INTAKE_PROMPTS = [
 ]
 
 
-def get_intake_prompt(turn: int, user_name: str) -> str:
+AGE_GATED_INTAKE_OVERRIDES = {
+    "child": {
+        2: "What's been on your mind lately? Anything at school, at home, or with friends that feels hard?",
+        3: "If you could pick three words to describe yourself, what would they be?",
+        5: "Tell me about the people you live with. Who matters to you?",
+        6: "Sometimes kids carry something that feels heavy. Is there something like that for you?",
+        8: "If you were a character in a story, what would you look like? What powers would you have?",
+    },
+    "adolescent": {
+        2: "What's going on right now that made you decide to talk to someone?",
+        6: "Everyone carries something. What's the thing you don't usually talk about?",
+        8: "If your healing was a game or a story, who would your character be? Describe them.",
+    },
+}
+
+
+def get_intake_prompt(turn: int, user_name: str, age_tier: str = "adult") -> str:
+    overrides = AGE_GATED_INTAKE_OVERRIDES.get(age_tier, {})
+    if turn in overrides:
+        return overrides[turn].replace("{name}", user_name)
     for num, _, text in INTAKE_PROMPTS:
         if num == turn:
             return text.replace("{name}", user_name)

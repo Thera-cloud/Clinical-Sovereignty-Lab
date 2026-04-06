@@ -263,16 +263,47 @@ async def compose_journey_narrative(
         "Generate the NEXT scene that continues from where we left off.\n"
     )
 
+    # Phase 6: family context enrichment
+    family_block = ""
+    family_ctx = profile.get("_family_context") or {}
+    if family_ctx.get("heritage_landmarks"):
+        lms = "; ".join(l.get("visual", "")[:60] for l in family_ctx["heritage_landmarks"][:3])
+        family_block += f"Heritage landmarks visible in the landscape: {lms}\n"
+    if family_ctx.get("couples_overlap"):
+        overlap = family_ctx["couples_overlap"]
+        if overlap.get("shared_domains"):
+            family_block += f"A distant figure (spouse archetype) is visible, connected through shared themes: {', '.join(overlap['shared_domains'][:3])}\n"
+        if family_ctx.get("coherence_trend"):
+            prox = "closer" if family_ctx["coherence_trend"] > 0 else "further away"
+            family_block += f"The distant figure appears {prox} today.\n"
+    if family_ctx.get("family_storm"):
+        family_block += "Storm clouds gather across the landscape — a shared family tension is present.\n"
+    if family_ctx.get("family_crystals"):
+        fc = family_ctx["family_crystals"]
+        if fc.get("family_group"):
+            family_block += f"Shared family wisdom echoes: {fc['family_group'][0].get('text','')[:80]}\n"
+    age_gate_block = ""
+    if family_ctx.get("age_gated"):
+        tier = family_ctx.get("age_tier", "child")
+        if tier == "child":
+            age_gate_block = ("CRITICAL: This is a CHILD user. Use bright, gentle, adventure-focused imagery. "
+                              "NO trauma, darkness, wounds, shame, or adult themes. Think Studio Ghibli.\n")
+        elif tier == "adolescent":
+            age_gate_block = ("This is an ADOLESCENT user. Use coming-of-age themes. Mild challenge is okay. "
+                              "No explicit trauma, abuse, or self-harm imagery.\n")
+
     sys_prompt = (
         "You are a therapeutic narrative composer for the Sovereign Story Engine. "
         "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
         "for a user's daily story panel.\n\n"
+        f"{age_gate_block}"
         f"User's current biome: {biome_name} — {biome_desc}\n"
         f"Core character present: {char_name}\n"
         f"{richness_guidance.get(richness, richness_guidance['moderate'])}"
         f"Active quest: {quest_goal}\n"
         f"Active mission: {mission_target}\n"
         f"Therapeutic arc: {arc}\n"
+        f"{family_block}"
         f"{continuity_block}\n"
         "The scene should:\n"
         "- Reflect where the user is therapeutically (not literally — metaphorically)\n"
@@ -353,6 +384,39 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     panel_seq = journey.get("panel_sequence", 0) or 0
     if transitioned:
         panel_seq = 0
+
+    # Phase 6: enrich profile with family context
+    try:
+        from app.sse.family_engine import (
+            get_family_for_user, check_age_gate, get_heritage_landmarks,
+            get_couples_crystal_overlap, detect_family_cycles, get_family_session_crystals,
+        )
+        fam = await get_family_for_user(user_id, db_pool)
+        age_info = await check_age_gate(user_id, db_pool)
+        fctx: Dict[str, Any] = {"age_gated": age_info.get("age_gated"), "age_tier": age_info.get("age_tier")}
+        if fam:
+            fctx["heritage_landmarks"] = await get_heritage_landmarks(user_id, db_pool)
+            fctx["family_crystals"] = await get_family_session_crystals(user_id, fam["family_id"], db_pool)
+            spouses = [m for m in fam.get("members", []) if m.get("role") == "spouse"]
+            if spouses:
+                fctx["couples_overlap"] = await get_couples_crystal_overlap(user_id, spouses[0]["user_id"], db_pool)
+                # Coherence trend for proximity
+                async with db_pool.acquire() as conn:
+                    trend = await conn.fetchval(
+                        "SELECT growth_pct FROM nevedal_metrics WHERE user_id = "
+                        "(SELECT id FROM users WHERE hardware_id=$1 OR username=$1 LIMIT 1) "
+                        "ORDER BY recorded_at DESC LIMIT 1", user_id)
+                fctx["coherence_trend"] = float(trend) if trend else 0
+            storms = await detect_family_cycles(fam["family_id"], db_pool)
+            if storms:
+                fctx["family_storm"] = True
+        if age_info.get("age_gated"):
+            from app.sse.family_engine import _BRIGHT_BIOME_MAP
+            biome_name = _BRIGHT_BIOME_MAP.get(current_biome_name, current_biome_name)
+            biome = {"biome": biome_name, "description": biome.get("description", "").replace("fog", "mist").replace("shadow", "shade")}
+        profile["_family_context"] = fctx
+    except Exception as _fam_err:
+        logger.warning("Phase 6 family enrichment failed for %s: %s", user_id, _fam_err)
 
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
@@ -534,3 +598,30 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
         logger.warning("get_user_sse_status failed for %s: %s", user_id, e)
 
     return status
+
+
+async def generate_age_transition_panel(user_id: str, db_pool) -> dict:
+    """Special panel for a minor turning 18 — age gate lifted, journey unlocked."""
+    from app.sse.infrastructure.grok_imagine_client import generate_image
+    from app.sse.infrastructure.r2_storage import store_image
+    prompt = ("A young person standing at the threshold of a great open gate, golden light "
+              "streaming through, the landscape beyond vast and full of possibility, "
+              "painterly style, warm palette, coming of age, no text, no words")
+    narrative = ("Today you step through the gate. The world beyond is no longer filtered "
+                 "— it is yours, fully. This is your sovereign journey now.")
+    r2_url = ""
+    try:
+        img = await generate_image(prompt)
+        r2_key = f"sse/journey/{user_id}/age_transition.png"
+        r2_url = await store_image(img, r2_key)
+    except Exception as e:
+        logger.warning("Age transition image failed for %s: %s", user_id, e)
+    panel_id = str(uuid.uuid4())
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO sse_panel_log (panel_id, user_id, panel_type, r2_url, narrative_text, panel_tone) "
+                "VALUES ($1,$2,'age_transition',$3,$4,'revelation')", panel_id, user_id, r2_url, narrative)
+    except Exception as e:
+        logger.warning("Age transition panel DB write failed: %s", e)
+    return {"panel_id": panel_id, "r2_url": r2_url, "narrative": narrative}

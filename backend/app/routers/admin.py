@@ -5588,6 +5588,54 @@ async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
     return result
 
 
+# ── Phase 6: Family Constellation (client endpoints) ──────────────────
+
+@sse_client_router.post("/family/create")
+async def sse_family_create(request: Request, _user: dict = Depends(_sse_auth)):
+    body = await request.json()
+    uid = _user.get("hardware_id") or _user.get("username", "")
+    from app.sse.family_engine import create_family_unit
+    return await create_family_unit(uid, body.get("name", "My Family"), request.app.state.db_pool)
+
+@sse_client_router.post("/family/add-member")
+async def sse_family_add_member(request: Request, _user: dict = Depends(_sse_auth)):
+    body = await request.json()
+    from app.sse.family_engine import add_family_member
+    return await add_family_member(
+        body["family_id"], body["user_id"], body.get("role", "member"),
+        body.get("display_name", ""), body.get("date_of_birth"),
+        request.app.state.db_pool, body.get("consenting_parent_id"))
+
+@sse_client_router.get("/family/constellation")
+async def sse_family_constellation(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("username", "")
+    from app.sse.family_engine import get_family_for_user, get_family_constellation
+    fam = await get_family_for_user(uid, request.app.state.db_pool)
+    if not fam:
+        return {"family_id": None, "members": []}
+    return await get_family_constellation(fam["family_id"], request.app.state.db_pool)
+
+@sse_client_router.get("/family/heritage")
+async def sse_family_heritage(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("username", "")
+    from app.sse.family_engine import get_heritage_landmarks
+    return await get_heritage_landmarks(uid, request.app.state.db_pool)
+
+@sse_client_router.post("/family/tag-session")
+async def sse_family_tag_session(request: Request, _user: dict = Depends(_sse_auth)):
+    body = await request.json()
+    from app.sse.family_engine import post_crystallize_family_tag
+    uid = _user.get("hardware_id") or _user.get("username", "")
+    await post_crystallize_family_tag(uid, body, request.app.state.db_pool)
+    return {"tagged": True}
+
+@sse_client_router.get("/family/member/{member_id}/summary")
+async def sse_family_member_summary(member_id: str, request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("username", "")
+    from app.sse.family_engine import get_minor_parent_view
+    return await get_minor_parent_view(uid, member_id, request.app.state.db_pool)
+
+
 def _parse_json_col(val):
     if val is None: return {}
     return json.loads(val) if isinstance(val, str) else val
@@ -5953,3 +6001,24 @@ async def sse_journey_override(request: Request):
             return {"status": "ok", "action": action}
         else:
             raise HTTPException(422, f"Unknown action: {action}")
+
+
+# ── Phase 6: Family Constellation (admin endpoints) ───────────────────
+
+@sse_router.get("/monitor/families")
+async def sse_monitor_families(request: Request):
+    pool = request.app.state.db_pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT fm.family_id, count(*) as member_count,
+                   count(*) FILTER (WHERE fm.age_gated) as minors,
+                   (SELECT count(*) FROM family_shared_events e WHERE e.family_id=fm.family_id) as events
+            FROM family_members fm GROUP BY fm.family_id ORDER BY member_count DESC""")
+    return [dict(r) for r in rows]
+
+@sse_router.post("/admin/family/emancipate-minor")
+async def sse_emancipate_minor(request: Request):
+    body = await request.json()
+    from app.sse.family_engine import emancipate_minor
+    await emancipate_minor(body["user_id"], body.get("reason", ""), "DrNevedal1", request.app.state.db_pool)
+    return {"emancipated": True, "user_id": body["user_id"]}

@@ -219,6 +219,15 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     </div>
   </div>
 
+  <!-- FAMILIES -->
+  <div class="glass mb-24">
+    <div class="glass-header"><div class="glass-title">👨‍👩‍👧‍👦 Families</div><button class="btn btn-sm" onclick="sseFamilyLoad()">Refresh</button></div>
+    <div class="glass-body" style="padding:0;overflow-x:auto">
+      <table class="tbl"><thead><tr><th>Family ID</th><th>Members</th><th>Minors</th><th>Events (30d)</th></tr></thead>
+      <tbody id="sseFamilyBody"><tr><td colspan="4" class="empty"><div class="empty-text">Click Refresh</div></td></tr></tbody></table>
+    </div>
+  </div>
+
   <!-- GENERATION LOG -->
   <div class="glass mb-24">
     <div class="glass-header"><div class="glass-title">📜 Generation Log</div><div style="font-size:11px;color:var(--t3)">Auto-refresh 60s</div></div>
@@ -700,6 +709,17 @@ async function sseDoOverride() {
     var r = await fetch(API + '/api/sse/admin/journey/override', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify(body)});
     var d = await r.json(); alert(JSON.stringify(d)); document.querySelector('.modal-overlay').remove();
   } catch(e) { alert('Error: ' + e); }
+}
+
+async function sseFamilyLoad() {
+  try {
+    var r = await fetch(API + '/api/sse/monitor/families', {headers:_authHeaders()});
+    var d = await r.json(), body = document.getElementById('sseFamilyBody');
+    if (!d.families || !d.families.length) { body.innerHTML = '<tr><td colspan="4" class="empty"><div class="empty-text">No families</div></td></tr>'; return; }
+    body.innerHTML = d.families.map(function(f) {
+      return '<tr><td style="font-family:var(--mono);font-size:11px">' + f.family_id + '</td><td>' + f.member_count + '</td><td>' + (f.minor_count||0) + '</td><td>' + (f.event_count||0) + '</td></tr>';
+    }).join('');
+  } catch(e) { console.warn('sseFamilyLoad:', e); }
 }
 
 function loadAll() { loadMetrics(); loadStoryboards(); loadGenerationLog(); loadCircuitBreaker(); loadHeartbeat(); sseLoadAlerts(); }

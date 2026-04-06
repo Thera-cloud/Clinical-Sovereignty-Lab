@@ -166,6 +166,34 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                                 primary="You're not alone in this. Reach out when you're ready.",
                                 secondary="Little Nate is here.", action="open_chat")
 
+            # 3b. Family-aware content (privacy-preserved aggregate)
+            try:
+                from app.sse.family_engine import get_family_for_user, _compute_age
+                fam = await get_family_for_user(user_id, db_pool)
+                if fam:
+                    fid = fam["family_id"]
+                    for m in fam.get("members", []):
+                        if m.get("date_of_birth"):
+                            dob = m["date_of_birth"]
+                            from datetime import date as _date
+                            if isinstance(dob, str):
+                                dob = _date.fromisoformat(dob)
+                            if dob.month == now.month and dob.day == now.day:
+                                return _content("milestone", biome,
+                                    primary=f"Happy birthday to {m.get('display_name','a family member')}!",
+                                    secondary="A special day in the family.", action="open_journey")
+                    btrans = await conn.fetchrow(
+                        "SELECT fm.display_name FROM family_members fm "
+                        "JOIN sse_admin_alerts a ON a.user_id=fm.user_id "
+                        "WHERE fm.family_id=$1 AND a.alert_type='biome_transition' AND a.created_at >= $2 "
+                        "AND fm.user_id != $3 LIMIT 1", fid, today_start, user_id)
+                    if btrans:
+                        return _content("milestone", biome,
+                            primary=f"{btrans['display_name']} moved to a new biome.",
+                            secondary="The family's journey grows.", action="open_journey")
+            except Exception as _fam_err:
+                logger.warning("widget_engine family content: %s", _fam_err)
+
             # 4. Active quest (30% chance goal)
             aq = await conn.fetchrow(
                 "SELECT quest_id, goal FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)

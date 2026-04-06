@@ -76,6 +76,13 @@ class SSEOrchestrator:
             replace_existing=True,
         )
 
+        self.scheduler.add_job(
+            self._run_age_up_check,
+            CronTrigger(minute="30", hour="4"),
+            id="sse_age_up_check", name="SSE age-up transition check",
+            replace_existing=True,
+        )
+
         if not self.scheduler.running:
             self.scheduler.start()
         logger.info("SSEOrchestrator: started with %d schedule(s) + heartbeat", len(schedules))
@@ -153,6 +160,27 @@ class SSEOrchestrator:
                 logger.info("SSE journey panels: %d generated, %d failed", ok, fail)
             except Exception as e:
                 logger.error("SSE journey panels batch error: %s", e)
+
+    async def _run_age_up_check(self):
+        """Detect family members turning 18 today — lift age gate, generate transition panel."""
+        try:
+            from app.sse.family_engine import generate_shared_event
+            from app.sse.thera_world_engine import generate_age_transition_panel
+            async with self.db_pool.acquire() as conn:
+                turning_18 = await conn.fetch(
+                    "SELECT user_id, family_id FROM family_members "
+                    "WHERE age_gated = true AND date_of_birth IS NOT NULL "
+                    "AND date_of_birth = CURRENT_DATE - INTERVAL '18 years'")
+                for row in turning_18:
+                    await conn.execute(
+                        "UPDATE family_members SET age_gated = false, "
+                        "age_transitioned_at = NOW() WHERE user_id = $1", row["user_id"])
+                    await generate_age_transition_panel(row["user_id"], self.db_pool)
+                    await generate_shared_event(row["family_id"], "age_transition",
+                        {"user_id": row["user_id"], "age": 18}, self.db_pool)
+                    logger.info("SSE age-up: %s turned 18, gate lifted", row["user_id"])
+        except Exception as e:
+            logger.warning("SSE age-up check error: %s", e)
 
     async def _heartbeat_check(self):
         """Check for generation gaps and write heartbeat record."""
