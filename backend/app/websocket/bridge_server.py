@@ -3030,6 +3030,8 @@ def authenticate_user(username: str, password: str, expected_role: str = None) -
     
     p = target.get("profile", {})
     
+    if p.get("account_status") == "DELETED":
+        return None, "ACCOUNT_DELETED"
     if p.get("subscription_status") == "PENDING_VERIFICATION":
         return None, "ACCOUNT_PENDING_APPROVAL"
     # Consent version check: flag for update but do NOT block login
@@ -10616,6 +10618,7 @@ async def handle_client(websocket, path=None):
                         "INVALID_PASSWORD": "Incorrect username or password",
                         "WRONG_PORTAL": _wrong_portal_msg,
                         "ACCOUNT_PENDING_APPROVAL": "Your account is pending admin approval. You'll be notified when approved.",
+                        "ACCOUNT_DELETED": "This account has been removed.",
                     }
                     friendly = friendly_messages.get(res, res)
                     _bf["count"] = _bf.get("count", 0) + 1
@@ -12636,6 +12639,8 @@ async def handle_client(websocket, path=None):
 
                     for k, v in registry.items():
                         p = v.get("profile", {})
+                        if p.get("account_status") == "DELETED":
+                            continue
                         hid = p.get("hardware_id") or ""
                         cred_username = (v.get("credentials", {}).get("username") or k)
                         effective_plan = p.get("subscription_plan") or p.get("tier") or "TRIAL"
@@ -14963,6 +14968,8 @@ async def handle_client(websocket, path=None):
                     for k, v in registry.items():
                         p = v.get("profile", {})
                         if p.get("role") != "CLIENT":
+                            continue
+                        if p.get("account_status") == "DELETED":
                             continue
 
                         # Assignment rules:
