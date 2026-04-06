@@ -43,3 +43,36 @@ These steps must be performed manually in Xcode. They cannot be automated.
 
 8. **Build and run** on a physical device. Long-press the home screen, tap +,
    search "Sovereign Sanctuary" to verify the widget appears in the gallery.
+
+## Known Issue
+
+The `StaticConfiguration` in `NateWidget.swift` currently renders `NateWidgetSmallView`
+for both `.systemSmall` and `.systemMedium` families. `NateWidgetMediumView` exists but
+is not wired. To fix, update the configuration closure to check the widget family:
+
+```swift
+StaticConfiguration(kind: kind, provider: NateTimelineProvider()) { entry in
+    if #available(iOS 17.0, *) {
+        switch entry.widgetFamily {
+        case .systemMedium: NateWidgetMediumView(entry: entry).containerBackground(entry.backgroundColor, for: .widget)
+        default: NateWidgetSmallView(entry: entry).containerBackground(entry.backgroundColor, for: .widget)
+        }
+    } else {
+        NateWidgetSmallView(entry: entry)
+    }
+}
+```
+
+This requires adding `@Environment(\.widgetFamily) var widgetFamily` to `NateWidgetEntry`
+or passing the family through the provider. Deferred to post-Xcode-setup.
+
+## Pre-Flight Checklist
+
+- [ ] Runner.xcworkspace opens without errors
+- [ ] NateWidget target added with correct bundle ID (`net.sovereignsanctuary.littlenate.NateWidget`)
+- [ ] App Group `group.net.sovereignsanctuary.littlenate` added to BOTH Runner and NateWidget
+- [ ] Our Swift files dragged into NateWidget group (Copy items unchecked, target NateWidget checked)
+- [ ] Xcode auto-generated template files deleted from NateWidget group
+- [ ] Deployment target matches Runner (iOS 15.0)
+- [ ] Build succeeds on device (no signing or compilation errors)
+- [ ] Widget appears in widget gallery as "Sovereign Sanctuary"

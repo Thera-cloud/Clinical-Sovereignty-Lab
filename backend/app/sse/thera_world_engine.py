@@ -327,7 +327,10 @@ async def compose_journey_narrative(
                 json={"model": model, "max_tokens": 400, "temperature": 0.7,
                       "messages": [{"role": "system", "content": sys_prompt},
                                    {"role": "user", "content": "Generate today's journey panel."}]})
-            raw = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp_json = r.json()
+            if "choices" not in resp_json:
+                logger.warning("SSE narrative: unexpected response keys for %s: %s status=%s", user_id, list(resp_json.keys()), r.status_code)
+            raw = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
             m = re.search(r"\{.*\}", raw, re.DOTALL)
             if m:
                 result = json.loads(m.group())
@@ -337,6 +340,8 @@ async def compose_journey_narrative(
                 result.setdefault("narrative_text", fallback["narrative_text"])
                 result.setdefault("panel_tone", fallback["panel_tone"])
                 return result
+            else:
+                logger.warning("SSE narrative: LLM returned non-JSON for %s. status=%s raw[:200]=%s", user_id, r.status_code, raw[:200])
     except Exception as e:
         logger.warning("compose_journey_narrative LLM failed for journey, using fallback: %s", e)
 
@@ -397,7 +402,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
         if fam:
             fctx["heritage_landmarks"] = await get_heritage_landmarks(user_id, db_pool)
             fctx["family_crystals"] = await get_family_session_crystals(user_id, fam["family_id"], db_pool)
-            spouses = [m for m in fam.get("members", []) if m.get("role") == "spouse"]
+            spouses = [m for m in fam.get("members", []) if m.get("relationship") == "spouse"]
             if spouses:
                 fctx["couples_overlap"] = await get_couples_crystal_overlap(user_id, spouses[0]["user_id"], db_pool)
                 # Coherence trend for proximity
@@ -578,7 +583,7 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
                         "top_domains": [{"domain": d["domain"], "count": d["cnt"]} for d in top_domains],
                         "growth_trend": trend}
                     coherence = await conn.fetchrow(
-                        "SELECT coherence_pct, growth_pct, quantum_pct FROM nevedal_metrics "
+                        "SELECT c_emo, p_ent, t_tunnel FROM nevedal_metrics "
                         "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", _uuid)
                     if coherence:
                         status["coherence"] = dict(coherence)

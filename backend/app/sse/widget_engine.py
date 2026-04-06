@@ -166,15 +166,23 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                                 primary="You're not alone in this. Reach out when you're ready.",
                                 secondary="Little Nate is here.", action="open_chat")
 
-            # 3b. Family-aware content (privacy-preserved aggregate)
+            # 3b. Family-aware content (inline to avoid nested pool acquisition)
             try:
-                from app.sse.family_engine import get_family_for_user, _compute_age
-                fam = await get_family_for_user(user_id, db_pool)
-                if fam:
-                    fid = fam["family_id"]
-                    for m in fam.get("members", []):
-                        if m.get("date_of_birth"):
-                            dob = m["date_of_birth"]
+                fm_row = await conn.fetchrow(
+                    "SELECT family_id FROM family_members WHERE user_id = $1 LIMIT 1", user_id)
+                if not fm_row:
+                    _hw = await conn.fetchval(
+                        "SELECT hardware_id FROM users WHERE username = $1 LIMIT 1", user_id)
+                    if _hw:
+                        fm_row = await conn.fetchrow(
+                            "SELECT family_id FROM family_members WHERE user_id = $1 LIMIT 1", _hw)
+                if fm_row:
+                    fid = fm_row["family_id"]
+                    fam_members = await conn.fetch(
+                        "SELECT display_name, date_of_birth FROM family_members WHERE family_id = $1", fid)
+                    for m in fam_members:
+                        dob = m.get("date_of_birth")
+                        if dob:
                             from datetime import date as _date
                             if isinstance(dob, str):
                                 dob = _date.fromisoformat(dob)

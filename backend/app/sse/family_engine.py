@@ -54,7 +54,7 @@ async def create_family_unit(head_user_id: str, family_name: str, db_pool) -> di
             "INSERT INTO families (id, family_code, name) VALUES ($1::uuid, $2, $3)",
             fid, family_code, family_name)
         await conn.execute(
-            "INSERT INTO family_members (family_id, user_id, role, display_name) "
+            "INSERT INTO family_members (family_id, user_id, relationship, display_name) "
             "VALUES ($1, $2, 'head', $3)",
             family_code, head_user_id, family_name)
     return {"family_id": family_code, "family_uuid": fid, "name": family_name}
@@ -80,12 +80,12 @@ async def add_family_member(
     async with db_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO family_members "
-            "(family_id, user_id, role, display_name, date_of_birth, age_gated, "
+            "(family_id, user_id, relationship, display_name, date_of_birth, age_gated, "
             " consent_recorded_at, consent_parent_id) "
             "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
             family_id, user_id, role, display_name, dob, age_gated,
             consent_at, consenting_parent_id)
-    return {"added": True, "age_gated": age_gated, "role": role}
+    return {"added": True, "age_gated": age_gated, "relationship": role}
 
 
 # ── 3. get_family_constellation ───────────────────────────────────────
@@ -93,7 +93,7 @@ async def add_family_member(
 async def get_family_constellation(family_id: str, db_pool) -> dict:
     async with db_pool.acquire() as conn:
         members = await conn.fetch(
-            "SELECT fm.user_id, fm.role, fm.display_name, fm.date_of_birth, "
+            "SELECT fm.user_id, fm.relationship, fm.display_name, fm.date_of_birth, "
             "fm.age_gated, fm.emancipated, "
             "j.current_biome, j.panels_generated, j.last_panel_at, "
             "f.archetype_hint, f.archetype_image_url "
@@ -101,7 +101,7 @@ async def get_family_constellation(family_id: str, db_pool) -> dict:
             "LEFT JOIN sse_user_journeys j ON j.user_id = fm.user_id "
             "LEFT JOIN sse_identity_forge f ON (f.user_id = fm.user_id OR "
             "  f.user_id = (SELECT hardware_id FROM users WHERE username = fm.user_id LIMIT 1)) "
-            "WHERE fm.family_id = $1 ORDER BY fm.joined_at", family_id)
+            "WHERE fm.family_id = $1 ORDER BY fm.added_at", family_id)
     return {"family_id": family_id, "members": [dict(m) for m in members]}
 
 
@@ -110,20 +110,20 @@ async def get_family_constellation(family_id: str, db_pool) -> dict:
 async def get_family_for_user(user_id: str, db_pool) -> Optional[dict]:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT family_id, role FROM family_members "
+            "SELECT family_id, relationship FROM family_members "
             "WHERE user_id = $1 LIMIT 1", user_id)
         if not row:
             hw = await conn.fetchval(
                 "SELECT hardware_id FROM users WHERE username = $1 LIMIT 1", user_id)
             if hw:
                 row = await conn.fetchrow(
-                    "SELECT family_id, role FROM family_members WHERE user_id = $1 LIMIT 1", hw)
+                    "SELECT family_id, relationship FROM family_members WHERE user_id = $1 LIMIT 1", hw)
         if not row:
             return None
         members = await conn.fetch(
-            "SELECT user_id, role, display_name, date_of_birth, age_gated "
+            "SELECT user_id, relationship, display_name, date_of_birth, age_gated "
             "FROM family_members WHERE family_id = $1", row["family_id"])
-    return {"family_id": row["family_id"], "user_role": row["role"],
+    return {"family_id": row["family_id"], "user_role": row["relationship"],
             "members": [dict(m) for m in members]}
 
 
@@ -169,7 +169,7 @@ async def get_heritage_landmarks(user_id: str, db_pool) -> list:
         if not fm:
             return []
         parents = await conn.fetch(
-            "SELECT user_id FROM family_members WHERE family_id = $1 AND role IN ('head','spouse')",
+            "SELECT user_id FROM family_members WHERE family_id = $1 AND relationship IN ('head','spouse')",
             fm["family_id"])
         if not parents:
             return []
@@ -233,10 +233,10 @@ async def detect_family_cycles(family_id: str, db_pool) -> list:
             if not resolved:
                 continue
             row = await conn.fetchrow(
-                "SELECT coherence_pct, growth_pct FROM nevedal_metrics "
+                "SELECT c_emo FROM nevedal_metrics "
                 "WHERE user_id=$1 ORDER BY recorded_at DESC LIMIT 1", resolved)
-            if row and row["coherence_pct"] is not None and row["coherence_pct"] < 30:
-                cycles.append({"user_id": uid, "coherence_pct": float(row["coherence_pct"]),
+            if row and row["c_emo"] is not None and float(row["c_emo"]) < 0.30:
+                cycles.append({"user_id": uid, "coherence_pct": float(row["c_emo"]),
                                 "signal": "low_coherence"})
     if len(cycles) >= 2:
         return [{"type": "family_storm", "affected": [c["user_id"] for c in cycles],
@@ -358,9 +358,9 @@ async def get_minor_parent_view(parent_id: str, child_id: str, db_pool) -> dict:
         if not child_fm or child_fm.get("emancipated"):
             return {"error": "not_accessible"}
         parent_fm = await conn.fetchrow(
-            "SELECT role FROM family_members WHERE user_id=$1 AND family_id=$2 LIMIT 1",
+            "SELECT relationship FROM family_members WHERE user_id=$1 AND family_id=$2 LIMIT 1",
             parent_id, child_fm["family_id"])
-        if not parent_fm or parent_fm["role"] not in ("head", "spouse"):
+        if not parent_fm or parent_fm["relationship"] not in ("head", "spouse"):
             return {"error": "not_authorized"}
 
         journey = await conn.fetchrow(

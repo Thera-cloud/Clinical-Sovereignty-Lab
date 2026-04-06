@@ -1,0 +1,37 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Widget Preview — Sovereign Sanctuary</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}body{background:#050505;color:#e0e0e0;font-family:'DM Sans',sans-serif;display:flex;flex-direction:column;align-items:center;padding:40px 16px}
+h1{color:#C9A962;font-size:20px;margin-bottom:24px}.row{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;margin-bottom:32px}
+.widget{border-radius:20px;overflow:hidden;position:relative;display:flex}.small{width:170px;height:170px;flex-direction:column;justify-content:flex-end;padding:14px}
+.medium{width:348px;height:170px}.medium .left{flex:1;display:flex;align-items:center;justify-content:center;font-size:24px;opacity:.5}
+.medium .right{flex:1;display:flex;flex-direction:column;justify-content:center;padding:14px}
+.primary{color:#fff;font-size:14px;font-weight:600;line-height:1.35}.secondary{color:#C9A962;font-size:11px;margin-top:4px}
+.eye{position:absolute;bottom:8px;right:10px;font-size:14px;opacity:.5}
+pre{background:#111;border:1px solid #222;border-radius:8px;padding:16px;max-width:600px;width:100%;font-size:12px;overflow-x:auto;color:#ccc;white-space:pre-wrap}
+.status{color:#666;font-size:12px;margin-top:8px}
+</style></head><body>
+<h1>Home Widget Preview</h1>
+<div class="row" id="widgets"><div class="status">Loading...</div></div>
+<pre id="raw">Fetching widget data...</pre>
+<div class="status" id="timer"></div>
+<script>
+const API=(location.hostname==='localhost'||location.hostname==='127.0.0.1')?'http://localhost:8000':'';
+function _authHeaders(){const h={};const t=sessionStorage.getItem('token')||localStorage.getItem('sc_token');if(t)h['Authorization']='Bearer '+t;return h}
+async function load(){
+  try{
+    const r=await fetch(API+'/api/sse-client/widget',{headers:_authHeaders()});
+    if(!r.ok){document.getElementById('raw').textContent='Error: '+r.status;return}
+    const d=await r.json();const bg=d.background_color||'#1a2332';
+    document.getElementById('widgets').innerHTML=
+      `<div class="widget small" style="background:${bg}"><span class="primary">${d.primary_text||''}</span>`+
+      `${d.secondary_text?'<span class="secondary">'+d.secondary_text+'</span>':''}<span class="eye">👁</span></div>`+
+      `<div class="widget medium" style="background:${bg}"><div class="left" style="background:${bg}cc">👁</div>`+
+      `<div class="right"><span class="primary">${d.primary_text||''}</span>`+
+      `${d.secondary_text?'<span class="secondary">'+d.secondary_text+'</span>':''}</div></div>`;
+    document.getElementById('raw').textContent=JSON.stringify(d,null,2);
+  }catch(e){document.getElementById('raw').textContent='Fetch error: '+e.message}
+  document.getElementById('timer').textContent='Last refresh: '+new Date().toLocaleTimeString()+' · auto-refreshes every 60s';
+}
+load();setInterval(load,60000);
+</script></body></html>
