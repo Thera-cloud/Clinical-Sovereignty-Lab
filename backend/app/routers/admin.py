@@ -5913,7 +5913,7 @@ async def sse_monitor_users_summary(request: Request):
                    f.archetype_hint, f.archetype_image_url,
                    (SELECT count(*) FROM sse_quests q WHERE q.user_id=j.user_id AND q.status='active') as active_quests,
                    (SELECT count(*) FROM sse_missions m WHERE m.user_id=j.user_id AND m.status='active') as active_missions
-            FROM sse_user_journeys j LEFT JOIN sse_identity_forge f ON j.user_id=f.user_id
+            FROM sse_user_journeys j LEFT JOIN sse_identity_forge f ON (f.user_id = j.user_id OR f.user_id = (SELECT hardware_id FROM users WHERE username = j.user_id LIMIT 1))
             ORDER BY j.last_panel_at DESC NULLS LAST""")
     return [dict(r) for r in rows]
 

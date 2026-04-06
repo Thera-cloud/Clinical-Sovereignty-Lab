@@ -143,6 +143,18 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                 return _content("milestone", biome, primary=f"Quest complete: {cq['goal']}",
                                 secondary="Your growth is real.", action="open_quest")
 
+            # 2b. Weekly clip generated today
+            clip = await conn.fetchrow(
+                "SELECT panel_id FROM sse_panel_log WHERE user_id=$1 AND panel_type='weekly_clip' AND generated_at >= $2", user_id, today_start)
+            if clip:
+                return _content("milestone", biome, primary="Your weekly story clip is ready.", secondary="Watch your journey unfold.", action="open_journey", action_id=str(clip["panel_id"]))
+
+            # 2c. Monthly recap generated today
+            recap = await conn.fetchrow(
+                "SELECT panel_id FROM sse_panel_log WHERE user_id=$1 AND panel_type='monthly_recap' AND generated_at >= $2", user_id, today_start)
+            if recap:
+                return _content("milestone", biome, primary="Your monthly chapter is ready.", secondary="See how far you've come.", action="open_journey", action_id=str(recap["panel_id"]))
+
             # 3. Crisis crystal in last 24h (use resolved UUID)
             crisis = None
             if _user_uuid:

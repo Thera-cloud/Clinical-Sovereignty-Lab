@@ -792,6 +792,8 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     final biome = sse['biome']?.toString() ?? '';
     final tone = sse['panel_tone']?.toString() ?? '';
     final panelId = item['id']?.toString() ?? '';
+    final pType = sse['panel_type']?.toString() ?? '';
+    final isVideo = imgUrl.endsWith('.mp4') || pType.contains('clip') || pType.contains('recap');
     // Mark as viewed
     if (panelId.isNotEmpty && panelId != 'archetype') {
       http.post(Uri.parse('$_baseUrl/api/sse-client/panel/$panelId/viewed'), headers: _authHeaders);
@@ -805,7 +807,13 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
         initialChildSize: 0.85, minChildSize: 0.4, maxChildSize: 0.95,
         expand: false,
         builder: (_, scrollCtrl) => ListView(controller: scrollCtrl, padding: const EdgeInsets.all(16), children: [
-          if (imgUrl.isNotEmpty)
+          if (imgUrl.isNotEmpty && isVideo)
+            GestureDetector(
+              onTap: () => launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication),
+              child: Container(height: 300, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(12)),
+                child: const Center(child: Icon(Icons.play_circle_fill, color: Color(0xFFC9A962), size: 72))),
+            )
+          else if (imgUrl.isNotEmpty)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Image.network(imgUrl, fit: BoxFit.cover, height: 300, width: double.infinity),
@@ -826,8 +834,9 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               label: const Text('Download'),
               style: OutlinedButton.styleFrom(foregroundColor: _VaultDesign.gold, side: BorderSide(color: _VaultDesign.gold.withOpacity(0.5))),
               onPressed: () async {
+                final ext = isVideo ? 'mp4' : 'png';
                 if (kIsWeb) {
-                  await downloadUrlToDevice(imgUrl, 'sovereign_journey_${DateTime.now().millisecondsSinceEpoch}.png');
+                  await downloadUrlToDevice(imgUrl, 'sovereign_journey_${DateTime.now().millisecondsSinceEpoch}.$ext');
                 } else {
                   launchUrl(Uri.parse(imgUrl), mode: LaunchMode.externalApplication);
                 }
