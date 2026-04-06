@@ -1,8 +1,8 @@
 {
   "agent": "nate-mac-agent",
   "status": "ok",
-  "uptime_s": 909530.6,
-  "timestamp": "2026-04-06T02:50:50.960480+00:00",
+  "uptime_s": 911091.7,
+  "timestamp": "2026-04-06T03:16:51.998914+00:00",
   "managed_processes": {
     "blue_harvester": {
       "name": "blue_harvester",
