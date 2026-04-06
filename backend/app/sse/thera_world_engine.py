@@ -477,7 +477,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
     image_prompt += f", {character[1]}"
 
-    r2_url = ""
+    r2_url = None
     try:
         image_bytes = await generate_image(image_prompt)
         content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
@@ -626,7 +626,7 @@ async def generate_age_transition_panel(user_id: str, db_pool) -> dict:
               "painterly style, warm palette, coming of age, no text, no words")
     narrative = ("Today you step through the gate. The world beyond is no longer filtered "
                  "— it is yours, fully. This is your sovereign journey now.")
-    r2_url = ""
+    r2_url = None
     try:
         img = await generate_image(prompt)
         r2_key = f"sse/journey/{user_id}/age_transition.png"

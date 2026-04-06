@@ -156,7 +156,7 @@ class SSEOrchestrator:
                     except Exception as e:
                         fail += 1
                         logger.warning("Journey panel failed for %s: %s", r["hardware_id"], e)
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(8)
                 logger.info("SSE journey panels: %d generated, %d failed", ok, fail)
             except Exception as e:
                 logger.error("SSE journey panels batch error: %s", e)

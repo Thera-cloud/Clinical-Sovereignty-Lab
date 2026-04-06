@@ -20,6 +20,10 @@ def _get_api_key() -> str:
     return os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "").strip()
 
 
+def _get_fallback_key() -> str:
+    return os.getenv("XAI_FALLBACK_KEY", "").strip()
+
+
 def _get_session() -> aiohttp.ClientSession:
     global _session
     if _session is None or _session.closed:
@@ -29,27 +33,21 @@ def _get_session() -> aiohttp.ClientSession:
     return _session
 
 
-def _headers() -> dict[str, str]:
+def _headers_for(key: str) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {_get_api_key()}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
 
 
-async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
-    """Generate a static image via Grok Imagine API.
+def _headers() -> dict[str, str]:
+    return _headers_for(_get_api_key())
 
-    Returns raw image bytes downloaded from the response URL.
-    Raises RuntimeError on API failure.
-    """
-    key = _get_api_key()
-    if not key:
-        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Imagine")
 
-    payload = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
+async def _imagine_with_key(key: str, payload: dict) -> bytes:
+    """Call Grok Imagine with a specific API key. Returns image bytes."""
     session = _get_session()
-
-    async with session.post(_IMAGINE_URL, json=payload, headers=_headers()) as resp:
+    async with session.post(_IMAGINE_URL, json=payload, headers=_headers_for(key)) as resp:
         if resp.status != 200:
             body = await resp.text()
             raise RuntimeError(f"Grok Imagine {resp.status}: {body[:300]}")
@@ -66,10 +64,37 @@ async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
     async with session.get(image_url) as dl_resp:
         if dl_resp.status != 200:
             raise RuntimeError(f"Image download failed: {dl_resp.status}")
-        image_bytes = await dl_resp.read()
+        return await dl_resp.read()
 
+
+async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
+    """Generate a static image via Grok Imagine API.
+
+    Returns raw image bytes downloaded from the response URL.
+    Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
+    Raises RuntimeError on API failure.
+    """
+    key = _get_api_key()
+    if not key:
+        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Imagine")
+
+    payload = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
+
+    try:
+        result = await _imagine_with_key(key, payload)
+        await asyncio.sleep(2)
+        return result
+    except RuntimeError as e:
+        if "429" not in str(e):
+            raise
+        fallback = _get_fallback_key()
+        if not fallback:
+            raise
+        logger.info("Grok Imagine primary key 429 — retrying with fallback key")
+
+    result = await _imagine_with_key(fallback, payload)
     await asyncio.sleep(2)
-    return image_bytes
+    return result
 
 
 async def generate_video(
