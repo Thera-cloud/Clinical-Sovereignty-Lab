@@ -1,136 +1,144 @@
 import WidgetKit
 import SwiftUI
 
-struct NateWidgetEntry: TimelineEntry {
+private let appGroupID = "group.net.sovereignsanctuary.littlenate"
+
+struct NateEntry: TimelineEntry {
     let date: Date
-    let type: String
+    let widgetType: String
     let primaryText: String
     let secondaryText: String
     let backgroundColor: Color
-    let action: String
-    let actionId: String
+    let imageURL: String?
 }
 
-struct NateTimelineProvider: TimelineProvider {
-    private let defaults = UserDefaults(suiteName: "group.net.sovereignsanctuary.littlenate")
-
-    func placeholder(in context: Context) -> NateWidgetEntry {
-        NateWidgetEntry(date: .now, type: "single_word", primaryText: "Breathe",
-                        secondaryText: "", backgroundColor: Color(hex: "#1a2332"),
-                        action: "open_chat", actionId: "")
+struct NateProvider: TimelineProvider {
+    func placeholder(in context: Context) -> NateEntry {
+        NateEntry(date: .now, widgetType: "journey_panel", primaryText: "Your journey continues…",
+                  secondaryText: "Open Sovereign Sanctuary", backgroundColor: Color(hex: "#0A0A0A"), imageURL: nil)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (NateWidgetEntry) -> Void) {
+    func getSnapshot(in context: Context, completion: @escaping (NateEntry) -> Void) {
         completion(readEntry())
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<NateWidgetEntry>) -> Void) {
+    func getTimeline(in context: Context, completion: @escaping (Timeline<NateEntry>) -> Void) {
         let entry = readEntry()
-        let next = Calendar.current.date(byAdding: .minute, value: 30, to: .now)!
+        let next = Calendar.current.date(byAdding: .minute, value: 30, to: entry.date)!
         completion(Timeline(entries: [entry], policy: .after(next)))
     }
 
-    private func readEntry() -> NateWidgetEntry {
-        let d = defaults
-        let type = d?.string(forKey: "widget_type") ?? "single_word"
-        let primary = d?.string(forKey: "widget_primary_text") ?? "Breathe"
-        let secondary = d?.string(forKey: "widget_secondary_text") ?? ""
-        let bg = d?.string(forKey: "widget_background_color") ?? "#1a2332"
-        let action = d?.string(forKey: "widget_action") ?? "open_chat"
-        let actionId = d?.string(forKey: "widget_action_id") ?? ""
-        return NateWidgetEntry(date: .now, type: type, primaryText: primary,
-                               secondaryText: secondary, backgroundColor: Color(hex: bg),
-                               action: action, actionId: actionId)
+    private func readEntry() -> NateEntry {
+        let defaults = UserDefaults(suiteName: appGroupID)
+        let wType   = defaults?.string(forKey: "widget_type") ?? "journey_panel"
+        let primary = defaults?.string(forKey: "widget_primary_text") ?? "Your journey continues…"
+        let secondary = defaults?.string(forKey: "widget_secondary_text") ?? ""
+        let bgHex   = defaults?.string(forKey: "widget_background_color") ?? "#0A0A0A"
+        let imgURL  = defaults?.string(forKey: "widget_image_url")
+        return NateEntry(date: .now, widgetType: wType, primaryText: primary,
+                         secondaryText: secondary, backgroundColor: Color(hex: bgHex), imageURL: imgURL)
     }
 }
 
-// MARK: - Small Widget
+// MARK: - Small Widget View
 
 struct NateWidgetSmallView: View {
-    let entry: NateWidgetEntry
+    let entry: NateEntry
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack {
             entry.backgroundColor
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Spacer()
+                    Text("👁👁")
+                        .font(.system(size: 14))
+                        .opacity(0.6)
+                }
                 Spacer()
                 Text(entry.primaryText)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(3)
-                if !entry.secondaryText.isEmpty {
-                    Text(entry.secondaryText)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#C9A962"))
-                        .lineLimit(1)
-                }
             }
             .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("👁")
-                .font(.system(size: 14))
-                .padding(8)
-                .opacity(0.6)
         }
-        .widgetURL(URL(string: "littlenate://widget?action=\(entry.action)&id=\(entry.actionId)"))
     }
 }
 
-// MARK: - Medium Widget
+// MARK: - Medium Widget View
 
 struct NateWidgetMediumView: View {
-    let entry: NateWidgetEntry
+    let entry: NateEntry
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Left: biome gradient
-            ZStack {
-                entry.backgroundColor.opacity(0.8)
-                LinearGradient(colors: [entry.backgroundColor, entry.backgroundColor.opacity(0.4)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Text("👁")
-                    .font(.system(size: 22))
-                    .opacity(0.5)
-            }
-            .frame(maxWidth: .infinity)
-
-            // Right: text content
-            VStack(alignment: .leading, spacing: 6) {
-                Spacer()
-                Text(entry.primaryText)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(3)
-                if !entry.secondaryText.isEmpty {
-                    Text(entry.secondaryText)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(hex: "#C9A962"))
-                        .lineLimit(1)
+        ZStack {
+            entry.backgroundColor
+            HStack(spacing: 12) {
+                if let urlStr = entry.imageURL, let url = URL(string: urlStr),
+                   let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 120)
+                        .clipped()
+                        .cornerRadius(8)
+                } else {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 120)
+                        .overlay(
+                            Text("👁👁")
+                                .font(.system(size: 24))
+                                .opacity(0.4)
+                        )
                 }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(entry.primaryText)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(3)
+                    if !entry.secondaryText.isEmpty {
+                        Text(entry.secondaryText)
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.6))
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 12)
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 12)
         }
-        .background(entry.backgroundColor)
-        .widgetURL(URL(string: "littlenate://widget?action=\(entry.action)&id=\(entry.actionId)"))
     }
 }
 
-// MARK: - Widget Configuration
+// MARK: - Widget Definition
 
 struct NateWidget: Widget {
-    let kind: String = "NateWidget"
+    let kind = "NateWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: NateTimelineProvider()) { entry in
+        StaticConfiguration(kind: kind, provider: NateProvider()) { entry in
             if #available(iOS 17.0, *) {
-                NateWidgetSmallView(entry: entry)
-                    .containerBackground(entry.backgroundColor, for: .widget)
+                Group {
+                    switch entry.widgetType {
+                    default:
+                        ViewThatFits {
+                            NateWidgetMediumView(entry: entry)
+                            NateWidgetSmallView(entry: entry)
+                        }
+                    }
+                }
+                .containerBackground(entry.backgroundColor, for: .widget)
             } else {
-                NateWidgetSmallView(entry: entry)
+                Group {
+                    ViewThatFits {
+                        NateWidgetMediumView(entry: entry)
+                        NateWidgetSmallView(entry: entry)
+                    }
+                }
             }
         }
         .configurationDisplayName("Sovereign Sanctuary")
@@ -139,22 +147,31 @@ struct NateWidget: Widget {
     }
 }
 
-// MARK: - Color hex extension
+// MARK: - Color Hex Extension
 
 extension Color {
     init(hex: String) {
-        let h = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: h).scanHexInt64(&int)
-        let r, g, b: Double
-        switch h.count {
-        case 6:
-            r = Double((int >> 16) & 0xFF) / 255
-            g = Double((int >> 8) & 0xFF) / 255
-            b = Double(int & 0xFF) / 255
-        default:
-            r = 0; g = 0; b = 0
-        }
+        let h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        var rgb: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&rgb)
+        let r = Double((rgb >> 16) & 0xFF) / 255
+        let g = Double((rgb >> 8) & 0xFF) / 255
+        let b = Double(rgb & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
     }
 }
+
+#if DEBUG
+struct NateWidget_Previews: PreviewProvider {
+    static var previews: some View {
+        let entry = NateEntry(date: .now, widgetType: "journey_panel",
+                              primaryText: "A quiet path opens through the dark forest…",
+                              secondaryText: "Tap to continue your journey",
+                              backgroundColor: Color(hex: "#0A0A0A"), imageURL: nil)
+        NateWidgetSmallView(entry: entry)
+            .previewContext(WidgetPreviewContext(family: .systemSmall))
+        NateWidgetMediumView(entry: entry)
+            .previewContext(WidgetPreviewContext(family: .systemMedium))
+    }
+}
+#endif
