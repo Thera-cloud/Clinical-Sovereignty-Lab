@@ -525,7 +525,7 @@ async def get_user_sse_status(user_id: str, db_pool) -> dict:
             try:
                 forge = await conn.fetchrow(
                     "SELECT archetype_hint, archetype_image_url, character_visual "
-                    "FROM sse_identity_forge WHERE user_id=$1", user_id)
+                    "FROM sse_identity_forge WHERE user_id=$1 OR user_id=(SELECT hardware_id FROM users WHERE username=$1 LIMIT 1)", user_id)
                 if forge:
                     status["forge"] = dict(forge)
             except Exception as _forge_err:

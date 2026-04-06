@@ -5482,8 +5482,8 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
             "generation_type as panel_tone, generated_at, NULL::timestamptz as viewed_at "
             "FROM sse_delivery_generation_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
         uid = hw_id or uname
-        j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id=$1", uid)
-        f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id=$1", uid)
+        j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
+        f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
     merged = sorted([dict(r) for r in rows_j] + [dict(r) for r in rows_w],
                      key=lambda x: x.get("generated_at") or "", reverse=True)[:50]
     return {
