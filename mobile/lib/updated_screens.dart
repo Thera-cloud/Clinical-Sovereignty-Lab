@@ -3627,6 +3627,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                   },
                 ),
               )).then((result) {
+                if (mounted) _checkSseIntake();
                 if (result is Map && result['askNateVault'] != null && mounted) {
                   final itemId = result['askNateVault'].toString();
                   _chatController.text = '${_chatController.text}[Vault:$itemId] '.trim();

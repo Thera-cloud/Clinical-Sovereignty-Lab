@@ -5527,6 +5527,27 @@ async def sse_client_checkin(request: Request, _user: dict = Depends(_sse_auth))
     msg = "I see you. I'm here." if emotion == "struggling" else "Thanks for checking in. I'm here."
     return {"message": msg, "acknowledged": True}
 
+@sse_client_router.get("/identity/status")
+async def sse_client_identity_status(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [i for i in {uid, uname} if i]
+    async with request.app.state.db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT archetype_hint, archetype_image_url, status FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
+    completed = bool(row and row["status"] == "complete")
+    return {"completed": completed, "archetype_hint": row["archetype_hint"] if row else None, "archetype_image_url": row["archetype_image_url"] if row else None}
+
+
+@sse_client_router.post("/identity/reset")
+async def sse_client_identity_reset(request: Request, _user: dict = Depends(_sse_auth)):
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    uname = _user.get("username") or uid
+    ids = [i for i in {uid, uname} if i]
+    async with request.app.state.db_pool.acquire() as conn:
+        await conn.execute("DELETE FROM sse_identity_forge WHERE user_id = ANY($1)", ids)
+    return {"status": "reset", "message": "Your identity has been reset. Start a new conversation to begin your journey again."}
+
+
 @sse_client_router.get("/recap")
 async def sse_client_recap(request: Request, _user: dict = Depends(_sse_auth)):
     uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")

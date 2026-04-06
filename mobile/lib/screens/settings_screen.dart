@@ -2180,6 +2180,24 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          // --- Your Archetype ---
+          _sectionHeader('YOUR ARCHETYPE', Icons.auto_awesome),
+          _settingsCard([
+            _actionRow(Icons.auto_awesome, 'Change Archetype', 'Redo your identity intake conversation', () async {
+              final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+                backgroundColor: const Color(0xFF1A1A1A),
+                title: const Text('Change Archetype?', style: TextStyle(color: Color(0xFFE8D5A3))),
+                content: const Text('This will reset your character identity. Your journey, quests, and story panels will be preserved, but your archetype image and character will be regenerated based on a new conversation with Little Nate.\n\nContinue?', style: TextStyle(color: Colors.white70)),
+                actions: [TextButton(onPressed: () => Navigator.pop(_, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(_, true), child: const Text('Reset', style: TextStyle(color: Color(0xFFC9A962))))],
+              ));
+              if (ok != true) return;
+              final tok = _profile['token']?.toString() ?? '';
+              final resp = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/identity/reset'), headers: {'Authorization': 'Bearer $tok'});
+              if (mounted && resp.statusCode == 200) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Archetype reset. Open your chat to begin a new intake.'))); }
+            }),
+          ]),
+          const SizedBox(height: 20),
+
           // --- Security ---
           _sectionHeader('SECURITY', Icons.security),
           _settingsCard([
