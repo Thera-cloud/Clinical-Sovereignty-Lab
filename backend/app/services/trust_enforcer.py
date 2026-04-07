@@ -190,6 +190,17 @@ class TrustEnforcer:
         await self._enforce_and_report(now)
 
     async def _enforce_and_report(self, now: datetime):
+        try:
+            async with self.db_pool.acquire() as conn:
+                already = await conn.fetchval(
+                    "SELECT 1 FROM skyeye_activity WHERE type='trust_enforcer_sent' "
+                    "AND created_at > NOW() - INTERVAL '30 minutes' LIMIT 1")
+            if already:
+                logger.info("TrustEnforcer: skipping — already sent this window")
+                return
+        except Exception:
+            pass
+
         preflight = await self._pre_flight_checks()
         auditor_results = await self._read_latest_results()
         baseline = await self._load_baseline()

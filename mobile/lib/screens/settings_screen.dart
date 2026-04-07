@@ -104,6 +104,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   List<dynamic> _coachSpecializations = [];
   bool _coachInfoLoaded = false;
 
+  // Archetype identity
+  String? _archetypeName;
+  String? _archetypeImageUrl;
+
   @override
   void initState() {
     super.initState();
@@ -122,6 +126,17 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     if (_isSovereignCircle) _fetchFamilyMembers();
     _loadBiometricState();
     _fetchCoachInfo();
+    _fetchArchetypeStatus();
+  }
+
+  Future<void> _fetchArchetypeStatus() async {
+    try {
+      final tok = _profile['token']?.toString() ?? '';
+      final resp = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/identity/status'), headers: {'Authorization': 'Bearer $tok'});
+      if (!mounted || resp.statusCode != 200) return;
+      final data = jsonDecode(resp.body);
+      setState(() { _archetypeName = data['archetype_hint']; _archetypeImageUrl = data['archetype_image_url']; });
+    } catch (_) {}
   }
 
   Future<void> _loadBiometricState() async {
@@ -2161,6 +2176,14 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
 
           // --- Your Archetype ---
           _sectionHeader('YOUR ARCHETYPE', Icons.auto_awesome),
+          if (_archetypeName != null && _archetypeName!.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
+              if (_archetypeImageUrl != null) CircleAvatar(radius: 16, backgroundImage: NetworkImage(_archetypeImageUrl!), backgroundColor: const Color(0xFF1A1A1A)),
+              if (_archetypeImageUrl != null) const SizedBox(width: 10),
+              Text('Your archetype: $_archetypeName', style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 14)),
+            ]))
+          else
+            const Padding(padding: EdgeInsets.only(bottom: 8), child: Text('No archetype yet — begin your journey', style: TextStyle(color: Colors.white38, fontSize: 13))),
           _settingsCard([
             _actionRow(Icons.auto_awesome, 'Change Archetype', 'Redo your identity intake conversation', () async {
               final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(

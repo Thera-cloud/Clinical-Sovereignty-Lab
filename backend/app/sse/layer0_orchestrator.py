@@ -151,6 +151,13 @@ class SSEOrchestrator:
                         "AND hardware_id IS NOT NULL AND hardware_id != ''")
                 for r in rows:
                     try:
+                        async with self.db_pool.acquire() as c2:
+                            exists = await c2.fetchval(
+                                "SELECT 1 FROM sse_panel_log WHERE user_id=$1 AND generated_at::date = CURRENT_DATE LIMIT 1",
+                                r["hardware_id"])
+                        if exists:
+                            logger.info("Skipping %s — panel already exists today", r["hardware_id"])
+                            continue
                         await generate_journey_panel(r["hardware_id"], self.db_pool)
                         ok += 1
                     except Exception as e:

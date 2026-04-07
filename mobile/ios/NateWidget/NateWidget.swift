@@ -96,13 +96,13 @@ struct NateWidgetMediumView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.primaryText)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(3)
                     if !entry.secondaryText.isEmpty {
                         Text(entry.secondaryText)
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.6))
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(hex: "#8B7355"))
                             .lineLimit(2)
                     }
                     Spacer()
@@ -122,15 +122,26 @@ struct NateWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NateProvider()) { entry in
-            ViewThatFits {
-                NateWidgetMediumView(entry: entry)
-                NateWidgetSmallView(entry: entry)
-            }
-            .containerBackground(entry.backgroundColor, for: .widget)
+            NateWidgetEntryView(entry: entry)
+                .containerBackground(entry.backgroundColor, for: .widget)
         }
         .configurationDisplayName("Sovereign Sanctuary")
         .description("Daily therapeutic touchpoint")
         .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+struct NateWidgetEntryView: View {
+    @Environment(\.widgetFamily) var family
+    let entry: NateEntry
+
+    var body: some View {
+        switch family {
+        case .systemMedium:
+            NateWidgetMediumView(entry: entry)
+        default:
+            NateWidgetSmallView(entry: entry)
+        }
     }
 }
 

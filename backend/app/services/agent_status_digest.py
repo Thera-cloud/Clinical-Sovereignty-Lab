@@ -78,6 +78,17 @@ class AgentStatusDigest:
             await asyncio.sleep(60)
 
     async def _build_and_send(self, now: datetime):
+        try:
+            async with self.db_pool.acquire() as conn:
+                already = await conn.fetchval(
+                    "SELECT 1 FROM skyeye_activity WHERE type='agent_digest_sent' "
+                    "AND created_at > NOW() - INTERVAL '30 minutes' LIMIT 1")
+            if already:
+                logger.info("AgentStatusDigest: skipping — already sent this window")
+                return
+        except Exception:
+            pass
+
         sections = []
 
         sections.append(await self._section_token_management())
