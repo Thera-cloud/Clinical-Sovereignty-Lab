@@ -1,9 +1,8 @@
 #!/bin/sh
 set -e
 
-echo "=== ci_post_clone: Installing Flutter and CocoaPods ==="
+echo "=== ci_post_clone (repo root): Installing Flutter and CocoaPods ==="
 echo "CI_PRIMARY_REPOSITORY_PATH=$CI_PRIMARY_REPOSITORY_PATH"
-echo "CI_WORKSPACE=$CI_WORKSPACE"
 echo "PWD=$(pwd)"
 
 # Flutter SDK — Xcode Cloud doesn't include it
@@ -13,17 +12,10 @@ if ! command -v flutter > /dev/null 2>&1; then
     export PATH="$HOME/flutter/bin:$PATH"
 fi
 
-# Ensure flutter is on PATH even if already installed
 export PATH="$HOME/flutter/bin:$PATH"
 flutter --version
 
-# Navigate to the Flutter project root
-if [ -d "$CI_PRIMARY_REPOSITORY_PATH/mobile" ]; then
-    cd "$CI_PRIMARY_REPOSITORY_PATH/mobile"
-elif [ -d "$CI_PRIMARY_REPOSITORY_PATH" ]; then
-    cd "$CI_PRIMARY_REPOSITORY_PATH"
-fi
-
+cd "$CI_PRIMARY_REPOSITORY_PATH/mobile"
 echo "Running flutter pub get in $(pwd)..."
 flutter pub get
 
