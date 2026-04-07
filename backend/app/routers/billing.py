@@ -11,7 +11,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 
 from app.auth import get_current_user_id
-from app.services.api_server import require_admin, require_coach
+from app.services.api_server import require_admin, require_coach, get_current_user
 from datetime import datetime, timedelta
 import logging
 import os
@@ -1621,8 +1621,8 @@ async def get_family_members(family_id: str, request: Request):
 class FamilyMemberCheckoutRequest(BaseModel):
     dependent_username: str
     ordinal: int
-    success_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
-    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+    success_url: Optional[str] = "https://app.sovereignsanctuary.net/payment-complete"
+    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/payment-cancelled"
 
 
 @router.post("/checkout/family-member")
@@ -1704,8 +1704,8 @@ class TokenPackPurchase(BaseModel):
     pack_id: str
     username: str
     email: Optional[str] = None
-    success_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
-    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/settings"
+    success_url: Optional[str] = "https://app.sovereignsanctuary.net/payment-complete"
+    cancel_url: Optional[str] = "https://app.sovereignsanctuary.net/payment-cancelled"
 
 
 @router.get("/token-packs")
@@ -2122,12 +2122,35 @@ async def payment_method_add_checkout(body: PaymentMethodCheckoutRequest, reques
             customer=customer_id,
             mode="setup",
             payment_method_types=payment_method_types,
-            success_url="https://app.sovereignsanctuary.net/?payment_setup=success",
-            cancel_url="https://app.sovereignsanctuary.net/?payment_setup=cancel",
+            success_url="https://app.sovereignsanctuary.net/payment-complete",
+            cancel_url="https://app.sovereignsanctuary.net/payment-cancelled",
         )
         return {"checkout_url": session.url, "session_id": session.id}
     except stripe.error.StripeError as e:
         raise HTTPException(400, f"Stripe checkout error: {e}")
+
+
+@router.post("/portal")
+async def create_billing_portal(request: Request, user: dict = Depends(get_current_user)):
+    if not STRIPE_AVAILABLE:
+        raise HTTPException(503, "Stripe not available")
+    hw_id = user.get("hardware_id") or user.get("user_id", "")
+    customer_id = None
+    db = getattr(request.app.state, "db_pool", None)
+    if db:
+        row = await db.fetchrow("SELECT stripe_customer_id FROM users WHERE hardware_id = $1", hw_id)
+        if row:
+            customer_id = row["stripe_customer_id"]
+    if not customer_id:
+        raise HTTPException(400, "No billing account found")
+    try:
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url="https://app.sovereignsanctuary.net/payment-complete",
+        )
+        return {"portal_url": session.url}
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, f"Portal error: {e}")
 
 
 class DojoCheckoutRequest(BaseModel):
@@ -2183,8 +2206,8 @@ async def dojo_checkout(body: DojoCheckoutRequest, request: Request, user: dict 
             "customer": customer_id,
             "mode": "subscription",
             "metadata": {"type": "dojo_subscription", "dojo_key": dojo_key, "coach_id": hw_id},
-            "success_url": "https://coach.sovereignsanctuary.net/?dojo=success&session_id={CHECKOUT_SESSION_ID}",
-            "cancel_url": "https://coach.sovereignsanctuary.net/?dojo=cancel",
+            "success_url": "https://coach.sovereignsanctuary.net/payment-complete?session_id={CHECKOUT_SESSION_ID}",
+            "cancel_url": "https://coach.sovereignsanctuary.net/payment-cancelled",
         }
 
         if price_id:

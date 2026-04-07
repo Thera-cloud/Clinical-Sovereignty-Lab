@@ -473,6 +473,19 @@ class StripeService:
                 await r.publish("nate:user_reload", json.dumps({"username": username}))
         except Exception:
             pass
+
+    async def _notify_payment_confirmed(self, username: str, ptype: str = "plan_upgrade", plan: str = "", tokens_added: int = 0):
+        """Push payment confirmation to the user's connected client via Redis → bridge."""
+        try:
+            from app.services.api_server import _get_auth_redis
+            r = await _get_auth_redis()
+            if r:
+                await r.publish("nate:payment_confirmed", json.dumps({
+                    "username": username, "type": ptype,
+                    "plan": plan, "tokens_added": tokens_added,
+                }))
+        except Exception:
+            pass
     
     # -------------------------------------------------------------------------
     # CUSTOMER MANAGEMENT
@@ -1519,6 +1532,8 @@ class StripeWebhookHandler:
         """Handle successful checkout."""
         
         metadata = session.get('metadata', {})
+        if metadata.get('type') == 'voice_block':
+            return  # handled by voice_billing webhook
 
         # --- Stripe-first registration: pending_signup flow --- # QUANTUM-CRYSTAL-ARCH
         pending_signup_id = metadata.get("pending_signup_id")
@@ -1603,6 +1618,7 @@ class StripeWebhookHandler:
                             "nate:user_reload",
                             json.dumps({"username": uname}),
                         )
+                        await self._notify_payment_confirmed(uname, "plan_upgrade", plan=tier)
             except Exception:
                 pass
 
@@ -1678,6 +1694,7 @@ class StripeWebhookHandler:
                                     "nate:user_reload",
                                     json.dumps({"username": username}),
                                 )
+                                await self._notify_payment_confirmed(username, "token_purchase", tokens_added=tokens)
                         except Exception:
                             pass
                     except Exception as e:

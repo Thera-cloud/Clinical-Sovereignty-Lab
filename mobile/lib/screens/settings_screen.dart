@@ -14,10 +14,11 @@ import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
-import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen, isNativeIOS;
+import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen;
 import 'billing_screens.dart';
 import '../config/app_config.dart';
 import '../services/payment_service.dart';
+import 'payment_confirmation_screen.dart';
 import 'vault_browser_screen.dart';
 import 'nate_organizer_screen.dart';
 import 'quiz_screen.dart';
@@ -523,17 +524,6 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   }
 
   Future<void> _purchaseTokenPack(String packId) async {
-    if (isNativeIOS) {
-      final iapId = _tokenPackIapMap[packId];
-      if (iapId != null) {
-        final uid = _profile['hardware_id'] ?? _profile['username'] ?? '';
-        final token = _profile['token'] as String?;
-        PaymentService.instance.setAuthContext(uid, token);
-        await PaymentService.instance.purchase(iapId);
-      }
-      return;
-    }
-
     try {
       final token = _profile['token'] ?? '';
       final username = _profile['username'] ?? '';
@@ -552,6 +542,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         final data = jsonDecode(resp.body);
         final url = data['checkout_url'];
         if (url != null && mounted) {
+          PaymentConfirmationScreen.pendingCheckout = true;
+          PaymentConfirmationScreen.pendingCheckoutType = 'token_purchase';
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
         }
       } else {
@@ -567,6 +559,27 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
         );
       }
+    }
+  }
+
+  Future<void> _openBillingPortal() async {
+    final token = _profile['token'] ?? '';
+    try {
+      final resp = await http.post(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/portal'),
+        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final url = jsonDecode(resp.body)['portal_url'];
+        if (url != null) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open billing portal'), backgroundColor: Colors.red));
+      }
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connection error'), backgroundColor: Colors.red));
     }
   }
 
@@ -640,17 +653,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(isNativeIOS ? 'Subscription Info' : '30-Day Billing Policy',
-                      style: const TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
+                  const Text('30-Day Billing Policy',
+                      style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  if (isNativeIOS) ...[
-                    Text(
-                      isUpgrade
-                          ? 'Your upgrade will be processed through the App Store. Any remaining value from your current plan is prorated.'
-                          : 'To manage or downgrade your subscription, go to Settings > Apple ID > Subscriptions on your device.',
-                      style: const TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
-                    ),
-                  ] else if (isUpgrade) ...[
+                  if (isUpgrade) ...[
                     const Text(
                       'Your new plan takes effect immediately with full access to upgraded features.',
                       style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.4),
@@ -709,21 +715,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
             onPressed: () {
               Navigator.pop(ctx);
-              if (isNativeIOS) {
-                if (isUpgrade) {
-                  _processUpgradeViaIAP(planKey);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('To downgrade, go to Settings > Apple ID > Subscriptions on your device.'),
-                      backgroundColor: Color(0xFF1A1A1A),
-                      duration: Duration(seconds: 5),
-                    ),
-                  );
-                }
-              } else {
-                _openStripeCheckoutForPlanChange(planKey, newName, isUpgrade);
-              }
+              _openStripeCheckoutForPlanChange(planKey, newName, isUpgrade);
             },
             child: Text(
               isUpgrade ? 'Confirm Upgrade' : 'Confirm Downgrade',
@@ -756,8 +748,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         },
         body: jsonEncode({
           'tier': planKey,
-          'success_url': 'https://app.sovereignsanctuary.net/payment-success',
-          'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
+          'success_url': 'https://app.sovereignsanctuary.net/payment-complete',
+          'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancelled',
         }),
       ).timeout(const Duration(seconds: 15));
 
@@ -767,10 +759,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         final data = jsonDecode(resp.body);
         final url = data['checkout_url'];
         if (url != null) {
+          PaymentConfirmationScreen.pendingCheckout = true;
+          PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Complete your ${isUpgrade ? "upgrade" : "plan change"} in the browser'),
+              content: Text(isUpgrade ? 'Opening secure checkout…' : 'Opening plan change…'),
               backgroundColor: const Color(0xFF1A1A1A),
             ),
           );
@@ -787,19 +781,6 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         SnackBar(content: Text('Connection error: $e'), backgroundColor: Colors.red),
       );
     }
-  }
-
-  Future<void> _processUpgradeViaIAP(String planKey) async {
-    final iapIds = <String, String>{
-      'STANDARD': PaymentService.innerChamberMonthly,
-      'TOP_TIER': PaymentService.sovereignCircleMonthly,
-    };
-    final iapId = iapIds[planKey];
-    if (iapId == null) return;
-    final uid = _profile['hardware_id'] ?? _profile['username'] ?? '';
-    final token = _profile['token'] as String?;
-    PaymentService.instance.setAuthContext(uid, token);
-    await PaymentService.instance.purchase(iapId);
   }
 
   void _sendWs(Map<String, dynamic> msg) {
@@ -1277,35 +1258,15 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
               onPressed: selected.isEmpty ? null : () async {
                 Navigator.pop(ctx);
-                if (isNativeIOS) {
-                  _sendWs({
-                    'type': 'request_coach_upgrade',
-                    'selected_dojos': selected.toList(),
-                    'coaching_fee': double.tryParse(feeCtrl.text) ?? 0,
-                    'zoom_link': zoomCtrl.text.trim(),
-                    'email': emailCtrl.text.trim(),
-                    'phone': phoneCtrl.text.trim(),
-                  });
-                  setState(() { _profile['upgrade_to_coach_status'] = 'PENDING'; });
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Coach upgrade request submitted for admin approval.'),
-                        backgroundColor: Color(0xFFC9A962),
-                      ),
-                    );
-                  }
-                } else {
-                  await _launchCoachUpgradeCheckout(
-                    selected.toList(),
-                    coaching_fee: double.tryParse(feeCtrl.text) ?? 0,
-                    zoomLink: zoomCtrl.text.trim(),
-                    email: emailCtrl.text.trim(),
-                    phone: phoneCtrl.text.trim(),
-                  );
-                }
+                await _launchCoachUpgradeCheckout(
+                  selected.toList(),
+                  coaching_fee: double.tryParse(feeCtrl.text) ?? 0,
+                  zoomLink: zoomCtrl.text.trim(),
+                  email: emailCtrl.text.trim(),
+                  phone: phoneCtrl.text.trim(),
+                );
               },
-              child: Text(isNativeIOS ? 'Submit Request' : 'Continue to Payment',
+              child: const Text('Continue to Payment',
                   style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             ),
           ],
@@ -1346,6 +1307,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         final data = jsonDecode(resp.body);
         final url = data['checkout_url'] as String?;
         if (url != null && url.isNotEmpty) {
+          PaymentConfirmationScreen.pendingCheckout = true;
+          PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           setState(() { _profile['upgrade_to_coach_status'] = 'PAYMENT_IN_PROGRESS'; });
         } else {
@@ -1817,6 +1780,20 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 onPressed: _showChangePlanSheet,
               ),
             ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: _Design.goldDim),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.settings, color: _Design.goldDim, size: 16),
+                label: const Text('Manage Subscription', style: TextStyle(color: _Design.goldDim, fontSize: 12)),
+                onPressed: _openBillingPortal,
+              ),
+            ),
             const SizedBox(height: 10),
             // Quick links to billing screens
             Row(children: [
@@ -1844,6 +1821,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 ));
               })),
             ]),
+            const SizedBox(height: 12),
+            _PaymentHistoryWidget(profile: _profile),
           ]),
           const SizedBox(height: 20),
 
@@ -2734,20 +2713,16 @@ class _ChangePlanSheet extends StatelessWidget {
                     children: [
                       Icon(Icons.info_outline, color: _Design.gold, size: 16),
                       const SizedBox(width: 8),
-                      Text(isNativeIOS ? 'Subscription Info' : '30-Day Billing Policy',
-                          style: const TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
+                      const Text('30-Day Billing Policy',
+                          style: TextStyle(color: _Design.gold, fontSize: 11, fontWeight: FontWeight.bold)),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    isNativeIOS
-                        ? 'Subscriptions are managed through the App Store. '
-                          'The free trial cannot be reactivated after it expires or after upgrading to a paid plan. '
-                          'Your conversation history, metrics, and all data are never deleted when changing plans.'
-                        : 'Upgrades take effect immediately. Downgrades keep your current access through the end of your billing cycle. '
-                          'The free trial cannot be reactivated after it expires or after upgrading to a paid plan. '
-                          'Your conversation history, metrics, and all data are never deleted when changing plans.',
-                    style: const TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.5),
+                  const Text(
+                    'Upgrades take effect immediately. Downgrades keep your current access through the end of your billing cycle. '
+                    'The free trial cannot be reactivated after it expires or after upgrading to a paid plan. '
+                    'Your conversation history, metrics, and all data are never deleted when changing plans.',
+                    style: TextStyle(color: _Design.textSecondary, fontSize: 11, height: 1.5),
                   ),
                 ],
               ),
@@ -4992,11 +4967,11 @@ class _LegalAgreementScreen extends StatelessWidget {
             _section('12. DATA WE COLLECT',
               'Account information (name, email, phone, DOB), voice biometric data (pitch, energy, speech rate, pause ratio), facial geometry data (Sovereign Circle only, processed real-time, not stored as raw video), text and conversation data, emotional and analytical data (C_emo scores, CEE events, crisis assessments, PMB profiles), and technical/usage data.'),
             _section('13. HOW WE PROCESS YOUR DATA',
-              'Data is processed via Azure OpenAI (Microsoft) under enterprise data protection agreements — your data is NOT used to train OpenAI\'s general models. ${isNativeIOS ? 'Payments processed securely.' : 'Payments via Stripe.'} All data encrypted in transit and at rest.'),
+              'Your conversation text and voice audio are processed by third-party AI services: xAI (Grok) and Microsoft Azure OpenAI. Both operate under enterprise data protection agreements — your data is NOT used to train their general models. Payments processed via Stripe. All data encrypted in transit and at rest.'),
             _section('14. DATA RETENTION',
               'Active accounts: retained for duration of membership. Deleted accounts: held 30 days then permanently purged. Anonymized aggregate data may be retained indefinitely for research.'),
             _section('15. DATA SHARING',
-              'Your data is NEVER sold. Shared only with: your assigned Coach (session summaries), Head of Household (aggregate family metrics, not individual content), law enforcement (only when legally compelled).'),
+              'Your data is NEVER sold. Shared with: (a) xAI (Grok) and Microsoft Azure OpenAI — your conversation text and voice audio for AI-powered therapeutic responses, under enterprise agreements that prohibit use for model training; (b) your assigned Coach (session summaries); (c) Head of Household (aggregate family metrics, not individual content); (d) law enforcement (only when legally compelled).'),
             _section('16. YOUR PRIVACY RIGHTS',
               'California (CCPA/CPRA): right to know, delete, opt out of sale. Illinois (BIPA): biometric consent provided herein. Texas (CUBI): biometric notification provided. Virginia, Colorado, Connecticut, Indiana, Kentucky, Rhode Island: access, correct, delete, port data. Right to Delete via Settings. Right to Data Export (transcripts; analytical overlays excluded as platform IP).'),
             _section('17. CHILDREN\'S PRIVACY (COPPA)',
@@ -5263,5 +5238,75 @@ class _WeeklyBriefDialogState extends State<_WeeklyBriefDialog> {
       case 'dipping': return '↓';
       default: return '→';
     }
+  }
+}
+
+class _PaymentHistoryWidget extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  const _PaymentHistoryWidget({required this.profile});
+  @override
+  State<_PaymentHistoryWidget> createState() => _PaymentHistoryWidgetState();
+}
+
+class _PaymentHistoryWidgetState extends State<_PaymentHistoryWidget> {
+  bool _expanded = false;
+  List<Map<String, dynamic>>? _invoices;
+  bool _loading = false;
+
+  Future<void> _load() async {
+    if (_invoices != null) return;
+    setState(() => _loading = true);
+    final token = widget.profile['token'] ?? '';
+    final uid = widget.profile['hardware_id'] ?? widget.profile['username'] ?? '';
+    try {
+      final resp = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/api/billing/invoices/$uid'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        final list = (data['invoices'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+        if (mounted) setState(() { _invoices = list; _loading = false; });
+      } else {
+        if (mounted) setState(() { _invoices = []; _loading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _invoices = []; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      InkWell(
+        onTap: () { setState(() => _expanded = !_expanded); if (_expanded) _load(); },
+        child: Row(children: [
+          Icon(_expanded ? Icons.expand_less : Icons.expand_more, color: _Design.goldDim, size: 18),
+          const SizedBox(width: 6),
+          const Text('Payment History', style: TextStyle(color: _Design.goldDim, fontSize: 13)),
+        ]),
+      ),
+      if (_expanded) ...[
+        const SizedBox(height: 8),
+        if (_loading) const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: _Design.goldDim))),
+        if (_invoices != null && _invoices!.isEmpty)
+          const Text('No payment history yet.', style: TextStyle(color: Color(0xFF666666), fontSize: 12)),
+        if (_invoices != null && _invoices!.isNotEmpty)
+          ...(_invoices!.take(10).map((inv) {
+            final date = inv['date'] ?? inv['created_at'] ?? '';
+            final amount = inv['amount_due'] ?? inv['amount'] ?? 0;
+            final status = (inv['status'] ?? '').toString();
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Expanded(child: Text(date.toString().substring(0, 10), style: const TextStyle(color: Color(0xFF888888), fontSize: 12))),
+                Text('\$${(amount is num ? amount : 0).toStringAsFixed(2)}', style: const TextStyle(color: _Design.goldBright, fontSize: 12)),
+                const SizedBox(width: 8),
+                Text(status, style: TextStyle(color: status == 'paid' ? const Color(0xFF4ECDC4) : const Color(0xFF888888), fontSize: 11)),
+              ]),
+            );
+          })),
+      ],
+    ]);
   }
 }

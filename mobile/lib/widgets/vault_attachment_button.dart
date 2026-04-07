@@ -13,6 +13,7 @@ import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
 import '../config/app_config.dart';
 import '../screens/vault_browser_screen.dart';
+import '../screens/settings_screen.dart';
 import 'upload_progress_indicator.dart';
 
 class _AttachmentDesign {
@@ -100,7 +101,9 @@ class _VaultAttachmentButtonState extends State<VaultAttachmentButton> {
             style: ElevatedButton.styleFrom(backgroundColor: _AttachmentDesign.gold),
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.pushNamed(context, '/settings');
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ClientSettingsScreen(profile: widget.profile ?? {}, socket: widget.socket),
+              ));
             },
             child: const Text('Upgrade', style: TextStyle(color: Colors.black)),
           ),

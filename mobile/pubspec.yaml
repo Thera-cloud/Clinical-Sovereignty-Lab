@@ -48,8 +48,6 @@ dependencies:
   path_provider: ^2.1.1
   file_picker: ^6.1.1
 
-  # In-App Purchase (iOS StoreKit, Android Google Play)
-  in_app_purchase: ^3.2.0
 
   # Cloud Storage (Google Drive / OneDrive export)
   google_sign_in: ^6.2.1

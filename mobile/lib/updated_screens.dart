@@ -26,6 +26,7 @@ import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
 import 'screens/settings_screen.dart';
 import 'screens/billing_screens.dart';
+import 'screens/payment_confirmation_screen.dart';
 import 'services/export_service.dart';
 import 'screens/coaching_mesh_screen.dart';
 import 'screens/onboarding_paid_screen.dart';
@@ -1211,7 +1212,7 @@ class _VocabEntry {
   }
 }
 
-class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
+class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindingObserver {
   final VagusEngine _audio = VagusEngine(); 
   final _dbg = getDebugLogger();
   
@@ -1374,6 +1375,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadAiConsent();
     _connectToCortex();
     _initSpeechToText();
@@ -1381,6 +1383,19 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     _initTts();
     _chatController.addListener(_onDraftChanged);
     _fetchRecap();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (_socket != null) _socket!.sink.add(jsonEncode({"type": "get_profile"}));
+      if (PaymentConfirmationScreen.pendingCheckout && mounted) {
+        PaymentConfirmationScreen.pendingCheckout = false;
+        Navigator.push(context, MaterialPageRoute(builder: (_) => PaymentConfirmationScreen(
+          profile: widget.currentUserProfile ?? {}, checkoutType: PaymentConfirmationScreen.pendingCheckoutType,
+        )));
+      }
+    }
   }
 
   void _onDraftChanged() {
@@ -1683,9 +1698,21 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
         if (kDebugMode) print("Swarm response: ${data['action']} → ${data['result']}");
       }
       else if (data['type'] == 'error') {
-        // General errors (not login-related) — show in system messages
         final msg = (data['message'] ?? data['error'] ?? 'An error occurred').toString();
         _addSystemMsg(msg);
+      }
+      else if (data['type'] == 'payment_confirmed') {
+        final pType = data['payment_type'] ?? '';
+        final plan = data['plan'] ?? '';
+        final tokens = data['tokens_added'] ?? 0;
+        final label = pType == 'token_purchase' ? '$tokens tokens added!' : 'Welcome to $plan!';
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Payment confirmed — $label'),
+            backgroundColor: const Color(0xFF4ECDC4),
+          ));
+          _socket?.sink.add(jsonEncode({"type": "get_profile"}));
+        }
       }
     } catch (e) {
       _debugLog("Parse Error: $e");
@@ -3326,18 +3353,6 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
     return ttsEligible.contains(tier) || ttsEligible.contains(plan);
   }
 
-  /// Check if user has full Realtime voice access (Sovereign Circle only)
-  bool _canUseRealtimeVoice() {
-    final premiumFeatures = widget.currentUserProfile?['premium_features'];
-    if (premiumFeatures != null && premiumFeatures is Map) {
-      return premiumFeatures['realtime_voice'] == true;
-    }
-    final tier = (widget.currentUserProfile?['tier'] ?? '').toString().toUpperCase();
-    final plan = (widget.currentUserProfile?['subscription_plan'] ?? '').toString().toUpperCase();
-    const realtimeTiers = {'TOP_TIER', 'SOVEREIGN_CIRCLE'};
-    return realtimeTiers.contains(tier) || realtimeTiers.contains(plan);
-  }
-
   /// Speak a Nate message aloud via Mini-TTS
   void _speakNateMessage(String text) {
     if (text.trim().isEmpty || _socket == null) return;
@@ -3498,6 +3513,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _nevedal.dispose();
     _audioSub?.cancel();
     _talkingTimer?.cancel();
@@ -3728,6 +3744,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> {
                 ]),
               ]),
             ),
+          if ((widget.currentUserProfile?['subscription_status'] ?? '').toString().toUpperCase() == 'TRIAL_ACTIVE')
+            TrialBannerWidget(userProfile: widget.currentUserProfile ?? {}),
           // Main content area - Background visual + Chat overlay
           Expanded(
             child: Stack(

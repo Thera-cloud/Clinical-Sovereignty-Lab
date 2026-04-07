@@ -9562,8 +9562,8 @@ class _SignUpWizardState extends State<SignUpWizard> {
                 Icon(Icons.lock, color: Color(0xFFC9A962), size: 18),
                 SizedBox(width: 8),
                 Expanded(child: Text(
-                  'You will be redirected to Stripe to complete payment securely. '
-                  'Your account is created after payment confirms.',
+                  'You\'ll complete payment on our secure checkout page. '
+                  'Your account is created once payment confirms.',
                   style: TextStyle(color: Colors.white60, fontSize: 12),
                 )),
               ],

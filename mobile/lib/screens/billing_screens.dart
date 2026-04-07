@@ -17,8 +17,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import '../main.dart' show defaultApiBaseUrl, isNativeIOS;
+import '../main.dart' show defaultApiBaseUrl;
 import '../services/payment_service.dart';
+import 'payment_confirmation_screen.dart';
 import '../config/app_config.dart';
 
 /// Build standard auth headers for REST API calls.
@@ -281,10 +282,11 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: _D.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           isUpgrade
               ? 'Upgrade to ${names[planKey]}'
-              : 'Downgrade to ${names[planKey]}',
+              : 'Change to ${names[planKey]}',
           style: TextStyle(
             color: isUpgrade ? _D.gold : _D.cyan,
             fontFamily: 'Cormorant Garamond',
@@ -296,8 +298,8 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
           children: [
             Text(
               isUpgrade
-                  ? 'Your new plan takes effect immediately with full access to upgraded features.'
-                  : 'You will retain current access through the end of your billing cycle.',
+                  ? 'Unlock full access to ${names[planKey]} features. Your new plan takes effect immediately.'
+                  : 'You\'ll keep your current access through the end of this billing period.',
               style: const TextStyle(
                   color: _D.textSecondary, fontSize: 13, height: 1.5),
             ),
@@ -309,11 +311,11 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Row(children: [
-                Icon(Icons.shield, color: _D.green, size: 16),
+                Icon(Icons.lock_outline, color: _D.green, size: 16),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Your history and data are always preserved.',
+                    'Secure checkout · Your data is always preserved.',
                     style: TextStyle(color: _D.green, fontSize: 11),
                   ),
                 ),
@@ -330,10 +332,11 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: isUpgrade ? _D.gold : _D.cyan,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              isUpgrade ? 'Confirm Upgrade' : 'Confirm Downgrade',
+              isUpgrade ? 'Continue to Payment' : 'Change Plan',
               style:
                   const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
             ),
@@ -346,26 +349,13 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
 
     setState(() => _loading = true);
 
-    if (isNativeIOS) {
-      final iapId = _planKeyToIapId(planKey);
-      if (iapId != null) {
-        final uid = widget.currentUserProfile['hardware_id'] ??
-            widget.currentUserProfile['username'] ?? '';
-        final token = widget.currentUserProfile['token'] as String?;
-        PaymentService.instance.setAuthContext(uid, token);
-        await PaymentService.instance.purchase(iapId);
-        if (mounted) setState(() => _loading = false);
-        return;
-      }
-    }
-
     final token = widget.currentUserProfile['token'] ?? '';
 
     try {
       final reqBody = <String, dynamic>{
         'tier': planKey,
-        'success_url': 'https://app.sovereignsanctuary.net/payment-success',
-        'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
+        'success_url': 'https://app.sovereignsanctuary.net/payment-complete',
+        'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancelled',
       };
       if (_verifiedPromo != null && _verifiedPromo!.isNotEmpty) {
         reqBody['promo_code'] = _verifiedPromo;
@@ -385,10 +375,12 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
         final data = jsonDecode(resp.body);
         final url = data['checkout_url'];
         if (url != null) {
+          PaymentConfirmationScreen.pendingCheckout = true;
+          PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Complete your ${isUpgrade ? "upgrade" : "plan change"} in the browser'),
+              content: Text(isUpgrade ? 'Opening secure checkout…' : 'Opening plan change…'),
               backgroundColor: _D.bgElevated,
             ));
             Navigator.pop(context, planKey);
@@ -1465,14 +1457,33 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: _D.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Purchase $label',
-            style: const TextStyle(color: _D.gold, fontFamily: 'Cormorant Garamond')),
-        content: Text(
-          isNativeIOS
-              ? 'You are purchasing the $label for \$$price.'
-              : 'You are purchasing the $label for \$$price. '
-                'You will be redirected to Stripe to complete payment.',
-          style: const TextStyle(color: _D.textSecondary, fontSize: 13),
+            style: const TextStyle(color: _D.gold, fontFamily: 'Cormorant Garamond', fontSize: 20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$label — \$$price',
+              style: const TextStyle(color: _D.textPrimary, fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: _D.green.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(children: [
+                Icon(Icons.lock_outline, color: _D.green, size: 16),
+                SizedBox(width: 8),
+                Expanded(child: Text(
+                  'Your sessions will be added instantly after payment.',
+                  style: TextStyle(color: _D.green, fontSize: 11),
+                )),
+              ]),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -1481,40 +1492,27 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
                 style: TextStyle(color: _D.textSecondary)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _D.gold),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _D.gold,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () {
               Navigator.pop(ctx);
-              if (isNativeIOS) {
-                final iapMap = <String, String>{
-                  'single': PaymentService.tokenLight,
-                  'pack_4': PaymentService.tokenStandard,
-                  'pack_8': PaymentService.tokenPower,
-                };
-                final iapId = iapMap[packType];
-                if (iapId != null) {
-                  final uid = widget.currentUserProfile['hardware_id'] ??
-                      widget.currentUserProfile['username'] ?? '';
-                  final token = widget.currentUserProfile['token'] as String?;
-                  PaymentService.instance.setAuthContext(uid, token);
-                  PaymentService.instance.purchase(iapId);
-                }
-              } else {
-                _sendWs({
-                  'type': 'get_checkout_url',
-                  'pack_type': packType,
-                  'success_url':
-                      'https://app.sovereignsanctuary.net/coaching/success',
-                  'cancel_url':
-                      'https://app.sovereignsanctuary.net/coaching/cancel',
-                });
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Opening checkout...'),
-                  backgroundColor: _D.bgElevated,
-                ));
-              }
+              _sendWs({
+                'type': 'get_checkout_url',
+                'pack_type': packType,
+                'success_url':
+                    'https://app.sovereignsanctuary.net/payment-complete',
+                'cancel_url':
+                    'https://app.sovereignsanctuary.net/payment-cancelled',
+              });
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Opening secure checkout…'),
+                backgroundColor: _D.bgElevated,
+              ));
             },
             child: const Text('Continue to Payment',
-                style: TextStyle(color: Colors.black)),
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -2267,22 +2265,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                     ),
                     const SizedBox(height: 16),
 
-                    if (isNativeIOS)
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: _D.cyan.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: _D.cyan.withOpacity(0.25)),
-                        ),
-                        child: const Text(
-                          'Payments on iOS are managed through your Apple ID. '
-                          'Go to Settings > Apple ID > Subscriptions to manage.',
-                          style: TextStyle(color: _D.cyan, fontSize: 12),
-                        ),
-                      )
-                    else
-                      Row(
+                    Row(
                         children: [
                           Expanded(
                             child: _AddPaymentButton(
@@ -2502,28 +2485,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                 _discountBadge(Icons.business, 'Corporate Plan', _appliedCompanyName!),
               if (_appliedPromoCode != null)
                 _discountBadge(Icons.local_offer, 'Promo Code', _appliedPromoCode!),
-              if (isNativeIOS) ...[
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _D.bgCard,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _D.border),
-                  ),
-                  child: Column(
-                    children: [
-                      const Icon(Icons.language, color: _D.gold, size: 32),
-                      const SizedBox(height: 10),
-                      const Text(
-                        'Discount and promo codes can be applied at\nsovereignsanctuary.net',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: _D.textSecondary, fontSize: 13, height: 1.5),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
+              ...[
                 if (_discountCodeSuccess != null) ...[
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
@@ -2566,7 +2528,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
                   onApply: _applyCorporateCode,
                 ),
                 const SizedBox(height: 12),
-                if (!kIsWeb && !isNativeIOS) ...[
+                if (!kIsWeb) ...[
                   Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(12),
@@ -2817,7 +2779,7 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
   bool _checkoutBusy = false;
 
   Future<void> _startTierCheckout(BuildContext context, String tier) async {
-    if (_checkoutBusy || isNativeIOS) {
+    if (_checkoutBusy) {
       widget.onUpgrade?.call();
       return;
     }
@@ -2844,8 +2806,8 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
             },
             body: jsonEncode({
               'tier': tier,
-              'success_url': 'https://app.sovereignsanctuary.net/payment-success',
-              'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancel',
+              'success_url': 'https://app.sovereignsanctuary.net/payment-complete',
+              'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancelled',
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -2854,10 +2816,12 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         final url = data['checkout_url'] as String?;
         if (url != null && url.isNotEmpty) {
+          PaymentConfirmationScreen.pendingCheckout = true;
+          PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Complete checkout in your browser'),
+              content: Text('Opening secure checkout…'),
               backgroundColor: Color(0xFF1A1A1A),
             ),
           );
@@ -2961,66 +2925,57 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
                   ),
                   if (isUrgent)
                     const Text(
-                      'Choose Inner Chamber or Sovereign Circle to continue',
+                      'Choose a plan to keep your access',
                       style: TextStyle(color: _D.textSecondary, fontSize: 10),
                     ),
                 ],
               ),
             ),
           ]),
-          if (!isNativeIOS) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: _checkoutBusy
-                        ? null
-                        : () => _startTierCheckout(context, 'STANDARD'),
-                    style: TextButton.styleFrom(
-                      backgroundColor: _D.cyan.withOpacity(0.2),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    child: Text(
-                      _checkoutBusy ? '…' : 'Inner Chamber',
-                      style: const TextStyle(
-                        color: _D.cyan,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: _checkoutBusy
+                      ? null
+                      : () => _startTierCheckout(context, 'STANDARD'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: _D.cyan.withOpacity(0.2),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  child: Text(
+                    _checkoutBusy ? '…' : 'Inner Chamber',
+                    style: const TextStyle(
+                      color: _D.cyan,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextButton(
-                    onPressed: _checkoutBusy
-                        ? null
-                        : () => _startTierCheckout(context, 'TOP_TIER'),
-                    style: TextButton.styleFrom(
-                      backgroundColor: _D.gold.withOpacity(0.25),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    child: Text(
-                      _checkoutBusy ? '…' : 'Sovereign Circle',
-                      style: const TextStyle(
-                        color: _D.gold,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else if (widget.onUpgrade != null)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: widget.onUpgrade,
-                child: const Text('Upgrade', style: TextStyle(color: _D.gold)),
               ),
-            ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextButton(
+                  onPressed: _checkoutBusy
+                      ? null
+                      : () => _startTierCheckout(context, 'TOP_TIER'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: _D.gold.withOpacity(0.25),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  child: Text(
+                    _checkoutBusy ? '…' : 'Sovereign Circle',
+                    style: const TextStyle(
+                      color: _D.gold,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -3051,31 +3006,12 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Your trial has ended. Upgrade to continue using Little Nate.',
+            'Choose a plan to continue your journey with Little Nate.',
             style: TextStyle(color: _D.textSecondary, fontSize: 12, height: 1.5),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          if (isNativeIOS)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: widget.onUpgrade,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _D.gold,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-                child: const Text('View Upgrade Options',
-                    style: TextStyle(
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14)),
-              ),
-            )
-          else
-            Row(
+          Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _planTile(

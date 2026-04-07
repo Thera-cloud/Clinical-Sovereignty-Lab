@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payment Confirmed — Sovereign Sanctuary</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #050505; color: #E8D5A3; font-family: 'DM Sans', system-ui, sans-serif;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
+  .card { max-width: 420px; padding: 48px 32px; }
+  .icon { font-size: 64px; margin-bottom: 24px; }
+  h1 { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 28px; color: #C9A962; margin-bottom: 12px; }
+  p { font-size: 16px; color: #888; line-height: 1.5; margin-bottom: 24px; }
+  .subtle { font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">&#10003;</div>
+  <h1>Payment Confirmed</h1>
+  <p>Return to the app to continue your journey.</p>
+  <p class="subtle">You can close this tab and return to the app.</p>
+</div>
+<script>setTimeout(function(){ window.location = 'sovereignsanctuary://payment-complete'; }, 2000);</script>
+</body>
+</html>

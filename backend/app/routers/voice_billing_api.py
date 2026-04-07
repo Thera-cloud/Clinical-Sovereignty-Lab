@@ -401,15 +401,14 @@ async def stripe_voice_webhook(request: Request):
         logger.warning("Stripe voice webhook: no user_id or phone in metadata")
         return {"status": "error", "detail": "no_user_id"}
 
-    stripe_session_id = session.get("id", "")
-    if stripe_session_id:
+    if payment_id:
         try:
             async with pool.acquire() as conn:
                 already = await conn.fetchval(
                     "SELECT 1 FROM voice_transactions WHERE stripe_payment_id = $1 LIMIT 1",
-                    stripe_session_id)
+                    payment_id)
                 if already:
-                    logger.info("Voice block already credited for session %s — skipping", stripe_session_id)
+                    logger.info("Voice block already credited for payment %s — skipping", payment_id)
                     return {"status": "already_credited"}
         except Exception as e:
             logger.warning("Idempotency check failed (proceeding): %s", e)

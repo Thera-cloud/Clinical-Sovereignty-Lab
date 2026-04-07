@@ -50,17 +50,17 @@ DOJO_PRICES_CENTS = {
 
 SUCCESS_URL = os.getenv(
     "REGISTRATION_SUCCESS_URL",
-    "https://app.sovereignsanctuary.net/?registration=success&session_id={CHECKOUT_SESSION_ID}",
+    "https://app.sovereignsanctuary.net/payment-complete?session_id={CHECKOUT_SESSION_ID}",
 )
 CANCEL_URL = os.getenv(
     "REGISTRATION_CANCEL_URL",
-    "https://app.sovereignsanctuary.net/?registration=cancel",
+    "https://app.sovereignsanctuary.net/payment-cancelled",
 )
 
 API_PUBLIC_BASE = os.getenv("API_PUBLIC_URL", "https://api.sovereignsanctuary.net").rstrip("/")
 TRIAL_SETUP_CANCEL_URL = os.getenv(
     "TRIAL_SETUP_CANCEL_URL",
-    "https://app.sovereignsanctuary.net/trial-setup.html?cancelled=1",
+    "https://app.sovereignsanctuary.net/payment-cancelled",
 )
 TRIAL_SETUP_SUCCESS_REDIRECT = os.getenv(
     "TRIAL_SETUP_SUCCESS_REDIRECT",
@@ -569,11 +569,11 @@ async def coach_upgrade_checkout(
 
     success_url = os.getenv(
         "UPGRADE_SUCCESS_URL",
-        "https://app.sovereignsanctuary.net/?upgrade=success",
+        "https://app.sovereignsanctuary.net/payment-complete",
     )
     cancel_url = os.getenv(
         "UPGRADE_CANCEL_URL",
-        "https://app.sovereignsanctuary.net/?upgrade=cancel",
+        "https://app.sovereignsanctuary.net/payment-cancelled",
     )
 
     try:

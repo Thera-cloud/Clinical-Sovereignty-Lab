@@ -1,5 +1,6 @@
 import WidgetKit
 import SwiftUI
+import UIKit
 
 private let appGroupID = "group.net.sovereignsanctuary.littlenate"
 
@@ -121,25 +122,11 @@ struct NateWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NateProvider()) { entry in
-            if #available(iOS 17.0, *) {
-                Group {
-                    switch entry.widgetType {
-                    default:
-                        ViewThatFits {
-                            NateWidgetMediumView(entry: entry)
-                            NateWidgetSmallView(entry: entry)
-                        }
-                    }
-                }
-                .containerBackground(entry.backgroundColor, for: .widget)
-            } else {
-                Group {
-                    ViewThatFits {
-                        NateWidgetMediumView(entry: entry)
-                        NateWidgetSmallView(entry: entry)
-                    }
-                }
+            ViewThatFits {
+                NateWidgetMediumView(entry: entry)
+                NateWidgetSmallView(entry: entry)
             }
+            .containerBackground(entry.backgroundColor, for: .widget)
         }
         .configurationDisplayName("Sovereign Sanctuary")
         .description("Daily therapeutic touchpoint")

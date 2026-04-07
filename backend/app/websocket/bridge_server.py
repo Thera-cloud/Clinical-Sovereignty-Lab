@@ -1637,6 +1637,7 @@ async def _init_token_redis_async(**_kw):
 BALANCE_SYNC_CHANNEL = "nate:balance_sync"
 USER_RELOAD_CHANNEL = "nate:user_reload"
 REGISTRY_RELOAD_CHANNEL = "nate:registry_reload"
+PAYMENT_CONFIRMED_CHANNEL = "nate:payment_confirmed"  # QUANTUM-CRYSTAL-ARCH
 
 
 def _cache_sync_blocking_listener():
@@ -1669,9 +1670,9 @@ def _cache_sync_blocking_listener():
             )
             client.ping()
             pubsub = client.pubsub()
-            pubsub.subscribe(BALANCE_SYNC_CHANNEL, USER_RELOAD_CHANNEL, REGISTRY_RELOAD_CHANNEL)
+            pubsub.subscribe(BALANCE_SYNC_CHANNEL, USER_RELOAD_CHANNEL, REGISTRY_RELOAD_CHANNEL, PAYMENT_CONFIRMED_CHANNEL)
             _cache_sync_blocking_listener._retry = 0
-            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload", flush=True)
+            print(f"[*] Cache sync listener subscribed to balance_sync + user_reload + registry_reload + payment_confirmed", flush=True)
 
             for message in pubsub.listen():
                 if message["type"] != "message":
@@ -1684,6 +1685,8 @@ def _cache_sync_blocking_listener():
                         _handle_user_reload(message["data"])
                     elif channel == REGISTRY_RELOAD_CHANNEL:
                         _handle_registry_reload()
+                    elif channel == PAYMENT_CONFIRMED_CHANNEL:
+                        _handle_payment_confirmed(message["data"])
                 except Exception as e:
                     print(f"[!] Cache sync message error on {channel}: {e}", flush=True)
 
@@ -1781,6 +1784,36 @@ def _handle_registry_reload():
             new_loop.run_until_complete(_do_full_reload())
         finally:
             new_loop.close()
+
+
+def _handle_payment_confirmed(raw_data: str):  # QUANTUM-CRYSTAL-ARCH
+    """Push payment confirmation to connected client via WebSocket."""
+    data = json.loads(raw_data)
+    username = data.get("username", "")
+    if not username:
+        return
+    hw_id = None
+    for k, v in _registry_cache.items():
+        if k.startswith("_"):
+            continue
+        if (v.get("credentials", {}) or {}).get("username", "") == username or v.get("profile", {}).get("username") == username:
+            hw_id = v.get("profile", {}).get("hardware_id", "")
+            break
+    if not hw_id:
+        return
+
+    ws = connected_clients.get(hw_id) or connected_coaches.get(hw_id)
+    if not ws:
+        return
+
+    import asyncio
+    msg = json.dumps({"type": "payment_confirmed", "payment_type": data.get("type", ""), "plan": data.get("plan", ""), "tokens_added": data.get("tokens_added", 0)})
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(lambda: loop.create_task(ws.send(msg)))
+    except RuntimeError:
+        pass
+    print(f"[PAYMENT CONFIRMED] Pushed to {username} ({hw_id[:8]}...)", flush=True)
 
 
 async def _balance_sync_listener():
