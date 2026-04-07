@@ -1988,6 +1988,82 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
     _sendMessage();
   }
 
+  void _showNewQuestDialog() {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text('Start a New Quest', style: TextStyle(color: Color(0xFFE8D5A3))),
+      content: TextField(controller: ctrl, autofocus: true, maxLines: 2, style: const TextStyle(color: Colors.white),
+        decoration: const InputDecoration(hintText: 'What do you want to work on?', hintStyle: TextStyle(color: Colors.white38),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF8B7355))),
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () async {
+          final goal = ctrl.text.trim();
+          if (goal.isEmpty) return;
+          Navigator.pop(ctx);
+          await _createQuestWithGoal(goal);
+        }, child: const Text('Start Quest', style: TextStyle(color: Color(0xFFC9A962)))),
+      ],
+    ));
+  }
+
+  void _showNewMissionDialog() {
+    final targetCtrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text('Start a New Mission', style: TextStyle(color: Color(0xFFE8D5A3))),
+      content: TextField(controller: targetCtrl, autofocus: true, style: const TextStyle(color: Colors.white),
+        decoration: const InputDecoration(hintText: 'Who is this about? (e.g. my mother, my partner)', hintStyle: TextStyle(color: Colors.white38),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF8B7355))),
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () async {
+          final target = targetCtrl.text.trim();
+          if (target.isEmpty) return;
+          Navigator.pop(ctx);
+          await _createMissionWithTarget(target);
+        }, child: const Text('Start Mission', style: TextStyle(color: Color(0xFFC9A962)))),
+      ],
+    ));
+  }
+
+  Future<void> _createQuestFromContext() async {
+    final userMsgs = _chatHistory.where((m) => m.startsWith("You:")).toList();
+    final last3 = userMsgs.length > 3 ? userMsgs.sublist(userMsgs.length - 3) : userMsgs;
+    final goal = last3.map((m) => m.replaceFirst("You: ", "")).join(" ").trim();
+    if (goal.isEmpty) { _showNewQuestDialog(); return; }
+    await _createQuestWithGoal(goal.length > 200 ? goal.substring(0, 200) : goal);
+  }
+
+  Future<void> _createQuestWithGoal(String goal) async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    try {
+      final resp = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/quest/create'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $tok'},
+        body: jsonEncode({'goal': goal}));
+      if (mounted && resp.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Quest started: $goal'), backgroundColor: const Color(0xFFC9A962)));
+        _sendPresetMessage("I just started a quest: $goal");
+      }
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create quest: $e'))); }
+  }
+
+  Future<void> _createMissionWithTarget(String target) async {
+    final tok = widget.currentUserProfile?['token']?.toString() ?? '';
+    try {
+      final resp = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/mission/create'),
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $tok'},
+        body: jsonEncode({'relationship_target': target, 'relationship_type': 'personal'}));
+      if (mounted && resp.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Mission started: $target'), backgroundColor: const Color(0xFFC9A962)));
+        _sendPresetMessage("I just started a mission about $target");
+      }
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not create mission: $e'))); }
+  }
+
   void _updateMetricsFromProfile(Map<String, dynamic> profile) {
     setState(() {
       _metrics = {
@@ -3738,6 +3814,8 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
                   _recapBtn('Continue Journey', () { _dismissRecap(); _sendPresetMessage("Let's talk about my journey today"); }),
                   if ((_recapData!["active_quests"] as List?)?.isNotEmpty == true)
                     _recapBtn('Work on Quest', () { _dismissRecap(); _sendPresetMessage("I want to work on my ${_recapData!["active_quests"][0]["goal"] ?? "quest"}"); }),
+                  if ((_recapData!["active_quests"] as List?)?.isNotEmpty != true)
+                    _recapBtn('New Quest', () { _dismissRecap(); _showNewQuestDialog(); }),
                   if ((_recapData!["active_missions"] as List?)?.isNotEmpty == true)
                     _recapBtn('Talk About Mission', () { _dismissRecap(); _sendPresetMessage("Let's talk about my mission with ${_recapData!["active_missions"][0]["relationship_target"] ?? "my relationship"}"); }),
                   _recapBtn('Just Chat', _dismissRecap),
@@ -3810,7 +3888,11 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
                               suggestionRow = Padding(padding: const EdgeInsets.only(top: 4, left: 20), child: Wrap(spacing: 8, children: [
                                 _recapBtn(hasQuestSuggestion ? 'Start Quest' : 'Start Mission', () {
                                   setState(() => _dismissedSuggestions.add(i));
-                                  _sendPresetMessage(hasQuestSuggestion ? "Yes, let's make that a quest" : "Yes, let's start that mission");
+                                  if (hasQuestSuggestion) {
+                                    _createQuestFromContext();
+                                  } else {
+                                    _showNewMissionDialog();
+                                  }
                                 }),
                                 _recapBtn('Not right now', () => setState(() => _dismissedSuggestions.add(i))),
                               ]));

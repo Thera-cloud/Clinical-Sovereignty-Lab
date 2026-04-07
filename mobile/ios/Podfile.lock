@@ -90,9 +90,6 @@ PODS:
     - GTMSessionFetcher/Core
   - home_widget (0.0.1):
     - Flutter
-  - in_app_purchase_storekit (0.0.1):
-    - Flutter
-    - FlutterMacOS
   - just_audio (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -140,7 +137,6 @@ DEPENDENCIES:
   - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
   - google_sign_in_ios (from `.symlinks/plugins/google_sign_in_ios/darwin`)
   - home_widget (from `.symlinks/plugins/home_widget/ios`)
-  - in_app_purchase_storekit (from `.symlinks/plugins/in_app_purchase_storekit/darwin`)
   - just_audio (from `.symlinks/plugins/just_audio/darwin`)
   - local_auth_darwin (from `.symlinks/plugins/local_auth_darwin/darwin`)
   - nfc_manager (from `.symlinks/plugins/nfc_manager/ios`)
@@ -191,8 +187,6 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/google_sign_in_ios/darwin"
   home_widget:
     :path: ".symlinks/plugins/home_widget/ios"
-  in_app_purchase_storekit:
-    :path: ".symlinks/plugins/in_app_purchase_storekit/darwin"
   just_audio:
     :path: ".symlinks/plugins/just_audio/darwin"
   local_auth_darwin:
@@ -236,7 +230,6 @@ SPEC CHECKSUMS:
   GTMAppAuth: f69bd07d68cd3b766125f7e072c45d7340dea0de
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
   home_widget: f169fc41fd807b4d46ab6615dc44d62adbf9f64f
-  in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
   just_audio: 4e391f57b79cad2b0674030a00453ca5ce817eed
   local_auth_darwin: c3ee6cce0a8d56be34c8ccb66ba31f7f180aaebb
   nfc_manager: 9c40fe22528ab871ca11e52ea8b95790e9d92ca2

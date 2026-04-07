@@ -108,6 +108,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   String? _archetypeName;
   String? _archetypeImageUrl;
 
+  // Quests & Missions
+  List<Map<String, dynamic>> _quests = [];
+  List<Map<String, dynamic>> _missions = [];
+
   @override
   void initState() {
     super.initState();
@@ -127,6 +131,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _loadBiometricState();
     _fetchCoachInfo();
     _fetchArchetypeStatus();
+    _fetchQuestsAndMissions();
   }
 
   Future<void> _fetchArchetypeStatus() async {
@@ -137,6 +142,82 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       final data = jsonDecode(resp.body);
       setState(() { _archetypeName = data['archetype_hint']; _archetypeImageUrl = data['archetype_image_url']; });
     } catch (_) {}
+  }
+
+  Future<void> _fetchQuestsAndMissions() async {
+    final tok = _profile['token']?.toString() ?? '';
+    final h = {'Authorization': 'Bearer $tok'};
+    try {
+      final qr = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/quests'), headers: h);
+      final mr = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/missions'), headers: h);
+      if (!mounted) return;
+      setState(() {
+        if (qr.statusCode == 200) _quests = List<Map<String, dynamic>>.from((jsonDecode(qr.body)['quests'] ?? []).map((e) => Map<String, dynamic>.from(e)));
+        if (mr.statusCode == 200) _missions = List<Map<String, dynamic>>.from((jsonDecode(mr.body)['missions'] ?? []).map((e) => Map<String, dynamic>.from(e)));
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _questAction(String questId, String action) async {
+    final tok = _profile['token']?.toString() ?? '';
+    await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/quest/$questId/$action'), headers: {'Authorization': 'Bearer $tok'});
+    _fetchQuestsAndMissions();
+  }
+
+  Future<void> _missionAction(String missionId, String action) async {
+    final tok = _profile['token']?.toString() ?? '';
+    await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/mission/$missionId/$action'), headers: {'Authorization': 'Bearer $tok'});
+    _fetchQuestsAndMissions();
+  }
+
+  void _showNewQuestDialogSettings() {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text('Start a New Quest', style: TextStyle(color: Color(0xFFE8D5A3))),
+      content: TextField(controller: ctrl, autofocus: true, maxLines: 2, style: const TextStyle(color: Colors.white),
+        decoration: const InputDecoration(hintText: 'What do you want to work on?', hintStyle: TextStyle(color: Colors.white38),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF8B7355))),
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () async {
+          final goal = ctrl.text.trim();
+          if (goal.isEmpty) return;
+          Navigator.pop(ctx);
+          final tok = _profile['token']?.toString() ?? '';
+          await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/quest/create'),
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $tok'}, body: jsonEncode({'goal': goal}));
+          _fetchQuestsAndMissions();
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Quest started: $goal'), backgroundColor: const Color(0xFFC9A962)));
+        }, child: const Text('Start Quest', style: TextStyle(color: Color(0xFFC9A962)))),
+      ],
+    ));
+  }
+
+  void _showNewMissionDialogSettings() {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text('Start a New Mission', style: TextStyle(color: Color(0xFFE8D5A3))),
+      content: TextField(controller: ctrl, autofocus: true, style: const TextStyle(color: Colors.white),
+        decoration: const InputDecoration(hintText: 'Who is this about? (e.g. my mother)', hintStyle: TextStyle(color: Colors.white38),
+          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF8B7355))),
+          focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFFC9A962))))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        TextButton(onPressed: () async {
+          final target = ctrl.text.trim();
+          if (target.isEmpty) return;
+          Navigator.pop(ctx);
+          final tok = _profile['token']?.toString() ?? '';
+          await http.post(Uri.parse('${AppConfig.apiBaseUrl}/api/sse-client/mission/create'),
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $tok'}, body: jsonEncode({'relationship_target': target, 'relationship_type': 'personal'}));
+          _fetchQuestsAndMissions();
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Mission started: $target'), backgroundColor: const Color(0xFFC9A962)));
+        }, child: const Text('Start Mission', style: TextStyle(color: Color(0xFFC9A962)))),
+      ],
+    ));
   }
 
   Future<void> _loadBiometricState() async {
@@ -2200,6 +2281,26 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          // --- Quests & Missions ---
+          _sectionHeader('YOUR QUESTS & MISSIONS', Icons.flag),
+          _settingsCard([
+            if (_quests.isEmpty && _missions.isEmpty)
+              const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No active quests or missions', style: TextStyle(color: Colors.white38, fontSize: 13))),
+            ..._quests.map((q) => _questMissionRow(
+              icon: Icons.auto_awesome, label: q['goal']?.toString() ?? 'Quest',
+              sub: 'Day ${DateTime.now().difference(DateTime.tryParse(q['started_at']?.toString() ?? '') ?? DateTime.now()).inDays}',
+              onPause: () => _questAction(q['quest_id']?.toString() ?? '', 'pause'),
+              onComplete: () => _questAction(q['quest_id']?.toString() ?? '', 'complete'))),
+            ..._missions.map((m) => _questMissionRow(
+              icon: Icons.people, label: m['relationship_target']?.toString() ?? 'Mission',
+              sub: 'Day ${DateTime.now().difference(DateTime.tryParse(m['started_at']?.toString() ?? '') ?? DateTime.now()).inDays}',
+              onPause: () => _missionAction(m['mission_id']?.toString() ?? '', 'pause'),
+              onComplete: () => _missionAction(m['mission_id']?.toString() ?? '', 'complete'))),
+            _actionRow(Icons.add, 'New Quest', 'Work on something personal', _showNewQuestDialogSettings),
+            _actionRow(Icons.group_add, 'New Mission', 'Work on a relationship', _showNewMissionDialogSettings),
+          ]),
+          const SizedBox(height: 20),
+
           // --- Security ---
           _sectionHeader('SECURITY', Icons.security),
           _settingsCard([
@@ -2541,6 +2642,20 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         ],
       ),
     );
+  }
+
+  Widget _questMissionRow({required IconData icon, required String label, required String sub, required VoidCallback onPause, required VoidCallback onComplete}) {
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [
+      Icon(icon, color: const Color(0xFFC9A962), size: 18),
+      const SizedBox(width: 10),
+      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(color: Color(0xFFE8D5A3), fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(sub, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+      ])),
+      IconButton(icon: const Icon(Icons.pause_circle_outline, color: Colors.white38, size: 20), onPressed: onPause, tooltip: 'Pause', padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+      const SizedBox(width: 4),
+      IconButton(icon: const Icon(Icons.check_circle_outline, color: Color(0xFF4ECDC4), size: 20), onPressed: onComplete, tooltip: 'Complete', padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+    ]));
   }
 
   Widget _actionRow(IconData icon, String title, String? subtitle, VoidCallback onTap, {bool danger = false}) {
