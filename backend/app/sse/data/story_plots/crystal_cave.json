@@ -1,0 +1,13 @@
+{
+  "id": "crystal_cave",
+  "title": "The Crystal Cave",
+  "description": "An integration and wholeness arc. Deep beneath the mountains, every crystal holds a memory — joy and sorrow, strength and weakness. The traveler learns that wholeness includes the broken pieces.",
+  "therapeutic_domains": ["integration", "ifs", "wholeness", "memory_reconsolidation"],
+  "acts": [
+    {"act": 1, "title": "The Descent", "description": "The traveler enters a cave where crystals glow with captured emotions — some radiant, some dark. Each one is a part they exiled.", "biome": "crystal_mountains"},
+    {"act": 2, "title": "The Gathering", "description": "The traveler collects crystals one by one. Each one burns when touched — the cost of reclaiming what was sent away.", "biome": "dark_forest"},
+    {"act": 3, "title": "The Constellation", "description": "Arranged together, the crystals form a pattern — not a flaw map, but a constellation. The traveler is the sum of every piece.", "biome": "open_sky"}
+  ],
+  "core_characters": ["The Archivist", "The Exile"],
+  "target_audience": "adults"
+}

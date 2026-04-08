@@ -1,0 +1,13 @@
+{
+  "id": "family_constellation",
+  "title": "The Family Constellation",
+  "description": "A family systems arc. Each family member is a star in a constellation — connected by invisible threads of loyalty, grief, and love. Moving one star shifts all the others.",
+  "therapeutic_domains": ["family_systems", "transgenerational", "eft", "couples"],
+  "acts": [
+    {"act": 1, "title": "The Star Map", "description": "The sky reveals a constellation where each star is a family member. Some burn bright, some have dimmed. Lines of light connect them — some taut, some frayed.", "biome": "fortress_plains"},
+    {"act": 2, "title": "The Tangled Threads", "description": "The traveler traces the threads and finds knots — loyalties to the dead, debts to the living, roles assigned before birth.", "biome": "dark_forest"},
+    {"act": 3, "title": "The New Arrangement", "description": "The traveler cannot cut the threads, but they can untangle them. Each star finds its own orbit. The constellation changes shape — still connected, no longer bound.", "biome": "open_sky"}
+  ],
+  "core_characters": ["The Ancestor", "The Weaver"],
+  "target_audience": "families"
+}

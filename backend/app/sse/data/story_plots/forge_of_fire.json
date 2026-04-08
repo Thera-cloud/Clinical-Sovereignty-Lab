@@ -1,0 +1,13 @@
+{
+  "id": "forge_of_fire",
+  "title": "The Forge of Fire",
+  "description": "An anger transformation arc. The traveler's rage is not an enemy — it is raw material. In the forge, anger is hammered into a sword of clarity and a shield of boundaries.",
+  "therapeutic_domains": ["anger", "boundaries", "transformation", "polyvagal"],
+  "acts": [
+    {"act": 1, "title": "The Wildfire", "description": "Fire consumes the landscape. The traveler is the fire and cannot stop burning. Everything they touch turns to ash.", "biome": "dark_forest"},
+    {"act": 2, "title": "The Anvil", "description": "A forge appears in the ruins. An ancient smith teaches: fire without containment destroys. Fire within a forge creates.", "biome": "fortress_plains"},
+    {"act": 3, "title": "The Tempered Blade", "description": "The traveler forges their anger into a blade that cuts clean — honest words, firm boundaries, protective not destructive.", "biome": "crystal_mountains"}
+  ],
+  "core_characters": ["The Smith", "The Flame"],
+  "target_audience": "adults"
+}

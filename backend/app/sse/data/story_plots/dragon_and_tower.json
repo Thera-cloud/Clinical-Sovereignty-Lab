@@ -1,0 +1,13 @@
+{
+  "id": "dragon_and_tower",
+  "title": "The Dragon and the Tower",
+  "description": "A couples arc exploring the anger-withdrawal cycle. One partner becomes the dragon (fire, pursuit), the other retreats to the tower (stone, distance). Both are protecting the same wound.",
+  "therapeutic_domains": ["couples", "anger", "withdrawal", "eft"],
+  "acts": [
+    {"act": 1, "title": "Fire at the Gate", "description": "The dragon circles the tower, breathing fire. The tower grows taller. Neither understands they are both afraid.", "biome": "fortress_plains"},
+    {"act": 2, "title": "The Crack in the Stone", "description": "A crack appears in the tower wall. Through it, the dragon sees not an enemy but a frightened child. The fire dims.", "biome": "river_valley"},
+    {"act": 3, "title": "The Shared Flame", "description": "The dragon lands. The tower opens. They sit together by a fire that warms without burning.", "biome": "crystal_mountains"}
+  ],
+  "core_characters": ["The Dragon", "The Tower"],
+  "target_audience": "adults"
+}

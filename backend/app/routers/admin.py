@@ -5465,6 +5465,16 @@ async def sse_pause_mission(mission_id: str, request: Request, _user: dict = Dep
     return {"status": "paused", "mission_id": mission_id}
 
 
+@sse_client_router.post("/ble/proximity")
+async def sse_ble_proximity(request: Request, _user: dict = Depends(_sse_auth)):
+    from app.sse.ble_co_traveler import process_proximity_event
+    body = await request.json()
+    uid = _user.get("hardware_id") or _user.get("user_id") or _user.get("username", "")
+    nearby = body.get("nearby_user_id", "")
+    if not nearby:
+        raise HTTPException(422, "nearby_user_id required")
+    return await process_proximity_event(uid, nearby, request.app.state.db_pool)
+
 @sse_client_router.get("/journey/panels")
 async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse_auth)):
     hw_id = _user.get("hardware_id") or _user.get("user_id") or ""
@@ -5921,6 +5931,11 @@ async def sse_assign_workbook(request: Request):
             "ON CONFLICT (user_id, storyboard_id) DO UPDATE SET source='coach_assigned', status='active'", uid, sid)
         await conn.execute("INSERT INTO sse_admin_alerts (user_id, alert_type, title, detail) VALUES ($1, 'workbook_assigned', 'Workbook Assigned', $2)", uid, f"Storyboard: {sid}")
     return {"assigned": True, "user_id": uid, "storyboard_id": sid}
+
+@sse_router.post("/admin/ingest-workbooks")
+async def sse_ingest_workbooks(request: Request):
+    from app.sse.workbook_ingestion import ingest_workbooks
+    return await ingest_workbooks(request.app.state.db_pool)
 
 @sse_router.post("/admin/backfill-intake/{user_id}")
 async def sse_backfill_intake(user_id: str, request: Request):

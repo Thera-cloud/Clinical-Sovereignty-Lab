@@ -114,11 +114,7 @@ async def generate_npcs_from_crystals(clusters: list) -> list:
     """Transform crystal clusters into story NPCs via single batch LLM call."""
     if not clusters:
         return []
-    import httpx
-    url = os.getenv("NATE_CHAT_URL", "")
-    key = os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "")
-    if not url or not key:
-        return [TEMPLATE_NPCS.get(c["pattern"], TEMPLATE_NPCS["seeker"]) for c in clusters]
+    from app.sse.llm_fallback import chat_completion_with_fallback
 
     cluster_desc = "\n".join(
         f"- Domain: {c['domain']}, pattern: {c['pattern']}, "
@@ -134,12 +130,11 @@ async def generate_npcs_from_crystals(clusters: list) -> list:
         "\"visual_prompt_fragment\": \"short image prompt fragment for Grok Imagine\"}"
     )
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(url, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": os.getenv("NATE_CHAT_MODEL", "grok-3-mini"), "max_tokens": 600,
-                      "temperature": 0.7, "messages": [{"role": "system", "content": sys_prompt},
-                      {"role": "user", "content": "Generate NPCs for all clusters."}]})
-            raw = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        raw = await chat_completion_with_fallback(
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": "Generate NPCs for all clusters."}],
+            max_tokens=600)
+        if raw:
             m = re.search(r"\[.*\]", raw, re.DOTALL)
             if m:
                 return json.loads(m.group())

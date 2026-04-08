@@ -1,0 +1,18 @@
+{
+  "catalog": "story_plots",
+  "version": "1.0",
+  "updated": "2026-04-06",
+  "description": "9 therapeutic story plot frameworks used by the SSE narrative engine. Each plot maps a therapeutic domain to a 3-act archetypal journey across biome transitions.",
+  "total_count": 9,
+  "plots": [
+    {"id": "orphans_return", "filename": "orphans_return.json", "title": "The Orphan's Return", "domains": ["attachment", "abandonment", "self-worth"], "audience": "adults"},
+    {"id": "dragon_and_tower", "filename": "dragon_and_tower.json", "title": "The Dragon and the Tower", "domains": ["couples", "anger", "withdrawal", "eft"], "audience": "adults"},
+    {"id": "shattered_mirror", "filename": "shattered_mirror.json", "title": "The Shattered Mirror", "domains": ["identity", "shame", "ifs", "self-worth"], "audience": "adults"},
+    {"id": "silent_guardian", "filename": "silent_guardian.json", "title": "The Silent Guardian", "domains": ["attachment", "parentification", "emotional_neglect"], "audience": "adults"},
+    {"id": "forge_of_fire", "filename": "forge_of_fire.json", "title": "The Forge of Fire", "domains": ["anger", "boundaries", "transformation", "polyvagal"], "audience": "adults"},
+    {"id": "river_crossing", "filename": "river_crossing.json", "title": "The River Crossing", "domains": ["vulnerability", "trust", "attachment", "aedp"], "audience": "adults"},
+    {"id": "crystal_cave", "filename": "crystal_cave.json", "title": "The Crystal Cave", "domains": ["integration", "ifs", "wholeness", "memory_reconsolidation"], "audience": "adults"},
+    {"id": "enchanted_forest", "filename": "enchanted_forest.json", "title": "The Enchanted Forest", "domains": ["safety", "emotional_literacy", "play_therapy"], "audience": "adolescents"},
+    {"id": "family_constellation", "filename": "family_constellation.json", "title": "The Family Constellation", "domains": ["family_systems", "transgenerational", "eft", "couples"], "audience": "families"}
+  ]
+}

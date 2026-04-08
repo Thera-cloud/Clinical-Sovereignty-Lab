@@ -1,0 +1,13 @@
+{
+  "id": "orphans_return",
+  "title": "The Orphan's Return",
+  "description": "A journey of reclaiming belonging after abandonment. The traveler discovers that the home they seek was never a place — it was the capacity to hold themselves.",
+  "therapeutic_domains": ["attachment", "abandonment", "self-worth"],
+  "acts": [
+    {"act": 1, "title": "The Empty Hearth", "description": "The traveler wakes in a cold stone house with no doors. Echoes of voices that left.", "biome": "dark_forest"},
+    {"act": 2, "title": "The Bridge of Names", "description": "A bridge appears, carved with the names of everyone who stayed and everyone who left. The traveler must choose which names to carry.", "biome": "fortress_plains"},
+    {"act": 3, "title": "The Homecoming", "description": "The traveler builds a fire in an open field. Others appear — drawn to the warmth. Home was never behind them.", "biome": "river_valley"}
+  ],
+  "core_characters": ["The Keeper", "The Echo"],
+  "target_audience": "adults"
+}

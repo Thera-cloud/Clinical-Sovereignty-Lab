@@ -1,0 +1,13 @@
+{
+  "id": "river_crossing",
+  "title": "The River Crossing",
+  "description": "A vulnerability and trust arc. The traveler must cross a river they cannot swim. They must ask for help — the one thing they have never learned to do.",
+  "therapeutic_domains": ["vulnerability", "trust", "attachment", "aedp"],
+  "acts": [
+    {"act": 1, "title": "The Far Shore", "description": "Everything the traveler needs is on the other side. The river is deep, cold, and moving fast. They have always crossed alone before.", "biome": "river_valley"},
+    {"act": 2, "title": "The Ferryman's Question", "description": "A ferryman appears. The price is not gold — it is an honest answer to one question the traveler has been avoiding.", "biome": "fortress_plains"},
+    {"act": 3, "title": "The Other Side", "description": "On the far shore, the traveler discovers they are not alone. Others crossed the same river, carrying the same fear.", "biome": "open_sky"}
+  ],
+  "core_characters": ["The Ferryman", "The Current"],
+  "target_audience": "adults"
+}

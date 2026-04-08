@@ -1,0 +1,13 @@
+{
+  "id": "enchanted_forest",
+  "title": "The Enchanted Forest",
+  "description": "A child-appropriate discovery and safety arc. The young traveler enters a gentle forest where friendly creatures teach them that feelings are not scary — they are messengers.",
+  "therapeutic_domains": ["safety", "emotional_literacy", "play_therapy"],
+  "acts": [
+    {"act": 1, "title": "The Friendly Path", "description": "Soft light, warm colors. A small creature appears and asks: what are you carrying today? The forest listens.", "biome": "dark_forest"},
+    {"act": 2, "title": "The Feeling Garden", "description": "Each emotion grows as a flower. Anger is a red thornbush — beautiful but prickly. Sadness is a blue rain cloud that waters the garden.", "biome": "river_valley"},
+    {"act": 3, "title": "The Treehouse", "description": "The traveler builds a treehouse in the canopy — a safe place that is always there. The creatures promise to guard it.", "biome": "open_sky"}
+  ],
+  "core_characters": ["The Woodland Guide", "The Talking Fox"],
+  "target_audience": "adolescents"
+}

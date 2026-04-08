@@ -8328,6 +8328,7 @@ class AzureCortex:
             _user_temp = _nate_temp(profile.get("username"))
             full_response = ""
             _provider_used = ""
+            _already_streamed = False
             _t_inf_start = _time_inf.monotonic()
 
             # SOVEREIGN-VOICE — primary path: streaming ODPE routing (sub-second first token)
@@ -8354,6 +8355,7 @@ class AzureCortex:
                             _chunk_buf = ""
                     if _chunk_buf:
                         await self._send(uid, full_response)
+                    _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send at line 8478
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Streaming inference failed: {_sov_err}")
                     full_response = ""
@@ -8474,7 +8476,7 @@ class AzureCortex:
                 print(f">>> [AQ-BYPASS] Witnessing fallback generated ({len(full_response)} chars)")
 
             # SOVEREIGN-VOICE — send response (sovereign/race paths need explicit send)
-            if _provider_used != "azure":
+            if _provider_used != "azure" and not _already_streamed:
                 await self._send(uid, full_response)
 
             # SOVEREIGN-VOICE — zero-cost token refund

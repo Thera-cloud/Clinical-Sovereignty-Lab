@@ -241,6 +241,7 @@ async def compose_journey_narrative(
         "panel_tone": "meditative",
     }
 
+    from app.sse.llm_fallback import chat_completion_with_fallback as _llm_fallback
     from app.services.nate_ai_config import NATE_CHAT_URL as _cfg_url, NATE_CHAT_KEY as _cfg_key, NATE_CHAT_MODEL as _cfg_model
     url = _cfg_url
     key = _cfg_key
@@ -282,6 +283,11 @@ async def compose_journey_narrative(
         fc = family_ctx["family_crystals"]
         if fc.get("family_group"):
             family_block += f"Shared family wisdom echoes: {fc['family_group'][0].get('text','')[:80]}\n"
+    try:
+        from app.sse.ble_co_traveler import get_co_traveler_prompt_addition
+        family_block += await get_co_traveler_prompt_addition(user_id, db_pool)
+    except Exception:
+        pass
     age_gate_block = ""
     if family_ctx.get("age_gated"):
         tier = family_ctx.get("age_tier", "child")
@@ -316,45 +322,22 @@ async def compose_journey_narrative(
         '"panel_tone": "one of: meditative, action_sequence, threshold_pathway, restoration_sands, revelation"}'
     )
 
-    _payload = {"model": model, "max_tokens": 400, "temperature": 0.7,
-                "messages": [{"role": "system", "content": sys_prompt},
-                             {"role": "user", "content": "Generate today's journey panel."}]}
-    _hdrs = {"Content-Type": "application/json"}
-    if "azure" in url.lower() or "services.ai" in url.lower():
-        _hdrs["api-key"] = key
-    else:
-        _hdrs["Authorization"] = f"Bearer {key}"
+    _msgs = [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": "Generate today's journey panel."}]
 
-    for _attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                r = await client.post(url, headers=_hdrs, json=_payload)
-                if r.status_code == 429 or r.status_code >= 500:
-                    logger.warning("SSE narrative: HTTP %s for %s (attempt %d), retrying after 10s", r.status_code, user_id, _attempt + 1)
-                    await asyncio.sleep(10)
-                    continue
-                resp_json = r.json()
-                if "choices" not in resp_json:
-                    logger.warning("SSE narrative: unexpected response keys for %s: %s status=%s", user_id, list(resp_json.keys()), r.status_code)
-                raw = resp_json.get("choices", [{}])[0].get("message", {}).get("content", "")
-                m = re.search(r"\{.*\}", raw, re.DOTALL)
-                if m:
-                    result = json.loads(m.group())
-                    result["image_prompt"] = result.get("image_prompt", fallback["image_prompt"])
-                    result["image_prompt"] += f", {grok_suffix}"
-                    result["image_prompt"] += ", no text, no words, no lettering, no calligraphy, no writing on image"
-                    result.setdefault("narrative_text", fallback["narrative_text"])
-                    result.setdefault("panel_tone", fallback["panel_tone"])
-                    return result
-                else:
-                    logger.warning("SSE narrative: LLM returned non-JSON for %s. status=%s raw[:200]=%s", user_id, r.status_code, raw[:200])
-                    if _attempt == 0:
-                        await asyncio.sleep(10)
-                        continue
-        except Exception as e:
-            logger.warning("compose_journey_narrative LLM failed for %s (attempt %d): %s", user_id, _attempt + 1, e)
-            if _attempt == 0:
-                await asyncio.sleep(10)
+    raw = await _llm_fallback(_msgs, max_tokens=400, temperature=0.7)
+    if raw:
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            result = json.loads(m.group())
+            result["image_prompt"] = result.get("image_prompt", fallback["image_prompt"])
+            result["image_prompt"] += f", {grok_suffix}"
+            result["image_prompt"] += ", no text, no words, no lettering, no calligraphy, no writing on image"
+            result.setdefault("narrative_text", fallback["narrative_text"])
+            result.setdefault("panel_tone", fallback["panel_tone"])
+            return result
+        else:
+            logger.warning("SSE narrative: LLM returned non-JSON for %s. raw[:200]=%s", user_id, raw[:200])
                 continue
 
     return fallback

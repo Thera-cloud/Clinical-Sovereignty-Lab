@@ -1,0 +1,13 @@
+{
+  "id": "silent_guardian",
+  "title": "The Silent Guardian",
+  "description": "An arc about the unavailable parent — the one who was physically present but emotionally gone. The traveler seeks a guardian who protects from a distance but never speaks.",
+  "therapeutic_domains": ["attachment", "parentification", "emotional_neglect"],
+  "acts": [
+    {"act": 1, "title": "The Watchtower", "description": "A figure stands on a distant hill, always watching, never approaching. The traveler has been calling to them since childhood.", "biome": "fortress_plains"},
+    {"act": 2, "title": "The Climb", "description": "The traveler climbs the hill. The guardian retreats — not from cruelty, but from their own frozen grief.", "biome": "dark_forest"},
+    {"act": 3, "title": "The Wordless Embrace", "description": "At the summit, the guardian cannot speak. The traveler learns that some love is expressed in presence, not language.", "biome": "crystal_mountains"}
+  ],
+  "core_characters": ["The Guardian", "The Child"],
+  "target_audience": "adults"
+}

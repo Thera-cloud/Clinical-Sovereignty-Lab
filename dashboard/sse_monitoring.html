@@ -203,6 +203,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <button class="btn btn-gold" onclick="sseBackfillAll()">🔄 Backfill All Users</button>
         <button class="btn btn-green" onclick="sseShowModal('preview')">🖼 Generate Test Panel</button>
         <button class="btn btn-red" onclick="sseShowModal('override')">🔧 Journey Override</button>
+        <button class="btn btn-blue" onclick="sseIngestWorkbooks()">📖 Ingest Workbooks</button>
       </div>
     </div>
   </div>
@@ -676,6 +677,13 @@ async function sseDoBackfill1() {
   try {
     var r = await fetch(API + '/api/sse/admin/backfill-intake/' + uid, {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({})});
     var d = await r.json(); alert(JSON.stringify(d, null, 2)); document.querySelector('.modal-overlay').remove();
+  } catch(e) { alert('Error: ' + e); }
+}
+async function sseIngestWorkbooks() {
+  if (!confirm('Ingest all protocol workbooks into crystal knowledge base?')) return;
+  try {
+    var r = await fetch(API + '/api/sse/admin/ingest-workbooks', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({})});
+    var d = await r.json(); alert('Workbooks: ' + d.workbooks_processed + ', Crystals created: ' + d.crystals_created);
   } catch(e) { alert('Error: ' + e); }
 }
 async function sseBackfillAll() {

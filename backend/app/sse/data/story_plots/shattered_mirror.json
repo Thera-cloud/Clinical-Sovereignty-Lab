@@ -1,0 +1,13 @@
+{
+  "id": "shattered_mirror",
+  "title": "The Shattered Mirror",
+  "description": "An identity and shame arc. The traveler carries a mirror that shows only distortions — the false self built from others' projections. Breaking it reveals the true face underneath.",
+  "therapeutic_domains": ["identity", "shame", "ifs", "self-worth"],
+  "acts": [
+    {"act": 1, "title": "The Hall of Reflections", "description": "Everywhere the traveler looks, warped mirrors show a version of themselves shaped by someone else's words.", "biome": "dark_forest"},
+    {"act": 2, "title": "The Shattering", "description": "The traveler drops the mirror. In every shard, a different face — protector, exile, wounded child. All of them are real.", "biome": "fortress_plains"},
+    {"act": 3, "title": "The Still Pool", "description": "At a quiet pool, the water shows not perfection but wholeness. Every scar visible. Every scar earned.", "biome": "river_valley"}
+  ],
+  "core_characters": ["The Mirror", "The Mask"],
+  "target_audience": "adults"
+}

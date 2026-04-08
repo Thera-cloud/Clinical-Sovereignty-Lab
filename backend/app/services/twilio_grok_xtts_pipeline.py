@@ -187,8 +187,28 @@ async def _build_grounded_voice_prompt(username: str, db_pool) -> str:
             memory_block += f"TRANSCRIPTS FROM RECENT PRIOR CALLS:\n{recent_summary}\n\n"
         memory_block += "=== END PRIOR SESSION MEMORY ===\n\n"
 
+    # SOVEREIGN-VOICE: inject SSE story context if available
+    story_block = ""
+    try:
+        from app.sse.voice_context_enricher import get_voice_story_context
+        sse = await get_voice_story_context(username, db_pool)
+        parts = []
+        if sse.get("archetype"):
+            parts.append(f"Archetype: {sse['archetype']}")
+        if sse.get("biome"):
+            parts.append(f"Story biome: {sse['biome']}")
+        if sse.get("active_quest"):
+            parts.append(f"Working on: {sse['active_quest']}")
+        if sse.get("active_mission"):
+            parts.append(f"Relationship focus: {sse['active_mission']}")
+        if parts:
+            story_block = f"[STORY JOURNEY] {who}'s therapeutic story: " + " | ".join(parts) + "\n\n"
+    except Exception:
+        pass
+
     return (
         memory_block
+        + story_block
         + f"You are Little Nate, a warm, concise therapeutic coach on a live phone call with {who}.\n"
         "Respond in 1–2 short sentences (under 25 words). One question OR one reflection, not both.\n"
         "Sound human and grounded. Never say you are an AI.\n\n"
@@ -1636,6 +1656,15 @@ async def run_twilio_grok_xtts_bridge(
                                         logger.debug("voice crystal vectorize upsert: %s", _ve)
                     except Exception as e:
                         logger.warning("voice lightweight crystal forge failed: %s", e)
+
+                # SOVEREIGN-VOICE: enrich crystals with voice session metadata
+                if session_username and duration_s > 10:
+                    try:
+                        from app.sse.voice_crystal_enricher import enrich_crystals_from_voice
+                        await enrich_crystals_from_voice(
+                            session_call_sid or "unknown", session_username, duration_s, db_pool)
+                    except Exception as _vce:
+                        logger.warning("voice crystal enricher: %s", _vce)
 
                 if voice_crystallization_enabled:
                     try:
