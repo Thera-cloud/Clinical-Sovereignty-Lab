@@ -849,7 +849,8 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
               onPressed: () {
                 Navigator.pop(ctx);
                 final pType = (item['_sse']?['panel_type'] ?? 'journey').toString();
-                final msg = '[Story Panel: $pType] Biome: $biome. ${narrative.length > 120 ? '${narrative.substring(0, 120)}…' : narrative}';
+                final fmtBiome = biome.replaceAll('_', ' ').split(' ').map((w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '').join(' ');
+                final msg = '[Story Panel: $pType] Biome: $fmtBiome. ${narrative.length > 120 ? '${narrative.substring(0, 120)}…' : narrative}';
                 Navigator.pop(context, msg);
               },
             )),
