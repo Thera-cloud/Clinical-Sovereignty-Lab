@@ -1,0 +1,30 @@
+# API Backwards Compatibility Rule
+
+## NEVER remove or rename an API endpoint that a mobile app binary uses.
+
+Mobile app binaries are frozen at submission time. Unlike the web app, 
+you cannot update them instantly. Any endpoint change breaks existing 
+users until they update.
+
+When changing an API endpoint:
+1. Keep the OLD endpoint working as a thin shim/redirect
+2. Add the NEW endpoint with the improved interface  
+3. Both must work simultaneously
+4. Comment the old endpoint with: # COMPAT: kept for iOS build <= X.Y.Z
+5. Only remove old endpoints after 6+ months AND confirming zero traffic
+
+This applies to:
+- URL paths (don't rename /api/billing/token-pack/checkout)
+- Request body field names (don't rename pack → pack_id)
+- Response body field names
+- Authentication methods
+- Query parameter names
+
+The web app at app.sovereignsanctuary.net can be updated instantly via 
+deploy-web.sh. iOS/Android cannot.
+
+## Current Compatibility Endpoints
+
+| Old URL | New URL | Shim Location | iOS Build |
+|---|---|---|---|
+| `POST /api/billing/token-pack/checkout` | `POST /api/billing/token-packs/purchase` | `billing.py` → `purchase_token_pack_compat` | <= 1.0.0 |

@@ -1724,6 +1724,20 @@ async def get_token_packs():
     ]
 
 
+# COMPAT: kept for iOS build <= 1.0.0 — old URL + field names
+@router.post("/token-pack/checkout")
+async def purchase_token_pack_compat(request: Request, user: dict = Depends(get_current_user)):
+    """Shim for iOS binary that sends {pack} to the old URL."""
+    body = await request.json()
+    pack_id = body.get("pack") or body.get("pack_id", "")
+    username = user.get("username", "")
+    compat_req = TokenPackPurchase(
+        pack_id=pack_id, username=username,
+        success_url=body.get("success_url"), cancel_url=body.get("cancel_url"),
+    )
+    return await purchase_token_pack(compat_req, request)
+
+
 @router.post("/token-packs/purchase")
 async def purchase_token_pack(req: TokenPackPurchase, request: Request):
     """Create Stripe checkout session for a token pack."""

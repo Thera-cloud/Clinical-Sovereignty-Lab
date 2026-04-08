@@ -10,13 +10,13 @@ struct NateEntry: TimelineEntry {
     let primaryText: String
     let secondaryText: String
     let backgroundColor: Color
-    let imageURL: String?
+    let imageData: Data?
 }
 
 struct NateProvider: TimelineProvider {
     func placeholder(in context: Context) -> NateEntry {
         NateEntry(date: .now, widgetType: "journey_panel", primaryText: "Your journey continues…",
-                  secondaryText: "Open Sovereign Sanctuary", backgroundColor: Color(hex: "#0A0A0A"), imageURL: nil)
+                  secondaryText: "Open Sovereign Sanctuary", backgroundColor: Color(hex: "#0A0A0A"), imageData: nil)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NateEntry) -> Void) {
@@ -35,9 +35,10 @@ struct NateProvider: TimelineProvider {
         let primary = defaults?.string(forKey: "widget_primary_text") ?? "Your journey continues…"
         let secondary = defaults?.string(forKey: "widget_secondary_text") ?? ""
         let bgHex   = defaults?.string(forKey: "widget_background_color") ?? "#0A0A0A"
-        let imgURL  = defaults?.string(forKey: "widget_image_url")
+        let imgB64  = defaults?.string(forKey: "widget_image_data") ?? ""
+        let imgData = imgB64.isEmpty ? nil : Data(base64Encoded: imgB64)
         return NateEntry(date: .now, widgetType: wType, primaryText: primary,
-                         secondaryText: secondary, backgroundColor: Color(hex: bgHex), imageURL: imgURL)
+                         secondaryText: secondary, backgroundColor: Color(hex: bgHex), imageData: imgData)
     }
 }
 
@@ -76,8 +77,7 @@ struct NateWidgetMediumView: View {
         ZStack {
             entry.backgroundColor
             HStack(spacing: 12) {
-                if let urlStr = entry.imageURL, let url = URL(string: urlStr),
-                   let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {
+                if let data = entry.imageData, let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
@@ -115,6 +115,33 @@ struct NateWidgetMediumView: View {
     }
 }
 
+// MARK: - Large Widget View
+
+struct NateWidgetLargeView: View {
+    let entry: NateEntry
+    var body: some View {
+        ZStack {
+            entry.backgroundColor
+            VStack(spacing: 0) {
+                if let data = entry.imageData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
+                        .frame(maxHeight: .infinity).clipped()
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(entry.primaryText)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white).lineLimit(3)
+                        if !entry.secondaryText.isEmpty {
+                            Text(entry.secondaryText).font(.system(size: 12))
+                                .foregroundColor(Color(hex: "#8B7355")).lineLimit(2)
+                        }
+                    }.padding(12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Widget Definition
 
 struct NateWidget: Widget {
@@ -127,7 +154,7 @@ struct NateWidget: Widget {
         }
         .configurationDisplayName("Sovereign Sanctuary")
         .description("Daily therapeutic touchpoint")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -137,6 +164,8 @@ struct NateWidgetEntryView: View {
 
     var body: some View {
         switch family {
+        case .systemLarge:
+            NateWidgetLargeView(entry: entry)
         case .systemMedium:
             NateWidgetMediumView(entry: entry)
         default:
@@ -165,11 +194,13 @@ struct NateWidget_Previews: PreviewProvider {
         let entry = NateEntry(date: .now, widgetType: "journey_panel",
                               primaryText: "A quiet path opens through the dark forest…",
                               secondaryText: "Tap to continue your journey",
-                              backgroundColor: Color(hex: "#0A0A0A"), imageURL: nil)
+                              backgroundColor: Color(hex: "#0A0A0A"), imageData: nil)
         NateWidgetSmallView(entry: entry)
             .previewContext(WidgetPreviewContext(family: .systemSmall))
         NateWidgetMediumView(entry: entry)
             .previewContext(WidgetPreviewContext(family: .systemMedium))
+        NateWidgetLargeView(entry: entry)
+            .previewContext(WidgetPreviewContext(family: .systemLarge))
     }
 }
 #endif

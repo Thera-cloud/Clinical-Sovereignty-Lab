@@ -37,6 +37,8 @@ DOMAIN_TO_PATTERN: Dict[str, str] = {
     "faith": "flame_keeper", "hope": "flame_keeper", "forgiveness": "flame_keeper",
     "trauma": "echo", "resentment": "echo", "deception": "echo",
     "vulnerability": "seeker", "growth": "seeker", "loneliness": "seeker",
+    "confidence": "reflection", "anxiety": "shadow_self", "patience": "tide",
+    "boundaries": "architect", "relationship": "guardian", "connection": "seeker",
 }
 
 TEMPLATE_NPCS: Dict[str, Dict[str, str]] = {

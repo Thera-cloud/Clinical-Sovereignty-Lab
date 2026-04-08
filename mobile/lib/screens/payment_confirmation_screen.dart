@@ -63,6 +63,14 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF050505),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white54),
+          onPressed: () { _pollTimer?.cancel(); Navigator.pop(context); },
+        ),
+      ),
       body: Center(child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -85,6 +93,12 @@ class _PaymentConfirmationScreenState extends State<PaymentConfirmationScreen> {
           if (_status == 'timeout')
             Text('Check your email for a receipt, or contact support.',
               textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 14)),
+          if (_status == 'checking' || _status == 'processing')
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text("Didn't complete checkout? Tap X to go back.",
+                textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12)),
+            ),
           const SizedBox(height: 24),
           if (_status == 'success' || _status == 'timeout')
             ElevatedButton(

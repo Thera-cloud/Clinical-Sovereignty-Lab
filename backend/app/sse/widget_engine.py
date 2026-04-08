@@ -202,7 +202,18 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
             except Exception as _fam_err:
                 logger.warning("widget_engine family content: %s", _fam_err)
 
-            # 4. Active quest (30% chance goal)
+            # 4. Journey panel with image — the visual story is the hook
+            panel = await conn.fetchrow(
+                "SELECT panel_id, r2_url, narrative_text FROM sse_panel_log WHERE user_id=$1 AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", user_id)
+            if panel and panel["r2_url"]:
+                narr = panel["narrative_text"] or ""
+                snippet = narr[:100] + "…" if len(narr) > 100 else narr
+                return _content("journey_panel", biome, primary=snippet or "Your journey continues.",
+                                secondary=biome.replace("_", " ").title(),
+                                image_url=panel["r2_url"], action="open_journey",
+                                action_id=str(panel["panel_id"]))
+
+            # 5. Active quest (30% chance goal)
             aq = await conn.fetchrow(
                 "SELECT quest_id, goal FROM sse_quests WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
             if aq and random.random() < 0.3:
@@ -210,7 +221,7 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                                 secondary="Keep going.", action="open_quest",
                                 action_id=str(aq["quest_id"]))
 
-            # 5. Active mission + no session in 3+ days
+            # 6. Active mission + no session in 3+ days
             am = await conn.fetchrow(
                 "SELECT mission_id, relationship_target FROM sse_missions WHERE user_id=$1 AND status='active' ORDER BY started_at DESC LIMIT 1", user_id)
             if am:
@@ -221,7 +232,7 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                                     secondary="Your mission awaits.", action="open_chat",
                                     action_id=str(am["mission_id"]))
 
-            # 6. Meaningful session yesterday (high-confidence crystal, use resolved UUID)
+            # 7. Meaningful session yesterday (high-confidence crystal, use resolved UUID)
             yesterday = today_start - timedelta(days=1)
             reflection = None
             if _user_uuid:
@@ -234,14 +245,14 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                 return _content("reflection", biome, primary=snippet,
                                 secondary="From yesterday's session", action="open_chat")
 
-            # 7. No check-in in 3+ days
+            # 8. No check-in in 3+ days
             last_checkin = await conn.fetchval(
                 "SELECT MAX(generated_at) FROM sse_panel_log WHERE user_id=$1 AND panel_type='checkin'", user_id)
             if not last_checkin or last_checkin < three_days_ago:
                 return _content("check_in", biome, primary="How are you today?",
                                 secondary="Tap to check in with Little Nate", action="open_checkin")
 
-            # 8/9. Faith / secular wisdom (20% chance)
+            # 9/10. Faith / secular wisdom (20% chance)
             if spiritual == "christian" and random.random() < 0.2:
                 verse, source = random.choice(_DEVOTIONALS)
                 return _content("devotional", biome, primary=verse,
@@ -250,17 +261,6 @@ async def get_widget_content(user_id: str, db_pool) -> Dict[str, Any]:
                 quote, author = random.choice(_SECULAR_WISDOM)
                 return _content("secular_wisdom", biome, primary=quote,
                                 secondary=f"— {author}", action="open_chat")
-
-            # 10. Default: journey panel or power word
-            panel = await conn.fetchrow(
-                "SELECT panel_id, r2_url, narrative_text FROM sse_panel_log WHERE user_id=$1 AND r2_url IS NOT NULL ORDER BY generated_at DESC LIMIT 1", user_id)
-            if panel and panel["r2_url"]:
-                narr = panel["narrative_text"] or ""
-                snippet = narr[:100] + "…" if len(narr) > 100 else narr
-                return _content("journey_panel", biome, primary=snippet or "Your journey continues.",
-                                secondary=biome.replace("_", " ").title(),
-                                image_url=panel["r2_url"], action="open_journey",
-                                action_id=str(panel["panel_id"]))
 
     except Exception as e:
         logger.warning("widget_engine: failed to query for user %s: %s", user_id, e)

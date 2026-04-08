@@ -107,13 +107,14 @@ class PaymentService {
           return;
         }
         final resp = await http.post(
-          Uri.parse('$baseUrl/api/billing/token-pack/checkout'),
+          Uri.parse('$baseUrl/api/billing/token-packs/purchase'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token',
           },
           body: jsonEncode({
-            'pack': packName,
+            'pack_id': packName,
+            'username': uid,
             'success_url': successUrl,
             'cancel_url': cancelUrl,
           }),

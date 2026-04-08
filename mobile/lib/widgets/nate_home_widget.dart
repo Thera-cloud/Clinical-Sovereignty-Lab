@@ -31,8 +31,21 @@ class NateWidgetService {
       await HomeWidget.saveWidgetData<String>('widget_type', data['type'] ?? 'single_word');
       await HomeWidget.saveWidgetData<String>('widget_primary_text', data['primary_text'] ?? 'Breathe');
       await HomeWidget.saveWidgetData<String>('widget_secondary_text', data['secondary_text'] ?? '');
-      await HomeWidget.saveWidgetData<String>('widget_image_url', data['image_url'] ?? '');
       await HomeWidget.saveWidgetData<String>('widget_background_color', data['background_color'] ?? '#1a2332');
+
+      final imageUrl = data['image_url'] as String? ?? '';
+      await HomeWidget.saveWidgetData<String>('widget_image_url', imageUrl);
+      if (imageUrl.isNotEmpty) {
+        try {
+          final imgResp = await http.get(Uri.parse(imageUrl)).timeout(const Duration(seconds: 15));
+          if (imgResp.statusCode == 200) {
+            await HomeWidget.saveWidgetData<String>(
+                'widget_image_data', base64Encode(imgResp.bodyBytes));
+          }
+        } catch (_) {}
+      } else {
+        await HomeWidget.saveWidgetData<String>('widget_image_data', '');
+      }
       await HomeWidget.saveWidgetData<String>('widget_action', data['action'] ?? 'open_chat');
       await HomeWidget.saveWidgetData<String>('widget_action_id', data['action_id'] ?? '');
 

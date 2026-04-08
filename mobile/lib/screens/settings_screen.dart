@@ -584,7 +584,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                 borderRadius: BorderRadius.circular(12),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _purchaseTokenPack(pack['id'] as String);
+                  _confirmTokenPurchase(pack['id'] as String, pack['label'] as String, pack['tokens'] as String, pack['price'] as String);
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -615,6 +615,31 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             const SizedBox(height: 10),
           ],
         ),
+      ),
+    );
+  }
+
+  void _confirmTokenPurchase(String packId, String label, String tokens, String price) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: Text('Purchase $label', style: const TextStyle(color: _Design.gold, fontFamily: 'Courier')),
+        content: Text(
+          'You\'ll be redirected to a secure payment page for $tokens tokens ($price). No charge until you complete checkout.',
+          style: const TextStyle(color: _Design.textPrimary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
+            onPressed: () { Navigator.pop(ctx); _purchaseTokenPack(packId); },
+            child: const Text('Continue to Payment', style: TextStyle(color: Colors.black, fontSize: 13)),
+          ),
+        ],
       ),
     );
   }
