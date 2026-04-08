@@ -1699,7 +1699,7 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
       }
       else if (data['type'] == 'error') {
         final msg = (data['message'] ?? data['error'] ?? 'An error occurred').toString();
-        _addSystemMsg(msg);
+        if (!msg.startsWith('Unknown message type')) _addSystemMsg(msg);
       }
       else if (data['type'] == 'payment_confirmed') {
         final pType = data['payment_type'] ?? '';
