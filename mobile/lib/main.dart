@@ -9172,61 +9172,64 @@ class _SignUpWizardState extends State<SignUpWizard> {
               const SizedBox(height: 20),
             ],
 
-            // 2.5 CONTACT INFO (Coaches - required; Clients - optional)
-            if (_effectiveRole == "COACH") ...[
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.4)),
-                  borderRadius: BorderRadius.circular(12),
-                  color: const Color(0xFF4ECDC4).withOpacity(0.05),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.contact_mail, color: Color(0xFF4ECDC4), size: 20),
-                        const SizedBox(width: 8),
-                        const Text("CONTACT INFORMATION", style: TextStyle(color: Color(0xFF4ECDC4), fontWeight: FontWeight.bold, fontFamily: 'Courier', fontSize: 13)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text("Required for identity verification and communication.", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _emailCtrl,
-                      keyboardType: TextInputType.emailAddress,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: "Email Address *",
-                        prefixIcon: const Icon(Icons.email),
-                        suffixIcon: _emailCtrl.text.isNotEmpty && _emailCtrl.text.contains('@') && _emailCtrl.text.contains('.')
-                            ? const Icon(Icons.check_circle, color: Color(0xFF4ECDC4), size: 20)
-                            : null,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _phoneCtrl,
-                      keyboardType: TextInputType.phone,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        labelText: "Phone Number *",
-                        hintText: "(XXX) XXX-XXXX",
-                        prefixIcon: const Icon(Icons.phone),
-                        suffixIcon: _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
-                            ? const Icon(Icons.check_circle, color: Color(0xFF4ECDC4), size: 20)
-                            : null,
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ],
-                ),
+            // 2.5 CONTACT INFO (Coaches - both required; Clients - at least one)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.4)),
+                borderRadius: BorderRadius.circular(12),
+                color: const Color(0xFF4ECDC4).withOpacity(0.05),
               ),
-              const SizedBox(height: 20),
-            ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.contact_mail, color: Color(0xFF4ECDC4), size: 20),
+                      const SizedBox(width: 8),
+                      const Text("CONTACT INFORMATION", style: TextStyle(color: Color(0xFF4ECDC4), fontWeight: FontWeight.bold, fontFamily: 'Courier', fontSize: 13)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _effectiveRole == "COACH"
+                        ? "Required for identity verification and communication."
+                        : "Provide an email or phone number for account recovery.",
+                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: _effectiveRole == "COACH" ? "Email Address *" : "Email Address",
+                      prefixIcon: const Icon(Icons.email),
+                      suffixIcon: _emailCtrl.text.isNotEmpty && _emailCtrl.text.contains('@') && _emailCtrl.text.contains('.')
+                          ? const Icon(Icons.check_circle, color: Color(0xFF4ECDC4), size: 20)
+                          : null,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: _effectiveRole == "COACH" ? "Phone Number *" : "Phone Number",
+                      hintText: "(XXX) XXX-XXXX",
+                      prefixIcon: const Icon(Icons.phone),
+                      suffixIcon: _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
+                          ? const Icon(Icons.check_circle, color: Color(0xFF4ECDC4), size: 20)
+                          : null,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
 
             // 3. W-9 TAX FORM (Coaches only)
             if (_effectiveRole == "COACH") ...[

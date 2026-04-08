@@ -3345,7 +3345,7 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
             sub_status = "TRIAL_ACTIVE"
             can_access_nate = True
             token_balance = 10000
-            trial_end = str((datetime.datetime.now() + datetime.timedelta(days=14)).date())
+            trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
     else:
         # Coach defaults
         tier = "COACH"
@@ -5666,10 +5666,10 @@ class SessionTracker:
 # ------------------------------------------------------------------------------
 class BillingSystem:
     PLAN_DETAILS = {
-        "COACH_ONLY": {"tokens": 0, "ai_minutes": 0, "coach_sessions": -1, "price": 0, "duration_days": 365, "can_access_nate": False},
-        "TRIAL": {"tokens": 10000, "ai_minutes": 30, "coach_sessions": 0, "price": 0, "duration_days": 14},
-        "STANDARD": {"tokens": 50000, "ai_minutes": 300, "coach_sessions": 4, "price": 49, "duration_days": 30},
-        "TOP_TIER": {"tokens": 200000, "ai_minutes": -1, "coach_sessions": 8, "price": 149, "duration_days": 30},
+        "COACH_ONLY": {"tokens": 0, "price": 0, "duration_days": 365, "can_access_nate": False},
+        "TRIAL": {"tokens": 10000, "price": 0, "duration_days": 7},
+        "STANDARD": {"tokens": 50000, "price": 49, "duration_days": 30},
+        "TOP_TIER": {"tokens": 200000, "price": 149, "duration_days": 30},
     }
 
     def __init__(self, data_dir: Path):
@@ -5711,7 +5711,6 @@ class BillingSystem:
             "stripe_price_id": price_id,
             "status": "active",
             "tokens_included": details["tokens"],
-            "coach_sessions_included": details["coach_sessions"],
             "monthly_price": details["price"],
             "start_date": str(datetime.datetime.now().date()),
             "end_date": str((datetime.datetime.now() + datetime.timedelta(days=details["duration_days"])).date()),
@@ -5801,7 +5800,6 @@ class BillingSystem:
                         "plan": plan,
                         "status": (row["subscription_status"] or "ACTIVE").lower(),
                         "tokens_included": details["tokens"],
-                        "coach_sessions_included": details["coach_sessions"],
                         "monthly_price": details["price"],
                     }
         except Exception as e:

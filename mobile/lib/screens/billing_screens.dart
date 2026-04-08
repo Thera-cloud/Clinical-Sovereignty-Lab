@@ -480,15 +480,15 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                   const SizedBox(height: 14),
                   _buildTierCard(
                     name: 'Threshold',
-                    subtitle: 'Trial — 14 Days',
+                    subtitle: 'Trial — 7 Days',
                     price: 'Free',
-                    priceSub: '14 days',
+                    priceSub: '7 days',
                     planKey: 'TRIAL',
                     color: _D.textSecondary,
                     features: [
                       '10,000 AI tokens',
-                      '30 minutes AI conversation',
-                      'Basic text conversations',
+                      'Text conversations with Little Nate',
+                      '7-day full access trial',
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -501,11 +501,9 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     color: _D.cyan,
                     features: [
                       '50,000 AI tokens/month',
-                      '300 min voice + text',
                       'Voice biometrics & emotional tracking',
                       'Family Sanctuary access',
                       '1 GB Legacy Vault storage',
-                      '4 coaching sessions/month',
                       'Session history & metrics',
                     ],
                   ),
@@ -519,13 +517,12 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
                     color: _D.gold,
                     recommended: true,
                     features: [
-                      'Unlimited AI minutes',
                       '200,000 tokens/month',
                       'Everything in Inner Chamber',
                       'Me-2-Me identity system',
                       'Avatar Mode (3D companion)',
                       '50 GB Legacy Vault storage',
-                      '8 coaching sessions/month',
+                      'Up to 5 family members',
                       'Priority support',
                     ],
                   ),
@@ -2864,7 +2861,7 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
         widget.userProfile['trial_start_date'] ??
         widget.userProfile['created_at'] ??
         '';
-    int daysRemaining = 14;
+    int daysRemaining = 7;
     if (trialEndStr.toString().isNotEmpty) {
       try {
         final end = DateTime.parse(trialEndStr.toString());
@@ -2873,7 +2870,7 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
       } catch (_) {
         try {
           final start = DateTime.parse(trialEndStr.toString());
-          final end = start.add(const Duration(days: 14));
+          final end = start.add(const Duration(days: 7));
           daysRemaining = end.difference(DateTime.now()).inDays;
           if (daysRemaining < 0) daysRemaining = 0;
         } catch (_) {}

@@ -28,14 +28,12 @@ class StripeBillingSystem:
     """Complete Stripe billing integration."""
     
     # Plan configurations — aligned with config/standing_orders_seed.json
-    # coach_sessions = max bookable per billing period (client pays coach; platform takes 30%, min $30)
-    # ai_minutes = -1 means unlimited
+    # Coaching sessions are a separate paid service based on coach pricing (not included in plans)
+    # Voice therapy is prepaid in 20-minute blocks ($50/$250/$500/$1000)
     PLANS = {
         "COACH_ONLY": {
             "name": "Coach Only",
             "tokens": 0,
-            "ai_minutes": 0,
-            "coach_sessions": -1,
             "price_monthly": 0,
             "price_yearly": 0,
             "can_access_nate": False,
@@ -43,43 +41,34 @@ class StripeBillingSystem:
         },
         "TRIAL": {
             "name": "Threshold (Trial)",
-            "tokens": 50000,
-            "ai_minutes": 300,
-            "week1_ai_minutes": 300,
-            "week2_ai_minutes_per_day": 30,
-            "coach_sessions": 0,
+            "tokens": 10000,
             "price_monthly": 0,
             "price_yearly": 0,
-            "duration_days": 14,
+            "duration_days": 7,
             "features": [
-                "14-day free trial",
-                "Week 1: 300 AI minutes full access",
-                "Week 2: 30 AI min/day + coherence upgrade prompt",
-                "50,000 tokens"
+                "7-day free trial",
+                "10,000 AI tokens",
+                "Text conversations with Little Nate"
             ]
         },
         "STANDARD": {
             "name": "Inner Chamber",
             "tokens": 50000,
-            "ai_minutes": 300,
-            "coach_sessions": 4,
             "price_monthly": 49,
             "price_yearly": 490,
             "family_sanctuary": True,
             "legacy_vault_gb": 1,
-            "features": ["300 AI minutes/month", "50,000 tokens/month", "4 coach sessions/month", "Family Sanctuary", "1 GB Legacy Vault"]
+            "features": ["50,000 tokens/month", "Voice biometrics & emotional tracking", "1 GB Legacy Vault"]
         },
         "TOP_TIER": {
             "name": "Sovereign Circle",
             "tokens": 200000,
-            "ai_minutes": -1,
-            "coach_sessions": 8,
             "price_monthly": 149,
             "price_yearly": 1490,
             "family_sanctuary": True,
             "me2me": True,
             "legacy_vault_gb": 50,
-            "features": ["Unlimited AI", "200,000 tokens/month", "8 coach sessions/month", "Me2Me avatars", "50 GB Legacy Vault", "Family Sanctuary"]
+            "features": ["200,000 tokens/month", "Me2Me avatars", "50 GB Legacy Vault", "Family Sanctuary", "Up to 5 family members"]
         },
     }
     
@@ -900,10 +889,6 @@ class StripeBillingSystem:
                     v["profile"]["subscription_status"] = "ACTIVE"
                     v["profile"]["token_balance"] = plan_config["tokens"]
                     
-                    # Add monthly coaching credits if applicable
-                    if plan_config["coach_sessions"] > 0:
-                        self.add_coaching_credits(user_id, plan_config["coach_sessions"])
-                    
                     self.registry_saver(registry)
                     break
         
@@ -1016,10 +1001,6 @@ class StripeBillingSystem:
                     v["profile"]["token_balance"] = plan_config["tokens"]
                     v["profile"]["token_usage_month"] = 0
                     v["profile"]["last_token_reset"] = str(datetime.datetime.now().date())
-                    
-                    # Add monthly coaching credits
-                    if plan_config["coach_sessions"] > 0:
-                        self.add_coaching_credits(user_id, plan_config["coach_sessions"])
                     
                     self.registry_saver(registry)
                     break

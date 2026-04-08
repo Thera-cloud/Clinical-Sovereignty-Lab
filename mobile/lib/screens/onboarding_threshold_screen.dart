@@ -378,7 +378,7 @@ class _OnboardingThresholdScreenState extends State<OnboardingThresholdScreen>
             ),
             const SizedBox(height: 20),
             Text(
-              'Week 1: Full access — 300 AI minutes, 50K tokens. Week 2: Focused mode — 30 min/day with coherence prompts to deepen your experience.',
+              'Full access for 7 days — 10,000 AI tokens, text conversations with Little Nate. Experience the Sanctuary before choosing your plan.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _textSecondary,

@@ -1518,7 +1518,7 @@ async def get_cost_schedule():
     return {
         "tiers": {
             "COACH_ONLY": {"name": "Coach Only", "monthly": 0, "yearly": 0},
-            "TRIAL": {"name": "Threshold (Trial)", "monthly": 0, "yearly": 0, "duration_days": 14},
+            "TRIAL": {"name": "Threshold (Trial)", "monthly": 0, "yearly": 0, "duration_days": 7},
             "STANDARD": {"name": "Inner Chamber", "monthly": 49, "yearly": 490},
             "TOP_TIER": {"name": "Sovereign Circle", "monthly": 149, "yearly": 1490},
         },

@@ -881,7 +881,7 @@ class DripScheduler:
             except (ValueError, TypeError):
                 continue
 
-            trial_days = 14  # Default from PLAN_DETAILS
+            trial_days = 7  # Default from PLAN_DETAILS
             trial_end = trial_start + timedelta(days=trial_days)
             days_remaining = (trial_end - now).total_seconds() / 86400
 

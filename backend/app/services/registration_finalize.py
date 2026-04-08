@@ -57,7 +57,7 @@ def _tier_mapping(role: str, registration_type: str):
     elif rt == "TOP_TIER":
         return "TOP_TIER", "TOP_TIER", "ACTIVE", True, 200000, ""
     else:
-        trial_end = str((datetime.datetime.now() + datetime.timedelta(days=14)).date())
+        trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
         return "STANDARD", "TRIAL", "TRIAL_ACTIVE", True, 10000, trial_end
 
 

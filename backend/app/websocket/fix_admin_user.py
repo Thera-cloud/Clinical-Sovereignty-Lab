@@ -41,7 +41,7 @@ new_profile = {
     "subscription_plan": "TRIAL",
     "stripe_customer_id": "",
     "subscription_start_date": str(datetime.now().date()),
-    "trial_end_date": str((datetime.now() + timedelta(days=14)).date()),
+    "trial_end_date": str((datetime.now() + timedelta(days=7)).date()),
     "total_sessions_count": 0,
     "token_balance": 10000,
     "token_usage_today": 0,
