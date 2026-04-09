@@ -100,9 +100,12 @@ async def get_db_pool() -> asyncpg.Pool:
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown."""
     # Startup
+    _is_clone = os.environ.get("IS_CLONE", "").lower() in ("true", "1", "yes")
     print(f"🚀 Starting Little Nate API Server...")
     print(f"   Environment: {settings.ENVIRONMENT}")
     print(f"   Server: {settings.SERVER_HOST}:{settings.SERVER_PORT}")
+    if _is_clone:
+        print("   ⚡ CLONE MODE — background agents and email-sending services will be skipped")
     
     # Connect to database
     global db_pool
@@ -2006,19 +2009,22 @@ async def lifespan(app: FastAPI):
 
     # ── Agent Status Digest — 3x daily trust report covering all agents ──
     _agent_digest = None
-    try:
-        from app.services.agent_status_digest import AgentStatusDigest
-        _digest_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
-        _agent_digest = AgentStatusDigest(
-            app_state=app.state,
-            db_pool=db_pool,
-            notification_system=_digest_notify,
-        )
-        await _agent_digest.start()
-        app.state.agent_status_digest = _agent_digest
-        print("   ✅ AgentStatusDigest started (5am/5pm/11pm UTC, stagger 110s)")
-    except Exception as asd_err:
-        print(f"   ⚠️  AgentStatusDigest init failed: {asd_err}")
+    if _is_clone:
+        print("   ⏭️  AgentStatusDigest skipped (clone mode)")
+    else:
+        try:
+            from app.services.agent_status_digest import AgentStatusDigest
+            _digest_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+            _agent_digest = AgentStatusDigest(
+                app_state=app.state,
+                db_pool=db_pool,
+                notification_system=_digest_notify,
+            )
+            await _agent_digest.start()
+            app.state.agent_status_digest = _agent_digest
+            print("   ✅ AgentStatusDigest started (5am/5pm/11pm UTC, stagger 110s)")
+        except Exception as asd_err:
+            print(f"   ⚠️  AgentStatusDigest init failed: {asd_err}")
 
     # ── SkyEye Tab Auditor — 3x daily endpoint trust scorecard ──
     _tab_auditor = None
@@ -2401,19 +2407,22 @@ async def lifespan(app: FastAPI):
 
     # ── Trust Enforcer — Meta-agent enforcing 100% trust across all 16 auditors ──
     _trust_enforcer = None
-    try:
-        from app.services.trust_enforcer import TrustEnforcer
-        _te_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
-        _trust_enforcer = TrustEnforcer(
-            db_pool=db_pool, notification_system=_te_notify, app_state=app.state,
-            redis_url=_REDIS_URL_EARLY,
-            redis_password=_REDIS_PW_EARLY,
-        )
-        await _trust_enforcer.start()
-        app.state.trust_enforcer = _trust_enforcer
-        print("   ✅ TrustEnforcer started (5:10am/5:10pm/11:10pm UTC, 10min stagger)")
-    except Exception as te_err:
-        print(f"   ⚠️  TrustEnforcer init failed: {te_err}")
+    if _is_clone:
+        print("   ⏭️  TrustEnforcer skipped (clone mode)")
+    else:
+        try:
+            from app.services.trust_enforcer import TrustEnforcer
+            _te_notify = getattr(app.state, "notification_system", None) or (_notify_sys if _token_renewal_agent else None)
+            _trust_enforcer = TrustEnforcer(
+                db_pool=db_pool, notification_system=_te_notify, app_state=app.state,
+                redis_url=_REDIS_URL_EARLY,
+                redis_password=_REDIS_PW_EARLY,
+            )
+            await _trust_enforcer.start()
+            app.state.trust_enforcer = _trust_enforcer
+            print("   ✅ TrustEnforcer started (5:10am/5:10pm/11:10pm UTC, 10min stagger)")
+        except Exception as te_err:
+            print(f"   ⚠️  TrustEnforcer init failed: {te_err}")
 
     # ── Assessment Engine — AI-driven dynamic assessments for clients ──
     _assessment_engine = None
