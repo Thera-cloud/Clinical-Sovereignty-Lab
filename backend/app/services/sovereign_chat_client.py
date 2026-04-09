@@ -239,7 +239,7 @@ def _get_grok_session() -> aiohttp.ClientSession:
 def _get_workers_session() -> aiohttp.ClientSession:
     global _workers_session
     if _workers_session is None or _workers_session.closed:
-        timeout = aiohttp.ClientTimeout(total=10, sock_connect=3, sock_read=8)
+        timeout = aiohttp.ClientTimeout(total=120, sock_connect=5, sock_read=30)
         connector = aiohttp.TCPConnector(limit=20, keepalive_timeout=120)
         _workers_session = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _workers_session

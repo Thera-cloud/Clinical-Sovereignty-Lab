@@ -7,6 +7,7 @@ Uses the bridge's existing db_pool (no HTTP calls to backend).
 """
 import hashlib
 import logging
+import random as _rnd
 import re
 from datetime import datetime, timezone
 
@@ -49,6 +50,10 @@ _MIN_SCORE = 4
 _MIN_SCORE_VOICE = 2
 _MIN_USER_LEN = 40
 _MIN_USER_LEN_VOICE = 15
+
+# Global crystal cache (5-min TTL) — avoids repeated 113K-row scans
+_global_crystal_cache: dict = {"rows": [], "expires": 0.0}
+_GLOBAL_CACHE_TTL = 300.0  # seconds
 
 
 async def recall_crystals_for_context(
@@ -103,20 +108,20 @@ async def recall_crystals_for_context(
                         _seen_ids.add(r["id"])
 
             if len(user_crystals) < user_limit and user_uuid:
-                _cold = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id = $1
-                      AND confidence >= 0.30
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                      AND (recall_count IS NULL OR recall_count = 0)
-                    ORDER BY RANDOM()
-                    LIMIT 1
-                    """,
+                _u_cold_cnt = await conn.fetchval(
+                    "SELECT count(*) FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
                     user_uuid,
                 )
+                _cold = await conn.fetch(
+                    "SELECT id, crystal_text, confidence, domain, metadata "
+                    "FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                    "ORDER BY id OFFSET $2 LIMIT 1",
+                    user_uuid, _rnd.randrange(max(_u_cold_cnt, 1)),
+                ) if _u_cold_cnt > 0 else []
                 for r in _cold:
                     if r["id"] not in _seen_ids:
                         user_crystals.append(r)
@@ -168,19 +173,19 @@ async def recall_crystals_for_context(
                         _seen_ids.add(r["id"])
 
             if len(global_crystals) < global_limit:
-                _g_cold = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id IS NULL
-                      AND confidence >= 0.55
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                      AND (recall_count IS NULL OR recall_count = 0)
-                    ORDER BY RANDOM()
-                    LIMIT 1
-                    """,
+                _g_cold_cnt = await conn.fetchval(
+                    "SELECT count(*) FROM nate_intelligence_crystals "
+                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
                 )
+                _g_cold = await conn.fetch(
+                    "SELECT id, crystal_text, confidence, domain, metadata "
+                    "FROM nate_intelligence_crystals "
+                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                    "ORDER BY id OFFSET $1 LIMIT 1",
+                    _rnd.randrange(max(_g_cold_cnt, 1)),
+                ) if _g_cold_cnt > 0 else []
                 for r in _g_cold:
                     if r["id"] not in _seen_ids:
                         global_crystals.append(r)
@@ -188,21 +193,19 @@ async def recall_crystals_for_context(
 
             _g_remaining = global_limit - len(global_crystals)
             if _g_remaining > 0:
-                _g_top = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id IS NULL
-                      AND confidence >= 0.55
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                    ORDER BY confidence DESC,
-                             last_recalled_at DESC NULLS LAST
-                    LIMIT $1
-                    """,
-                    _g_remaining + len(_seen_ids),
-                )
-                for r in _g_top:
+                import time as _t_cache
+                _now = _t_cache.monotonic()
+                if _global_crystal_cache["expires"] < _now or not _global_crystal_cache["rows"]:
+                    _g_top_all = await conn.fetch(
+                        "SELECT id, crystal_text, confidence, domain, metadata "
+                        "FROM nate_intelligence_crystals "
+                        "WHERE user_id IS NULL AND confidence >= 0.55 "
+                        "AND scope NOT IN ('archived') AND superseded_by IS NULL "
+                        "ORDER BY confidence DESC, last_recalled_at DESC NULLS LAST LIMIT 50",
+                    )
+                    _global_crystal_cache["rows"] = [dict(r) for r in _g_top_all]
+                    _global_crystal_cache["expires"] = _now + _GLOBAL_CACHE_TTL
+                for r in _global_crystal_cache["rows"]:
                     if r["id"] not in _seen_ids and len(global_crystals) < global_limit:
                         global_crystals.append(r)
                         _seen_ids.add(r["id"])
@@ -245,19 +248,19 @@ async def recall_crystals_for_context(
             # QUANTUM-CRYSTAL-ARCH: dedicated clinical DNA slot — six-quotient growth
             # and clinical edge crystals that define HOW Nate responds
             clinical_dna = []
-            _dna_rows = await conn.fetch(
-                """
-                SELECT id, crystal_text, confidence, domain, metadata
-                FROM nate_intelligence_crystals
-                WHERE user_id IS NULL
-                  AND confidence >= 0.85
-                  AND scope NOT IN ('archived')
-                  AND superseded_by IS NULL
-                  AND origin_surface IN ('growth_engine', 'clinical_edge_seed')
-                ORDER BY RANDOM()
-                LIMIT 2
-                """,
+            _dna_cnt = await conn.fetchval(
+                "SELECT count(*) FROM nate_intelligence_crystals "
+                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
+                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed')",
             )
+            _dna_rows = await conn.fetch(
+                "SELECT id, crystal_text, confidence, domain, metadata "
+                "FROM nate_intelligence_crystals "
+                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
+                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
+                "ORDER BY id OFFSET $1 LIMIT 2",
+                _rnd.randrange(max(_dna_cnt, 1)),
+            ) if _dna_cnt > 0 else []
             for r in _dna_rows:
                 if r["id"] not in _seen_ids:
                     clinical_dna.append(r)
@@ -269,66 +272,64 @@ async def recall_crystals_for_context(
 
             crystal_ids = [c["id"] for c in crystals]
 
-            await conn.executemany(
-                """
-                INSERT INTO crystal_recall_log
-                    (user_id, crystal_id, source, recalled_at)
-                VALUES ($1, $2, $3, NOW())
-                """,
-                [(hardware_id, cid, source) for cid in crystal_ids],
+        # Fire-and-forget: recall log + reinforcement + co-activation (don't block reads)
+        import asyncio as _aio
+        _aio.create_task(_reinforce_recalled_crystals(db_pool, hardware_id, crystal_ids, source))
+
+        lines = []
+        if user_crystals:
+            lines.append(
+                "YOUR PERSONAL MEMORIES (from prior sessions with this person — "
+                "reference naturally, these are their own words):"
             )
-
-            await conn.execute(
-                """
-                UPDATE nate_intelligence_crystals
-                SET recall_count = COALESCE(recall_count, 0) + 1,
-                    last_recalled_at = NOW(),
-                    confidence = GREATEST(confidence, LEAST(confidence + 0.03, 0.95)),
-                    updated_at = NOW()
-                WHERE id = ANY($1::int[])
-                """,
-                crystal_ids,
+            for c in user_crystals:
+                conf = float(c["confidence"]) if c["confidence"] else 0
+                text = (c["crystal_text"] or "")[:300]
+                lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
+        if clinical_dna:
+            lines.append(
+                "CLINICAL DNA (your lived growth lessons — these define "
+                "HOW you respond, follow them precisely):"
             )
-
-            # QUANTUM-CRYSTAL-ARCH: record co-activation for crystals recalled together
-            if len(crystal_ids) >= 2:
-                import asyncio as _aio
-                _aio.create_task(_record_co_activation(db_pool, crystal_ids, source))
-
-            lines = []
-            if user_crystals:
-                lines.append(
-                    "YOUR PERSONAL MEMORIES (from prior sessions with this person — "
-                    "reference naturally, these are their own words):"
-                )
-                for c in user_crystals:
-                    conf = float(c["confidence"]) if c["confidence"] else 0
-                    text = (c["crystal_text"] or "")[:300]
-                    lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
-            if clinical_dna:
-                lines.append(
-                    "CLINICAL DNA (your lived growth lessons — these define "
-                    "HOW you respond, follow them precisely):"
-                )
-                for c in clinical_dna:
-                    conf = float(c["confidence"]) if c["confidence"] else 0
-                    text = (c["crystal_text"] or "")[:300]
-                    lines.append(f"- {text} (confidence: {conf:.2f})")
-            if global_crystals:
-                lines.append(
-                    "GENERAL KNOWLEDGE (validated therapeutic insights — "
-                    "reference when relevant):"
-                )
-                for c in global_crystals:
-                    conf = float(c["confidence"]) if c["confidence"] else 0
-                    text = (c["crystal_text"] or "")[:200]
-                    lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
-            if anticipatory_section:
-                lines.append(anticipatory_section)
-            return "\n".join(lines)
+            for c in clinical_dna:
+                conf = float(c["confidence"]) if c["confidence"] else 0
+                text = (c["crystal_text"] or "")[:300]
+                lines.append(f"- {text} (confidence: {conf:.2f})")
+        if global_crystals:
+            lines.append(
+                "GENERAL KNOWLEDGE (validated therapeutic insights — "
+                "reference when relevant):"
+            )
+            for c in global_crystals:
+                conf = float(c["confidence"]) if c["confidence"] else 0
+                text = (c["crystal_text"] or "")[:200]
+                lines.append(f"- [{c['domain']}] {text} (confidence: {conf:.2f})")
+        if anticipatory_section:
+            lines.append(anticipatory_section)
+        return "\n".join(lines)
     except Exception as e:
         logger.warning("crystal_recall_bridge: %s", e)
         return ""
+
+
+async def _reinforce_recalled_crystals(db_pool, hardware_id: str, crystal_ids: list, source: str) -> None:
+    """Background: log recall + update recall_count/confidence + co-activation."""
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.executemany(
+                "INSERT INTO crystal_recall_log (user_id, crystal_id, source, recalled_at) VALUES ($1, $2, $3, NOW())",
+                [(hardware_id, cid, source) for cid in crystal_ids],
+            )
+            await conn.execute(
+                "UPDATE nate_intelligence_crystals SET recall_count = COALESCE(recall_count, 0) + 1, "
+                "last_recalled_at = NOW(), confidence = GREATEST(confidence, LEAST(confidence + 0.03, 0.95)), "
+                "updated_at = NOW() WHERE id = ANY($1::int[])",
+                crystal_ids,
+            )
+        if len(crystal_ids) >= 2:
+            await _record_co_activation(db_pool, crystal_ids, source)
+    except Exception as e:
+        logger.warning("crystal_recall_bridge: reinforcement write: %s", e)
 
 
 def _rerank_by_affect(crystals: list, affect_weight: float, limit: int) -> list:

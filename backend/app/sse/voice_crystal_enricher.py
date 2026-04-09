@@ -23,7 +23,7 @@ async def enrich_crystals_from_voice(
             # Crystals forged in the last N minutes (call duration + 2 min buffer)
             window_min = int(duration_min) + 2
             rows = await conn.fetch(
-                "SELECT crystal_id, confidence FROM nate_intelligence_crystals "
+                "SELECT id, confidence FROM nate_intelligence_crystals "
                 "WHERE (user_id = (SELECT id FROM users WHERE username=$1 LIMIT 1) "
                 "       OR user_id IS NULL) "
                 "AND created_at > NOW() - make_interval(mins => $2) "
@@ -33,14 +33,12 @@ async def enrich_crystals_from_voice(
 
             for row in rows:
                 new_conf = min(0.95, row["confidence"] * _VOICE_CONFIDENCE_BOOST)
-                meta = json.dumps({"source": "voice", "session_duration_min": duration_min,
-                                   "call_sid": session_call_sid})
                 await conn.execute(
                     "UPDATE nate_intelligence_crystals "
                     "SET confidence = $1, "
                     "    crystal_text = crystal_text || E'\\n[voice session: ' || $2 || ' min]' "
-                    "WHERE crystal_id = $3",
-                    new_conf, str(duration_min), row["crystal_id"])
+                    "WHERE id = $3",
+                    new_conf, str(duration_min), row["id"])
                 enriched += 1
 
             # Store a voice session summary for story context

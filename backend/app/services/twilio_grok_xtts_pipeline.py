@@ -13,10 +13,10 @@ Session lifecycle:
   - Logs voice minutes to voice_call_usage table
 
 Env:
-  XAI_API_KEY          — required for Grok Realtime WebSocket
-  XAI_REALTIME_URL     — default wss://api.x.ai/v1/realtime
-  XTTS_URL             — default http://37.27.244.80:8100/synthesize
-  TWILIO_VOICE_PIPELINE — set to grok_xtts to use this path
+  AZURE_API_KEY            — required for Azure Foundry Grok Realtime
+  AZURE_OPENAI_ENDPOINT    — Azure Foundry endpoint
+  AZURE_OPENAI_DEPLOYMENT  — Grok model deployment (default gpt-realtime)
+  TWILIO_VOICE_PIPELINE    — set to azure_realtime or grok_xtts
 """
 
 from __future__ import annotations
@@ -66,9 +66,11 @@ except ImportError:
 
 logger = logging.getLogger("nate.twilio_grok_xtts")
 
-XAI_REALTIME_URL = os.getenv("XAI_REALTIME_URL", "wss://api.x.ai/v1/realtime")
-XAI_API_KEY = os.getenv("XAI_API_KEY", "").strip()
 XTTS_URL = os.getenv("XTTS_URL", "http://37.27.244.80:8100/synthesize").strip().rstrip("/")
+# SOVEREIGN-VOICE: Azure Foundry Grok Realtime WSS — never xAI direct
+_AZ_EP = os.getenv("AZURE_OPENAI_ENDPOINT", "").replace("https://", "").replace("wss://", "").replace("/", "")
+_AZ_DEPLOY = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-realtime")
+_AZ_REALTIME_URL = f"wss://{_AZ_EP}/openai/realtime?api-version=2024-10-01-preview&deployment={_AZ_DEPLOY}" if _AZ_EP else ""
 
 _TWILIO_MULAW_CHUNK = 160
 
@@ -285,17 +287,17 @@ async def _synthesize_edge_tts_fallback(text: str) -> Optional[bytes]:
 
 
 async def _open_grok_session(system_prompt: str):
-    """Connect to xAI Realtime and send session.update + inject context as conversation item."""
+    """Connect to Azure Foundry Grok Realtime and send session.update."""  # SOVEREIGN-VOICE
     import websockets
 
-    key = os.getenv("XAI_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("XAI_API_KEY not set")
+    api_key = os.getenv("AZURE_API_KEY", "").strip()
+    if not api_key or not _AZ_REALTIME_URL:
+        raise RuntimeError("AZURE_API_KEY or AZURE_OPENAI_ENDPOINT not set for voice")
 
-    url = os.getenv("XAI_REALTIME_URL", XAI_REALTIME_URL).strip() or XAI_REALTIME_URL
+    print(f"[VOICE] Connecting to Azure Foundry Realtime: {_AZ_REALTIME_URL[:60]}...")
     ws = await websockets.connect(
-        url,
-        extra_headers={"Authorization": f"Bearer {key}"},
+        _AZ_REALTIME_URL,
+        extra_headers={"api-key": api_key},
         max_size=None,
     )
     session_update = {
@@ -1822,10 +1824,9 @@ async def run_twilio_grok_xtts_bridge(
 
 def use_grok_xtts_pipeline() -> bool:
     v = os.getenv("TWILIO_VOICE_PIPELINE", "").strip().lower()
-    return v in ("grok_xtts", "grok+xtts", "1", "true", "yes")
+    return v in ("grok_xtts", "grok+xtts", "azure_realtime", "1", "true", "yes")
 
 
 def grok_xtts_configured() -> bool:
-    return bool(os.getenv("XAI_API_KEY", "").strip()) and bool(
-        os.getenv("XTTS_URL", "http://37.27.244.80:8100/synthesize").strip()
-    )
+    # SOVEREIGN-VOICE: Azure Foundry is the voice provider
+    return bool(os.getenv("AZURE_API_KEY", "").strip()) and bool(_AZ_REALTIME_URL)

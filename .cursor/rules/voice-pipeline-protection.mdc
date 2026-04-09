@@ -1,0 +1,36 @@
+# Voice Pipeline — Azure Foundry ONLY
+
+The voice pipeline MUST use the 2-hop architecture:
+1. Grok via Azure Foundry Realtime (AZURE_OPENAI_ENDPOINT + AZURE_API_KEY) for TEXT generation
+2. Azure TTS Onyx (gpt-4o-mini-tts) for speech synthesis
+3. WAV → μ-law conversion → Twilio stream
+
+NEVER use xAI Realtime WebSocket (wss://api.x.ai) for voice. It was tested and:
+- Returns HTTP 429 under load
+- Cannot handle 8+ concurrent calls
+- Was explicitly rolled back on April 6, 2026
+
+The Azure Foundry pipeline handles 200+ concurrent connections.
+
+## Protected Files
+
+- `twilio_grok_xtts_pipeline.py` (max 50 new lines per session)
+- Do NOT add xAI direct API calls
+- Do NOT add XAI_REALTIME_URL references
+- Do NOT add Rex native voice
+- Do NOT re-add XAI_API_KEY for WebSocket auth — use AZURE_API_KEY with `api-key` header
+
+## Connection Pattern (Canonical)
+
+```python
+ws = await websockets.connect(
+    f"wss://{AZURE_OPENAI_ENDPOINT}/openai/realtime?api-version=2024-10-01-preview&deployment={AZURE_OPENAI_DEPLOYMENT}",
+    extra_headers={"api-key": AZURE_API_KEY},
+)
+```
+
+## Enricher Dependencies
+
+- `voice_context_enricher.py` — called at line ~195, injects [STORY JOURNEY] into system prompt
+- `voice_crystal_enricher.py` — called at line ~1665, enriches crystals post-call
+- Both are pure DB queries, independent of the WebSocket provider

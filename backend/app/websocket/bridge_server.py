@@ -198,6 +198,7 @@ REQUIRED_COACH_ETHICS_VERSION = "v1.0_2026"
 
 # Database pool — created in main(), used by NateNudge + AI Mode handlers
 db_pool = None
+chat_db_pool = None  # SOVEREIGN-VOICE: dedicated pool for chat context (fast, small)
 
 # Bridge context — holds vault_bridge for B5 chat-integrated file interactions
 class _BridgeContext:
@@ -7583,14 +7584,20 @@ class AzureCortex:
         # SOVEREIGN-VOICE: run 4 async DB lookups in parallel instead of sequential
         _hw_id = profile.get("hardware_id", "")
         _uname = profile.get("username", uid)
+        _cpool = chat_db_pool or db_pool
+        async def _timed(name, coro):
+            _s = _time_ctx.monotonic()
+            result = await coro
+            print(f">>> [CTX-TIMING] {name}: {int((_time_ctx.monotonic() - _s) * 1000)}ms")
+            return result
         relational_context, checkin_context, crystal_context, pg_history_context = await asyncio.gather(
-            self._get_relational_context(profile),
-            self._get_checkin_context(profile),
-            recall_crystals_for_context(
-                db_pool, _hw_id, max_results=8,
+            _timed("relational", self._get_relational_context(profile)),
+            _timed("checkin", self._get_checkin_context(profile)),
+            _timed("crystals", recall_crystals_for_context(
+                _cpool, _hw_id, max_results=8,
                 source="bridge_chat", query_text=user_text,
-            ),
-            _fetch_pg_history_for_chat(db_pool, _uname, _hw_id, limit=15),
+            )),
+            _timed("pg_history", _fetch_pg_history_for_chat(_cpool, _uname, _hw_id, limit=15)),
         )
         _pre_ms = int((_time_ctx.monotonic() - _t_pre) * 1000)
         print(f">>> [RELATIONAL CONTEXT LENGTH]: {len(relational_context)} chars (parallel pre-fetch: {_pre_ms}ms)")
@@ -8337,12 +8344,16 @@ class AzureCortex:
                 try:
                     _chunk_buf = ""
                     _first_token = True
+                    _prev_prov = None
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
                         temperature=_user_temp, max_tokens=1500,
                         domain="clinical",
                         image_data_url=_vault_image_data_url,
                     ):
+                        if _prev_prov and provider != _prev_prov:
+                            full_response, _chunk_buf = "", ""  # QUANTUM-CRYSTAL-ARCH: discard partial from failed provider
+                        _prev_prov = provider
                         full_response += delta
                         _provider_used = provider
                         _chunk_buf += delta
@@ -25700,12 +25711,7 @@ IMPORTANT:
             # =================================================================
 
             else:
-                print(f">>> [SOCKET] Unknown message type: {t} from uid={uid}")
-                await websocket.send(json.dumps({
-                    "type": "error",
-                    "message": f"Unknown message type: {t}",
-                    "hint": "Check the API documentation for valid message types.",
-                }))
+                print(f">>> [SOCKET] Unhandled message type: {t} from uid={uid}")
 
     except websockets.exceptions.ConnectionClosed:
         print(f">>> [SOCKET] Connection closed for {uid}")
@@ -25812,6 +25818,14 @@ async def main():
                 command_timeout=30,
             )
             print(f"[*] Database pool created ({db_pool.get_size()} connections)")
+            # SOVEREIGN-VOICE: dedicated small pool for chat context — never queues behind background agents
+            global chat_db_pool
+            chat_db_pool = await asyncpg.create_pool(
+                host=_pg_host, port=_pg_port, user=_pg_user,
+                password=_pg_pass, database=_pg_db,
+                min_size=2, max_size=8, command_timeout=10,
+            )
+            print(f"[*] Chat context pool created ({chat_db_pool.get_size()} connections)")
             billing_system.db_pool = db_pool  # Founding member eligibility (platform_config)
             nevedal_handler.db_pool = db_pool  # Enable Nevedal metrics → PostgreSQL
             parietal.db_pool = db_pool  # MetricsEngine → client_metrics PG table

@@ -193,6 +193,18 @@ async def inbound_call(request: Request, From: str = Form("")):
     )
 
 
+@router.post("/call-status")
+async def voice_call_status(
+    request: Request,
+    CallSid: str = Form(""),
+    CallStatus: str = Form(""),
+    CallDuration: str = Form("0"),
+):
+    """Twilio call status callback — acknowledge and log."""
+    logger.info("call-status: sid=%s status=%s duration=%ss", CallSid[:12] if CallSid else "?", CallStatus, CallDuration)
+    return {"status": "received"}
+
+
 async def _send_zero_balance_sms(phone: str, name: str):
     try:
         from app.services.voice_notifications import send_zero_balance_decline_sms
