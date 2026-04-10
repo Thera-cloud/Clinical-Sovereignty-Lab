@@ -35,9 +35,65 @@ COST_PER_IMAGE_CENTS = 7
 COST_PER_VIDEO_CENTS = 400
 COST_PER_NARRATION_CENTS = 1
 
+COST_PER_LORA_TRAIN_CENTS = 200
+
 _replicate_available = bool(os.getenv("REPLICATE_API_TOKEN"))
 if not _replicate_available:
     logger.warning("[STUDIO] REPLICATE_API_TOKEN not set — LoRA features disabled")
+
+
+async def estimate_pipeline_cost(project_id: str, mode: str) -> dict:
+    """Return a dynamic cost estimate based on project state."""
+    from app.sse.trailer_generator import _load_manifest_from_r2, _load_trained_loras
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest:
+        return {"error": "Project not found"}
+
+    scenes = [s for s in manifest.get("scenes", []) if s.get("status") == "success"]
+    total_scenes = len(scenes)
+    chain_state = manifest.get("chain_state", {})
+    completed = len(chain_state.get("completed_clips", []))
+
+    remaining = max(total_scenes - completed, 0) if chain_state else total_scenes
+
+    trained_loras = await _load_trained_loras(project_id)
+    has_lora = bool(trained_loras)
+
+    if mode == "interpolated":
+        video_clips = max(total_scenes - 1, 0) - completed
+        lora_regen = total_scenes if has_lora else 0
+        video_cost = max(video_clips, 0) * COST_PER_VIDEO_CENTS
+        lora_image_cost = lora_regen * COST_PER_IMAGE_CENTS
+        narration_cost = total_scenes * COST_PER_NARRATION_CENTS
+        total = video_cost + lora_image_cost + narration_cost
+    elif mode == "chain":
+        video_cost = remaining * COST_PER_VIDEO_CENTS
+        narration_cost = total_scenes * COST_PER_NARRATION_CENTS
+        total = video_cost + narration_cost
+    elif mode == "cel":
+        video_cost = remaining * COST_PER_VIDEO_CENTS
+        narration_cost = total_scenes * COST_PER_NARRATION_CENTS
+        total = video_cost + narration_cost
+    else:
+        video_cost = remaining * COST_PER_VIDEO_CENTS
+        narration_cost = 0
+        total = video_cost
+
+    return {
+        "mode": mode,
+        "total_scenes": total_scenes,
+        "remaining_scenes": remaining,
+        "completed_scenes": completed,
+        "has_lora": has_lora,
+        "estimated_cost_cents": total,
+        "estimated_cost_usd": f"${total / 100:.2f}",
+        "breakdown": {
+            "video_generation": f"${video_cost / 100:.2f}",
+            "narration": f"${narration_cost / 100:.2f}",
+            "lora_regen": f"${(lora_regen * COST_PER_IMAGE_CENTS if mode == 'interpolated' else 0) / 100:.2f}" if mode == "interpolated" and has_lora else None,
+        },
+        "daily_cap_usd": f"${_COST_CAP_CENTS / 100:.2f}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -185,15 +241,23 @@ async def break_into_scenes(script_text: str) -> dict:
 #  Image / Video / Narration generation
 # ---------------------------------------------------------------------------
 
-async def generate_scene_image(description: str, project_id: str, scene_num: int, redis=None) -> str:
-    """Generate image via Grok Imagine and upload to R2. Returns R2 URL."""
+async def generate_scene_image(description: str, project_id: str, scene_num: int, redis=None, characters: list[str] | None = None) -> str:
+    """Generate image via LoRA (if trained) or Grok Imagine, upload to R2. Returns R2 URL."""
     await _check_cost_budget(COST_PER_IMAGE_CENTS, redis)
 
-    from app.sse.infrastructure.grok_imagine_client import generate_image, GROK_IMAGINE_LOCK
+    from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_image
+    from app.sse.trailer_generator import (
+        STYLE_PREFIX, _generate_image_with_lora_or_grok,
+        _load_trained_loras, _build_consistent_prompt,
+    )
+
+    chars = characters or []
+    trained_loras = await _load_trained_loras(project_id)
+    styled_description = _build_consistent_prompt(description, chars) if chars else STYLE_PREFIX + description
 
     async with GROK_IMAGINE_LOCK:
-        image_bytes = await generate_image(description)
+        image_bytes = await _generate_image_with_lora_or_grok(styled_description, chars, trained_loras)
     r2_key = f"sse/studio/projects/{project_id}/{scene_num}.png"
     r2_url = await store_image(image_bytes, r2_key)
     await _track_cost(COST_PER_IMAGE_CENTS, redis)
@@ -206,9 +270,11 @@ async def generate_scene_video(image_url: str, motion_prompt: str, project_id: s
 
     from app.sse.infrastructure.grok_imagine_client import generate_video, poll_video_status, GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_video
+    from app.sse.trailer_generator import STYLE_PREFIX
 
+    styled_motion = STYLE_PREFIX + motion_prompt
     async with GROK_IMAGINE_LOCK:
-        video_id = await generate_video(motion_prompt, source_image_url=image_url)
+        video_id = await generate_video(styled_motion, source_image_url=image_url)
 
     for _ in range(24):
         await asyncio.sleep(5)
@@ -591,22 +657,31 @@ async def stitch_project_trailer(project_id: str, options: dict, db_pool, redis=
 
 
 async def get_video_status(project_id: str) -> dict:
-    """Check video generation status from R2 manifest."""
+    """Check video generation status from R2 manifest + chain state."""
     from app.sse.trailer_generator import _load_manifest_from_r2
     from app.sse.infrastructure import r2_storage as _r2
     client = _r2._get_client()
     if not client:
         return {"status": "r2_unavailable"}
 
+    data: dict = {}
     try:
         def _get():
             return client.get_object(Bucket=_r2._R2_BUCKET,
                                      Key=f"sse/studio/projects/{project_id}/video_manifest.json")
         resp = await asyncio.get_event_loop().run_in_executor(None, _get)
         data = json.loads(resp["Body"].read().decode())
-        return data
     except Exception:
-        return {"status": "not_started"}
+        data = {"status": "not_started"}
+
+    try:
+        proj_manifest = await _load_manifest_from_r2(project_id)
+        if proj_manifest and proj_manifest.get("chain_state"):
+            data["chain_state"] = proj_manifest["chain_state"]
+    except Exception:
+        pass
+
+    return data
 
 
 async def get_trailer_status(project_id: str) -> dict:
@@ -648,11 +723,18 @@ async def start_lora_training(character_key: str, training_images_zip_url: str) 
     )
 
 
-async def poll_lora_training(training_id: str) -> dict:
-    """Check LoRA training status."""
+async def poll_lora_training(training_id: str, project_id: str | None = None, character_key: str | None = None) -> dict:
+    """Check LoRA training status. On completion, saves LoRA URL to project manifest."""
     _require_replicate()
     from app.sse.infrastructure.replicate_client import poll_training
-    return await poll_training(training_id)
+    result = await poll_training(training_id)
+    if result.get("status") == "succeeded" and result.get("output") and project_id and character_key:
+        lora_url = result["output"] if isinstance(result["output"], str) else result["output"].get("weights", "")
+        if lora_url:
+            from app.sse.trailer_generator import save_trained_lora
+            await save_trained_lora(project_id, character_key, lora_url)
+            logger.info("[STUDIO] LoRA for %s saved to manifest: %s", character_key, lora_url[:80])
+    return result
 
 
 async def generate_with_lora(prompt: str, lora_urls: list[str], width: int = 1024, height: int = 576) -> list[str]:

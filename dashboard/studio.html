@@ -324,7 +324,7 @@ function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refr
       const s = scenes[idx];
       const d = await apiFetch('/api/sse/admin/studio/generate-image', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, description: s.description || s.prompt })
+        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, description: s.description || s.prompt, characters: s.characters || [] })
       });
       const updated = [...scenes];
       updated[idx] = { ...updated[idx], image_url: d.r2_url };
@@ -592,7 +592,7 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
   const [videoLoading, setVideoLoading] = useState(false);
   const [stitchLoading, setStitchLoading] = useState(false);
   const [trailerStatus, setTrailerStatus] = useState(null);
-  const [stitchOpts, setStitchOpts] = useState({ include_color_grade: true, include_narration: true, format: '16:9' });
+  const [stitchOpts, setStitchOpts] = useState({ include_color_grade: true, include_narration: true, color_preset: 'ghibli_warm', format: '16:9' });
   const [genMode, setGenMode] = useState('interpolated');
   const pollRef = useRef(null);
 
@@ -662,8 +662,16 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
   const generateCongruent = async () => {
     const pid = await ensureProject(scenes);
     if (!pid) return;
-    const cost = genMode === 'interpolated' ? '$72' : '$76';
-    if (!confirm(`Generate ${genMode} trailer (~${cost})? This takes several minutes.`)) return;
+    try {
+      const est = await apiFetch(`/api/sse/admin/studio/cost-estimate/${pid}?mode=${genMode}`);
+      const msg = `Generate ${genMode} trailer?\n\nEstimated cost: ${est.estimated_cost_usd}\n` +
+        `Scenes: ${est.total_scenes} (${est.remaining_scenes} remaining)\n` +
+        `LoRA: ${est.has_lora ? 'Yes (hero images will be regenerated)' : 'No'}\n` +
+        `Daily cap: ${est.daily_cap_usd}\n\nProceed?`;
+      if (!confirm(msg)) return;
+    } catch (e) {
+      if (!confirm(`Generate ${genMode} trailer? Cost estimate unavailable. Proceed anyway?`)) return;
+    }
     setVideoLoading(true);
     try {
       const endpoint = genMode === 'interpolated' ? '/api/sse/admin/studio/generate-interpolated-trailer' : '/api/sse/admin/studio/generate-congruent-clips';
@@ -750,12 +758,28 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
         </div>
         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
           <button className="btn" onClick={generateCongruent} disabled={videoLoading}>
-            {videoLoading ? <><span className="spinner"/> Generating {genMode} clips...</> : `Generate ${genMode.charAt(0).toUpperCase()+genMode.slice(1)} Clips (~$${genMode==='interpolated'?'72':'76'})`}
+            {videoLoading ? <><span className="spinner"/> Generating {genMode} clips...</> : `Generate ${genMode.charAt(0).toUpperCase()+genMode.slice(1)} Clips`}
           </button>
-          {videoStatus && videoStatus.chain_state && videoStatus.chain_state.last_completed_scene && (
+          {videoStatus && videoStatus.chain_state && videoStatus.chain_state.last_completed_scene && !videoStatus.chain_state.awaiting_approval && (
             <button className="btn btn-sm" onClick={resumeGeneration} disabled={videoLoading}>
               Resume from Scene {videoStatus.chain_state.last_completed_scene + 1}
             </button>
+          )}
+          {videoStatus && videoStatus.chain_state && videoStatus.chain_state.awaiting_approval && (
+            <div style={{display:'flex',gap:8,alignItems:'center',padding:'8px 12px',background:'#C9A96222',borderRadius:6,border:'1px solid var(--gold)'}}>
+              <span style={{fontSize:12,color:'var(--gold-b)'}}>Branch Point — Scene {videoStatus.chain_state.branch_scene} awaiting approval</span>
+              {videoStatus.chain_state.branch_preview_url && (
+                <img src={videoStatus.chain_state.branch_preview_url} alt="Preview" style={{width:48,height:48,borderRadius:4,objectFit:'cover'}} />
+              )}
+              <button className="btn btn-sm" style={{background:'var(--green)'}} onClick={async () => {
+                await apiFetch('/api/sse/admin/studio/approve-branch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_id:projectId,action:'approve'})});
+                pollVideoStatus();
+              }}>Approve & Continue</button>
+              <button className="btn btn-sm" style={{background:'var(--red)',opacity:.7}} onClick={async () => {
+                await apiFetch('/api/sse/admin/studio/approve-branch', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_id:projectId,action:'reject'})});
+                pollVideoStatus();
+              }}>Reject</button>
+            </div>
           )}
           <button className="btn btn-sm" onClick={generateAllVideos} disabled={videoLoading} style={{opacity:.6}}>
             Legacy Independent
@@ -796,6 +820,15 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
               onChange={e => setStitchOpts(o => ({...o, include_color_grade: e.target.checked}))} />
             Color Grade
           </label>
+          {stitchOpts.include_color_grade && (
+            <select value={stitchOpts.color_preset} onChange={e => setStitchOpts(o => ({...o, color_preset: e.target.value}))}
+              style={{width:'auto',fontSize:12,padding:'4px 8px'}}>
+              <option value="ghibli_warm">Ghibli Warm</option>
+              <option value="cool_night">Cool Night</option>
+              <option value="neutral">Neutral</option>
+              <option value="sunset_drama">Sunset Drama</option>
+            </select>
+          )}
           <label style={{fontSize:12,color:'var(--t2)',display:'flex',alignItems:'center',gap:6}}>
             <input type="checkbox" checked={stitchOpts.include_narration}
               onChange={e => setStitchOpts(o => ({...o, include_narration: e.target.checked}))} />
@@ -831,6 +864,71 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  VOICE MAPPING PANEL
+// ═══════════════════════════════════════════════════════════════════
+function VoiceMappingPanel({ projectId, ensureProject }) {
+  const [voiceCfg, setVoiceCfg] = useState(null);
+  const [availVoices, setAvailVoices] = useState([]);
+  const [saving, setSaving] = useState(null);
+
+  const loadVoices = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/voice-config/' + projectId);
+      setVoiceCfg(d.voices || {});
+      setAvailVoices(d.available_voices || []);
+    } catch (e) { console.warn('voice-config load failed', e); }
+  }, [projectId]);
+
+  useEffect(() => { loadVoices(); }, [loadVoices]);
+
+  const saveVoice = async (charKey, voice, instructions) => {
+    const pid = await ensureProject();
+    setSaving(charKey);
+    try {
+      await apiFetch('/api/sse/admin/studio/voice-config', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ project_id: pid, character: charKey, voice, instructions: instructions || null })
+      });
+      await loadVoices();
+    } catch (e) { alert('Save failed: ' + e.message); }
+    setSaving(null);
+  };
+
+  if (!voiceCfg) return e('div', {className:'panel'}, e('p',{style:{color:'var(--t2)',fontSize:12}},'Load a project to configure voices.'));
+
+  const chars = Object.entries(voiceCfg);
+  return e('div', {className:'panel'},
+    e('h2', null, 'Voice Mapping'),
+    e('p', {style:{fontSize:12,color:'var(--t2)',marginBottom:12}}, 'Assign TTS voices to each character for narration generation.'),
+    e('div', {style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}},
+      chars.map(([key, cfg]) =>
+        e('div', {key, style:{padding:12,background:'var(--raised)',borderRadius:6,border:'1px solid var(--border)'}},
+          e('div', {style:{fontSize:13,color:'var(--gold-b)',marginBottom:6}}, key.replace(/_/g,' ')),
+          e('div', {style:{display:'flex',gap:6,alignItems:'center',marginBottom:6}},
+            e('select', {
+              value: cfg.voice || 'shimmer',
+              onChange: ev => saveVoice(key, ev.target.value, cfg.instructions),
+              style:{flex:1,fontSize:12,padding:'4px 8px'},
+              disabled: saving === key,
+            }, availVoices.map(v => e('option', {key:v, value:v}, v))),
+            saving === key && e('span', {className:'spinner',style:{width:14,height:14}}),
+          ),
+          e('input', {
+            type:'text',
+            placeholder:'Voice instructions (e.g., "gentle, wise tone")',
+            defaultValue: cfg.instructions || '',
+            onBlur: ev => { if (ev.target.value !== (cfg.instructions || '')) saveVoice(key, cfg.voice, ev.target.value); },
+            style:{fontSize:11,width:'100%'},
+          })
+        )
+      )
+    )
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  CHARACTER LAB TAB (LoRA training + testing)
 // ═══════════════════════════════════════════════════════════════════
 function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
@@ -852,11 +950,28 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
     setLoading('gen_training');
     try {
       await apiFetch('/api/sse/admin/studio/lora/training-images', {
-        method: 'POST', ct: 'application/json',
+        method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ character_key: selectedChar, project_id: pid })
       });
-      alert('Training image generation started — check Library tab in ~2 minutes.');
+      alert('Training image generation started — check Library tab in ~2 minutes.\nOnce done, click "Auto-Zip" to prepare for training.');
       refreshCost();
+    } catch (e) { alert('Failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const autoZipTrainingImages = async () => {
+    const pid = await ensureProject(scenes);
+    if (!pid) return;
+    setLoading('zip');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/lora/zip-training-images', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ character_key: selectedChar, project_id: pid })
+      });
+      if (d.zip_url) {
+        setLoraUrl(d.zip_url);
+        alert('Training images zipped! URL auto-filled. Click "Train LoRA" to start.');
+      }
     } catch (e) { alert('Failed: ' + e.message); }
     setLoading('');
   };
@@ -879,8 +994,10 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
     if (!trainingId) return;
     setLoading('poll');
     try {
-      const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId);
+      const pid = await ensureProject();
+      const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId + '?project_id=' + encodeURIComponent(pid) + '&character_key=' + encodeURIComponent(selectedChar));
       setTrainingStatus(d);
+      if (d.status === 'succeeded') alert('LoRA training complete! Character lock saved to project. All scene generation will now use this LoRA.');
     } catch (e) { alert('Poll failed: ' + e.message); }
     setLoading('');
   };
@@ -921,14 +1038,19 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
           <div style={{flex:1,minWidth:300}}>
             <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Step 1: Generate Training Images</div>
             <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Generate 20 diverse poses/angles of {selectedChar} for LoRA fine-tuning.</p>
-            <button className="btn" onClick={generateTrainingSet} disabled={loading==='gen_training'}>
-              {loading==='gen_training' ? <span className="spinner"/> : `Generate 20 Images (~$1.40)`}
-            </button>
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn" onClick={generateTrainingSet} disabled={loading==='gen_training'}>
+                {loading==='gen_training' ? <span className="spinner"/> : `Generate 20 Images (~$1.40)`}
+              </button>
+              <button className="btn btn-sm" onClick={autoZipTrainingImages} disabled={loading==='zip'}>
+                {loading==='zip' ? <span className="spinner"/> : 'Auto-Zip for Training'}
+              </button>
+            </div>
           </div>
 
           <div style={{flex:1,minWidth:300}}>
             <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Step 2: Train LoRA</div>
-            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Upload training images as .zip and start LoRA training on Replicate.</p>
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Zip URL auto-filled after Step 1 zip, or paste manually.</p>
             <input type="text" placeholder="Training images .zip URL..." value={loraUrl} onChange={e => setLoraUrl(e.target.value)} style={{marginBottom:8}} />
             <div style={{display:'flex',gap:8}}>
               <button className="btn" onClick={startTraining} disabled={loading==='train'}>
@@ -980,6 +1102,8 @@ function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
           </div>
         )}
       </div>
+
+      <VoiceMappingPanel projectId={projectId} ensureProject={ensureProject} />
     </div>
   );
 }

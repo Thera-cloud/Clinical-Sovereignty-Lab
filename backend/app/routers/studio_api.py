@@ -31,6 +31,7 @@ class GenerateImageRequest(BaseModel):
     project_id: str
     scene_num: int
     description: str
+    characters: list[str] | None = None
 
 class GenerateVideoRequest(BaseModel):
     project_id: str
@@ -64,6 +65,7 @@ class StitchTrailerRequest(BaseModel):
     project_id: str
     include_color_grade: bool = True
     include_narration: bool = True
+    color_preset: str = "ghibli_warm"
     format: str = "16:9"
 
 
@@ -102,7 +104,7 @@ async def generate_image(body: GenerateImageRequest, request: Request):
     from app.sse.studio_service import generate_scene_image
     redis = _get_redis(request)
     try:
-        url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis)
+        url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis, characters=body.characters)
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {"r2_url": url}
@@ -254,6 +256,7 @@ async def stitch_trailer(body: StitchTrailerRequest, request: Request, backgroun
     redis = _get_redis(request)
     options = {"include_color_grade": body.include_color_grade,
                "include_narration": body.include_narration,
+               "color_preset": body.color_preset,
                "format": body.format}
     background_tasks.add_task(stitch_project_trailer, body.project_id, options, db, redis)
     return {"status": "started", "project_id": body.project_id,
@@ -295,6 +298,12 @@ class LoraTrainingImagesRequest(BaseModel):
     character_key: str
     project_id: str
 
+class VoiceOverrideRequest(BaseModel):
+    project_id: str
+    character: str
+    voice: str
+    instructions: str | None = None
+
 class CongruentClipsRequest(BaseModel):
     project_id: str
     mode: str = "interpolated"
@@ -315,10 +324,10 @@ async def lora_train(body: LoraTrainRequest):
 
 
 @studio_router.get("/lora/status/{training_id}")
-async def lora_status(training_id: str):
+async def lora_status(training_id: str, project_id: str | None = None, character_key: str | None = None):
     from app.sse.studio_service import poll_lora_training
     try:
-        return await poll_lora_training(training_id)
+        return await poll_lora_training(training_id, project_id=project_id, character_key=character_key)
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -342,6 +351,15 @@ async def lora_training_images(body: LoraTrainingImagesRequest, request: Request
             "message": "Generating 20 training images — ~2 minutes"}
 
 
+@studio_router.post("/lora/zip-training-images")
+async def lora_zip_images(body: LoraTrainingImagesRequest):
+    from app.sse.trailer_generator import zip_lora_training_images
+    url = await zip_lora_training_images(body.project_id, body.character_key)
+    if not url:
+        raise HTTPException(404, "No training images found for this character")
+    return {"zip_url": url, "character": body.character_key}
+
+
 @studio_router.post("/lora/test")
 async def lora_test(body: LoraGenerateRequest):
     from app.sse.studio_service import generate_with_lora
@@ -350,6 +368,36 @@ async def lora_test(body: LoraGenerateRequest):
         return {"test_images": urls, "count": len(urls)}
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+# ── Phase 2: Voice Mapping ────────────────────────────────────────────────
+
+@studio_router.get("/voice-config/{project_id}")
+async def voice_config(project_id: str):
+    from app.sse.trailer_generator import get_voice_config, AVAILABLE_TTS_VOICES
+    cfg = await get_voice_config(project_id)
+    return {"voices": cfg, "available_voices": AVAILABLE_TTS_VOICES}
+
+
+@studio_router.post("/voice-config")
+async def set_voice(body: VoiceOverrideRequest):
+    from app.sse.trailer_generator import set_voice_override, AVAILABLE_TTS_VOICES
+    if body.voice not in AVAILABLE_TTS_VOICES:
+        raise HTTPException(422, f"Invalid voice. Choose from: {AVAILABLE_TTS_VOICES}")
+    result = await set_voice_override(body.project_id, body.character, body.voice, body.instructions)
+    return {"character": body.character, "override": result}
+
+
+@studio_router.get("/color-presets")
+async def list_color_presets():
+    from app.sse.trailer_generator import COLOR_GRADE_PRESETS
+    return {"presets": list(COLOR_GRADE_PRESETS.keys()), "default": "ghibli_warm"}
+
+
+@studio_router.get("/cost-estimate/{project_id}")
+async def cost_estimate(project_id: str, mode: str = "interpolated"):
+    from app.sse.studio_service import estimate_pipeline_cost
+    return await estimate_pipeline_cost(project_id, mode)
 
 
 # ── Phase 2: Congruent Generation ─────────────────────────────────────────
@@ -393,3 +441,30 @@ async def resume_generation(body: CongruentClipsRequest, request: Request, backg
     background_tasks.add_task(_gen, body.project_id, body.mode, db, redis, body.resume_from)
     return {"status": "resuming", "project_id": body.project_id, "mode": body.mode,
             "resume_from": body.resume_from}
+
+
+class BranchApprovalRequest(BaseModel):
+    project_id: str
+    action: str = "approve"
+
+
+@studio_router.post("/approve-branch")
+async def approve_branch(body: BranchApprovalRequest, request: Request, background_tasks: BackgroundTasks):
+    from app.sse.trailer_generator import approve_branch_point
+    from app.sse.studio_service import generate_congruent_clips as _gen
+    result = await approve_branch_point(body.project_id, body.action)
+    if result.get("status") == "approved":
+        db = _get_db(request)
+        redis = _get_redis(request)
+        background_tasks.add_task(_gen, body.project_id, "chain", db, redis, result["resuming_from"])
+        result["message"] = f"Approved — resuming chain from scene {result['resuming_from']}"
+    return result
+
+
+@studio_router.get("/chain-state/{project_id}")
+async def get_chain_state(project_id: str):
+    from app.sse.trailer_generator import _load_manifest_from_r2
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest:
+        raise HTTPException(404, "Project not found")
+    return manifest.get("chain_state", {})

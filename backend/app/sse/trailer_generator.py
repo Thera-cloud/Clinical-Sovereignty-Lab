@@ -229,6 +229,65 @@ def _build_consistent_prompt(scene_prompt: str, characters: list[str]) -> str:
     return STYLE_PREFIX + char_block + resolved
 
 
+def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: dict[str, dict]) -> str:
+    """Build prompt for LoRA generation with trigger words replacing character descriptions."""
+    trigger_parts = []
+    for char in characters:
+        lora_info = trained_loras.get(char)
+        if lora_info:
+            trigger_parts.append(lora_info["trigger_word"])
+        else:
+            ref = CHARACTER_REFERENCES.get(char)
+            if ref:
+                trigger_parts.append(ref["inline_desc"])
+
+    resolved = scene_prompt
+    for char_name, ref in CHARACTER_REFERENCES.items():
+        lora_info = trained_loras.get(char_name)
+        if lora_info:
+            resolved = resolved.replace(f"{{{char_name}}}", lora_info["trigger_word"])
+        else:
+            resolved = resolved.replace(f"{{{char_name}}}", ref["inline_desc"])
+
+    char_block = ""
+    if trigger_parts:
+        char_block = "Characters: " + ", ".join(trigger_parts) + ". "
+
+    return STYLE_PREFIX + char_block + resolved
+
+
+async def _generate_image_with_lora_or_grok(
+    prompt: str,
+    characters: list[str],
+    trained_loras: dict[str, dict],
+) -> bytes:
+    """Generate an image using trained LoRAs if available, else fall back to Grok Imagine.
+
+    trained_loras: {character_key: {"lora_url": "https://...", "trigger_word": "THERA_BOY"}}
+    """
+    relevant_loras = {
+        c: trained_loras[c] for c in characters if c in trained_loras and trained_loras[c].get("lora_url")
+    }
+
+    if relevant_loras:
+        try:
+            from app.sse.infrastructure.replicate_client import generate_with_loras
+            lora_urls = [info["lora_url"] for info in relevant_loras.values()]
+            lora_prompt = _build_lora_prompt(prompt, characters, trained_loras)
+            logger.info("[LORA-GEN] Using %d LoRA(s) for characters: %s", len(lora_urls), list(relevant_loras.keys()))
+            image_urls = await generate_with_loras(lora_prompt, lora_urls, width=1024, height=576)
+            if image_urls:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+                    async with sess.get(image_urls[0]) as resp:
+                        if resp.status == 200:
+                            return await resp.read()
+                logger.warning("[LORA-GEN] Failed to download LoRA image, falling back to Grok")
+        except Exception as e:
+            logger.warning("[LORA-GEN] LoRA generation failed (%s), falling back to Grok", e)
+
+    return await generate_image(prompt)
+
+
 def _write_manifest(results: list[dict], total: int) -> None:
     os.makedirs(TRAILER_OUTPUT_DIR, exist_ok=True)
     manifest = {
@@ -260,6 +319,31 @@ async def _load_manifest_from_r2(project_id: str) -> Optional[dict]:
         return json.loads(resp["Body"].read().decode())
     except Exception:
         return None
+
+
+async def _load_trained_loras(project_id: str) -> dict[str, dict]:
+    """Load trained LoRA weights from the project manifest.
+
+    Returns {character_key: {"lora_url": "https://...", "trigger_word": "THERA_BOY"}}
+    or empty dict if none trained.
+    """
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest:
+        return {}
+    return manifest.get("trained_loras", {})
+
+
+async def save_trained_lora(project_id: str, character_key: str, lora_url: str) -> None:
+    """Record a completed LoRA training result in the project manifest."""
+    manifest = await _load_manifest_from_r2(project_id) or {}
+    loras = manifest.get("trained_loras", {})
+    loras[character_key] = {
+        "lora_url": lora_url,
+        "trigger_word": f"THERA_{character_key.upper()}",
+        "trained_at": datetime.utcnow().isoformat(),
+    }
+    manifest["trained_loras"] = loras
+    await _save_manifest_to_r2(project_id, manifest)
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +380,8 @@ async def generate_character_references(project_id: str) -> dict[str, Optional[s
 async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None) -> list[dict]:
     """Generate hero images with character consistency.
 
+    If trained LoRA weights exist in the project manifest, uses Replicate Flux
+    with those LoRAs for character-locked images. Falls back to Grok Imagine.
     If scenes is None, loads the thera_world_origin preset.
     """
     if scenes is None:
@@ -305,6 +391,10 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
 
     logger.info("[TRAILER] Generating character references for project %s", project_id)
     refs = await generate_character_references(project_id)
+
+    trained_loras = await _load_trained_loras(project_id)
+    if trained_loras:
+        logger.info("[TRAILER] Found trained LoRAs for: %s", list(trained_loras.keys()))
 
     results: list[dict] = []
     total = len(scenes)
@@ -319,12 +409,16 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
 
             logger.info("[TRAILER] Scene %d: %s", num, title)
             try:
-                image_bytes = await generate_image(consistent_prompt)
+                image_bytes = await _generate_image_with_lora_or_grok(
+                    consistent_prompt, characters, trained_loras,
+                )
                 r2_key = f"sse/studio/projects/{project_id}/scenes/{title}.png"
                 r2_url = await store_image(image_bytes, r2_key)
+                used_lora = any(c in trained_loras for c in characters)
                 results.append({"scene": num, "title": title, "r2_url": r2_url,
-                                "status": "success", "cost": 0.07})
-                logger.info("[TRAILER] Scene %d done", num)
+                                "status": "success", "cost": 0.07,
+                                "used_lora": used_lora})
+                logger.info("[TRAILER] Scene %d done (lora=%s)", num, used_lora)
             except Exception as e:
                 results.append({"scene": num, "title": title, "r2_url": None,
                                 "status": f"error: {str(e)[:120]}"})
@@ -685,8 +779,12 @@ def _extract_last_frame(video_bytes: bytes, scene_num: int) -> bytes | None:
 
 async def generate_interpolated_trailer(
     project_id: str, resume_from: int | None = None,
+    regenerate_with_lora: bool = True,
 ) -> list[dict]:
     """Generate trailer using start+end frame interpolation.
+
+    If *regenerate_with_lora* is True and trained LoRAs exist, hero images
+    are regenerated via LoRA before interpolation to lock character identity.
 
     Requires all 19 hero images pre-generated (status=success in manifest).
     Produces 18 transition clips (N→N+1) + 1 end card = 19 videos.
@@ -698,6 +796,32 @@ async def generate_interpolated_trailer(
     if not manifest or not manifest.get("scenes"):
         logger.warning("[INTERPOLATE] No manifest or images for project %s", project_id)
         return []
+
+    if regenerate_with_lora and resume_from is None:
+        trained_loras = await _load_trained_loras(project_id)
+        if trained_loras:
+            preset_scenes = _load_preset("thera_world_origin") if _PRESETS_DIR.exists() else []
+            preset_map = {s["scene"]: s for s in preset_scenes}
+            for scene_data in manifest["scenes"]:
+                if scene_data.get("status") != "success":
+                    continue
+                snum = scene_data["scene"]
+                pdef = preset_map.get(snum, {})
+                chars = pdef.get("characters", [])
+                relevant = {c: trained_loras[c] for c in chars if c in trained_loras}
+                if not relevant:
+                    continue
+                try:
+                    prompt = _build_consistent_prompt(pdef.get("prompt", scene_data.get("title", "")), chars)
+                    img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
+                    key = f"sse/studio/projects/{project_id}/scenes/{scene_data.get('title', f'scene_{snum}')}.png"
+                    new_url = await store_image(img, key)
+                    scene_data["r2_url"] = new_url
+                    scene_data["used_lora"] = True
+                    logger.info("[INTERPOLATE] LoRA-regenerated scene %d hero image", snum)
+                except Exception as e:
+                    logger.warning("[INTERPOLATE] LoRA regen failed scene %d: %s", snum, e)
+            await _save_manifest_to_r2(project_id, manifest)
 
     scenes = sorted(
         [s for s in manifest["scenes"] if s.get("status") == "success"],
@@ -846,6 +970,10 @@ async def generate_chain_trailer(
         key=lambda s: s["scene"],
     )
     motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+    trained_loras = await _load_trained_loras(project_id)
+
+    preset_scenes = _load_preset("thera_world_origin") if (_PRESETS_DIR / "thera_world_origin.json").exists() else []
+    preset_map = {s["scene"]: s for s in preset_scenes}
 
     chain_state = manifest.get("chain_state", {})
     results: list[dict] = chain_state.get("completed_clips", [])
@@ -865,7 +993,23 @@ async def generate_chain_trailer(
             motion = motion_map.get(scene_num, {"motion": "Smooth cinematic motion"})
 
             if scene_num in BRANCH_POINTS or previous_last_frame_url is None:
-                hero_url = scene_data["r2_url"]
+                if trained_loras and scene_num in preset_map:
+                    chars = preset_map[scene_num].get("characters", [])
+                    relevant = {c: trained_loras[c] for c in chars if c in trained_loras}
+                    if relevant:
+                        prompt = _build_consistent_prompt(preset_map[scene_num]["prompt"], chars)
+                        try:
+                            img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
+                            branch_key = f"sse/studio/projects/{project_id}/chain/branch_{scene_num:02d}.png"
+                            hero_url = await store_image(img, branch_key)
+                            logger.info("[CHAIN] Branch %d: LoRA-generated hero image", scene_num)
+                        except Exception as e:
+                            logger.warning("[CHAIN] LoRA branch %d failed (%s), using existing image", scene_num, e)
+                            hero_url = scene_data["r2_url"]
+                    else:
+                        hero_url = scene_data["r2_url"]
+                else:
+                    hero_url = scene_data["r2_url"]
             else:
                 hero_url = previous_last_frame_url
 
@@ -916,6 +1060,17 @@ async def generate_chain_trailer(
                 "total_cost_so_far": sum(r.get("cost", 0) for r in results),
             }
             manifest["chain_state"] = chain_state
+
+            next_scene = scenes[i + 1]["scene"] if i + 1 < len(scenes) else None
+            if next_scene and next_scene in BRANCH_POINTS:
+                chain_state["awaiting_approval"] = True
+                chain_state["branch_scene"] = next_scene
+                chain_state["branch_preview_url"] = hero_url
+                manifest["chain_state"] = chain_state
+                await _save_manifest_to_r2(project_id, manifest)
+                logger.info("[CHAIN] Paused at branch point before scene %d — awaiting admin approval", next_scene)
+                return results
+
             await _save_manifest_to_r2(project_id, manifest)
             await asyncio.sleep(8)
 
@@ -934,6 +1089,37 @@ async def generate_chain_trailer(
         "application/json",
     )
     return results
+
+
+async def approve_branch_point(project_id: str, action: str = "approve") -> dict:
+    """Approve or reject a branch point pause, then resume chain generation.
+
+    action: "approve" to continue, "regenerate" to re-gen the branch hero image.
+    Returns the chain state or an error.
+    """
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest:
+        return {"error": "Project not found"}
+
+    chain_state = manifest.get("chain_state", {})
+    if not chain_state.get("awaiting_approval"):
+        return {"error": "No pending approval", "chain_state": chain_state}
+
+    if action == "reject":
+        chain_state["awaiting_approval"] = False
+        chain_state["rejected"] = True
+        manifest["chain_state"] = chain_state
+        await _save_manifest_to_r2(project_id, manifest)
+        return {"status": "rejected", "message": "Branch point rejected. Chain paused."}
+
+    chain_state.pop("awaiting_approval", None)
+    chain_state.pop("branch_scene", None)
+    chain_state.pop("branch_preview_url", None)
+    manifest["chain_state"] = chain_state
+    await _save_manifest_to_r2(project_id, manifest)
+
+    resume_scene = chain_state.get("last_completed_scene", 0) + 1
+    return {"status": "approved", "resuming_from": resume_scene}
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +1172,11 @@ async def generate_cel_animation_clip(
     previous_last_frame_url: str | None,
     motion_prompt: str,
 ) -> dict:
-    """Generate a single scene using cel animation composite method."""
+    """Generate a single scene using cel animation composite method.
+
+    If trained LoRAs exist, generates fresh character reference images via LoRA
+    instead of using the Grok-generated reference PNGs.
+    """
     scene_def = next(
         (s for s in (_load_preset("thera_world_origin") if _PRESETS_DIR.exists() else [])
          if s.get("scene") == scene_num),
@@ -994,9 +1184,20 @@ async def generate_cel_animation_clip(
     )
     scene_characters = scene_def.get("characters", [])
 
+    trained_loras = await _load_trained_loras(project_id)
+
     ref_images: list[bytes] = []
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
         for char in scene_characters[:3]:
+            if char in trained_loras and trained_loras[char].get("lora_url"):
+                try:
+                    ref = CHARACTER_REFERENCES.get(char, {})
+                    prompt = f"{STYLE_PREFIX}{ref.get('ref_prompt', char)}, full body reference sheet"
+                    img = await _generate_image_with_lora_or_grok(prompt, [char], trained_loras)
+                    ref_images.append(img)
+                    continue
+                except Exception as e:
+                    logger.warning("[CEL] LoRA ref failed for %s: %s, falling back", char, e)
             url = character_refs.get(char)
             if not url:
                 continue
@@ -1156,6 +1357,49 @@ async def generate_lora_training_set(
     return results
 
 
+async def zip_lora_training_images(project_id: str, character: str) -> str | None:
+    """Collect generated training images from R2, zip them, upload zip, return URL."""
+    from app.sse.infrastructure import r2_storage as _r2
+    client = _r2._get_client()
+    if not client:
+        return None
+
+    prefix = f"sse/studio/projects/{project_id}/lora/{character}/"
+    work_dir = tempfile.mkdtemp(prefix="lora_zip_")
+    try:
+        def _list():
+            return client.list_objects_v2(Bucket=_r2._R2_BUCKET, Prefix=prefix)
+        resp = await asyncio.get_event_loop().run_in_executor(None, _list)
+        contents = resp.get("Contents", [])
+        png_keys = [c["Key"] for c in contents if c["Key"].endswith(".png")]
+        if not png_keys:
+            return None
+
+        img_dir = os.path.join(work_dir, "images")
+        os.makedirs(img_dir, exist_ok=True)
+
+        for key in png_keys:
+            fname = key.rsplit("/", 1)[-1]
+            def _dl(k=key):
+                return client.get_object(Bucket=_r2._R2_BUCKET, Key=k)
+            obj = await asyncio.get_event_loop().run_in_executor(None, _dl)
+            with open(os.path.join(img_dir, fname), "wb") as f:
+                f.write(obj["Body"].read())
+
+        zip_path = os.path.join(work_dir, f"{character}_training.zip")
+        import zipfile
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for fname in os.listdir(img_dir):
+                zf.write(os.path.join(img_dir, fname), fname)
+
+        zip_key = f"sse/studio/projects/{project_id}/lora/{character}_training.zip"
+        with open(zip_path, "rb") as f:
+            url = await store_bytes(f.read(), zip_key, "application/zip")
+        return url
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 #  Narration Audio Merge (into stitched trailer)
 # ---------------------------------------------------------------------------
@@ -1245,11 +1489,11 @@ async def _merge_narration_audio(
 async def generate_congruent_trailer(
     project_id: str,
     mode: str = "interpolated",
-    use_lora: bool = False,
     resume_from: int | None = None,
 ) -> list[dict]:
     """Master orchestrator for all congruent generation modes.
 
+    LoRA is auto-detected from the project manifest — no flag needed.
     Modes: interpolated (default), chain, cel, independent.
     """
     if mode == "interpolated":
@@ -1348,10 +1592,36 @@ def _concat_audio_files(file_paths: list[str], output_path: str) -> None:
     ], capture_output=True, timeout=60)
 
 
+AVAILABLE_TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+
+
+async def get_voice_config(project_id: str) -> dict[str, dict]:
+    """Return project voice overrides merged with defaults."""
+    manifest = await _load_manifest_from_r2(project_id)
+    overrides = (manifest or {}).get("voice_overrides", {})
+    merged = {}
+    for char, cfg in CHARACTER_VOICES.items():
+        merged[char] = {**cfg, **(overrides.get(char, {}))}
+    return merged
+
+
+async def set_voice_override(project_id: str, character: str, voice: str, instructions: str | None = None) -> dict:
+    """Persist a per-project voice override for a character."""
+    manifest = await _load_manifest_from_r2(project_id) or {}
+    overrides = manifest.get("voice_overrides", {})
+    overrides[character] = {"voice": voice}
+    if instructions is not None:
+        overrides[character]["instructions"] = instructions
+    manifest["voice_overrides"] = overrides
+    await _save_manifest_to_r2(project_id, manifest)
+    return overrides[character]
+
+
 async def _generate_all_narration(project_id: str, work_dir: str) -> dict[int, str]:
     """Generate TTS audio for all dialogue scenes. Returns {scene_num: r2_url}."""
     preset_scenes = _load_preset("thera_world_origin")
     dialogue_map = {s["scene"]: s.get("dialogue", []) for s in preset_scenes if s.get("dialogue")}
+    voice_map = await get_voice_config(project_id)
 
     narration_dir = os.path.join(work_dir, "narration")
     os.makedirs(narration_dir, exist_ok=True)
@@ -1365,7 +1635,7 @@ async def _generate_all_narration(project_id: str, work_dir: str) -> dict[int, s
         scene_audio_parts: list[str] = []
 
         for i, line in enumerate(lines):
-            voice_cfg = CHARACTER_VOICES.get(line["voice"], CHARACTER_VOICES["boy"])
+            voice_cfg = voice_map.get(line["voice"], CHARACTER_VOICES.get("boy", {"voice": "shimmer", "instructions": ""}))
             try:
                 audio_bytes = await _azure_tts(
                     text=line["text"],
@@ -1398,6 +1668,29 @@ async def _generate_all_narration(project_id: str, work_dir: str) -> dict[int, s
 #  Congruent Stitching (FFmpeg)
 # ---------------------------------------------------------------------------
 
+COLOR_GRADE_PRESETS = {
+    "ghibli_warm": (
+        "colorbalance=rs=0.08:gs=0.03:bs=-0.08,"
+        "eq=gamma=1.05:saturation=1.15:contrast=1.05,"
+        "unsharp=5:5:0.5:5:5:0"
+    ),
+    "cool_night": (
+        "colorbalance=rs=-0.06:gs=0.0:bs=0.10,"
+        "eq=gamma=0.95:saturation=0.90:contrast=1.10,"
+        "unsharp=5:5:0.4:5:5:0"
+    ),
+    "neutral": (
+        "eq=gamma=1.0:saturation=1.0:contrast=1.0,"
+        "unsharp=5:5:0.3:5:5:0"
+    ),
+    "sunset_drama": (
+        "colorbalance=rs=0.12:gs=0.05:bs=-0.10,"
+        "eq=gamma=1.10:saturation=1.25:contrast=1.08,"
+        "unsharp=5:5:0.6:5:5:0"
+    ),
+}
+
+
 async def stitch_trailer(project_id: str, options: dict | None = None) -> Optional[dict]:
     """Stitch clips into a congruent trailer with post-processing.
 
@@ -1405,6 +1698,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
     """
     options = options or {}
     include_color_grade = options.get("include_color_grade", True)
+    color_preset = options.get("color_preset", "ghibli_warm")
     include_narration = options.get("include_narration", True)
     output_format = options.get("format", "16:9")
 
@@ -1426,10 +1720,11 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
         return None
 
     video_manifest = json.loads(video_manifest_bytes.decode())
-    successful = sorted(
-        [c for c in video_manifest.get("clips", []) if c.get("status") in ("success", "ken_burns")],
-        key=lambda c: c["scene"],
-    )
+    raw_clips = [c for c in video_manifest.get("clips", []) if c.get("status") in ("success", "ken_burns")]
+    for c in raw_clips:
+        if "scene" not in c and "from_scene" in c:
+            c["scene"] = c["from_scene"]
+    successful = sorted(raw_clips, key=lambda c: c.get("scene", 0))
 
     if len(successful) < 2:
         logger.warning("[STITCH] Only %d clips — need at least 2", len(successful))
@@ -1457,18 +1752,15 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
                     logger.warning("[STITCH] Download failed scene %d: %s", clip["scene"], e)
 
         if include_color_grade:
-            logger.info("[STITCH] Applying color grade...")
+            grade_filter = COLOR_GRADE_PRESETS.get(color_preset, COLOR_GRADE_PRESETS["ghibli_warm"])
+            logger.info("[STITCH] Applying color grade preset '%s'...", color_preset)
             for clip in successful:
                 src = os.path.join(clip_dir, f"scene_{clip['scene']:02d}.mp4")
                 dst = os.path.join(graded_dir, f"scene_{clip['scene']:02d}.mp4")
                 if os.path.exists(src):
                     cmd = [
                         "ffmpeg", "-y", "-i", src,
-                        "-vf", (
-                            "colorbalance=rs=0.08:gs=0.03:bs=-0.08,"
-                            "eq=gamma=1.05:saturation=1.15:contrast=1.05,"
-                            "unsharp=5:5:0.5:5:5:0"
-                        ),
+                        "-vf", grade_filter,
                         "-c:v", "libx264", "-preset", "fast",
                         "-crf", "20", "-pix_fmt", "yuv420p", dst,
                     ]
@@ -1558,6 +1850,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
         results["clips_used"] = len(graded_clips)
         results["format"] = output_format
         results["color_graded"] = include_color_grade
+        results["color_preset"] = color_preset if include_color_grade else None
         results["has_narration"] = bool(narration_files)
         results["narration_scenes"] = list(narration_files.keys())
 
