@@ -150,6 +150,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
   <div class="topbar-left">
     <a href="sse_story_generator.html" class="back-btn">←</a>
     <div class="topbar-title"><span>SSE</span> Monitor</div>
+    <a href="studio.html" style="font-size:13px;color:var(--t2);margin-left:16px;text-decoration:none">🎬 Studio →</a>
   </div>
   <div class="topbar-right">
     <div class="pulse-indicator" id="healthBadge"><div class="pulse-dot"></div><span id="healthText">Checking…</span></div>
@@ -204,6 +205,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <button class="btn btn-green" onclick="sseShowModal('preview')">🖼 Generate Test Panel</button>
         <button class="btn btn-red" onclick="sseShowModal('override')">🔧 Journey Override</button>
         <button class="btn btn-blue" onclick="sseIngestWorkbooks()">📖 Ingest Workbooks</button>
+        <button class="btn btn-gold" onclick="sseGenerateTrailer()">🎬 Generate Trailer</button>
       </div>
     </div>
   </div>
@@ -685,6 +687,22 @@ async function sseIngestWorkbooks() {
     var r = await fetch(API + '/api/sse/admin/ingest-workbooks', {method:'POST', headers:_authHeaders('application/json'), body:JSON.stringify({})});
     var d = await r.json(); alert('Workbooks: ' + d.workbooks_processed + ', Crystals created: ' + d.crystals_created);
   } catch(e) { alert('Error: ' + e); }
+}
+function sseGenerateTrailer() {
+  if (!confirm('Generate all 19 Thera-World trailer scenes? Takes ~3 minutes.')) return;
+  fetch(API + '/api/sse/admin/generate-trailer', {method:'POST', headers:_authHeaders()})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      alert('Trailer generation started — 19 scenes, ~3 minutes');
+      var poll = setInterval(function(){
+        fetch(API + '/api/sse/admin/trailer-status', {headers:_authHeaders()})
+          .then(function(r){return r.json()})
+          .then(function(s){
+            if (s.total && s.success === s.total) { clearInterval(poll); alert('All ' + s.total + ' trailer scenes generated!'); }
+          });
+      }, 10000);
+    })
+    .catch(function(e){ alert('Error: ' + e); });
 }
 async function sseBackfillAll() {
   if (!confirm('Backfill ALL users with missing archetypes?')) return;

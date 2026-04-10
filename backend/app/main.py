@@ -3612,6 +3612,12 @@ except Exception as _gkm_err:
     print(f"   ⚠️  GKM router failed: {_gkm_err}")
 
 try:
+    from app.routers.studio_api import studio_router
+    app.include_router(studio_router)
+except Exception as _studio_err:
+    print(f"   ⚠️  Studio router failed: {_studio_err}")
+
+try:
     from app.routers.sendgrid_inbound import router as sendgrid_inbound_router
     app.include_router(sendgrid_inbound_router)
 except Exception as _sg_err:

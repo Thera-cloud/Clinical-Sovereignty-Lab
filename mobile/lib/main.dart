@@ -10207,26 +10207,33 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   bool _isBooking = false;
   String _coachId = '';
   
+  Timer? _loadingTimeout;
+
   @override
   void initState() {
     super.initState();
     _coachId = (widget.currentUserProfile?['assigned_coach_id'] ?? '').toString();
     _connect();
+    _loadingTimeout = Timer(const Duration(seconds: 8), () {
+      if (mounted && _isLoading) setState(() => _isLoading = false);
+    });
   }
   
   void _connect() {
     try {
       _socket = WebSocketChannel.connect(Uri.parse(_serverUrl));
       _socket!.stream.listen(_handleMessage, onError: (e) => debugLog('WS Error: $e'), onDone: () {
-        Future.delayed(const Duration(seconds: 3), _connect);
+        if (mounted && _isLoading) setState(() => _isLoading = false);
       });
       _socket!.sink.add(jsonEncode({
         "type": "login_request",
         "username": widget.username ?? '',
         "password": widget.password ?? '',
+        "expected_role": "CLIENT",
       }));
     } catch (e) {
       debugLog('Connection error: $e');
+      if (mounted) setState(() => _isLoading = false);
     }
   }
   
@@ -10236,8 +10243,11 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       final type = data['type']?.toString() ?? '';
       
       if (type == 'login_success') {
-        // Fetch upcoming sessions
+        _loadingTimeout?.cancel();
         _requestUpcomingSessions();
+      } else if (type == 'login_failed' || type == 'wrong_portal') {
+        _loadingTimeout?.cancel();
+        if (mounted) setState(() => _isLoading = false);
       } else if (type == 'client_upcoming_sessions') {
         setState(() {
           _upcomingSessions = List<Map<String, dynamic>>.from(
@@ -10306,6 +10316,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   
   @override
   void dispose() {
+    _loadingTimeout?.cancel();
     _socket?.sink.close();
     super.dispose();
   }
@@ -10319,6 +10330,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A0A0A),
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Color(0xFFC9A962)), onPressed: () => Navigator.pop(context)),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

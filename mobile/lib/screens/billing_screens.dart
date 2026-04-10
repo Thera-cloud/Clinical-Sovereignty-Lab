@@ -1493,20 +1493,44 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
               backgroundColor: _D.gold,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              _sendWs({
-                'type': 'get_checkout_url',
-                'pack_type': packType,
-                'success_url':
-                    'https://app.sovereignsanctuary.net/payment-complete',
-                'cancel_url':
-                    'https://app.sovereignsanctuary.net/payment-cancelled',
-              });
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('Opening secure checkout…'),
                 backgroundColor: _D.bgElevated,
               ));
+              try {
+                final resp = await http.post(
+                  Uri.parse('$defaultApiBaseUrl/api/billing/coaching/purchase'),
+                  headers: _authHeaders(_userId, json: true),
+                  body: jsonEncode({
+                    'pack_type': packType,
+                    'success_url': 'https://app.sovereignsanctuary.net/payment-complete',
+                    'cancel_url': 'https://app.sovereignsanctuary.net/payment-cancelled',
+                  }),
+                );
+                if (resp.statusCode == 200) {
+                  final data = jsonDecode(resp.body);
+                  final url = data['checkout_url'] ?? '';
+                  if (url.isNotEmpty) {
+                    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Purchase error: ${resp.statusCode}'),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Connection error: $e'),
+                    backgroundColor: Colors.red,
+                  ));
+                }
+              }
             },
             child: const Text('Continue to Payment',
                 style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),

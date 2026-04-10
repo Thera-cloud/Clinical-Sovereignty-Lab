@@ -15,6 +15,8 @@ _VIDEO_URL = "https://api.x.ai/v1/videos/generations"
 
 _session: Optional[aiohttp.ClientSession] = None
 
+GROK_IMAGINE_LOCK = asyncio.Lock()
+
 
 def _get_api_key() -> str:
     return os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "").strip()

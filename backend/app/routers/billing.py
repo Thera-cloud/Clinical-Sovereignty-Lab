@@ -892,6 +892,54 @@ async def get_coaching_pack_options():
     return {"packs": COACHING_PACKS, "coach_payout": COACH_PAYOUT}
 
 
+@router.post("/coaching/purchase")
+async def purchase_coaching_pack(request: Request, user: dict = Depends(get_current_user)):
+    """Create Stripe Checkout session for a coaching session pack."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    body = await request.json()
+    pack_id = (body.get("pack_type") or body.get("pack_id") or "").strip()
+    if pack_id not in COACHING_PACKS:
+        raise HTTPException(400, f"Invalid coaching pack: {pack_id}")
+    pack = COACHING_PACKS[pack_id]
+    hw_id = user.get("hardware_id", "")
+    username = user.get("username", "")
+    success_url = body.get("success_url", "https://app.sovereignsanctuary.net/payment-complete")
+    cancel_url = body.get("cancel_url", "https://app.sovereignsanctuary.net/payment-cancelled")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text AS uid, profile_data->>'email' AS email, profile_data->>'name' AS name FROM users WHERE hardware_id = $1 OR username = $1",
+            hw_id or username,
+        )
+    if not row:
+        raise HTTPException(404, "User not found")
+    import stripe as _stripe
+    _stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+    customer_id = None
+    try:
+        customers = _stripe.Customer.list(email=row["email"], limit=1)
+        if customers.data:
+            customer_id = customers.data[0].id
+        else:
+            cust = _stripe.Customer.create(email=row["email"], name=row["name"] or username)
+            customer_id = cust.id
+    except Exception:
+        pass
+    price_cents = pack["price"] * 100
+    line_items = [{"price_data": {"currency": "usd", "product_data": {"name": pack["label"]}, "unit_amount": price_cents}, "quantity": 1}]
+    sess = _stripe.checkout.Session.create(
+        customer=customer_id,
+        mode="payment",
+        payment_method_types=["card"],
+        line_items=line_items,
+        success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url=cancel_url,
+        metadata={"type": "coaching_pack", "user_id": row["uid"], "username": username, "pack_id": pack_id, "sessions": str(pack["sessions"])},
+    )
+    return {"checkout_url": sess.url, "session_id": sess.id}
+
+
 @router.get("/coaching/packs/{user_id}")
 async def get_user_coaching_packs(user_id: str):
     """List a user's purchased coaching packs and remaining credits."""
@@ -1971,8 +2019,17 @@ async def create_connect_account(request: Request, user: dict = Depends(require_
         raise HTTPException(503, "Database unavailable")
 
     hw_id = user.get("hardware_id", "")
-    email = user.get("email", "")
     profile = user.get("profile", user)
+    # Read plaintext email from DB — Redis cache may hold encrypted value
+    email = ""
+    try:
+        async with pool.acquire() as _ec:
+            _row = await _ec.fetchrow(
+                "SELECT profile_data->>'email' AS email FROM users WHERE hardware_id = $1", hw_id)
+            if _row and _row["email"]:
+                email = _row["email"]
+    except Exception:
+        email = user.get("email", "")
     existing_connect = (profile.get("stripe_connect_id") or "").strip()
 
     if existing_connect:

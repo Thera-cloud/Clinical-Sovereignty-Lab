@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thera-World Studio — Sovereign Sanctuary</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+:root {
+  --bg:     #050505;
+  --card:   #0A0A0A;
+  --raised: #111111;
+  --border: #1a1a1a;
+  --gold:   #C9A962;
+  --gold-b: #E8D5A3;
+  --gold-d: #8B7355;
+  --cyan:   #4ECDC4;
+  --purple: #9D4EDD;
+  --red:    #EF4444;
+  --green:  #22C55E;
+  --t1:     #f0ece4;
+  --t2:     #a0998d;
+  --t3:     #605a50;
+  --mono:   'SF Mono', 'Fira Code', monospace;
+  --body:   'DM Sans', system-ui, sans-serif;
+  --head:   'Cormorant Garamond', Georgia, serif;
+  --rs:     8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--t1); font-family:var(--body); font-size:14px; min-height:100vh; }
+::selection { background:var(--gold); color:var(--bg); }
+a { color:var(--gold); text-decoration:none; }
+a:hover { color:var(--gold-b); }
+button { font-family:var(--body); cursor:pointer; }
+.topbar { display:flex; align-items:center; gap:16px; padding:12px 24px; background:var(--card); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:100; }
+.topbar h1 { font-family:var(--head); font-size:22px; color:var(--gold); font-weight:400; }
+.topbar .nav-link { font-size:13px; color:var(--t2); }
+.topbar .nav-link:hover { color:var(--gold); }
+.topbar .cost-banner { margin-left:auto; font-size:12px; color:var(--t2); font-family:var(--mono); }
+.tab-bar { display:flex; gap:0; background:var(--card); border-bottom:1px solid var(--border); padding:0 24px; }
+.tab-btn { padding:10px 20px; font-size:13px; color:var(--t3); background:none; border:none; border-bottom:2px solid transparent; transition:all .2s; }
+.tab-btn:hover { color:var(--t2); }
+.tab-btn.active { color:var(--gold); border-bottom-color:var(--gold); }
+.main { padding:24px; max-width:1400px; margin:0 auto; }
+.panel { background:var(--card); border:1px solid var(--border); border-radius:var(--rs); padding:20px; margin-bottom:16px; }
+.panel h2 { font-family:var(--head); font-size:18px; color:var(--gold-b); margin-bottom:12px; font-weight:400; }
+.btn { padding:8px 16px; border-radius:6px; border:1px solid var(--gold-d); background:var(--raised); color:var(--gold); font-size:12px; transition:all .2s; }
+.btn:hover { background:var(--gold); color:var(--bg); }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn-sm { padding:5px 12px; font-size:11px; }
+.btn-danger { border-color:var(--red); color:var(--red); }
+.btn-danger:hover { background:var(--red); color:#fff; }
+textarea, input[type="text"], select {
+  background:var(--raised); border:1px solid var(--border); color:var(--t1); border-radius:6px;
+  padding:10px 12px; font-family:var(--body); font-size:13px; width:100%; resize:vertical;
+}
+textarea:focus, input:focus, select:focus { outline:none; border-color:var(--gold-d); }
+.grid-3 { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:16px; }
+.scene-card { background:var(--raised); border:1px solid var(--border); border-radius:var(--rs); overflow:hidden; }
+.scene-card .card-header { padding:12px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
+.scene-card .card-header .scene-num { color:var(--gold); font-family:var(--mono); font-size:11px; }
+.scene-card .card-header .mood { font-size:10px; color:var(--purple); background:rgba(157,78,221,.15); padding:2px 8px; border-radius:10px; }
+.scene-card .card-body { padding:16px; }
+.scene-card .desc { font-size:12px; color:var(--t2); line-height:1.5; max-height:80px; overflow:hidden; margin-bottom:12px; }
+.scene-card .media-preview { width:100%; aspect-ratio:16/9; background:var(--bg); border-radius:6px; overflow:hidden; display:flex; align-items:center; justify-content:center; margin-bottom:12px; }
+.scene-card .media-preview img { width:100%; height:100%; object-fit:cover; }
+.scene-card .card-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.lib-item { background:var(--raised); border:1px solid var(--border); border-radius:var(--rs); overflow:hidden; cursor:pointer; transition:border-color .2s; }
+.lib-item:hover { border-color:var(--gold-d); }
+.lib-item .thumb { width:100%; aspect-ratio:16/9; background:var(--bg); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.lib-item .thumb img { width:100%; height:100%; object-fit:cover; }
+.lib-item .meta { padding:10px 12px; font-size:11px; color:var(--t2); }
+.modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.7); z-index:200; display:flex; align-items:center; justify-content:center; }
+.modal { background:var(--card); border:1px solid var(--border); border-radius:var(--rs); max-width:800px; width:90%; max-height:80vh; overflow:auto; padding:24px; }
+.modal h3 { font-family:var(--head); color:var(--gold); margin-bottom:12px; }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--gold-d); border-top-color:var(--gold); border-radius:50%; animation:spin .6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.split { display:flex; gap:16px; }
+.split .left { flex:7; }
+.split .right { flex:3; }
+.content-item { padding:8px 12px; font-size:12px; color:var(--t2); cursor:pointer; border-radius:4px; margin-bottom:4px; }
+.content-item:hover { background:var(--border); color:var(--t1); }
+.collapse-header { cursor:pointer; font-size:13px; color:var(--gold-d); padding:8px 0; border-bottom:1px solid var(--border); margin-bottom:8px; user-select:none; }
+.collapse-header:hover { color:var(--gold); }
+.filter-tabs { display:flex; gap:8px; margin-bottom:16px; }
+.filter-tab { padding:6px 14px; font-size:12px; border-radius:20px; border:1px solid var(--border); background:none; color:var(--t3); cursor:pointer; }
+.filter-tab.active { border-color:var(--gold-d); color:var(--gold); background:rgba(201,169,98,.1); }
+.badge { font-size:10px; padding:2px 8px; border-radius:10px; }
+.badge-green { background:rgba(34,197,94,.15); color:var(--green); }
+.badge-red { background:rgba(239,68,68,.15); color:var(--red); }
+.badge-gold { background:rgba(201,169,98,.15); color:var(--gold); }
+.empty-state { text-align:center; padding:48px; color:var(--t3); font-size:14px; }
+@media (max-width:768px) { .split { flex-direction:column; } .grid-3 { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const API = location.origin;
+
+function _authHeaders(ct) {
+  const t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
+  const h = { 'Authorization': 'Bearer ' + t };
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+
+function navTo(page) {
+  const t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
+  const u = sessionStorage.getItem('username') || localStorage.getItem('sc_username') || '';
+  const p = sessionStorage.getItem('profile') || localStorage.getItem('sc_profile') || '';
+  try { localStorage.setItem('sc_token', t); } catch(e) {}
+  try { localStorage.setItem('sc_username', u); } catch(e) {}
+  try { localStorage.setItem('sc_profile', p); } catch(e) {}
+  const ckOpts = '; path=/; max-age=86400; samesite=strict' + (location.protocol === 'https:' ? '; secure' : '');
+  document.cookie = 'sc_token=' + encodeURIComponent(t) + ckOpts;
+  document.cookie = 'sc_username=' + encodeURIComponent(u) + ckOpts;
+  document.cookie = 'sc_profile=' + encodeURIComponent(p) + ckOpts;
+  window.location.href = page;
+}
+
+async function apiFetch(path, opts = {}) {
+  try {
+    const r = await fetch(API + path, { ...opts, headers: { ..._authHeaders(opts.ct), ...opts.headers } });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      throw new Error(`${r.status}: ${txt.slice(0, 200)}`);
+    }
+    return await r.json();
+  } catch (e) { console.warn('apiFetch', path, e); throw e; }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SCRIPT TAB
+// ═══════════════════════════════════════════════════════════════════
+function ScriptTab({ scenes, setScenes, setTab }) {
+  const [script, setScript] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const [sources, setSources] = useState(null);
+  const [selectedSources, setSelectedSources] = useState(['plots','characters','biomes','workbooks','npcs']);
+  const [loading, setLoading] = useState('');
+  const [presets, setPresets] = useState([]);
+  const [collapsed, setCollapsed] = useState({});
+
+  useEffect(() => {
+    apiFetch('/api/sse/admin/studio/content-sources').then(setSources).catch(() => {});
+    apiFetch('/api/sse/admin/studio/presets').then(setPresets).catch(() => {});
+  }, []);
+
+  const toggleCollapse = (k) => setCollapsed(p => ({...p, [k]: !p[k]}));
+
+  const loadPreset = async (name) => {
+    try {
+      const data = await apiFetch('/api/sse/admin/studio/presets/' + name);
+      setScenes(data.scenes || []);
+      setScript(data.scenes.map(s => `Scene ${s.scene}: ${s.title}\n${s.prompt}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
+    } catch (e) { alert('Failed to load preset: ' + e.message); }
+  };
+
+  const generateScript = async () => {
+    if (!prompt.trim()) return;
+    setLoading('script');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/generate-script', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ prompt, content_sources: selectedSources })
+      });
+      setScenes(d.scenes || []);
+      if (d.scenes?.length) {
+        setScript(d.scenes.map(s => `Scene ${s.scene}: ${s.title}\n${s.description}\nDialogue: ${s.dialogue || ''}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
+      } else if (d.raw) { setScript(d.raw); }
+    } catch (e) { alert('Script generation failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const breakScenes = async () => {
+    if (!script.trim()) return;
+    setLoading('break');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/break-scenes', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ script })
+      });
+      setScenes(d.scenes || []);
+    } catch (e) { alert('Scene breaking failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const insertContent = (text) => setScript(s => s + '\n' + text);
+
+  const renderSource = (key, label, items, renderItem) => (
+    <div key={key}>
+      <div className="collapse-header" onClick={() => toggleCollapse(key)}>
+        {collapsed[key] ? '▸' : '▾'} {label} ({items?.length || 0})
+      </div>
+      {!collapsed[key] && items?.map((item, i) => (
+        <div key={i} className="content-item" onClick={() => insertContent(renderItem(item))}>
+          {typeof renderItem(item) === 'string' ? renderItem(item).slice(0, 80) : item.title || item.name || item.id}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="split">
+      <div className="left">
+        <div className="panel">
+          <h2>Script Editor</h2>
+          <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
+            <input type="text" placeholder="Describe what to create..." value={prompt} onChange={e => setPrompt(e.target.value)} style={{flex:1,minWidth:200}} />
+            <button className="btn" onClick={generateScript} disabled={!!loading}>{loading==='script' ? <span className="spinner"/> : 'Generate Script'}</button>
+            {presets.length > 0 && (
+              <select onChange={e => e.target.value && loadPreset(e.target.value)} style={{width:'auto',minWidth:140}}>
+                <option value="">Load Preset...</option>
+                {presets.map(p => <option key={p.id} value={p.id}>{p.title} ({p.scene_count} scenes)</option>)}
+              </select>
+            )}
+          </div>
+          <textarea rows={16} value={script} onChange={e => setScript(e.target.value)} placeholder="Write or paste your script here..." />
+          <div style={{display:'flex',gap:12,marginTop:12,alignItems:'center'}}>
+            <button className="btn" onClick={breakScenes} disabled={!!loading}>{loading==='break' ? <span className="spinner"/> : 'Break into Scenes'}</button>
+            {scenes.length > 0 && <span style={{fontSize:12,color:'var(--t2)'}}>{scenes.length} scenes &middot; ~{scenes.reduce((a,s) => a + (s.duration||5), 0)}s total</span>}
+            {scenes.length > 0 && <button className="btn btn-sm" onClick={() => setTab('scenes')} style={{marginLeft:'auto'}}>Go to Scenes &rarr;</button>}
+          </div>
+        </div>
+        {scenes.length > 0 && (
+          <div className="panel">
+            <h2>Scene Breakdown</h2>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {scenes.map((s,i) => (
+                <div key={i} style={{display:'flex',gap:12,padding:'10px 12px',background:'var(--raised)',borderRadius:6,alignItems:'flex-start'}}>
+                  <span style={{color:'var(--gold)',fontFamily:'var(--mono)',fontSize:11,minWidth:32}}>#{s.scene||i+1}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,color:'var(--t1)',marginBottom:4}}>{s.title || `Scene ${s.scene||i+1}`}</div>
+                    <div style={{fontSize:11,color:'var(--t2)',lineHeight:1.4}}>{(s.description || s.prompt || '').slice(0, 150)}</div>
+                    {s.dialogue && <div style={{fontSize:11,color:'var(--cyan)',marginTop:4}}>"{s.dialogue}"</div>}
+                  </div>
+                  <span className="mood" style={{fontSize:10,color:'var(--purple)'}}>{s.mood || '—'}</span>
+                  <span style={{fontSize:10,color:'var(--t3)',minWidth:30,textAlign:'right'}}>{s.duration||5}s</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="right">
+        <div className="panel" style={{position:'sticky',top:60}}>
+          <h2>Content Sources</h2>
+          {!sources ? <div style={{color:'var(--t3)',fontSize:12}}>Loading...</div> : <>
+            {renderSource('plots', 'Story Plots', sources.plots, p => `[Plot: ${p.title}] ${p.description}`)}
+            {renderSource('archetypes', 'Archetypes', sources.archetypes?.map(a => ({id:a,name:a})), a => a.name)}
+            {renderSource('biomes', 'Biomes', sources.biomes, b => `[Biome: ${b.id}] ${b.description}`)}
+            {renderSource('workbooks', 'Workbooks', sources.workbooks, w => `[${w.name}] by ${w.theorist}`)}
+            {renderSource('npcs', 'NPC Templates', sources.npcs, n => `[NPC: ${n.name}] ${n.description}`)}
+            {sources.core_character && (
+              <div>
+                <div className="collapse-header" onClick={() => toggleCollapse('core')}>
+                  {collapsed['core'] ? '▸' : '▾'} Core Character
+                </div>
+                {!collapsed['core'] && <div className="content-item" onClick={() => insertContent(sources.core_character)}>{sources.core_character.slice(0,120)}...</div>}
+              </div>
+            )}
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SCENES TAB
+// ═══════════════════════════════════════════════════════════════════
+function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refreshCost }) {
+  const [loading, setLoading] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const ensureProject = async () => {
+    if (projectId) return projectId;
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/projects', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes })
+      });
+      setProjectId(d.project_id);
+      return d.project_id;
+    } catch (e) { alert('Failed to create project: ' + e.message); return null; }
+  };
+
+  const genImage = async (idx) => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    setLoading(l => ({...l, [`img_${idx}`]: true}));
+    try {
+      const s = scenes[idx];
+      const d = await apiFetch('/api/sse/admin/studio/generate-image', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, description: s.description || s.prompt })
+      });
+      const updated = [...scenes];
+      updated[idx] = { ...updated[idx], image_url: d.r2_url };
+      setScenes(updated);
+      refreshCost();
+    } catch (e) { alert('Image gen failed: ' + e.message); }
+    setLoading(l => ({...l, [`img_${idx}`]: false}));
+  };
+
+  const genVideo = async (idx) => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    const s = scenes[idx];
+    if (!s.image_url) return alert('Generate an image first');
+    setLoading(l => ({...l, [`vid_${idx}`]: true}));
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/generate-video', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, image_url: s.image_url, motion_prompt: (s.description || s.prompt).slice(0, 200) })
+      });
+      const updated = [...scenes];
+      updated[idx] = { ...updated[idx], video_url: d.video_url };
+      setScenes(updated);
+      refreshCost();
+    } catch (e) { alert('Video gen failed: ' + e.message); }
+    setLoading(l => ({...l, [`vid_${idx}`]: false}));
+  };
+
+  const genAudio = async (idx, voice) => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    const s = scenes[idx];
+    if (!s.dialogue) return alert('No dialogue for this scene');
+    setLoading(l => ({...l, [`aud_${idx}`]: true}));
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/generate-narration', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, text: s.dialogue, voice: voice || 'narrator' })
+      });
+      const updated = [...scenes];
+      updated[idx] = { ...updated[idx], audio_url: d.audio_url };
+      setScenes(updated);
+      refreshCost();
+    } catch (e) { alert('Narration failed: ' + e.message); }
+    setLoading(l => ({...l, [`aud_${idx}`]: false}));
+  };
+
+  const genAllImages = async () => {
+    const est = scenes.length * 0.07;
+    if (!confirm(`Generate ${scenes.length} images (~$${est.toFixed(2)}). Proceed?`)) return;
+    for (let i = 0; i < scenes.length; i++) {
+      if (!scenes[i].image_url) await genImage(i);
+    }
+  };
+
+  const saveProject = async () => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    setSaving(true);
+    try {
+      await apiFetch('/api/sse/admin/studio/projects', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ title: 'Studio Project', scenes })
+      });
+    } catch (e) { /* ignore if already created */ }
+    setSaving(false);
+  };
+
+  if (!scenes.length) return <div className="empty-state">No scenes yet. Use the Script tab to create or load scenes.</div>;
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <button className="btn" onClick={genAllImages}>Generate All Images (~${(scenes.length * 0.07).toFixed(2)})</button>
+        <button className="btn btn-sm" onClick={saveProject} disabled={saving}>{saving ? <span className="spinner"/> : 'Save Project'}</button>
+        {costInfo && <span style={{marginLeft:'auto',fontSize:12,color:'var(--t2)',fontFamily:'var(--mono)'}}>Today: ${(costInfo.spent_cents/100).toFixed(2)} / ${(costInfo.cap_cents/100).toFixed(2)}</span>}
+      </div>
+      <div className="grid-3">
+        {scenes.map((s, i) => (
+          <div key={i} className="scene-card">
+            <div className="card-header">
+              <span className="scene-num">Scene {s.scene || i+1}</span>
+              <span style={{fontSize:12,color:'var(--t1)',flex:1,marginLeft:8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.title || ''}</span>
+              {s.mood && <span className="mood">{s.mood}</span>}
+            </div>
+            <div className="card-body">
+              <div className="desc">{s.description || s.prompt || ''}</div>
+              <div className="media-preview">
+                {s.image_url ? <img src={s.image_url} alt={s.title} /> : <span style={{color:'var(--t3)',fontSize:12}}>No image</span>}
+              </div>
+              {s.video_url && (
+                <video controls style={{width:'100%',borderRadius:6,marginBottom:12}} src={s.video_url}/>
+              )}
+              {s.audio_url && (
+                <audio controls style={{width:'100%',marginBottom:12}} src={s.audio_url}/>
+              )}
+              <div className="card-actions">
+                <button className="btn btn-sm" onClick={() => genImage(i)} disabled={loading[`img_${i}`]}>
+                  {loading[`img_${i}`] ? <span className="spinner"/> : (s.image_url ? 'Regen Image' : 'Gen Image')}
+                </button>
+                <button className="btn btn-sm" onClick={() => genVideo(i)} disabled={loading[`vid_${i}`] || !s.image_url}>
+                  {loading[`vid_${i}`] ? <span className="spinner"/> : (s.video_url ? 'Regen Video' : 'Gen Video')}
+                </button>
+                {s.dialogue && (
+                  <select onChange={e => e.target.value && genAudio(i, e.target.value)} disabled={loading[`aud_${i}`]} style={{width:'auto',fontSize:11,padding:'4px 8px'}}>
+                    <option value="">{loading[`aud_${i}`] ? 'Generating...' : (s.audio_url ? 'Regen Audio' : 'Gen Audio')}</option>
+                    <option value="narrator">Narrator</option>
+                    <option value="serpent">Serpent</option>
+                    <option value="boy">Boy</option>
+                    <option value="girl">Girl</option>
+                  </select>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LIBRARY TAB
+// ═══════════════════════════════════════════════════════════════════
+function LibraryTab() {
+  const [items, setItems] = useState([]);
+  const [filter, setFilter] = useState('all');
+  const [projects, setProjects] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [lib, proj] = await Promise.all([
+        apiFetch('/api/sse/admin/studio/library?filter=' + filter),
+        apiFetch('/api/sse/admin/studio/projects').catch(() => [])
+      ]);
+      setItems(lib || []);
+      setProjects(proj || []);
+    } catch (e) { console.warn('Library load failed:', e); }
+    setLoading(false);
+  }, [filter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const deleteItem = async (key) => {
+    if (!confirm('Delete ' + key.split('/').pop() + '?')) return;
+    try {
+      await fetch(API + '/api/sse/admin/studio/library/delete', {
+        method: 'DELETE', headers: _authHeaders('application/json'),
+        body: JSON.stringify({ r2_key: key })
+      });
+      setItems(items.filter(i => i.key !== key));
+    } catch (e) { alert('Delete failed: ' + e.message); }
+  };
+
+  const cleanProject = async (pid) => {
+    if (!confirm('Delete all R2 assets for this project?')) return;
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/clean-project', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid })
+      });
+      alert('Deleted ' + d.deleted_count + ' objects');
+      load();
+    } catch (e) { alert('Clean failed: ' + e.message); }
+  };
+
+  const totalSize = items.reduce((a,i) => a + (i.size_bytes||0), 0);
+  const filters = ['all','image','video','audio'];
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:12,marginBottom:16,alignItems:'center',flexWrap:'wrap'}}>
+        <div className="filter-tabs">
+          {filters.map(f => (
+            <button key={f} className={'filter-tab' + (filter===f?' active':'')} onClick={() => setFilter(f)}>
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+        <span style={{marginLeft:'auto',fontSize:11,color:'var(--t3)',fontFamily:'var(--mono)'}}>
+          {items.length} items &middot; {(totalSize/1024/1024).toFixed(1)} MB
+        </span>
+      </div>
+
+      {loading ? <div className="empty-state"><span className="spinner"/> Loading...</div> : (
+        <>
+          {items.length === 0 ? <div className="empty-state">No media found</div> : (
+            <div className="grid-3">
+              {items.map((item, i) => (
+                <div key={i} className="lib-item" onClick={() => setPreview(item)}>
+                  <div className="thumb">
+                    {item.type === 'image' ? <img src={item.url} alt="" /> :
+                     item.type === 'video' ? <span style={{fontSize:32}}>▶</span> :
+                     item.type === 'audio' ? <span style={{fontSize:24}}>🎵</span> :
+                     <span style={{fontSize:24}}>📄</span>}
+                  </div>
+                  <div className="meta">
+                    <div style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.key.split('/').pop()}</div>
+                    <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+                      <span className={'badge badge-' + (item.type==='image'?'gold':item.type==='video'?'green':'gold')}>{item.type}</span>
+                      <span>{(item.size_bytes/1024).toFixed(0)} KB</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {projects.length > 0 && (
+            <div className="panel" style={{marginTop:24}}>
+              <h2>Projects</h2>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {projects.map(p => (
+                  <div key={p.project_id} style={{display:'flex',gap:12,padding:'10px 12px',background:'var(--raised)',borderRadius:6,alignItems:'center'}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,color:'var(--t1)'}}>{p.title}</div>
+                      <div style={{fontSize:11,color:'var(--t3)'}}>{p.scene_count} scenes &middot; ${((p.actual_cost_cents||0)/100).toFixed(2)} spent &middot; {p.status}</div>
+                    </div>
+                    <span className={'badge ' + (p.status==='complete'?'badge-green':p.status==='failed'?'badge-red':'badge-gold')}>{p.status}</span>
+                    {(p.status === 'failed' || p.status === 'partial') && (
+                      <button className="btn btn-sm btn-danger" onClick={() => cleanProject(p.project_id)}>Clean</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {preview && (
+        <div className="modal-overlay" onClick={() => setPreview(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>{preview.key.split('/').pop()}</h3>
+            {preview.type === 'image' && <img src={preview.url} style={{width:'100%',borderRadius:6,marginBottom:12}} />}
+            {preview.type === 'video' && <video controls src={preview.url} style={{width:'100%',borderRadius:6,marginBottom:12}} />}
+            {preview.type === 'audio' && <audio controls src={preview.url} style={{width:'100%',marginBottom:12}} />}
+            <div style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+              <div>Key: <span style={{fontFamily:'var(--mono)',fontSize:11}}>{preview.key}</span></div>
+              <div>Size: {(preview.size_bytes/1024).toFixed(1)} KB &middot; Modified: {preview.last_modified?.slice(0,19) || '—'}</div>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <a className="btn" href={preview.url} target="_blank" rel="noopener">Download</a>
+              <button className="btn btn-danger" onClick={() => { deleteItem(preview.key); setPreview(null); }}>Delete</button>
+              <button className="btn" onClick={() => setPreview(null)} style={{marginLeft:'auto'}}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PIPELINE TAB (Phase 2 — character refs, batch video, stitching)
+// ═══════════════════════════════════════════════════════════════════
+function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost }) {
+  const [charRefs, setCharRefs] = useState(null);
+  const [refsLoading, setRefsLoading] = useState(false);
+  const [videoStatus, setVideoStatus] = useState(null);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [stitchLoading, setStitchLoading] = useState(false);
+  const [trailerStatus, setTrailerStatus] = useState(null);
+  const [stitchOpts, setStitchOpts] = useState({ include_color_grade: true, include_narration: true, format: '16:9' });
+  const pollRef = useRef(null);
+
+  const ensureProject = async () => {
+    if (projectId) return projectId;
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/projects', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes })
+      });
+      setProjectId(d.project_id);
+      return d.project_id;
+    } catch (e) { alert('Failed to create project: ' + e.message); return null; }
+  };
+
+  const pollVideoStatus = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const s = await apiFetch('/api/sse/admin/studio/projects/' + projectId + '/video-status');
+      setVideoStatus(s);
+      if (s.status === 'not_started' && videoLoading) { /* still running */ }
+      else if (s.clips) { setVideoLoading(false); }
+    } catch (e) { /* ignore */ }
+  }, [projectId, videoLoading]);
+
+  const pollTrailerStatus = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const s = await apiFetch('/api/sse/admin/studio/projects/' + projectId + '/trailer-status');
+      setTrailerStatus(s);
+      if (s.trailer) { setStitchLoading(false); }
+    } catch (e) { /* ignore */ }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const iv = setInterval(() => {
+      if (videoLoading) pollVideoStatus();
+      if (stitchLoading) pollTrailerStatus();
+    }, 10000);
+    return () => clearInterval(iv);
+  }, [projectId, videoLoading, stitchLoading, pollVideoStatus, pollTrailerStatus]);
+
+  const generateRefs = async () => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    const est = 7 * 0.07;
+    if (!confirm(`Generate 7 character reference images (~$${est.toFixed(2)})?`)) return;
+    setRefsLoading(true);
+    try {
+      await apiFetch('/api/sse/admin/studio/generate-character-refs', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid })
+      });
+      setTimeout(async () => {
+        try {
+          const s = await apiFetch('/api/sse/admin/studio/projects/' + pid + '/trailer-status');
+          if (s.character_refs) setCharRefs(s.character_refs);
+        } catch(e) {}
+        setRefsLoading(false);
+        refreshCost();
+      }, 50000);
+    } catch (e) { alert('Ref generation failed: ' + e.message); setRefsLoading(false); }
+  };
+
+  const generateAllVideos = async () => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    if (!confirm('Generate motion video clips for all scenes? This takes several minutes and costs ~$0.25/scene.')) return;
+    setVideoLoading(true);
+    try {
+      await apiFetch('/api/sse/admin/studio/generate-video-clips', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid })
+      });
+    } catch (e) { alert('Video generation failed: ' + e.message); setVideoLoading(false); }
+  };
+
+  const stitchTrailer = async () => {
+    const pid = await ensureProject();
+    if (!pid) return;
+    if (!confirm('Stitch all clips into a congruent trailer? This downloads clips, applies color grading, generates narration, and exports.')) return;
+    setStitchLoading(true);
+    try {
+      await apiFetch('/api/sse/admin/studio/stitch-trailer', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid, ...stitchOpts })
+      });
+    } catch (e) { alert('Stitching failed: ' + e.message); setStitchLoading(false); }
+  };
+
+  if (!scenes.length) return <div className="empty-state">Load scenes in the Script tab first.</div>;
+
+  const charNames = ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
+
+  return (
+    <div>
+      {/* Character References */}
+      <div className="panel">
+        <h2>Character References</h2>
+        <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+          Generate reference images for all 7 characters to ensure visual consistency across scenes.
+        </p>
+        <button className="btn" onClick={generateRefs} disabled={refsLoading}>
+          {refsLoading ? <><span className="spinner"/> Generating 7 refs (~40s)...</> : 'Generate Character Refs (~$0.49)'}
+        </button>
+        {charRefs && (
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12,marginTop:16}}>
+            {charNames.map(name => (
+              <div key={name} style={{textAlign:'center'}}>
+                {charRefs[name] ? (
+                  <img src={charRefs[name]} alt={name} style={{width:'100%',borderRadius:6,border:'1px solid var(--border)'}} />
+                ) : (
+                  <div style={{width:'100%',aspectRatio:'1',background:'var(--bg)',borderRadius:6,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--t3)',fontSize:11}}>Pending</div>
+                )}
+                <div style={{fontSize:11,color:'var(--gold-d)',marginTop:4}}>{name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Batch Video Generation */}
+      <div className="panel">
+        <h2>Motion Video Clips</h2>
+        <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+          Extend all hero images into 5s motion clips using Grok Video. Falls back to Ken Burns (slow zoom) if Grok Video is unavailable.
+        </p>
+        <button className="btn" onClick={generateAllVideos} disabled={videoLoading}>
+          {videoLoading ? <><span className="spinner"/> Generating clips (polling every 10s)...</> : 'Generate All Video Clips'}
+        </button>
+        {videoStatus && videoStatus.clips && (
+          <div style={{marginTop:16}}>
+            <div style={{fontSize:12,color:'var(--t2)',marginBottom:8}}>
+              {videoStatus.success || 0}/{videoStatus.total || 0} clips complete
+              {videoStatus.total_cost != null && ` — $${videoStatus.total_cost.toFixed(2)}`}
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
+              {videoStatus.clips.map((c,i) => (
+                <div key={i} style={{padding:8,background:'var(--raised)',borderRadius:6,fontSize:11}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                    <span style={{color:'var(--gold)'}}>Scene {c.scene}</span>
+                    <span className={'badge ' + (c.status==='success'?'badge-green':c.status==='ken_burns'?'badge-gold':'badge-red')}>
+                      {c.status}
+                    </span>
+                  </div>
+                  {c.video_url && <video controls src={c.video_url} style={{width:'100%',borderRadius:4}} />}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Trailer Stitching */}
+      <div className="panel">
+        <h2>Congruent Trailer Stitching</h2>
+        <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+          Combine all clips into a single trailer with color grading, crossfades, narration overlay, and format conversion.
+        </p>
+        <div style={{display:'flex',gap:16,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+          <label style={{fontSize:12,color:'var(--t2)',display:'flex',alignItems:'center',gap:6}}>
+            <input type="checkbox" checked={stitchOpts.include_color_grade}
+              onChange={e => setStitchOpts(o => ({...o, include_color_grade: e.target.checked}))} />
+            Color Grade
+          </label>
+          <label style={{fontSize:12,color:'var(--t2)',display:'flex',alignItems:'center',gap:6}}>
+            <input type="checkbox" checked={stitchOpts.include_narration}
+              onChange={e => setStitchOpts(o => ({...o, include_narration: e.target.checked}))} />
+            Include Narration
+          </label>
+          <select value={stitchOpts.format} onChange={e => setStitchOpts(o => ({...o, format: e.target.value}))}
+            style={{width:'auto',fontSize:12,padding:'4px 8px'}}>
+            <option value="16:9">16:9 (YouTube)</option>
+            <option value="9:16">9:16 (Reels/TikTok)</option>
+            <option value="1:1">1:1 (Instagram)</option>
+          </select>
+        </div>
+        <button className="btn" onClick={stitchTrailer} disabled={stitchLoading}>
+          {stitchLoading ? <><span className="spinner"/> Stitching trailer...</> : 'Stitch Trailer'}
+        </button>
+        {trailerStatus && trailerStatus.trailer && (
+          <div style={{marginTop:16,padding:16,background:'var(--raised)',borderRadius:6}}>
+            <div style={{fontSize:13,color:'var(--green)',marginBottom:8}}>Trailer Complete</div>
+            <video controls src={trailerStatus.trailer.trailer_url} style={{width:'100%',borderRadius:6,marginBottom:12}} />
+            <div style={{fontSize:11,color:'var(--t2)'}}>
+              {trailerStatus.trailer.clips_used} clips &middot; {trailerStatus.trailer.format} &middot;
+              {(trailerStatus.trailer.size_bytes / 1024 / 1024).toFixed(1)} MB
+              {trailerStatus.trailer.has_narration && ' &middot; with narration'}
+            </div>
+            <a className="btn btn-sm" href={trailerStatus.trailer.trailer_url} target="_blank" rel="noopener" style={{marginTop:8,display:'inline-block'}}>
+              Download Trailer
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  APP ROOT
+// ═══════════════════════════════════════════════════════════════════
+function App() {
+  const [tab, setTab] = useState('script');
+  const [scenes, setScenes] = useState([]);
+  const [projectId, setProjectId] = useState(null);
+  const [costInfo, setCostInfo] = useState(null);
+
+  const refreshCost = useCallback(async () => {
+    try { setCostInfo(await apiFetch('/api/sse/admin/studio/cost-status')); } catch(e) {}
+  }, []);
+
+  useEffect(() => { refreshCost(); const iv = setInterval(refreshCost, 30000); return () => clearInterval(iv); }, [refreshCost]);
+
+  return (
+    <div>
+      <div className="topbar">
+        <a className="nav-link" href="javascript:void(0)" onClick={() => navTo('sse_monitoring.html')}>&larr; SSE Monitor</a>
+        <h1>Thera-World Studio</h1>
+        <a className="nav-link" href="javascript:void(0)" onClick={() => navTo('command.html')}>&larr; Command</a>
+        {costInfo && (
+          <div className="cost-banner">
+            Today: ${(costInfo.spent_cents/100).toFixed(2)} / ${(costInfo.cap_cents/100).toFixed(2)}
+            {costInfo.remaining_cents <= 0 && <span style={{color:'var(--red)',marginLeft:8}}>LIMIT REACHED</span>}
+          </div>
+        )}
+      </div>
+      <div className="tab-bar">
+        {['script','scenes','pipeline','library'].map(t => (
+          <button key={t} className={'tab-btn' + (tab===t?' active':'')} onClick={() => setTab(t)}>
+            {t === 'script' ? 'Script' : t === 'scenes' ? `Scenes (${scenes.length})` : t === 'pipeline' ? 'Pipeline' : 'Library'}
+          </button>
+        ))}
+      </div>
+      <div className="main">
+        {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} />}
+        {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} setProjectId={setProjectId} costInfo={costInfo} refreshCost={refreshCost} />}
+        {tab === 'pipeline' && <PipelineTab projectId={projectId} setProjectId={setProjectId} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} />}
+        {tab === 'library' && <LibraryTab />}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

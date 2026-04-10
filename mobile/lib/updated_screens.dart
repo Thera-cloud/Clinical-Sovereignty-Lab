@@ -8740,6 +8740,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       return "$joined$extra$lastTxt";
     }
 
+    // Merge family entries that resolve to the same folder label (dedup)
+    final Map<String, String> famLabelToId = {};
+    for (final fid in byFamily.keys.toList()) {
+      final label = folderLabelForFamily(byFamily[fid]!);
+      if (famLabelToId.containsKey(label)) {
+        byFamily[famLabelToId[label]!]!.addAll(byFamily[fid]!);
+        byFamily.remove(fid);
+      } else {
+        famLabelToId[label] = fid;
+      }
+    }
+
+    // Merge company entries that resolve to the same display name (dedup)
+    final Map<String, String> compLabelToId = {};
+    for (final cid in byCompany.keys.toList()) {
+      final cName = byCompany[cid]!.isNotEmpty ? (byCompany[cid]!.first['company_name'] ?? cid).toString() : cid;
+      if (compLabelToId.containsKey(cName)) {
+        byCompany[compLabelToId[cName]!]!.addAll(byCompany[cid]!);
+        byCompany.remove(cid);
+      } else {
+        compLabelToId[cName] = cid;
+      }
+    }
+
     byFamily.forEach((familyId, members) {
       out.add({
         "folder_id": "family:$familyId",

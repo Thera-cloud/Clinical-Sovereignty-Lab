@@ -3,7 +3,7 @@ Analytics & Admin API Routes
 Platform-wide analytics, crisis monitoring, and admin functions
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
@@ -6037,3 +6037,20 @@ async def sse_emancipate_minor(request: Request):
     from app.sse.family_engine import emancipate_minor
     await emancipate_minor(body["user_id"], body.get("reason", ""), "DrNevedal1", request.app.state.db_pool)
     return {"emancipated": True, "user_id": body["user_id"]}
+
+
+@sse_router.post("/admin/generate-trailer")
+async def sse_generate_trailer(request: Request, background_tasks: BackgroundTasks):
+    import uuid as _uuid
+    from app.sse.trailer_generator import generate_all_scenes
+    background_tasks.add_task(generate_all_scenes, str(_uuid.uuid4()))
+    return {"status": "started", "message": "Generating 19 scenes — check status in ~3 minutes"}
+
+
+@sse_router.get("/admin/trailer-status")
+async def sse_trailer_status(request: Request):
+    manifest_path = "/tmp/trailer_scenes/manifest.json"
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            return json.load(f)
+    return {"status": "not_started"}

@@ -67,6 +67,20 @@ async def store_image(image_bytes: bytes, key: str) -> str:
     return f"{_R2_PUBLIC_BASE}/{key}"
 
 
+async def store_bytes(data: bytes, key: str, content_type: str = "application/octet-stream") -> str:
+    """Upload arbitrary bytes to R2 with a specific content type. Returns public URL."""
+    client = _get_client()
+    if client is None:
+        logger.warning("r2_storage: R2 credentials missing — returning mock URL for %s", key)
+        return _mock_url(key)
+
+    def _upload():
+        client.put_object(Bucket=_R2_BUCKET, Key=key, Body=data, ContentType=content_type)
+
+    await asyncio.get_event_loop().run_in_executor(None, _upload)
+    return f"{_R2_PUBLIC_BASE}/{key}"
+
+
 async def store_video(video_url: str, key: str) -> str:
     """Download video from temporary URL and upload to R2. Returns permanent URL."""
     client = _get_client()
