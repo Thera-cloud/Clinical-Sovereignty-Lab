@@ -38,15 +38,21 @@ _PRESETS_DIR = Path(__file__).parent / "data" / "studio_presets"
 #  Character Reference System
 # ---------------------------------------------------------------------------
 
+_GHIBLI_PREFIX = (
+    "Studio Ghibli anime art style, soft cel shading, "
+    "expressive large emotive eyes, hand-drawn animation aesthetic, "
+)
+
 CHARACTER_REFERENCES = {
     "boy": {
         "ref_prompt": (
-            "Character reference sheet, young boy age 6, messy brown hair, fair skin, "
+            f"{_GHIBLI_PREFIX}"
+            "character reference sheet, young boy age 6, messy brown hair, fair skin, "
             "simple white linen shirt, brown shorts, bare feet, holding a small carved "
             "wooden dragon toy in right hand, innocent face with large curious eyes, "
             "multiple angles showing front three-quarter and profile, consistent "
-            "proportions, neutral studio lighting, white background, character design "
-            "sheet style, 16:9"
+            "proportions, neutral studio lighting, white background, Ghibli character "
+            "model sheet style, 16:9"
         ),
         "inline_desc": (
             "young boy age 6 with messy brown hair, fair skin, simple white linen "
@@ -55,10 +61,12 @@ CHARACTER_REFERENCES = {
     },
     "serpent": {
         "ref_prompt": (
-            "Character reference sheet, elegant dark serpent with ancient knowing amber "
+            f"{_GHIBLI_PREFIX}"
+            "Studio Ghibli magical creature design, "
+            "character reference sheet, elegant dark serpent with ancient knowing amber "
             "eyes, iridescent dark green-black scales, coiled sinuous body, the serpent "
             "appears wise not evil, mystical aura, multiple angles showing head detail "
-            "and full body coil, neutral lighting, character design sheet style, 16:9"
+            "and full body coil, neutral lighting, Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "dark elegant serpent with iridescent green-black scales and ancient knowing "
@@ -67,11 +75,13 @@ CHARACTER_REFERENCES = {
     },
     "dragon": {
         "ref_prompt": (
-            "Character reference sheet, massive red dragon 50 feet tall, dark crimson "
+            f"{_GHIBLI_PREFIX}"
+            "Ghibli-scale fantasy creature reminiscent of Haku from Spirited Away but red, "
+            "character reference sheet, massive red dragon 50 feet tall, dark crimson "
             "scales with amber undertones, powerful wings spread wide, amber eyes "
             "matching the serpent, ancient intelligent face not mindless beast, fearsome "
             "but purposeful, multiple angles showing full body and head detail, "
-            "character design sheet style, 16:9"
+            "Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "massive 50-foot red dragon with dark crimson scales, amber eyes matching "
@@ -80,10 +90,11 @@ CHARACTER_REFERENCES = {
     },
     "girl": {
         "ref_prompt": (
-            "Character reference sheet, young girl age 6, bright blonde hair in loose "
+            f"{_GHIBLI_PREFIX}"
+            "character reference sheet, young girl age 6, bright blonde hair in loose "
             "braids, light blue dress, bare feet, radiant smile, bright sparkling eyes "
             "full of joy, clean and dry appearance contrasting with the boy, multiple "
-            "angles, character design sheet style, 16:9"
+            "angles, Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "young girl age 6 with bright blonde hair in loose braids, light blue "
@@ -92,9 +103,11 @@ CHARACTER_REFERENCES = {
     },
     "watcher": {
         "ref_prompt": (
-            "Character reference sheet, tall woman warrior in dark ornate armor, "
+            f"{_GHIBLI_PREFIX}"
+            "Ghibli warrior character design, "
+            "character reference sheet, tall woman warrior in dark ornate armor, "
             "vigilant stern expression, pointing hand, short dark hair, battle-worn "
-            "but noble, standing atop a stone tower, character design sheet style, 16:9"
+            "but noble, standing atop a stone tower, Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "tall armored woman watcher with dark ornate armor, vigilant stern "
@@ -103,10 +116,12 @@ CHARACTER_REFERENCES = {
     },
     "glowing_woman": {
         "ref_prompt": (
-            "Character reference sheet, ethereal woman radiating warm golden-white "
+            f"{_GHIBLI_PREFIX}"
+            "ethereal Ghibli spirit character, "
+            "character reference sheet, ethereal woman radiating warm golden-white "
             "light, serene compassionate expression, flowing white and gold robes, "
             "her light illuminates everything around her, calm presence contrasting "
-            "with chaos, character design sheet style, 16:9"
+            "with chaos, Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "ethereal woman radiating warm golden-white light, flowing white and "
@@ -115,10 +130,12 @@ CHARACTER_REFERENCES = {
     },
     "knight": {
         "ref_prompt": (
-            "Character reference sheet, knight in brilliant polished silver armor, "
+            f"{_GHIBLI_PREFIX}"
+            "Ghibli noble warrior character, "
+            "character reference sheet, knight in brilliant polished silver armor, "
             "raised sword, noble defiant stance, red cape, standing at the base of "
-            "a tower, heroic but ultimately ignored by the dragon, character design "
-            "sheet style, 16:9"
+            "a tower, heroic but ultimately ignored by the dragon, "
+            "Ghibli character model sheet style, 16:9"
         ),
         "inline_desc": (
             "knight in brilliant polished silver armor with raised sword, red cape, "
@@ -128,11 +145,13 @@ CHARACTER_REFERENCES = {
 }
 
 STYLE_PREFIX = (
-    "Maintaining exact visual consistency throughout: warm golden color grade, "
-    "film grain texture, shallow depth of field, anamorphic lens characteristics, "
-    "Terrence Malick meets Guillermo del Toro visual language, "
-    "rich earth tones with mystical amber accents, "
-    "cinematic 2.39:1 framing within 16:9 frame — "
+    "Studio Ghibli anime art style throughout, Makoto Shinkai inspired, "
+    "warm watercolor sky backgrounds with soft golden atmospheric light rays, "
+    "soft cel shading with hand-drawn animation aesthetic, "
+    "expressive characters with large emotive eyes, "
+    "lush hand-painted nature environments with dreamy depth, "
+    "rich earth tones with amber and emerald accents, "
+    "emotionally resonant and inviting, cinematic 16:9 framing — "
 )
 
 CHARACTER_VOICES = {
@@ -335,30 +354,57 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
 #  Ken Burns Fallback (static image → slow zoom video)
 # ---------------------------------------------------------------------------
 
-async def _ken_burns_fallback(image_url: str, output_path: str, duration: int = 5) -> bool:
-    """Generate a slow-zoom Ken Burns clip from a static image using FFmpeg."""
-    try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(image_url) as r:
-                if r.status != 200:
-                    return False
-                img_bytes = await r.read()
-    except Exception as e:
-        logger.warning("[KEN-BURNS] Image download failed: %s", e)
+async def _ken_burns_fallback(image_source: str, output_path: str, duration: int = 8) -> bool:
+    """Generate a slow-zoom Ken Burns clip from a static image using FFmpeg.
+
+    image_source can be an R2 key (no protocol) or a URL. R2 keys are
+    downloaded via the S3 API directly, avoiding the broken public URL.
+    """
+    from app.sse.infrastructure.r2_storage import download_bytes as _r2_download
+
+    img_bytes = None
+    if image_source.startswith("http://") or image_source.startswith("https://"):
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(image_source) as r:
+                    if r.status == 200:
+                        img_bytes = await r.read()
+        except Exception as e:
+            logger.warning("[KEN-BURNS] HTTP download failed: %s", e)
+
+    if img_bytes is None:
+        r2_key = image_source
+        if "://" in r2_key:
+            parts = r2_key.split("/", 3)
+            r2_key = parts[-1] if len(parts) > 3 else r2_key
+        img_bytes = await _r2_download(r2_key)
+
+    if not img_bytes:
+        logger.warning("[KEN-BURNS] Could not obtain image bytes for %s", image_source)
         return False
 
     img_path = output_path.replace(".mp4", ".png")
     with open(img_path, "wb") as f:
         f.write(img_bytes)
 
-    frames = duration * 24
+    # Pre-scale to 2112x1188 (10% overshoot), then linear inward crop for
+    # a smooth zoom-in effect. Much faster than zoompan on large images.
+    vf = (
+        "scale=2112:1188:force_original_aspect_ratio=decrease,"
+        "pad=2112:1188:(ow-iw)/2:(oh-ih)/2,"
+        f"crop=1920:1080:'96*(1-t/{duration})':'54*(1-t/{duration})'"
+    )
     cmd = [
         "ffmpeg", "-y", "-loop", "1", "-t", str(duration), "-i", img_path,
-        "-vf", f"zoompan=z='min(zoom+0.001,1.08)':d={frames}:s=1920x1080",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", output_path,
+        "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "24",
+        output_path,
     ]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            logger.warning("[KEN-BURNS] FFmpeg exit %d: %s", result.returncode,
+                           result.stderr.decode(errors="replace")[:500])
+            return False
     except Exception as e:
         logger.warning("[KEN-BURNS] FFmpeg failed: %s", e)
         return False
@@ -370,14 +416,56 @@ async def _ken_burns_fallback(image_url: str, output_path: str, duration: int = 
 #  Motion Video Generation
 # ---------------------------------------------------------------------------
 
+async def _build_manifest_from_individual_images(project_id: str) -> Optional[dict]:
+    """Build a manifest from individually-generated scene images in R2."""
+    from app.sse.infrastructure import r2_storage as _r2
+    client = _r2._get_client()
+    if client is None:
+        return None
+
+    prefix = f"sse/studio/projects/{project_id}/"
+    try:
+        def _list():
+            return client.list_objects_v2(Bucket=_r2._R2_BUCKET, Prefix=prefix, MaxKeys=100)
+        resp = await asyncio.get_event_loop().run_in_executor(None, _list)
+    except Exception as e:
+        logger.warning("[TRAILER-VIDEO] R2 list failed: %s", e)
+        return None
+
+    scenes = []
+    for obj in resp.get("Contents", []):
+        key = obj["Key"]
+        filename = key.split("/")[-1]
+        if not filename.endswith(".png") or filename.endswith("_ref.png"):
+            continue
+        try:
+            scene_num = int(filename.replace(".png", ""))
+        except ValueError:
+            continue
+        r2_url = _r2.presigned_url(key) or f"{_r2._R2_PUBLIC_BASE}/{key}"
+        scenes.append({"scene": scene_num, "title": f"scene_{scene_num}", "r2_url": r2_url, "r2_key": key, "status": "success"})
+
+    if not scenes:
+        return None
+
+    scenes.sort(key=lambda s: s["scene"])
+    manifest = {"project_id": project_id, "scenes": scenes, "total": len(scenes),
+                "success": len(scenes), "source": "individual_images"}
+    logger.info("[TRAILER-VIDEO] Built manifest from %d individual images", len(scenes))
+    return manifest
+
+
 async def generate_motion_clips(project_id: str) -> list[dict]:
-    """Extend hero images into 5s motion video clips with transition context.
+    """Extend hero images into 8s motion video clips with transition context.
 
     Falls back to Ken Burns if Grok Video fails.
+    Grok Video cost: ~$4.00 per clip (4B ticks).
     """
     manifest = await _load_manifest_from_r2(project_id)
     if not manifest or not manifest.get("scenes"):
-        logger.warning("[TRAILER-VIDEO] No manifest found — run generate_all_scenes first")
+        manifest = await _build_manifest_from_individual_images(project_id)
+    if not manifest or not manifest.get("scenes"):
+        logger.warning("[TRAILER-VIDEO] No manifest or images found for project %s", project_id)
         return []
 
     successful_scenes = [s for s in manifest["scenes"] if s.get("status") == "success"]
@@ -403,16 +491,17 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
                 video_id = await generate_video(motion_prompt, source_image_url=scene_data["r2_url"])
 
                 video_url = None
-                for attempt in range(36):
+                for attempt in range(60):
                     await asyncio.sleep(5)
-                    status = await poll_video_status(video_id)
-                    if status["status"] == "completed" and status.get("url"):
-                        video_url = status["url"]
+                    poll = await poll_video_status(video_id)
+                    if poll["status"] == "completed" and poll.get("url"):
+                        video_url = poll["url"]
                         break
-                    if status["status"] == "failed":
+                    if poll["status"] == "failed":
                         break
                     if attempt % 6 == 0:
-                        logger.info("[TRAILER-VIDEO] Polling %s... %ds", video_id, attempt * 5)
+                        logger.info("[TRAILER-VIDEO] Polling %s — progress %s%% (%ds)",
+                                    video_id, poll.get("progress", "?"), attempt * 5)
 
                 if video_url:
                     async with aiohttp.ClientSession() as sess:
@@ -424,7 +513,7 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
                                 results.append({
                                     "scene": scene_num, "title": scene_data["title"],
                                     "hero_url": scene_data["r2_url"], "video_url": stored_url,
-                                    "status": "success", "cost": 0.25,
+                                    "status": "success", "cost": 4.00,
                                 })
                                 logger.info("[TRAILER-VIDEO] Scene %d done (grok)", scene_num)
                                 await asyncio.sleep(8)
@@ -436,29 +525,31 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
                 logger.warning("[TRAILER-VIDEO] Scene %d Grok Video failed: %s — trying Ken Burns", scene_num, e)
 
                 work_dir = tempfile.mkdtemp(prefix="kb_")
-                kb_path = os.path.join(work_dir, f"scene_{scene_num:02d}.mp4")
-                success = await _ken_burns_fallback(scene_data["r2_url"], kb_path)
+                try:
+                    kb_path = os.path.join(work_dir, f"scene_{scene_num:02d}.mp4")
+                    img_src = scene_data.get("r2_key") or scene_data["r2_url"]
+                    success = await _ken_burns_fallback(img_src, kb_path)
 
-                if success and os.path.exists(kb_path):
-                    with open(kb_path, "rb") as f:
-                        kb_bytes = f.read()
-                    r2_key = f"sse/studio/projects/{project_id}/clips/scene_{scene_num:02d}.mp4"
-                    stored_url = await store_bytes(kb_bytes, r2_key, "video/mp4")
-                    results.append({
-                        "scene": scene_num, "title": scene_data["title"],
-                        "hero_url": scene_data["r2_url"], "video_url": stored_url,
-                        "status": "ken_burns", "cost": 0,
-                    })
-                    logger.info("[TRAILER-VIDEO] Scene %d done (ken burns)", scene_num)
-                else:
-                    results.append({
-                        "scene": scene_num, "title": scene_data["title"],
-                        "hero_url": scene_data["r2_url"], "video_url": None,
-                        "status": f"failed: {str(e)[:100]}",
-                    })
-                    logger.warning("[TRAILER-VIDEO] Scene %d Ken Burns also failed", scene_num)
-
-                shutil.rmtree(work_dir, ignore_errors=True)
+                    if success and os.path.exists(kb_path):
+                        with open(kb_path, "rb") as f:
+                            kb_bytes = f.read()
+                        r2_key = f"sse/studio/projects/{project_id}/clips/scene_{scene_num:02d}.mp4"
+                        stored_url = await store_bytes(kb_bytes, r2_key, "video/mp4")
+                        results.append({
+                            "scene": scene_num, "title": scene_data["title"],
+                            "hero_url": scene_data["r2_url"], "video_url": stored_url,
+                            "status": "ken_burns", "cost": 0,
+                        })
+                        logger.info("[TRAILER-VIDEO] Scene %d done (ken burns)", scene_num)
+                    else:
+                        results.append({
+                            "scene": scene_num, "title": scene_data["title"],
+                            "hero_url": scene_data["r2_url"], "video_url": None,
+                            "status": f"failed: {str(e)[:100]}",
+                        })
+                        logger.warning("[TRAILER-VIDEO] Scene %d Ken Burns also failed", scene_num)
+                finally:
+                    shutil.rmtree(work_dir, ignore_errors=True)
 
             await asyncio.sleep(8)
 
@@ -479,6 +570,740 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
     logger.info("[TRAILER-VIDEO] Complete: %d/%d clips, $%.2f",
                 video_manifest["success"], video_manifest["total"], video_manifest["total_cost"])
     return results
+
+
+# ---------------------------------------------------------------------------
+#  Reusable Video-from-Image helper (supports end_frame interpolation)
+# ---------------------------------------------------------------------------
+
+async def _generate_video_from_image(
+    image_url: str,
+    motion_prompt: str,
+    end_frame_url: str | None = None,
+    duration_seconds: int = 8,
+) -> dict | None:
+    """Generate an 8s motion clip from a hero image, optionally interpolating toward end_frame.
+
+    Returns dict with video_url, cost, etc. on success or None on failure.
+    """
+    payload: dict = {
+        "model": "grok-imagine-video",
+        "prompt": motion_prompt,
+        "image_url": image_url,
+    }
+    if end_frame_url:
+        payload["end_frame"] = end_frame_url
+
+    from app.sse.infrastructure.grok_imagine_client import (
+        _get_api_key, _get_fallback_key, _get_session, _headers_for,
+        _VIDEO_URL,
+    )
+
+    key = _get_api_key()
+    fallback = _get_fallback_key()
+    session = _get_session()
+    video_id: str | None = None
+
+    for api_key in (key, fallback):
+        if not api_key:
+            continue
+        try:
+            async with session.post(_VIDEO_URL, json=payload, headers=_headers_for(api_key)) as resp:
+                if resp.status == 429 and api_key == key:
+                    continue
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.warning("[VIDEO-GEN] HTTP %d: %s", resp.status, body[:300])
+                    continue
+                data = await resp.json()
+                video_id = data.get("request_id") or data.get("id")
+                break
+        except Exception as e:
+            logger.warning("[VIDEO-GEN] Request error: %s", e)
+
+    if not video_id:
+        return None
+
+    for attempt in range(60):
+        await asyncio.sleep(5)
+        try:
+            poll = await poll_video_status(video_id)
+        except Exception as e:
+            logger.warning("[VIDEO-GEN] Poll error attempt %d: %s", attempt, e)
+            continue
+
+        if poll["status"] == "completed" and poll.get("url"):
+            return {
+                "video_url": poll["url"],
+                "video": {"url": poll["url"], "duration": poll.get("duration", 8)},
+                "cost": 4.00,
+                "progress": 100,
+            }
+        if poll["status"] == "failed":
+            logger.warning("[VIDEO-GEN] Generation failed for %s", video_id)
+            return None
+        if attempt % 6 == 0:
+            logger.info("[VIDEO-GEN] Polling %s — progress %s%%", video_id, poll.get("progress", "?"))
+
+    logger.warning("[VIDEO-GEN] Timeout polling %s", video_id)
+    return None
+
+
+# ---------------------------------------------------------------------------
+#  Last-Frame Extraction (FFmpeg)
+# ---------------------------------------------------------------------------
+
+BRANCH_POINTS = [1, 8, 15]
+
+
+def _extract_last_frame(video_bytes: bytes, scene_num: int) -> bytes | None:
+    """Extract the last frame of a video as PNG bytes. Returns None on failure."""
+    work_dir = tempfile.mkdtemp(prefix=f"lastframe_{scene_num}_")
+    try:
+        vid_path = os.path.join(work_dir, f"scene_{scene_num:02d}.mp4")
+        frame_path = os.path.join(work_dir, f"scene_{scene_num:02d}_last.png")
+        with open(vid_path, "wb") as f:
+            f.write(video_bytes)
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-sseof", "-0.1", "-i", vid_path, "-frames:v", "1", frame_path],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0 or not os.path.exists(frame_path):
+            return None
+        with open(frame_path, "rb") as f:
+            return f.read()
+    except Exception as e:
+        logger.warning("[LAST-FRAME] Scene %d extraction failed: %s", scene_num, e)
+        return None
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+#  Interpolated Pipeline (start_frame + end_frame — DEFAULT mode)
+# ---------------------------------------------------------------------------
+
+async def generate_interpolated_trailer(
+    project_id: str, resume_from: int | None = None,
+) -> list[dict]:
+    """Generate trailer using start+end frame interpolation.
+
+    Requires all 19 hero images pre-generated (status=success in manifest).
+    Produces 18 transition clips (N→N+1) + 1 end card = 19 videos.
+    Checkpoint saved after each successful clip.
+    """
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest or not manifest.get("scenes"):
+        manifest = await _build_manifest_from_individual_images(project_id)
+    if not manifest or not manifest.get("scenes"):
+        logger.warning("[INTERPOLATE] No manifest or images for project %s", project_id)
+        return []
+
+    scenes = sorted(
+        [s for s in manifest["scenes"] if s.get("status") == "success"],
+        key=lambda s: s["scene"],
+    )
+    if len(scenes) < 2:
+        logger.warning("[INTERPOLATE] Need at least 2 scenes, got %d", len(scenes))
+        return []
+
+    motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+    chain_state = manifest.get("chain_state", {})
+    results: list[dict] = chain_state.get("completed_clips", [])
+    start_idx = 0
+
+    if resume_from is not None:
+        for idx, s in enumerate(scenes[:-1]):
+            if s["scene"] >= resume_from:
+                start_idx = idx
+                break
+
+    async with GROK_IMAGINE_LOCK:
+        for i in range(start_idx, len(scenes) - 1):
+            start_scene = scenes[i]
+            end_scene = scenes[i + 1]
+            motion = motion_map.get(start_scene["scene"], {"motion": "Smooth cinematic transition"})
+
+            logger.info("[INTERPOLATE] Transition %d→%d...", start_scene["scene"], end_scene["scene"])
+
+            video_result = await _generate_video_from_image(
+                image_url=start_scene["r2_url"],
+                motion_prompt=STYLE_PREFIX + motion["motion"],
+                end_frame_url=end_scene["r2_url"],
+            )
+
+            if video_result and video_result.get("video_url"):
+                video_url = video_result["video_url"]
+                try:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as dl:
+                        async with dl.get(video_url) as vr:
+                            if vr.status == 200:
+                                vid_bytes = await vr.read()
+                                r2_key = (
+                                    f"sse/studio/projects/{project_id}/clips/"
+                                    f"transition_{start_scene['scene']:02d}_to_{end_scene['scene']:02d}.mp4"
+                                )
+                                stored = await store_bytes(vid_bytes, r2_key, "video/mp4")
+                                video_url = stored
+                except Exception as e:
+                    logger.warning("[INTERPOLATE] R2 upload failed: %s", e)
+
+                results.append({
+                    "from_scene": start_scene["scene"],
+                    "to_scene": end_scene["scene"],
+                    "video_url": video_url,
+                    "status": "success",
+                    "cost": 4.00,
+                })
+
+                chain_state = {
+                    "mode": "interpolated",
+                    "last_completed_transition": i,
+                    "completed_clips": results,
+                    "total_cost_so_far": sum(r.get("cost", 0) for r in results),
+                }
+                manifest["chain_state"] = chain_state
+                await _save_manifest_to_r2(project_id, manifest)
+            else:
+                results.append({
+                    "from_scene": start_scene["scene"],
+                    "to_scene": end_scene["scene"],
+                    "video_url": None,
+                    "status": "failed",
+                    "cost": 0,
+                })
+
+            await asyncio.sleep(8)
+
+        # End card (last scene standalone)
+        last_scene = scenes[-1]
+        logger.info("[INTERPOLATE] End card scene %d...", last_scene["scene"])
+        end_card = await _generate_video_from_image(
+            image_url=last_scene["r2_url"],
+            motion_prompt="Golden text fades in letter by letter with shimmer particle effects",
+        )
+        if end_card and end_card.get("video_url"):
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as dl:
+                    async with dl.get(end_card["video_url"]) as vr:
+                        if vr.status == 200:
+                            vid_bytes = await vr.read()
+                            r2_key = f"sse/studio/projects/{project_id}/clips/endcard_{last_scene['scene']:02d}.mp4"
+                            stored = await store_bytes(vid_bytes, r2_key, "video/mp4")
+                            end_card["video_url"] = stored
+            except Exception:
+                pass
+            results.append({
+                "from_scene": last_scene["scene"],
+                "to_scene": None,
+                "video_url": end_card["video_url"],
+                "status": "success",
+                "cost": 4.00,
+            })
+
+    video_manifest = {
+        "project_id": project_id,
+        "mode": "interpolated",
+        "generated_at": datetime.utcnow().isoformat(),
+        "clips": results,
+        "total": len(results),
+        "success": sum(1 for r in results if r["status"] == "success"),
+        "total_cost": sum(r.get("cost", 0) for r in results),
+    }
+    await store_bytes(
+        json.dumps(video_manifest, indent=2).encode(),
+        f"sse/studio/projects/{project_id}/video_manifest.json",
+        "application/json",
+    )
+    manifest["chain_state"] = {"mode": "interpolated", "completed": True, "completed_clips": results}
+    await _save_manifest_to_r2(project_id, manifest)
+
+    logger.info("[INTERPOLATE] Complete: %d/%d clips, $%.2f",
+                video_manifest["success"], video_manifest["total"], video_manifest["total_cost"])
+    return results
+
+
+# ---------------------------------------------------------------------------
+#  Chain Pipeline (each scene from previous last frame)
+# ---------------------------------------------------------------------------
+
+async def generate_chain_trailer(
+    project_id: str, resume_from: int | None = None,
+) -> list[dict]:
+    """Generate trailer using progressive chain method.
+
+    Each scene extends from the previous scene's last frame.
+    Branch points get fresh hero images with character references.
+    """
+    manifest = await _load_manifest_from_r2(project_id)
+    if not manifest or not manifest.get("scenes"):
+        manifest = await _build_manifest_from_individual_images(project_id)
+    if not manifest or not manifest.get("scenes"):
+        return []
+
+    scenes = sorted(
+        [s for s in manifest["scenes"] if s.get("status") == "success"],
+        key=lambda s: s["scene"],
+    )
+    motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+
+    chain_state = manifest.get("chain_state", {})
+    results: list[dict] = chain_state.get("completed_clips", [])
+    previous_last_frame_url: str | None = chain_state.get("previous_last_frame_url")
+
+    start_idx = 0
+    if resume_from is not None:
+        for idx, s in enumerate(scenes):
+            if s["scene"] >= resume_from:
+                start_idx = idx
+                break
+
+    async with GROK_IMAGINE_LOCK:
+        for i in range(start_idx, len(scenes)):
+            scene_data = scenes[i]
+            scene_num = scene_data["scene"]
+            motion = motion_map.get(scene_num, {"motion": "Smooth cinematic motion"})
+
+            if scene_num in BRANCH_POINTS or previous_last_frame_url is None:
+                hero_url = scene_data["r2_url"]
+            else:
+                hero_url = previous_last_frame_url
+
+            logger.info("[CHAIN] Scene %d: %s...", scene_num, scene_data.get("title", ""))
+
+            video_result = await _generate_video_from_image(
+                image_url=hero_url,
+                motion_prompt=STYLE_PREFIX + motion["motion"],
+            )
+
+            if video_result and video_result.get("video_url"):
+                video_url = video_result["video_url"]
+                vid_bytes: bytes | None = None
+                try:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as dl:
+                        async with dl.get(video_url) as vr:
+                            if vr.status == 200:
+                                vid_bytes = await vr.read()
+                                r2_key = f"sse/studio/projects/{project_id}/clips/scene_{scene_num:02d}.mp4"
+                                stored = await store_bytes(vid_bytes, r2_key, "video/mp4")
+                                video_url = stored
+                except Exception as e:
+                    logger.warning("[CHAIN] R2 upload failed scene %d: %s", scene_num, e)
+
+                if vid_bytes:
+                    frame_bytes = _extract_last_frame(vid_bytes, scene_num)
+                    if frame_bytes:
+                        frame_r2_key = f"sse/studio/projects/{project_id}/chain/scene_{scene_num:02d}_lastframe.png"
+                        previous_last_frame_url = await store_image(frame_bytes, frame_r2_key)
+                    else:
+                        previous_last_frame_url = None
+
+                results.append({
+                    "scene": scene_num, "title": scene_data.get("title", ""),
+                    "video_url": video_url, "status": "success", "cost": 4.00,
+                })
+            else:
+                results.append({
+                    "scene": scene_num, "title": scene_data.get("title", ""),
+                    "video_url": None, "status": "failed", "cost": 0,
+                })
+
+            chain_state = {
+                "mode": "chain",
+                "last_completed_scene": scene_num,
+                "previous_last_frame_url": previous_last_frame_url,
+                "completed_clips": results,
+                "total_cost_so_far": sum(r.get("cost", 0) for r in results),
+            }
+            manifest["chain_state"] = chain_state
+            await _save_manifest_to_r2(project_id, manifest)
+            await asyncio.sleep(8)
+
+    video_manifest = {
+        "project_id": project_id,
+        "mode": "chain",
+        "generated_at": datetime.utcnow().isoformat(),
+        "clips": results,
+        "total": len(results),
+        "success": sum(1 for r in results if r["status"] == "success"),
+        "total_cost": sum(r.get("cost", 0) for r in results),
+    }
+    await store_bytes(
+        json.dumps(video_manifest, indent=2).encode(),
+        f"sse/studio/projects/{project_id}/video_manifest.json",
+        "application/json",
+    )
+    return results
+
+
+# ---------------------------------------------------------------------------
+#  Cel Animation Compositing
+# ---------------------------------------------------------------------------
+
+def _build_composite_plate(
+    character_ref_images: list[bytes],
+    storyboard_bytes: bytes,
+    previous_frame_bytes: bytes | None,
+) -> bytes:
+    """Build a composite reference plate: [char refs | storyboard | prev frame]."""
+    import io
+    from PIL import Image
+
+    storyboard_img = Image.open(io.BytesIO(storyboard_bytes)).convert("RGB")
+    sw, sh = storyboard_img.size
+
+    ref_strip_width = sw // 3
+    has_prev = previous_frame_bytes is not None
+    canvas_width = ref_strip_width + sw + (ref_strip_width if has_prev else 0)
+    canvas = Image.new("RGB", (canvas_width, sh), (0, 0, 0))
+
+    if character_ref_images:
+        ref_height = sh // max(len(character_ref_images), 1)
+        y_offset = 0
+        for ref_bytes in character_ref_images:
+            ref_img = Image.open(io.BytesIO(ref_bytes)).convert("RGB")
+            ref_img = ref_img.resize((ref_strip_width, ref_height))
+            canvas.paste(ref_img, (0, y_offset))
+            y_offset += ref_height
+
+    canvas.paste(storyboard_img, (ref_strip_width, 0))
+
+    if previous_frame_bytes:
+        prev_img = Image.open(io.BytesIO(previous_frame_bytes)).convert("RGB")
+        prev_img = prev_img.resize((ref_strip_width, sh))
+        canvas.paste(prev_img, (ref_strip_width + sw, 0))
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+async def generate_cel_animation_clip(
+    project_id: str,
+    scene_num: int,
+    character_refs: dict[str, str | None],
+    storyboard_url: str,
+    previous_last_frame_url: str | None,
+    motion_prompt: str,
+) -> dict:
+    """Generate a single scene using cel animation composite method."""
+    scene_def = next(
+        (s for s in (_load_preset("thera_world_origin") if _PRESETS_DIR.exists() else [])
+         if s.get("scene") == scene_num),
+        {},
+    )
+    scene_characters = scene_def.get("characters", [])
+
+    ref_images: list[bytes] = []
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+        for char in scene_characters[:3]:
+            url = character_refs.get(char)
+            if not url:
+                continue
+            try:
+                async with sess.get(url) as r:
+                    if r.status == 200:
+                        ref_images.append(await r.read())
+            except Exception:
+                pass
+
+        try:
+            async with sess.get(storyboard_url) as r:
+                storyboard_bytes = await r.read() if r.status == 200 else b""
+        except Exception:
+            storyboard_bytes = b""
+
+        prev_bytes: bytes | None = None
+        if previous_last_frame_url:
+            try:
+                async with sess.get(previous_last_frame_url) as r:
+                    if r.status == 200:
+                        prev_bytes = await r.read()
+            except Exception:
+                pass
+
+    if not storyboard_bytes:
+        return {"scene": scene_num, "status": "failed_no_storyboard"}
+
+    composite_bytes = _build_composite_plate(ref_images, storyboard_bytes, prev_bytes)
+    composite_r2_key = f"sse/studio/projects/{project_id}/composites/scene_{scene_num:02d}_composite.jpg"
+    composite_url = await store_image(composite_bytes, composite_r2_key)
+
+    char_names = [
+        CHARACTER_REFERENCES[c]["inline_desc"] for c in scene_characters if c in CHARACTER_REFERENCES
+    ]
+    animation_prompt = (
+        f"{STYLE_PREFIX}"
+        f"ANIMATE the center panel of this reference plate. "
+        f"The left panel shows the exact character design to use — "
+        f"maintain these exact proportions, clothing, and features. "
+        f"{'The right panel shows what just happened — continue smoothly from that motion. ' if prev_bytes else ''}"
+        f"Characters in scene: {'; '.join(char_names)}. "
+        f"Action: {motion_prompt}"
+    )
+
+    video_result = await _generate_video_from_image(
+        image_url=composite_url,
+        motion_prompt=animation_prompt,
+    )
+
+    if not video_result or not video_result.get("video_url"):
+        return {"scene": scene_num, "status": "failed"}
+
+    work_dir = tempfile.mkdtemp(prefix=f"cel_{scene_num}_")
+    try:
+        video_url = video_result["video_url"]
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
+            async with sess.get(video_url) as vr:
+                if vr.status != 200:
+                    return {"scene": scene_num, "status": "failed_download"}
+                vid_bytes = await vr.read()
+
+        raw_path = os.path.join(work_dir, f"scene_{scene_num:02d}_raw.mp4")
+        cropped_path = os.path.join(work_dir, f"scene_{scene_num:02d}_cropped.mp4")
+        with open(raw_path, "wb") as f:
+            f.write(vid_bytes)
+
+        import io
+        from PIL import Image
+        sb_img = Image.open(io.BytesIO(storyboard_bytes)).convert("RGB")
+        sw, sh = sb_img.size
+        crop_x = sw // 3
+
+        subprocess.run([
+            "ffmpeg", "-y", "-i", raw_path,
+            "-vf", f"crop={sw}:{sh}:{crop_x}:0",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
+            cropped_path,
+        ], capture_output=True, timeout=60)
+
+        if not os.path.exists(cropped_path):
+            cropped_path = raw_path
+
+        with open(cropped_path, "rb") as f:
+            cropped_bytes = f.read()
+
+        clip_r2_key = f"sse/studio/projects/{project_id}/clips/scene_{scene_num:02d}.mp4"
+        clip_url = await store_bytes(cropped_bytes, clip_r2_key, "video/mp4")
+
+        frame_bytes = _extract_last_frame(cropped_bytes, scene_num)
+        last_frame_url = None
+        if frame_bytes:
+            frame_key = f"sse/studio/projects/{project_id}/chain/scene_{scene_num:02d}_lastframe.png"
+            last_frame_url = await store_image(frame_bytes, frame_key)
+
+        return {
+            "scene": scene_num,
+            "clip_url": clip_url,
+            "last_frame_url": last_frame_url,
+            "status": "success",
+            "cost": 4.00,
+        }
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+#  LoRA Training Variations
+# ---------------------------------------------------------------------------
+
+LORA_TRAINING_VARIATIONS = [
+    "standing facing camera, neutral pose",
+    "looking to the left, three-quarter view",
+    "looking to the right, three-quarter view",
+    "sitting on the ground, relaxed",
+    "running to the right, dynamic action pose",
+    "arms raised above head, joyful expression",
+    "looking down, thoughtful expression",
+    "looking up at the sky, wonder on face",
+    "crouching down, examining something on the ground",
+    "side profile, walking left",
+    "back view, looking over shoulder",
+    "close-up portrait, head and shoulders only",
+    "full body, standing in meadow with wind blowing",
+    "full body, dramatic lighting from below",
+    "full body, soft golden sunset lighting",
+    "medium shot, hands together, contemplative",
+    "dynamic pose, leaping forward",
+    "sitting on a rock, legs dangling",
+    "standing in rain, looking up with determination",
+    "gentle smile, holding out hand toward camera",
+]
+
+
+async def generate_lora_training_set(
+    project_id: str, character: str, count: int = 20,
+) -> list[dict]:
+    """Generate training images for LoRA fine-tuning of a specific character."""
+    ref = CHARACTER_REFERENCES.get(character)
+    if not ref:
+        raise ValueError(f"Unknown character: {character}")
+
+    results: list[dict] = []
+    async with GROK_IMAGINE_LOCK:
+        for i in range(min(count, len(LORA_TRAINING_VARIATIONS))):
+            variation = LORA_TRAINING_VARIATIONS[i]
+            prompt = f"{STYLE_PREFIX}{ref['ref_prompt']}, {variation}"
+            try:
+                img_bytes = await generate_image(prompt)
+                r2_key = f"sse/studio/projects/{project_id}/lora/{character}/train_{i:02d}.png"
+                r2_url = await store_image(img_bytes, r2_key)
+                results.append({"index": i, "r2_url": r2_url, "status": "success"})
+            except Exception as e:
+                results.append({"index": i, "r2_url": None, "status": f"error: {str(e)[:100]}"})
+            await asyncio.sleep(3)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+#  Narration Audio Merge (into stitched trailer)
+# ---------------------------------------------------------------------------
+
+async def _merge_narration_audio(
+    video_path: str,
+    narration_files: dict[int, str],
+    scene_offsets: dict[int, float],
+    output_path: str,
+) -> bool:
+    """Overlay positioned narration audio onto a video.
+
+    For each scene with narration, pads with silence to match its offset,
+    then mixes all tracks and overlays onto the video.
+    """
+    if not narration_files:
+        return False
+
+    work_dir = tempfile.mkdtemp(prefix="narr_merge_")
+    try:
+        positioned_tracks: list[str] = []
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+            for scene_num, narr_url in sorted(narration_files.items()):
+                offset = scene_offsets.get(scene_num, 0.0)
+                local_narr = os.path.join(work_dir, f"narr_{scene_num:02d}.wav")
+                try:
+                    async with sess.get(narr_url) as r:
+                        if r.status == 200:
+                            with open(local_narr, "wb") as f:
+                                f.write(await r.read())
+                        else:
+                            continue
+                except Exception:
+                    continue
+
+                positioned = os.path.join(work_dir, f"positioned_{scene_num:02d}.wav")
+                if offset > 0.1:
+                    subprocess.run([
+                        "ffmpeg", "-y",
+                        "-f", "lavfi", "-t", f"{offset:.2f}", "-i", "anullsrc=r=44100:cl=mono",
+                        "-i", local_narr,
+                        "-filter_complex", "[0][1]concat=n=2:v=0:a=1",
+                        positioned,
+                    ], capture_output=True, timeout=30)
+                else:
+                    shutil.copy(local_narr, positioned)
+
+                if os.path.exists(positioned):
+                    positioned_tracks.append(positioned)
+
+        if not positioned_tracks:
+            return False
+
+        combined = os.path.join(work_dir, "combined_narration.wav")
+        if len(positioned_tracks) == 1:
+            shutil.copy(positioned_tracks[0], combined)
+        else:
+            inputs: list[str] = []
+            filter_parts: list[str] = []
+            for idx, t in enumerate(positioned_tracks):
+                inputs.extend(["-i", t])
+                filter_parts.append(f"[{idx}]")
+            amix_filter = "".join(filter_parts) + f"amix=inputs={len(positioned_tracks)}:duration=longest"
+            cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", amix_filter, combined]
+            subprocess.run(cmd, capture_output=True, timeout=60)
+
+        if not os.path.exists(combined):
+            return False
+
+        subprocess.run([
+            "ffmpeg", "-y", "-i", video_path, "-i", combined,
+            "-c:v", "copy", "-c:a", "aac", "-map", "0:v", "-map", "1:a",
+            "-shortest", output_path,
+        ], capture_output=True, timeout=300)
+        return os.path.exists(output_path)
+    except Exception as e:
+        logger.warning("[NARR-MERGE] Error: %s", e)
+        return False
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+#  Unified Pipeline Orchestrator
+# ---------------------------------------------------------------------------
+
+async def generate_congruent_trailer(
+    project_id: str,
+    mode: str = "interpolated",
+    use_lora: bool = False,
+    resume_from: int | None = None,
+) -> list[dict]:
+    """Master orchestrator for all congruent generation modes.
+
+    Modes: interpolated (default), chain, cel, independent.
+    """
+    if mode == "interpolated":
+        return await generate_interpolated_trailer(project_id, resume_from=resume_from)
+    elif mode == "chain":
+        return await generate_chain_trailer(project_id, resume_from=resume_from)
+    elif mode == "cel":
+        manifest = await _load_manifest_from_r2(project_id)
+        if not manifest or not manifest.get("scenes"):
+            return []
+        scenes = sorted(
+            [s for s in manifest["scenes"] if s.get("status") == "success"],
+            key=lambda s: s["scene"],
+        )
+        refs = manifest.get("character_refs", {})
+        motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+        results: list[dict] = []
+        previous_last_frame: str | None = None
+
+        for scene_data in scenes:
+            scene_num = scene_data["scene"]
+            if scene_num in BRANCH_POINTS:
+                previous_last_frame = None
+            motion = motion_map.get(scene_num, {"motion": "Smooth cinematic motion"})
+            result = await generate_cel_animation_clip(
+                project_id=project_id,
+                scene_num=scene_num,
+                character_refs=refs,
+                storyboard_url=scene_data["r2_url"],
+                previous_last_frame_url=previous_last_frame,
+                motion_prompt=motion["motion"],
+            )
+            results.append(result)
+            if result.get("status") == "success" and result.get("last_frame_url"):
+                previous_last_frame = result["last_frame_url"]
+            await asyncio.sleep(8)
+
+        video_manifest = {
+            "project_id": project_id,
+            "mode": "cel",
+            "generated_at": datetime.utcnow().isoformat(),
+            "clips": results,
+            "total": len(results),
+            "success": sum(1 for r in results if r.get("status") == "success"),
+            "total_cost": sum(r.get("cost", 0) for r in results),
+        }
+        await store_bytes(
+            json.dumps(video_manifest, indent=2).encode(),
+            f"sse/studio/projects/{project_id}/video_manifest.json",
+            "application/json",
+        )
+        return results
+    else:
+        return await generate_motion_clips(project_id)
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +1506,16 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
         ], capture_output=True, timeout=300)
 
         final_output = raw_output
+
+        if include_narration and narration_files:
+            scene_offsets: dict[int, float] = {}
+            cumulative = 0.0
+            for clip in successful:
+                scene_offsets[clip["scene"]] = cumulative
+                cumulative += 8.0
+            narrated = os.path.join(work_dir, "trailer_narrated.mp4")
+            if await _merge_narration_audio(raw_output, narration_files, scene_offsets, narrated):
+                final_output = narrated
 
         if output_format == "9:16":
             vert = os.path.join(work_dir, "trailer_vertical.mp4")

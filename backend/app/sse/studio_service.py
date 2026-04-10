@@ -29,11 +29,15 @@ _AZURE_API_KEY = os.getenv("AZURE_API_KEY", "")
 _AZURE_TTS_DEPLOYMENT = os.getenv("AZURE_OPENAI_MINI_TTS_DEPLOYMENT", "gpt-4o-mini-tts")
 
 _COST_REDIS_KEY = "sse:studio:daily_cost"
-_COST_CAP_CENTS = int(os.getenv("SSE_STUDIO_DAILY_CAP_CENTS", "2500"))
+_COST_CAP_CENTS = int(os.getenv("SSE_STUDIO_DAILY_CAP_CENTS", "15000"))
 
 COST_PER_IMAGE_CENTS = 7
-COST_PER_VIDEO_CENTS = 25
+COST_PER_VIDEO_CENTS = 400
 COST_PER_NARRATION_CENTS = 1
+
+_replicate_available = bool(os.getenv("REPLICATE_API_TOKEN"))
+if not _replicate_available:
+    logger.warning("[STUDIO] REPLICATE_API_TOKEN not set — LoRA features disabled")
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +265,7 @@ async def generate_narration(text: str, voice: str, project_id: str, scene_num: 
 
     await asyncio.get_event_loop().run_in_executor(None, _upload)
     await _track_cost(COST_PER_NARRATION_CENTS, redis)
-    return f"{_r2._R2_PUBLIC_BASE}/{r2_key}"
+    return _r2.presigned_url(r2_key) or f"{_r2._R2_PUBLIC_BASE}/{r2_key}"
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +294,7 @@ async def list_library(filter_type: str = "all") -> list[dict]:
                         continue
                     items.append({
                         "key": key,
-                        "url": f"{_r2._R2_PUBLIC_BASE}/{key}",
+                        "url": _r2.presigned_url(key) or f"{_r2._R2_PUBLIC_BASE}/{key}",
                         "size_bytes": obj.get("Size", 0),
                         "last_modified": obj["LastModified"].isoformat() if obj.get("LastModified") else None,
                         "type": media_type,
@@ -392,6 +396,50 @@ async def get_project(project_id: str, db_pool) -> dict | None:
     if not row:
         return None
     return _row_to_dict(row)
+
+
+async def get_project_hydrated(project_id: str, db_pool) -> dict | None:
+    """Get project with scenes hydrated from R2 asset URLs."""
+    proj = await get_project(project_id, db_pool)
+    if not proj:
+        return None
+
+    from app.sse.infrastructure.r2_storage import list_objects, presigned_url, _R2_PUBLIC_BASE
+
+    prefix = f"sse/studio/projects/{project_id}/"
+    objects = await list_objects(prefix)
+
+    asset_map: dict[int, dict] = {}
+    for obj in objects:
+        key = obj["Key"]
+        filename = key.split("/")[-1]
+        if "/" in filename or filename.startswith("refs"):
+            continue
+        name, _, ext = filename.rpartition(".")
+        if not name.isdigit():
+            continue
+        scene_num = int(name)
+        url = presigned_url(key) or f"{_R2_PUBLIC_BASE}/{key}"
+        entry = asset_map.setdefault(scene_num, {})
+        if ext == "png":
+            entry["image_url"] = url
+        elif ext == "mp4":
+            entry["video_url"] = url
+        elif ext in ("mp3", "wav", "ogg"):
+            entry["audio_url"] = url
+
+    manifest = proj.get("manifest", {})
+    if isinstance(manifest, str):
+        manifest = json.loads(manifest)
+    scenes = manifest.get("scenes", [])
+
+    for s in scenes:
+        sn = s.get("scene", 0)
+        if sn in asset_map:
+            s.update(asset_map[sn])
+
+    proj["manifest"] = manifest
+    return proj
 
 
 async def list_projects(db_pool) -> list[dict]:
@@ -578,3 +626,75 @@ async def get_trailer_status(project_id: str) -> dict:
     if not manifest:
         return {"status": "not_started"}
     return manifest
+
+
+# ---------------------------------------------------------------------------
+#  Phase 2: LoRA Character Lock Pipeline
+# ---------------------------------------------------------------------------
+
+def _require_replicate() -> None:
+    if not _replicate_available:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=501, detail="LoRA features require REPLICATE_API_TOKEN")
+
+
+async def start_lora_training(character_key: str, training_images_zip_url: str) -> dict:
+    """Kick off LoRA training on Replicate for a character."""
+    _require_replicate()
+    from app.sse.infrastructure.replicate_client import train_lora
+    return await train_lora(
+        training_images_url=training_images_zip_url,
+        trigger_word=f"THERA_{character_key.upper()}",
+    )
+
+
+async def poll_lora_training(training_id: str) -> dict:
+    """Check LoRA training status."""
+    _require_replicate()
+    from app.sse.infrastructure.replicate_client import poll_training
+    return await poll_training(training_id)
+
+
+async def generate_with_lora(prompt: str, lora_urls: list[str], width: int = 1024, height: int = 576) -> list[str]:
+    """Generate images using trained LoRA weights."""
+    _require_replicate()
+    from app.sse.infrastructure.replicate_client import generate_with_loras
+    return await generate_with_loras(prompt, lora_urls, width=width, height=height)
+
+
+async def generate_lora_training_images(character_key: str, project_id: str, redis=None) -> dict:
+    """Generate a diverse set of training images for LoRA fine-tuning."""
+    from app.sse.trailer_generator import generate_lora_training_set
+    num_images = 20
+    await _check_cost_budget(COST_PER_IMAGE_CENTS * num_images, redis)
+    results = await generate_lora_training_set(character_key, project_id)
+    await _track_cost(COST_PER_IMAGE_CENTS * len(results), redis)
+    return {"character": character_key, "images": results, "count": len(results)}
+
+
+# ---------------------------------------------------------------------------
+#  Phase 2: Congruent Generation Pipelines
+# ---------------------------------------------------------------------------
+
+async def generate_congruent_clips(project_id: str, mode: str, db_pool, redis=None, resume_from: int | None = None) -> dict:
+    """Run a congruent generation pipeline (interpolated/chain/cel/independent)."""
+    from app.sse.trailer_generator import generate_congruent_trailer
+    results = await generate_congruent_trailer(project_id, mode=mode, resume_from=resume_from)
+    cost = sum(r.get("cost", 0) for r in results)
+    total_cost_cents = int(cost * 100)
+    await _track_cost(total_cost_cents, redis)
+    if db_pool:
+        await update_project(project_id, None, f"{mode}_generated", total_cost_cents, db_pool)
+    return {
+        "project_id": project_id,
+        "mode": mode,
+        "clips": results,
+        "total": len(results),
+        "success": sum(1 for r in results if r.get("status") == "success"),
+        "total_cost_cents": total_cost_cents,
+    }
+
+
+async def generate_interpolated(project_id: str, db_pool, redis=None, resume_from: int | None = None) -> dict:
+    """Shortcut for interpolated trailer generation (recommended default)."""
+    return await generate_congruent_clips(project_id, "interpolated", db_pool, redis, resume_from)

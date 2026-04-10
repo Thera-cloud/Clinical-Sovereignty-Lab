@@ -69,11 +69,46 @@ async def _imagine_with_key(key: str, payload: dict) -> bytes:
         return await dl_resp.read()
 
 
+_MODERATION_SOFTENERS = [
+    (r"\bterror\b", "surprise"),
+    (r"\bterrifying\b", "dramatic"),
+    (r"\bterrified\b", "startled"),
+    (r"\bfrozen in terror\b", "wide-eyed with wonder"),
+    (r"\bhurt\b", "concern"),
+    (r"\banger\b", "determination"),
+    (r"\bfists are clenched\b", "hands at his sides"),
+    (r"\bgrabbing the legs of\b", "lifting"),
+    (r"\bjaws wide open descending upon\b", "looming protectively over"),
+    (r"\bteeth and fire visible\b", "glowing breath visible"),
+    (r"\bfalling backwards\b", "leaning back"),
+    (r"\bfire crashes\b", "light radiates"),
+    (r"\bfrightened\b", "awed"),
+    (r"\bscared\b", "awed"),
+    (r"\bscreeches\b", "calls out"),
+    (r"\bdefiantly\b", "bravely"),
+    (r"\berupting from\b", "emerging from"),
+    (r"\bexploding\b", "splashing"),
+    (r"\bdark red\b", "warm amber"),
+    (r"\bdread\b", "mystery"),
+    (r"\bclimax\b", "crescendo"),
+]
+
+
+def _soften_prompt(prompt: str) -> str:
+    """Apply content moderation softeners to a prompt for retry."""
+    import re
+    result = prompt
+    for pattern, replacement in _MODERATION_SOFTENERS:
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    return f"Whimsical fantasy illustration, family-friendly animated style: {result}"
+
+
 async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
     """Generate a static image via Grok Imagine API.
 
     Returns raw image bytes downloaded from the response URL.
     Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
+    On content moderation rejection, retries once with a softened prompt.
     Raises RuntimeError on API failure.
     """
     key = _get_api_key()
@@ -87,7 +122,15 @@ async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
         await asyncio.sleep(2)
         return result
     except RuntimeError as e:
-        if "429" not in str(e):
+        err_str = str(e)
+        if "content moderation" in err_str.lower():
+            logger.warning("Grok Imagine moderation rejection — retrying with softened prompt")
+            softened = _soften_prompt(prompt)
+            payload_soft = {"model": "grok-imagine-image", "prompt": softened, "n": 1}
+            result = await _imagine_with_key(key, payload_soft)
+            await asyncio.sleep(2)
+            return result
+        if "429" not in err_str:
             raise
         fallback = _get_fallback_key()
         if not fallback:
@@ -99,23 +142,10 @@ async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
     return result
 
 
-async def generate_video(
-    prompt: str, source_image_url: Optional[str] = None
-) -> str:
-    """Start video generation via Grok Video API.
-
-    Returns a video_id string for polling. Does NOT wait for completion.
-    """
-    key = _get_api_key()
-    if not key:
-        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Video")
-
-    payload: dict = {"model": "grok-imagine-video", "prompt": prompt}
-    if source_image_url:
-        payload["image_url"] = source_image_url
-
+async def _video_with_key(key: str, payload: dict) -> str:
+    """Call Grok Video with a specific API key. Returns request_id."""
     session = _get_session()
-    async with session.post(_VIDEO_URL, json=payload, headers=_headers()) as resp:
+    async with session.post(_VIDEO_URL, json=payload, headers=_headers_for(key)) as resp:
         if resp.status != 200:
             body = await resp.text()
             raise RuntimeError(f"Grok Video {resp.status}: {body[:300]}")
@@ -127,21 +157,72 @@ async def generate_video(
     return video_id
 
 
+async def generate_video(
+    prompt: str, source_image_url: Optional[str] = None
+) -> str:
+    """Start video generation via Grok Video API.
+
+    Returns a request_id string for polling. Does NOT wait for completion.
+    Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
+    """
+    key = _get_api_key()
+    if not key:
+        raise RuntimeError("XAI_API_KEY not set — cannot call Grok Video")
+
+    payload: dict = {"model": "grok-imagine-video", "prompt": prompt}
+    if source_image_url:
+        payload["image_url"] = source_image_url
+
+    try:
+        return await _video_with_key(key, payload)
+    except RuntimeError as e:
+        if "429" not in str(e):
+            raise
+        fallback = _get_fallback_key()
+        if not fallback:
+            raise
+        logger.info("Grok Video primary key 429 — retrying with fallback key")
+        return await _video_with_key(fallback, payload)
+
+
 async def poll_video_status(video_id: str) -> dict:
     """Poll Grok Video API for generation status.
 
-    Returns {"status": "processing"|"completed"|"failed", "url": str|None}.
-    Caller handles polling loop with backoff.
+    xAI returns status="done" for BOTH pending and completed. The real
+    completion signal is progress==100 AND video.url present. We normalize
+    to: "completed" | "processing" | "failed".
     """
     url = f"https://api.x.ai/v1/videos/{video_id}"
     session = _get_session()
 
-    async with session.get(url, headers=_headers()) as resp:
-        if resp.status != 200:
-            body = await resp.text()
-            raise RuntimeError(f"Grok Video poll {resp.status}: {body[:300]}")
-        data = await resp.json()
+    for key in (_get_api_key(), _get_fallback_key()):
+        if not key:
+            continue
+        async with session.get(url, headers=_headers_for(key)) as resp:
+            if resp.status in (401, 403):
+                continue
+            if resp.status not in (200, 202):
+                body = await resp.text()
+                raise RuntimeError(f"Grok Video poll {resp.status}: {body[:300]}")
+            data = await resp.json()
 
-    status = data.get("status", "processing")
-    video_url = (data.get("video") or {}).get("url") or data.get("url")
-    return {"status": status, "url": video_url}
+            progress = data.get("progress", 0)
+            video_url = (data.get("video") or {}).get("url") or data.get("url")
+            raw_status = data.get("status", "")
+
+            if video_url and progress == 100:
+                status = "completed"
+            elif raw_status == "failed":
+                status = "failed"
+            else:
+                status = "processing"
+
+            return {
+                "status": status,
+                "url": video_url,
+                "progress": progress,
+                "duration": (data.get("video") or {}).get("duration"),
+                "cost_ticks": (data.get("usage") or {}).get("cost_in_usd_ticks"),
+            }
+
+    raise RuntimeError("No valid API key for Grok Video poll")

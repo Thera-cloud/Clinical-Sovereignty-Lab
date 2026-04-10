@@ -102,6 +102,28 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 const API = location.origin;
 
+function _recoverAuth() {
+  if (sessionStorage.getItem('sc_token')) return;
+  const hash = location.hash.slice(1);
+  if (hash) {
+    const ps = new URLSearchParams(hash);
+    if (ps.get('t')) { try { sessionStorage.setItem('sc_token', ps.get('t')); } catch(e){} }
+    if (ps.get('u')) { try { sessionStorage.setItem('username', ps.get('u')); } catch(e){} }
+    if (ps.get('p')) { try { sessionStorage.setItem('profile', ps.get('p')); } catch(e){} }
+    if (ps.get('t')) return;
+  }
+  ['sc_token','sc_username','sc_profile'].forEach(k => {
+    const v = localStorage.getItem(k);
+    if (v) { try { sessionStorage.setItem(k === 'sc_token' ? 'sc_token' : k === 'sc_username' ? 'username' : 'profile', v); } catch(e){} }
+  });
+  if (sessionStorage.getItem('sc_token')) return;
+  const ck = document.cookie.split(';').reduce((a,c) => { const [k,v] = c.trim().split('='); a[k] = decodeURIComponent(v||''); return a; }, {});
+  if (ck.sc_token) { try { sessionStorage.setItem('sc_token', ck.sc_token); } catch(e){} }
+  if (ck.sc_username) { try { sessionStorage.setItem('username', ck.sc_username); } catch(e){} }
+  if (ck.sc_profile) { try { sessionStorage.setItem('profile', ck.sc_profile); } catch(e){} }
+}
+_recoverAuth();
+
 function _authHeaders(ct) {
   const t = sessionStorage.getItem('sc_token') || localStorage.getItem('sc_token') || '';
   const h = { 'Authorization': 'Bearer ' + t };
@@ -132,6 +154,22 @@ async function apiFetch(path, opts = {}) {
     }
     return await r.json();
   } catch (e) { console.warn('apiFetch', path, e); throw e; }
+}
+
+function dText(d) {
+  if (!d) return '';
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) return d.filter(x => x && x.text).map(x => x.text).join(' ');
+  if (d.text) return d.text;
+  return '';
+}
+function dHas(d) { return !!dText(d); }
+function dVoice(d) {
+  if (!d) return 'narrator';
+  if (typeof d === 'string') return 'narrator';
+  if (Array.isArray(d) && d.length > 0 && d[0].voice) return d[0].voice;
+  if (d.voice) return d.voice;
+  return 'narrator';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -171,7 +209,7 @@ function ScriptTab({ scenes, setScenes, setTab }) {
       });
       setScenes(d.scenes || []);
       if (d.scenes?.length) {
-        setScript(d.scenes.map(s => `Scene ${s.scene}: ${s.title}\n${s.description}\nDialogue: ${s.dialogue || ''}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
+        setScript(d.scenes.map(s => `Scene ${s.scene}: ${s.title}\n${s.description}\nDialogue: ${dText(s.dialogue)}\nMood: ${s.mood}\nDuration: ${s.duration}s\n`).join('\n'));
       } else if (d.raw) { setScript(d.raw); }
     } catch (e) { alert('Script generation failed: ' + e.message); }
     setLoading('');
@@ -237,7 +275,7 @@ function ScriptTab({ scenes, setScenes, setTab }) {
                   <div style={{flex:1}}>
                     <div style={{fontSize:13,color:'var(--t1)',marginBottom:4}}>{s.title || `Scene ${s.scene||i+1}`}</div>
                     <div style={{fontSize:11,color:'var(--t2)',lineHeight:1.4}}>{(s.description || s.prompt || '').slice(0, 150)}</div>
-                    {s.dialogue && <div style={{fontSize:11,color:'var(--cyan)',marginTop:4}}>"{s.dialogue}"</div>}
+                    {dHas(s.dialogue) && <div style={{fontSize:11,color:'var(--cyan)',marginTop:4}}>"{dText(s.dialogue).slice(0, 120)}"</div>}
                   </div>
                   <span className="mood" style={{fontSize:10,color:'var(--purple)'}}>{s.mood || '—'}</span>
                   <span style={{fontSize:10,color:'var(--t3)',minWidth:30,textAlign:'right'}}>{s.duration||5}s</span>
@@ -274,24 +312,12 @@ function ScriptTab({ scenes, setScenes, setTab }) {
 // ═══════════════════════════════════════════════════════════════════
 //  SCENES TAB
 // ═══════════════════════════════════════════════════════════════════
-function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refreshCost }) {
+function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refreshCost }) {
   const [loading, setLoading] = useState({});
   const [saving, setSaving] = useState(false);
 
-  const ensureProject = async () => {
-    if (projectId) return projectId;
-    try {
-      const d = await apiFetch('/api/sse/admin/studio/projects', {
-        method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes })
-      });
-      setProjectId(d.project_id);
-      return d.project_id;
-    } catch (e) { alert('Failed to create project: ' + e.message); return null; }
-  };
-
   const genImage = async (idx) => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     setLoading(l => ({...l, [`img_${idx}`]: true}));
     try {
@@ -309,7 +335,7 @@ function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refre
   };
 
   const genVideo = async (idx) => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     const s = scenes[idx];
     if (!s.image_url) return alert('Generate an image first');
@@ -328,15 +354,15 @@ function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refre
   };
 
   const genAudio = async (idx, voice) => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     const s = scenes[idx];
-    if (!s.dialogue) return alert('No dialogue for this scene');
+    if (!dHas(s.dialogue)) return alert('No dialogue for this scene');
     setLoading(l => ({...l, [`aud_${idx}`]: true}));
     try {
       const d = await apiFetch('/api/sse/admin/studio/generate-narration', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, text: s.dialogue, voice: voice || 'narrator' })
+        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, text: dText(s.dialogue), voice: voice || dVoice(s.dialogue) })
       });
       const updated = [...scenes];
       updated[idx] = { ...updated[idx], audio_url: d.audio_url };
@@ -355,13 +381,13 @@ function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refre
   };
 
   const saveProject = async () => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     setSaving(true);
     try {
-      await apiFetch('/api/sse/admin/studio/projects', {
-        method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ title: 'Studio Project', scenes })
+      await apiFetch('/api/sse/admin/studio/projects/' + pid, {
+        method: 'PUT', ct: 'application/json',
+        body: JSON.stringify({ manifest: { scenes } })
       });
     } catch (e) { /* ignore if already created */ }
     setSaving(false);
@@ -402,7 +428,7 @@ function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refre
                 <button className="btn btn-sm" onClick={() => genVideo(i)} disabled={loading[`vid_${i}`] || !s.image_url}>
                   {loading[`vid_${i}`] ? <span className="spinner"/> : (s.video_url ? 'Regen Video' : 'Gen Video')}
                 </button>
-                {s.dialogue && (
+                {dHas(s.dialogue) && (
                   <select onChange={e => e.target.value && genAudio(i, e.target.value)} disabled={loading[`aud_${i}`]} style={{width:'auto',fontSize:11,padding:'4px 8px'}}>
                     <option value="">{loading[`aud_${i}`] ? 'Generating...' : (s.audio_url ? 'Regen Audio' : 'Gen Audio')}</option>
                     <option value="narrator">Narrator</option>
@@ -423,7 +449,7 @@ function ScenesTab({ scenes, setScenes, projectId, setProjectId, costInfo, refre
 // ═══════════════════════════════════════════════════════════════════
 //  LIBRARY TAB
 // ═══════════════════════════════════════════════════════════════════
-function LibraryTab() {
+function LibraryTab({ onLoadProject }) {
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState('all');
   const [projects, setProjects] = useState([]);
@@ -521,6 +547,7 @@ function LibraryTab() {
                       <div style={{fontSize:11,color:'var(--t3)'}}>{p.scene_count} scenes &middot; ${((p.actual_cost_cents||0)/100).toFixed(2)} spent &middot; {p.status}</div>
                     </div>
                     <span className={'badge ' + (p.status==='complete'?'badge-green':p.status==='failed'?'badge-red':'badge-gold')}>{p.status}</span>
+                    <button className="btn btn-sm" onClick={() => onLoadProject && onLoadProject(p.project_id)}>Load</button>
                     {(p.status === 'failed' || p.status === 'partial') && (
                       <button className="btn btn-sm btn-danger" onClick={() => cleanProject(p.project_id)}>Clean</button>
                     )}
@@ -558,7 +585,7 @@ function LibraryTab() {
 // ═══════════════════════════════════════════════════════════════════
 //  PIPELINE TAB (Phase 2 — character refs, batch video, stitching)
 // ═══════════════════════════════════════════════════════════════════
-function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost }) {
+function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }) {
   const [charRefs, setCharRefs] = useState(null);
   const [refsLoading, setRefsLoading] = useState(false);
   const [videoStatus, setVideoStatus] = useState(null);
@@ -566,19 +593,8 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
   const [stitchLoading, setStitchLoading] = useState(false);
   const [trailerStatus, setTrailerStatus] = useState(null);
   const [stitchOpts, setStitchOpts] = useState({ include_color_grade: true, include_narration: true, format: '16:9' });
+  const [genMode, setGenMode] = useState('interpolated');
   const pollRef = useRef(null);
-
-  const ensureProject = async () => {
-    if (projectId) return projectId;
-    try {
-      const d = await apiFetch('/api/sse/admin/studio/projects', {
-        method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes })
-      });
-      setProjectId(d.project_id);
-      return d.project_id;
-    } catch (e) { alert('Failed to create project: ' + e.message); return null; }
-  };
 
   const pollVideoStatus = useCallback(async () => {
     if (!projectId) return;
@@ -609,7 +625,7 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
   }, [projectId, videoLoading, stitchLoading, pollVideoStatus, pollTrailerStatus]);
 
   const generateRefs = async () => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     const est = 7 * 0.07;
     if (!confirm(`Generate 7 character reference images (~$${est.toFixed(2)})?`)) return;
@@ -631,9 +647,9 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
   };
 
   const generateAllVideos = async () => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
-    if (!confirm('Generate motion video clips for all scenes? This takes several minutes and costs ~$0.25/scene.')) return;
+    if (!confirm('Generate motion video clips for all scenes (legacy independent mode)? Costs ~$4/scene.')) return;
     setVideoLoading(true);
     try {
       await apiFetch('/api/sse/admin/studio/generate-video-clips', {
@@ -643,8 +659,35 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
     } catch (e) { alert('Video generation failed: ' + e.message); setVideoLoading(false); }
   };
 
+  const generateCongruent = async () => {
+    const pid = await ensureProject(scenes);
+    if (!pid) return;
+    const cost = genMode === 'interpolated' ? '$72' : '$76';
+    if (!confirm(`Generate ${genMode} trailer (~${cost})? This takes several minutes.`)) return;
+    setVideoLoading(true);
+    try {
+      const endpoint = genMode === 'interpolated' ? '/api/sse/admin/studio/generate-interpolated-trailer' : '/api/sse/admin/studio/generate-congruent-clips';
+      const body = genMode === 'interpolated' ? { project_id: pid } : { project_id: pid, mode: genMode };
+      await apiFetch(endpoint, { method: 'POST', ct: 'application/json', body: JSON.stringify(body) });
+    } catch (e) { alert('Generation failed: ' + e.message); setVideoLoading(false); }
+  };
+
+  const resumeGeneration = async () => {
+    const pid = await ensureProject(scenes);
+    if (!pid) return;
+    const resumeFrom = videoStatus?.chain_state?.last_completed_scene;
+    if (!resumeFrom) return alert('No checkpoint found to resume from');
+    setVideoLoading(true);
+    try {
+      await apiFetch('/api/sse/admin/studio/resume-generation', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ project_id: pid, mode: genMode, resume_from: resumeFrom + 1 })
+      });
+    } catch (e) { alert('Resume failed: ' + e.message); setVideoLoading(false); }
+  };
+
   const stitchTrailer = async () => {
-    const pid = await ensureProject();
+    const pid = await ensureProject(scenes);
     if (!pid) return;
     if (!confirm('Stitch all clips into a congruent trailer? This downloads clips, applies color grading, generates narration, and exports.')) return;
     setStitchLoading(true);
@@ -687,15 +730,37 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
         )}
       </div>
 
-      {/* Batch Video Generation */}
+      {/* Congruent Video Generation */}
       <div className="panel">
-        <h2>Motion Video Clips</h2>
+        <h2>Motion Video Generation</h2>
         <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
-          Extend all hero images into 5s motion clips using Grok Video. Falls back to Ken Burns (slow zoom) if Grok Video is unavailable.
+          Generate 8s motion clips. Choose a generation mode based on quality vs cost tradeoff.
         </p>
-        <button className="btn" onClick={generateAllVideos} disabled={videoLoading}>
-          {videoLoading ? <><span className="spinner"/> Generating clips (polling every 10s)...</> : 'Generate All Video Clips'}
-        </button>
+        <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+          {[
+            {id:'interpolated',label:'Interpolated ★',desc:'Start→End frame directed motion — best quality'},
+            {id:'chain',label:'Chain',desc:'Each scene extends from previous last frame'},
+            {id:'cel',label:'Cel Animation',desc:'Composite reference plates (character + storyboard + prev frame)'},
+            {id:'independent',label:'Independent',desc:'Each scene generated separately (legacy)'},
+          ].map(m => (
+            <button key={m.id} className={'filter-tab' + (genMode===m.id?' active':'')} onClick={() => setGenMode(m.id)} title={m.desc}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+          <button className="btn" onClick={generateCongruent} disabled={videoLoading}>
+            {videoLoading ? <><span className="spinner"/> Generating {genMode} clips...</> : `Generate ${genMode.charAt(0).toUpperCase()+genMode.slice(1)} Clips (~$${genMode==='interpolated'?'72':'76'})`}
+          </button>
+          {videoStatus && videoStatus.chain_state && videoStatus.chain_state.last_completed_scene && (
+            <button className="btn btn-sm" onClick={resumeGeneration} disabled={videoLoading}>
+              Resume from Scene {videoStatus.chain_state.last_completed_scene + 1}
+            </button>
+          )}
+          <button className="btn btn-sm" onClick={generateAllVideos} disabled={videoLoading} style={{opacity:.6}}>
+            Legacy Independent
+          </button>
+        </div>
         {videoStatus && videoStatus.clips && (
           <div style={{marginTop:16}}>
             <div style={{fontSize:12,color:'var(--t2)',marginBottom:8}}>
@@ -766,19 +831,208 @@ function PipelineTab({ projectId, setProjectId, scenes, costInfo, refreshCost })
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  CHARACTER LAB TAB (LoRA training + testing)
+// ═══════════════════════════════════════════════════════════════════
+function CharacterLabTab({ projectId, ensureProject, scenes, refreshCost }) {
+  const [selectedChar, setSelectedChar] = useState('boy');
+  const [trainingImages, setTrainingImages] = useState([]);
+  const [trainingId, setTrainingId] = useState(null);
+  const [trainingStatus, setTrainingStatus] = useState(null);
+  const [loraUrl, setLoraUrl] = useState('');
+  const [testImages, setTestImages] = useState([]);
+  const [testPrompt, setTestPrompt] = useState('');
+  const [loading, setLoading] = useState('');
+
+  const charNames = ['boy','serpent','dragon','girl','watcher','glowing_woman','knight'];
+
+  const generateTrainingSet = async () => {
+    const pid = await ensureProject(scenes);
+    if (!pid) return;
+    if (!confirm(`Generate 20 training images for "${selectedChar}"? (~$1.40)`)) return;
+    setLoading('gen_training');
+    try {
+      await apiFetch('/api/sse/admin/studio/lora/training-images', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ character_key: selectedChar, project_id: pid })
+      });
+      alert('Training image generation started — check Library tab in ~2 minutes.');
+      refreshCost();
+    } catch (e) { alert('Failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const startTraining = async () => {
+    if (!loraUrl.trim()) return alert('Enter the training images .zip URL');
+    setLoading('train');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/lora/train', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ character_key: selectedChar, training_images_zip_url: loraUrl })
+      });
+      setTrainingId(d.training_id);
+      setTrainingStatus(d);
+    } catch (e) { alert('Training failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const pollTraining = async () => {
+    if (!trainingId) return;
+    setLoading('poll');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/lora/status/' + trainingId);
+      setTrainingStatus(d);
+    } catch (e) { alert('Poll failed: ' + e.message); }
+    setLoading('');
+  };
+
+  const testLora = async () => {
+    if (!testPrompt.trim()) return alert('Enter a test prompt');
+    const urls = loraUrl ? [loraUrl] : (trainingStatus?.output ? [trainingStatus.output] : []);
+    if (!urls.length) return alert('No LoRA weights URL available — train first or paste URL');
+    setLoading('test');
+    try {
+      const d = await apiFetch('/api/sse/admin/studio/lora/test', {
+        method: 'POST', ct: 'application/json',
+        body: JSON.stringify({ prompt: testPrompt, lora_urls: urls })
+      });
+      setTestImages(d.test_images || []);
+    } catch (e) { alert('Test failed: ' + e.message); }
+    setLoading('');
+  };
+
+  return (
+    <div>
+      <div className="panel">
+        <h2>Character Lab — LoRA Training</h2>
+        <p style={{fontSize:12,color:'var(--t2)',marginBottom:16}}>
+          Train character-specific LoRA weights to ensure identical character appearance across all scenes.
+          Requires <span style={{fontFamily:'var(--mono)',color:'var(--gold)'}}>REPLICATE_API_TOKEN</span> env var.
+        </p>
+
+        <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+          {charNames.map(c => (
+            <button key={c} className={'filter-tab' + (selectedChar===c?' active':'')} onClick={() => setSelectedChar(c)}>
+              {c}
+            </button>
+          ))}
+        </div>
+
+        <div style={{display:'flex',gap:16,marginBottom:16,flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:300}}>
+            <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Step 1: Generate Training Images</div>
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Generate 20 diverse poses/angles of {selectedChar} for LoRA fine-tuning.</p>
+            <button className="btn" onClick={generateTrainingSet} disabled={loading==='gen_training'}>
+              {loading==='gen_training' ? <span className="spinner"/> : `Generate 20 Images (~$1.40)`}
+            </button>
+          </div>
+
+          <div style={{flex:1,minWidth:300}}>
+            <div style={{fontSize:13,color:'var(--gold-b)',marginBottom:8}}>Step 2: Train LoRA</div>
+            <p style={{fontSize:11,color:'var(--t3)',marginBottom:8}}>Upload training images as .zip and start LoRA training on Replicate.</p>
+            <input type="text" placeholder="Training images .zip URL..." value={loraUrl} onChange={e => setLoraUrl(e.target.value)} style={{marginBottom:8}} />
+            <div style={{display:'flex',gap:8}}>
+              <button className="btn" onClick={startTraining} disabled={loading==='train'}>
+                {loading==='train' ? <span className="spinner"/> : 'Start Training'}
+              </button>
+              {trainingId && (
+                <button className="btn btn-sm" onClick={pollTraining} disabled={loading==='poll'}>
+                  {loading==='poll' ? <span className="spinner"/> : 'Check Status'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {trainingStatus && (
+          <div style={{padding:12,background:'var(--raised)',borderRadius:6,marginBottom:16}}>
+            <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:8}}>
+              <span style={{fontSize:12,color:'var(--t1)'}}>Training: {trainingStatus.training_id?.slice(0,12)}...</span>
+              <span className={'badge ' + (trainingStatus.status==='succeeded'?'badge-green':trainingStatus.status==='failed'?'badge-red':'badge-gold')}>
+                {trainingStatus.status}
+              </span>
+            </div>
+            {trainingStatus.logs_tail && (
+              <pre style={{fontSize:10,color:'var(--t3)',whiteSpace:'pre-wrap',maxHeight:100,overflow:'auto'}}>{trainingStatus.logs_tail}</pre>
+            )}
+            {trainingStatus.output && (
+              <div style={{fontSize:11,color:'var(--green)',marginTop:8}}>LoRA weights: <span style={{fontFamily:'var(--mono)'}}>{typeof trainingStatus.output === 'string' ? trainingStatus.output.slice(0,60) : JSON.stringify(trainingStatus.output).slice(0,60)}...</span></div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Test LoRA Generation</h2>
+        <p style={{fontSize:12,color:'var(--t2)',marginBottom:12}}>
+          Test your trained LoRA by generating images with a prompt. The character should look consistent.
+        </p>
+        <div style={{display:'flex',gap:8,marginBottom:12}}>
+          <input type="text" placeholder="Test prompt (e.g., 'THERA_BOY standing on a mountain top')" value={testPrompt} onChange={e => setTestPrompt(e.target.value)} style={{flex:1}} />
+          <button className="btn" onClick={testLora} disabled={loading==='test'}>
+            {loading==='test' ? <span className="spinner"/> : 'Generate Test'}
+          </button>
+        </div>
+        {testImages.length > 0 && (
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:12}}>
+            {testImages.map((url, i) => (
+              <img key={i} src={url} alt={`Test ${i+1}`} style={{width:'100%',borderRadius:6,border:'1px solid var(--border)'}} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  APP ROOT
 // ═══════════════════════════════════════════════════════════════════
 function App() {
   const [tab, setTab] = useState('script');
   const [scenes, setScenes] = useState([]);
   const [projectId, setProjectId] = useState(null);
+  const projectIdRef = useRef(null);
+  const projectPromiseRef = useRef(null);
   const [costInfo, setCostInfo] = useState(null);
+
+  const setProjectIdSync = useCallback((id) => {
+    projectIdRef.current = id;
+    setProjectId(id);
+  }, []);
+
+  const ensureProjectGlobal = useCallback(async (scenesForCreate) => {
+    if (projectIdRef.current) return projectIdRef.current;
+    if (projectPromiseRef.current) return projectPromiseRef.current;
+    projectPromiseRef.current = (async () => {
+      try {
+        const d = await apiFetch('/api/sse/admin/studio/projects', {
+          method: 'POST', ct: 'application/json',
+          body: JSON.stringify({ title: 'Studio Project ' + new Date().toISOString().slice(0,16), scenes: scenesForCreate })
+        });
+        setProjectIdSync(d.project_id);
+        return d.project_id;
+      } catch (e) { alert('Failed to create project: ' + e.message); return null; }
+      finally { projectPromiseRef.current = null; }
+    })();
+    return projectPromiseRef.current;
+  }, [setProjectIdSync]);
 
   const refreshCost = useCallback(async () => {
     try { setCostInfo(await apiFetch('/api/sse/admin/studio/cost-status')); } catch(e) {}
   }, []);
 
   useEffect(() => { refreshCost(); const iv = setInterval(refreshCost, 30000); return () => clearInterval(iv); }, [refreshCost]);
+
+  const loadProject = useCallback(async (pid) => {
+    try {
+      const proj = await apiFetch('/api/sse/admin/studio/projects/' + pid + '?hydrate=true');
+      const manifest = proj.manifest || {};
+      const sc = manifest.scenes || [];
+      setScenes(sc);
+      setProjectIdSync(pid);
+      setTab('scenes');
+    } catch (e) { alert('Failed to load project: ' + e.message); }
+  }, [setProjectIdSync]);
 
   return (
     <div>
@@ -794,17 +1048,18 @@ function App() {
         )}
       </div>
       <div className="tab-bar">
-        {['script','scenes','pipeline','library'].map(t => (
+        {['script','scenes','pipeline','charlab','library'].map(t => (
           <button key={t} className={'tab-btn' + (tab===t?' active':'')} onClick={() => setTab(t)}>
-            {t === 'script' ? 'Script' : t === 'scenes' ? `Scenes (${scenes.length})` : t === 'pipeline' ? 'Pipeline' : 'Library'}
+            {t === 'script' ? 'Script' : t === 'scenes' ? `Scenes (${scenes.length})` : t === 'pipeline' ? 'Pipeline' : t === 'charlab' ? 'Character Lab' : 'Library'}
           </button>
         ))}
       </div>
       <div className="main">
         {tab === 'script' && <ScriptTab scenes={scenes} setScenes={setScenes} setTab={setTab} />}
-        {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} setProjectId={setProjectId} costInfo={costInfo} refreshCost={refreshCost} />}
-        {tab === 'pipeline' && <PipelineTab projectId={projectId} setProjectId={setProjectId} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} />}
-        {tab === 'library' && <LibraryTab />}
+        {tab === 'scenes' && <ScenesTab scenes={scenes} setScenes={setScenes} projectId={projectId} ensureProject={ensureProjectGlobal} costInfo={costInfo} refreshCost={refreshCost} />}
+        {tab === 'pipeline' && <PipelineTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} costInfo={costInfo} refreshCost={refreshCost} />}
+        {tab === 'charlab' && <CharacterLabTab projectId={projectId} ensureProject={ensureProjectGlobal} scenes={scenes} refreshCost={refreshCost} />}
+        {tab === 'library' && <LibraryTab onLoadProject={loadProject} />}
       </div>
     </div>
   );

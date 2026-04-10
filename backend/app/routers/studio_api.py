@@ -101,7 +101,10 @@ async def break_scenes(body: BreakScenesRequest):
 async def generate_image(body: GenerateImageRequest, request: Request):
     from app.sse.studio_service import generate_scene_image
     redis = _get_redis(request)
-    url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis)
+    try:
+        url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return {"r2_url": url}
 
 
@@ -109,7 +112,10 @@ async def generate_image(body: GenerateImageRequest, request: Request):
 async def generate_video(body: GenerateVideoRequest, request: Request):
     from app.sse.studio_service import generate_scene_video
     redis = _get_redis(request)
-    url = await generate_scene_video(body.image_url, body.motion_prompt, body.project_id, body.scene_num, redis=redis)
+    try:
+        url = await generate_scene_video(body.image_url, body.motion_prompt, body.project_id, body.scene_num, redis=redis)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return {"video_url": url}
 
 
@@ -169,15 +175,35 @@ async def list_projects(request: Request):
 
 
 @studio_router.get("/projects/{project_id}")
-async def get_project(project_id: str, request: Request):
-    from app.sse.studio_service import get_project as _get
+async def get_project(project_id: str, request: Request, hydrate: bool = False):
+    db = _get_db(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    if hydrate:
+        from app.sse.studio_service import get_project_hydrated as _get
+    else:
+        from app.sse.studio_service import get_project as _get
+    proj = await _get(project_id, db)
+    if not proj:
+        raise HTTPException(404, "Project not found")
+    return proj
+
+
+@studio_router.put("/projects/{project_id}")
+async def update_project_endpoint(project_id: str, request: Request):
+    from app.sse.studio_service import update_project as _update, get_project as _get
     db = _get_db(request)
     if not db:
         raise HTTPException(503, "Database unavailable")
     proj = await _get(project_id, db)
     if not proj:
         raise HTTPException(404, "Project not found")
-    return proj
+    body = await request.json()
+    manifest = body.get("manifest")
+    status = body.get("status")
+    cost = body.get("actual_cost_cents")
+    await _update(project_id, manifest, status, cost, db)
+    return {"status": "updated", "project_id": project_id}
 
 
 @studio_router.post("/clean-project")
@@ -251,3 +277,119 @@ async def daily_budget(request: Request):
     from app.sse.studio_service import get_daily_cost
     redis = _get_redis(request)
     return await get_daily_cost(redis)
+
+
+# ── Phase 2: LoRA Character Lock ──────────────────────────────────────────
+
+class LoraTrainRequest(BaseModel):
+    character_key: str
+    training_images_zip_url: str
+
+class LoraGenerateRequest(BaseModel):
+    prompt: str
+    lora_urls: list[str]
+    width: int = 1024
+    height: int = 576
+
+class LoraTrainingImagesRequest(BaseModel):
+    character_key: str
+    project_id: str
+
+class CongruentClipsRequest(BaseModel):
+    project_id: str
+    mode: str = "interpolated"
+    resume_from: int | None = None
+
+class InterpolatedTrailerRequest(BaseModel):
+    project_id: str
+    resume_from: int | None = None
+
+
+@studio_router.post("/lora/train")
+async def lora_train(body: LoraTrainRequest):
+    from app.sse.studio_service import start_lora_training
+    try:
+        return await start_lora_training(body.character_key, body.training_images_zip_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@studio_router.get("/lora/status/{training_id}")
+async def lora_status(training_id: str):
+    from app.sse.studio_service import poll_lora_training
+    try:
+        return await poll_lora_training(training_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@studio_router.post("/lora/generate")
+async def lora_generate(body: LoraGenerateRequest):
+    from app.sse.studio_service import generate_with_lora
+    try:
+        urls = await generate_with_lora(body.prompt, body.lora_urls, body.width, body.height)
+        return {"images": urls}
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@studio_router.post("/lora/training-images")
+async def lora_training_images(body: LoraTrainingImagesRequest, request: Request, background_tasks: BackgroundTasks):
+    from app.sse.studio_service import generate_lora_training_images
+    redis = _get_redis(request)
+    background_tasks.add_task(generate_lora_training_images, body.character_key, body.project_id, redis)
+    return {"status": "started", "character": body.character_key,
+            "message": "Generating 20 training images — ~2 minutes"}
+
+
+@studio_router.post("/lora/test")
+async def lora_test(body: LoraGenerateRequest):
+    from app.sse.studio_service import generate_with_lora
+    try:
+        urls = await generate_with_lora(body.prompt, body.lora_urls, body.width, body.height)
+        return {"test_images": urls, "count": len(urls)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+# ── Phase 2: Congruent Generation ─────────────────────────────────────────
+
+@studio_router.post("/generate-congruent-clips")
+async def generate_congruent_clips(body: CongruentClipsRequest, request: Request, background_tasks: BackgroundTasks):
+    from app.sse.studio_service import generate_congruent_clips as _gen
+    db = _get_db(request)
+    redis = _get_redis(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    background_tasks.add_task(_gen, body.project_id, body.mode, db, redis, body.resume_from)
+    cost_estimate = "$72.00" if body.mode == "interpolated" else "$76.00"
+    return {"status": "started", "project_id": body.project_id, "mode": body.mode,
+            "estimated_cost": cost_estimate,
+            "message": f"Generating {body.mode} trailer — this takes several minutes"}
+
+
+@studio_router.post("/generate-interpolated-trailer")
+async def generate_interpolated_trailer(body: InterpolatedTrailerRequest, request: Request, background_tasks: BackgroundTasks):
+    from app.sse.studio_service import generate_interpolated
+    db = _get_db(request)
+    redis = _get_redis(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    background_tasks.add_task(generate_interpolated, body.project_id, db, redis, body.resume_from)
+    return {"status": "started", "project_id": body.project_id, "mode": "interpolated",
+            "estimated_cost": "$72.00", "clips": 18,
+            "message": "Generating interpolated trailer (start→end frame) — best quality mode"}
+
+
+@studio_router.post("/resume-generation")
+async def resume_generation(body: CongruentClipsRequest, request: Request, background_tasks: BackgroundTasks):
+    from app.sse.studio_service import generate_congruent_clips as _gen
+    db = _get_db(request)
+    redis = _get_redis(request)
+    if not db:
+        raise HTTPException(503, "Database unavailable")
+    if body.resume_from is None:
+        raise HTTPException(400, "resume_from is required for resume")
+    background_tasks.add_task(_gen, body.project_id, body.mode, db, redis, body.resume_from)
+    return {"status": "resuming", "project_id": body.project_id, "mode": body.mode,
+            "resume_from": body.resume_from}
