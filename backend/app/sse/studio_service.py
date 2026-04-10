@@ -248,13 +248,14 @@ async def generate_scene_image(description: str, project_id: str, scene_num: int
     from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_image
     from app.sse.trailer_generator import (
-        STYLE_PREFIX, _generate_image_with_lora_or_grok,
+        _get_style_prefix, _generate_image_with_lora_or_grok,
         _load_trained_loras, _build_consistent_prompt,
     )
 
     chars = characters or []
     trained_loras = await _load_trained_loras(project_id)
-    styled_description = _build_consistent_prompt(description, chars) if chars else STYLE_PREFIX + description
+    prefix = _get_style_prefix(scene_num)
+    styled_description = _build_consistent_prompt(description, chars, scene_num=scene_num) if chars else prefix + description
 
     async with GROK_IMAGINE_LOCK:
         image_bytes = await _generate_image_with_lora_or_grok(styled_description, chars, trained_loras)
@@ -270,13 +271,13 @@ async def generate_scene_video(image_url: str, motion_prompt: str, project_id: s
 
     from app.sse.infrastructure.grok_imagine_client import generate_video, poll_video_status, GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_video
-    from app.sse.trailer_generator import STYLE_PREFIX
+    from app.sse.trailer_generator import _build_video_prompt
 
-    styled_motion = STYLE_PREFIX + motion_prompt
+    styled_motion = _build_video_prompt(scene_num, motion_prompt)
     async with GROK_IMAGINE_LOCK:
         video_id = await generate_video(styled_motion, source_image_url=image_url)
 
-    for _ in range(24):
+    for _ in range(60):
         await asyncio.sleep(5)
         status = await poll_video_status(video_id)
         if status["status"] == "completed" and status.get("url"):
@@ -286,7 +287,7 @@ async def generate_scene_video(image_url: str, motion_prompt: str, project_id: s
             return r2_url
         if status["status"] == "failed":
             raise RuntimeError("Grok Video generation failed")
-    raise RuntimeError("Grok Video timed out after 120s")
+    raise RuntimeError("Grok Video timed out after 300s")
 
 
 async def generate_narration(text: str, voice: str, project_id: str, scene_num: int, redis=None) -> str:

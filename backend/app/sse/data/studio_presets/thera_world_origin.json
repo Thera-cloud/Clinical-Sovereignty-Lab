@@ -10,7 +10,8 @@
       "prompt": "Cinematic wide shot, golden hour lighting, {boy} running around a massive ancient oak tree in a green meadow, a still reflective puddle at the base of the tree, warm nostalgic atmosphere, film grain, shallow depth of field, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "nostalgic"
+      "mood": "nostalgic",
+      "tone": "warm"
     },
     {
       "scene": 2,
@@ -19,7 +20,8 @@
       "prompt": "Overhead cinematic shot of {boy} crouching beside a still puddle at the base of an ancient oak tree, the puddle reflects the tree branches above but within the reflection {serpent} coils along a branch, ethereal and unsettling, golden afternoon light, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "mysterious"
+      "mood": "mysterious",
+      "tone": "warm"
     },
     {
       "scene": 3,
@@ -34,7 +36,8 @@
         {"voice": "serpent", "text": "I have always been here with you, little boy."}
       ],
       "duration": 5,
-      "mood": "wonder"
+      "mood": "wonder",
+      "tone": "dark"
     },
     {
       "scene": 4,
@@ -48,7 +51,8 @@
         {"voice": "serpent", "text": "I have been with you, and below you, little boy. Do you want to play?"}
       ],
       "duration": 5,
-      "mood": "ominous"
+      "mood": "ominous",
+      "tone": "dark"
     },
     {
       "scene": 5,
@@ -66,7 +70,8 @@
         {"voice": "serpent", "text": "As you command, little boy. I will be your dragon for you."}
       ],
       "duration": 5,
-      "mood": "temptation"
+      "mood": "temptation",
+      "tone": "dark"
     },
     {
       "scene": 6,
@@ -77,7 +82,8 @@
         {"voice": "boy", "text": "I am a dragon! Roar! I am a mean dragon that breathes fire!"}
       ],
       "duration": 5,
-      "mood": "joyful-dark"
+      "mood": "joyful-dark",
+      "tone": "warm"
     },
     {
       "scene": 7,
@@ -89,7 +95,8 @@
         {"voice": "boy", "text": "Fine! You are like everyone else. Never there for me!"}
       ],
       "duration": 5,
-      "mood": "abandonment"
+      "mood": "abandonment",
+      "tone": "dark"
     },
     {
       "scene": 8,
@@ -98,7 +105,8 @@
       "prompt": "Dramatic cinematic shot of a {dragon} claw erupting from a small puddle grabbing the legs of {boy} in mid-air, water exploding upward, the boy's face frozen in terror, the ancient oak tree behind, time-freeze motion capture style, dramatic lighting with dark red and gold, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "terror"
+      "mood": "terror",
+      "tone": "dark"
     },
     {
       "scene": 9,
@@ -107,7 +115,8 @@
       "prompt": "Epic cinematic aerial shot of {dragon} flying through a fantasy world carrying {boy} in its talons, below is a vast landscape showing dark twisted forest, fortress plains with stone walls, luminous river valley, glowing crystal caves, ancient temples, tiny figures looking up from below, dramatic storm clouds and golden light breaking through, epic scale, 16:9",
       "dialogue": [],
       "duration": 8,
-      "mood": "epic"
+      "mood": "epic",
+      "tone": "dark"
     },
     {
       "scene": 10,
@@ -116,7 +125,8 @@
       "prompt": "Cinematic dramatic shot of {dragon} flying past a tall stone tower over a dark ocean, on top of the tower {watcher} pointing at the dragon and {glowing_woman} watching calmly, at the base {knight} raises a sword defiantly, the dragon screeches with open jaws, dramatic scale, storm clouds, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "confrontation"
+      "mood": "confrontation",
+      "tone": "dark"
     },
     {
       "scene": 11,
@@ -125,7 +135,8 @@
       "prompt": "Cinematic low-angle shot of {dragon} towering over {boy} who stands beside an ancient spiraling stone well with glowing runes, the boy clutches a small wooden dragon toy, scale emphasized dramatically, mystical clearing with bioluminescent plants, dramatic lighting, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "awe"
+      "mood": "awe",
+      "tone": "dark"
     },
     {
       "scene": 12,
@@ -142,7 +153,8 @@
         {"voice": "dragon", "text": "By placing you inside me. But you also have to place me inside you. Don't you want to be protected?"}
       ],
       "duration": 5,
-      "mood": "dread"
+      "mood": "dread",
+      "tone": "dark"
     },
     {
       "scene": 13,
@@ -153,7 +165,8 @@
         {"voice": "boy", "text": "Yes, I want to be protected."}
       ],
       "duration": 5,
-      "mood": "climax"
+      "mood": "climax",
+      "tone": "dark"
     },
     {
       "scene": 14,
@@ -162,7 +175,8 @@
       "prompt": "Cinematic underwater shot of {boy} swimming downward through dark well water, above him dragon fire crashes against the water surface creating orange rippling light, below him a bright white vortex of light pulls him downward, air bubbles trail from the boy, mystical and terrifying, deep blue and orange contrast, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "escape"
+      "mood": "escape",
+      "tone": "dark"
     },
     {
       "scene": 15,
@@ -171,7 +185,8 @@
       "prompt": "Cinematic medium shot of {boy} soaking wet standing in a shallow puddle beneath an ancient oak tree in a golden meadow, his face shows shock and confusion, he clutches a wooden dragon toy to his chest, water drips from him, the scene is peaceful but the boy looks like he survived something terrifying, golden hour light, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "relief"
+      "mood": "relief",
+      "tone": "warm"
     },
     {
       "scene": 16,
@@ -183,7 +198,8 @@
         {"voice": "girl", "text": "Did you hear me? Are you so silly that you got that wet jumping into the puddle? You are funny!"}
       ],
       "duration": 5,
-      "mood": "hope"
+      "mood": "hope",
+      "tone": "warm"
     },
     {
       "scene": 17,
@@ -195,7 +211,8 @@
         {"voice": "boy", "text": "I am a dragon coming to get you, princess warrior! Roar!"}
       ],
       "duration": 3,
-      "mood": "revelation"
+      "mood": "revelation",
+      "tone": "dark"
     },
     {
       "scene": 18,
@@ -206,7 +223,8 @@
         {"voice": "girl", "text": "You will never catch me, dragon! I am protected in the forest!"}
       ],
       "duration": 5,
-      "mood": "foreboding"
+      "mood": "foreboding",
+      "tone": "dark"
     },
     {
       "scene": 19,
@@ -215,7 +233,8 @@
       "prompt": "Elegant title card on pure black background, golden ornate text reading THERA-WORLD in large cinematic serif font with subtitle A Journey of Two Worlds of Healing and by Sovereign Sanctuary below, small text Come adventure with Little Nate at bottom, minimalist cinematic, gold on black, subtle particle shimmer, 16:9",
       "dialogue": [],
       "duration": 5,
-      "mood": "closing"
+      "mood": "closing",
+      "tone": "warm"
     }
   ]
 }

@@ -339,16 +339,29 @@ function ScenesTab({ scenes, setScenes, projectId, ensureProject, costInfo, refr
     if (!pid) return;
     const s = scenes[idx];
     if (!s.image_url) return alert('Generate an image first');
+    const sceneNum = s.scene || idx+1;
     setLoading(l => ({...l, [`vid_${idx}`]: true}));
     try {
-      const d = await apiFetch('/api/sse/admin/studio/generate-video', {
+      await apiFetch('/api/sse/admin/studio/generate-video', {
         method: 'POST', ct: 'application/json',
-        body: JSON.stringify({ project_id: pid, scene_num: s.scene || idx+1, image_url: s.image_url, motion_prompt: (s.description || s.prompt).slice(0, 200) })
+        body: JSON.stringify({ project_id: pid, scene_num: sceneNum, image_url: s.image_url, motion_prompt: (s.description || s.prompt).slice(0, 200) })
       });
-      const updated = [...scenes];
-      updated[idx] = { ...updated[idx], video_url: d.video_url };
-      setScenes(updated);
-      refreshCost();
+      // Poll for completion (video generates in background)
+      for (let attempt = 0; attempt < 40; attempt++) {
+        await new Promise(r => setTimeout(r, 5000));
+        try {
+          const proj = await apiFetch('/api/sse/admin/studio/projects/' + pid + '?hydrate=true');
+          const mScenes = (proj.manifest && proj.manifest.scenes) || proj.scenes || [];
+          const sc = mScenes.find(x => x.scene === sceneNum);
+          if (sc && sc.video_url) {
+            const updated = [...scenes];
+            updated[idx] = { ...updated[idx], video_url: sc.video_url };
+            setScenes(updated);
+            refreshCost();
+            break;
+          }
+        } catch (_) {}
+      }
     } catch (e) { alert('Video gen failed: ' + e.message); }
     setLoading(l => ({...l, [`vid_${idx}`]: false}));
   };
@@ -787,18 +800,43 @@ function PipelineTab({ projectId, ensureProject, scenes, costInfo, refreshCost }
         </div>
         {videoStatus && videoStatus.clips && (
           <div style={{marginTop:16}}>
-            <div style={{fontSize:12,color:'var(--t2)',marginBottom:8}}>
-              {videoStatus.success || 0}/{videoStatus.total || 0} clips complete
-              {videoStatus.total_cost != null && ` — $${videoStatus.total_cost.toFixed(2)}`}
+            <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:8}}>
+              <span style={{fontSize:12,color:'var(--t2)'}}>
+                {videoStatus.success || 0}/{videoStatus.total || 0} clips complete
+                {videoStatus.total_cost != null && ` — $${videoStatus.total_cost.toFixed(2)}`}
+              </span>
+              <button className="btn btn-sm" style={{fontSize:10,padding:'2px 8px',background:'var(--gold-dim)'}}
+                onClick={async () => {
+                  if (!confirm('Remove duplicate clips? Keeps only the latest version of each transition.')) return;
+                  const r = await apiFetch('/api/sse/admin/studio/projects/' + projectId + '/deduplicate-clips', {method:'POST'});
+                  if (r && r.removed > 0) {
+                    alert('Removed ' + r.removed + ' duplicates (' + r.before + ' → ' + r.after + ')');
+                    pollVideoStatus();
+                  } else {
+                    alert('No duplicates found');
+                  }
+                }}>
+                Deduplicate
+              </button>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
               {videoStatus.clips.map((c,i) => (
-                <div key={i} style={{padding:8,background:'var(--raised)',borderRadius:6,fontSize:11}}>
-                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-                    <span style={{color:'var(--gold)'}}>Scene {c.scene}</span>
-                    <span className={'badge ' + (c.status==='success'?'badge-green':c.status==='ken_burns'?'badge-gold':'badge-red')}>
-                      {c.status}
+                <div key={i} style={{padding:8,background:'var(--raised)',borderRadius:6,fontSize:11,position:'relative'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:4,alignItems:'center'}}>
+                    <span style={{color:'var(--gold)'}}>
+                      {c.from_scene != null ? `${c.from_scene}→${c.to_scene || 'end'}` : `Scene ${c.scene || '?'}`}
                     </span>
+                    <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                      <span className={'badge ' + (c.status==='success'?'badge-green':c.status==='ken_burns'?'badge-gold':'badge-red')}>
+                        {c.status}
+                      </span>
+                      <button onClick={async () => {
+                        if (!confirm('Delete this clip? It will not be included in the stitched trailer.')) return;
+                        await apiFetch('/api/sse/admin/studio/projects/' + projectId + '/clips/' + i, {method:'DELETE'});
+                        pollVideoStatus();
+                      }} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14,padding:'0 2px'}}
+                        title="Delete clip">✕</button>
+                    </div>
                   </div>
                   {c.video_url && <video controls src={c.video_url} style={{width:'100%',borderRadius:4}} />}
                 </div>

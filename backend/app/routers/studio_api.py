@@ -111,14 +111,23 @@ async def generate_image(body: GenerateImageRequest, request: Request):
 
 
 @studio_router.post("/generate-video")
-async def generate_video(body: GenerateVideoRequest, request: Request):
+async def generate_video(body: GenerateVideoRequest, request: Request, background_tasks: BackgroundTasks):
     from app.sse.studio_service import generate_scene_video
     redis = _get_redis(request)
-    try:
-        url = await generate_scene_video(body.image_url, body.motion_prompt, body.project_id, body.scene_num, redis=redis)
-    except RuntimeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    return {"video_url": url}
+
+    async def _run():
+        try:
+            print(f"[STUDIO] Background video gen starting: scene {body.scene_num}", flush=True)
+            url = await generate_scene_video(body.image_url, body.motion_prompt, body.project_id, body.scene_num, redis=redis)
+            print(f"[STUDIO] Background video gen complete: scene {body.scene_num} → {url}", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[STUDIO] Background video gen FAILED scene {body.scene_num}: {e}", flush=True)
+            traceback.print_exc()
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "scene_num": body.scene_num,
+            "message": "Video generation started — poll project manifest for completion"}
 
 
 @studio_router.post("/generate-narration")
@@ -282,6 +291,18 @@ async def daily_budget(request: Request):
     return await get_daily_cost(redis)
 
 
+@studio_router.delete("/projects/{project_id}/clips/{clip_index}")
+async def delete_clip(project_id: str, clip_index: int):
+    from app.sse.trailer_generator import delete_video_clip
+    return await delete_video_clip(project_id, clip_index)
+
+
+@studio_router.post("/projects/{project_id}/deduplicate-clips")
+async def deduplicate_clips(project_id: str):
+    from app.sse.trailer_generator import deduplicate_video_manifest
+    return await deduplicate_video_manifest(project_id)
+
+
 # ── Phase 2: LoRA Character Lock ──────────────────────────────────────────
 
 class LoraTrainRequest(BaseModel):
@@ -409,7 +430,19 @@ async def generate_congruent_clips(body: CongruentClipsRequest, request: Request
     redis = _get_redis(request)
     if not db:
         raise HTTPException(503, "Database unavailable")
-    background_tasks.add_task(_gen, body.project_id, body.mode, db, redis, body.resume_from)
+
+    async def _run():
+        try:
+            print(f"[STUDIO] Congruent {body.mode} starting: {body.project_id}", flush=True)
+            result = await _gen(body.project_id, body.mode, db, redis, body.resume_from)
+            ok = result.get("success", 0) if isinstance(result, dict) else 0
+            print(f"[STUDIO] Congruent {body.mode} complete: {ok} clips", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[STUDIO] Congruent {body.mode} FAILED: {e}", flush=True)
+            traceback.print_exc()
+
+    background_tasks.add_task(_run)
     cost_estimate = "$72.00" if body.mode == "interpolated" else "$76.00"
     return {"status": "started", "project_id": body.project_id, "mode": body.mode,
             "estimated_cost": cost_estimate,
@@ -423,7 +456,19 @@ async def generate_interpolated_trailer(body: InterpolatedTrailerRequest, reques
     redis = _get_redis(request)
     if not db:
         raise HTTPException(503, "Database unavailable")
-    background_tasks.add_task(generate_interpolated, body.project_id, db, redis, body.resume_from)
+
+    async def _run():
+        try:
+            print(f"[STUDIO] Interpolated trailer starting: {body.project_id}", flush=True)
+            result = await generate_interpolated(body.project_id, db, redis, body.resume_from)
+            ok = result.get("success", 0) if isinstance(result, dict) else len(result)
+            print(f"[STUDIO] Interpolated trailer complete: {ok} clips", flush=True)
+        except Exception as e:
+            import traceback
+            print(f"[STUDIO] Interpolated trailer FAILED: {e}", flush=True)
+            traceback.print_exc()
+
+    background_tasks.add_task(_run)
     return {"status": "started", "project_id": body.project_id, "mode": "interpolated",
             "estimated_cost": "$72.00", "clips": 18,
             "message": "Generating interpolated trailer (start→end frame) — best quality mode"}

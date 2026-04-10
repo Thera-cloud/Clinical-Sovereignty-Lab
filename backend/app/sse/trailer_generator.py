@@ -144,15 +144,45 @@ CHARACTER_REFERENCES = {
     },
 }
 
-STYLE_PREFIX = (
-    "Studio Ghibli anime art style throughout, Makoto Shinkai inspired, "
-    "warm watercolor sky backgrounds with soft golden atmospheric light rays, "
+STYLE_PREFIX_WARM = (
+    "Studio Ghibli anime art style, Makoto Shinkai inspired, "
+    "warm watercolor sky backgrounds with soft golden atmospheric light, "
     "soft cel shading with hand-drawn animation aesthetic, "
     "expressive characters with large emotive eyes, "
     "lush hand-painted nature environments with dreamy depth, "
-    "rich earth tones with amber and emerald accents, "
-    "emotionally resonant and inviting, cinematic 16:9 framing — "
+    "cinematic 16:9 framing — "
 )
+
+STYLE_PREFIX_DARK = (
+    "Studio Ghibli anime art style with dark dramatic tension, "
+    "Makoto Shinkai inspired, ominous and foreboding atmosphere, "
+    "dramatic shadows and deep reds against golden skies, "
+    "characters maintain Ghibli proportions with imposing serious presence, "
+    "Princess Mononoke intensity meets Spirited Away grandeur, "
+    "cinematic 16:9 framing — "
+)
+
+STYLE_PREFIX = STYLE_PREFIX_WARM
+
+SCENE_TONE: dict[int, str] = {
+    1: "warm", 2: "warm", 3: "dark",
+    4: "dark", 5: "dark", 6: "warm",
+    7: "dark", 8: "dark", 9: "dark",
+    10: "dark", 11: "dark", 12: "dark",
+    13: "dark", 14: "dark", 15: "warm",
+    16: "warm", 17: "dark", 18: "dark",
+    19: "warm",
+}
+
+NEGATIVE_PROMPT_DARK = (
+    "The dragon must be massive, ancient, dark crimson, imposing and serious. "
+    "The serpent must be sleek, dark-scaled, mysterious and formidable. "
+    "Neither creature should appear small, friendly, cute, or bright green."
+)
+
+
+def _get_style_prefix(scene_num: int) -> str:
+    return STYLE_PREFIX_DARK if SCENE_TONE.get(scene_num, "warm") == "dark" else STYLE_PREFIX_WARM
 
 CHARACTER_VOICES = {
     "serpent": {
@@ -174,26 +204,52 @@ CHARACTER_VOICES = {
 }
 
 SCENE_MOTION_PROMPTS = [
-    {"scene": 1, "motion": "Camera slowly pushes forward toward the boy and tree, the boy runs in a circle, leaves flutter in warm wind, golden light shifts subtly", "transition_from": None, "transition_to": "camera descends toward puddle"},
-    {"scene": 2, "motion": "Camera slowly descends toward the puddle, subtle ripple appears in the water, the serpent shadow shifts position on the reflected branch, tension builds", "transition_from": "meadow establishing shot", "transition_to": "close on puddle reflection"},
-    {"scene": 3, "motion": "Subtle water ripples emanate from the serpent in the reflection, the boy's eyes widen slightly, light shifts on the water surface", "transition_from": "puddle discovery", "transition_to": "underwater perspective"},
-    {"scene": 4, "motion": "Underwater camera slowly rises toward the surface, light rays shift through the water, the serpent shadow moves closer, bubbles rise", "transition_from": "surface reflection", "transition_to": "return to surface"},
-    {"scene": 5, "motion": "The boy leans forward toward the puddle with growing excitement, the serpent's amber eyes pulse brighter, the dragon toy catches golden light", "transition_from": "underwater mystery", "transition_to": "boy running free"},
-    {"scene": 6, "motion": "Fast joyful tracking shot following the running boy through golden grass, his shadow morphs dragon-like on the ground, wind blows", "transition_from": "intimate bargain", "transition_to": "return to stillness"},
-    {"scene": 7, "motion": "Stillness and tension, the boy's shoulders tense and fists clench tighter, the puddle is perfectly still and empty, dusk light darkens", "transition_from": "joyful running stops", "transition_to": "explosive action"},
-    {"scene": 8, "motion": "EXPLOSIVE upward motion, the dragon claw bursts violently from the water, water sprays in slow motion, the boy is jerked downward, debris hangs in air", "transition_from": "still tension snaps", "transition_to": "aerial chaos"},
-    {"scene": 9, "motion": "Fast sweeping aerial flyover of the vast fantasy landscape, camera banks and rolls following the dragon, clouds part revealing biomes below", "transition_from": "pulled through portal", "transition_to": "approaching tower"},
-    {"scene": 10, "motion": "Dragon swoops past the stone tower, camera tracks following, the watcher points urgently, the glowing woman's light pulses, the knight raises his sword", "transition_from": "aerial sweep", "transition_to": "descent to ground"},
-    {"scene": 11, "motion": "Camera slowly tilts upward from the tiny boy's level to the massive dragon head above, emphasizing terrifying scale, the boy trembles, the well glows", "transition_from": "dropped from flight", "transition_to": "looking into well"},
-    {"scene": 12, "motion": "Camera slowly descends into the well water, the reflection ripples as the dragon's voice reverberates, the boy's reflected face trembles", "transition_from": "looking up at dragon", "transition_to": "dragon descends"},
-    {"scene": 13, "motion": "Dragon jaws descend rapidly toward camera filling the frame, fire builds in the throat, the boy falls backward, extreme dramatic zoom", "transition_from": "well reflection", "transition_to": "plunge underwater"},
-    {"scene": 14, "motion": "Boy sinks through dark water in slow motion, dragon fire crashes on the surface above creating orange-red light, below a white vortex grows brighter", "transition_from": "escaping jaws", "transition_to": "emerging in meadow"},
-    {"scene": 15, "motion": "Perfect stillness, water drips slowly from the motionless boy, the puddle slowly calms, a single ripple expands outward, impossibly still golden meadow", "transition_from": "shot through vortex", "transition_to": "girl appears"},
-    {"scene": 16, "motion": "The bright girl steps forward into frame laughing, the wet dark boy stares motionless, the puddle between them smooths to a perfect mirror", "transition_from": "stillness and shock", "transition_to": "close on eyes"},
-    {"scene": 17, "motion": "Extreme slow zoom into the boy's eyes, one pupil dilates and flashes amber dragon slit then returns, a knowing dangerous smile slowly creeps", "transition_from": "girl awakens him", "transition_to": "chase and fire"},
-    {"scene": 18, "motion": "Children run away becoming small, camera descends to the still puddle, the serpent materializes, its amber eyes lock onto the viewer, mouth opens revealing flame", "transition_from": "boy transformed", "transition_to": "black and title"},
-    {"scene": 19, "motion": "On pure black, golden text materializes letter by letter with subtle shimmer particle effects, THERA-WORLD appears then subtitle fades in below", "transition_from": "fire fills screen", "transition_to": None},
+    {"scene": 1, "motion": "Camera slowly pushes forward toward a young boy age 6 with messy brown hair, white linen shirt, brown shorts, bare feet clutching a small carved wooden dragon toy, he runs around a massive ancient oak tree in a golden meadow, leaves flutter in warm wind, golden light shifts subtly"},
+    {"scene": 2, "motion": "Camera slowly descends toward a still puddle, a subtle ripple appears in the water, within the reflection a DARK ELEGANT SERPENT with iridescent green-black scales and ancient knowing amber eyes coils along a reflected branch, the young boy with messy brown hair crouches beside the puddle, tension builds"},
+    {"scene": 3, "motion": "Subtle water ripples emanate from the DARK ELEGANT SERPENT with iridescent green-black scales and ancient knowing amber eyes coiled in the puddle reflection, the serpent looks wise but unsettling and deceptive not cute or friendly, the young boy with messy brown hair and wide curious eyes leans closer, light shifts on the water surface"},
+    {"scene": 4, "motion": "Underwater camera slowly rises toward the surface, light rays shift through the water, in the foreground the shadow of the DARK ELEGANT SERPENT with iridescent green-black scales moves closer with deliberate ancient menace, above the silhouette of the young boy with messy brown hair kneels at the surface, bubbles rise"},
+    {"scene": 5, "motion": "The young boy age 6 with messy brown hair and white linen shirt leans forward toward the puddle holding his wooden dragon toy with growing excitement, in the reflection the DARK ELEGANT SERPENT with iridescent green-black scales and glowing amber eyes pulses brighter, the serpent appears wise but deceptive"},
+    {"scene": 6, "motion": "Fast joyful tracking shot following the young boy age 6 with messy brown hair and white linen shirt running through golden grass swooping his wooden dragon toy, his shadow on the ground subtly morphs into a dragon-like shape with wings, wind blows his hair"},
+    {"scene": 7, "motion": "Stillness and tension, the young boy age 6 with messy brown hair and clenched fists stands at the edge of the puddle, his shoulders tense with anger and hurt, the puddle is perfectly still and empty showing no serpent, dusk light darkens ominously"},
+    {"scene": 8, "motion": "EXPLOSIVE upward motion, a MASSIVE RED DRAGON with dark crimson scales and glowing amber eyes erupts its claw from the small puddle, the dragon is imposing and ancient, it reaches for the young boy with messy brown hair pulling him downward, water explodes in slow motion, debris hangs in air"},
+    {"scene": 9, "motion": "Fast sweeping aerial flyover, the MASSIVE RED DRAGON with dark crimson scales and glowing amber eyes beats its powerful wings carrying the small young boy in its great talons, the dragon is ancient and imposing, fire trails from its jaws, vast fantasy landscape below with dark forests and stone fortresses, clouds part revealing biomes"},
+    {"scene": 10, "motion": "The MASSIVE RED DRAGON with dark crimson scales swoops dramatically past a tall stone tower, on top stands a tall armored woman watcher with dark ornate armor pointing urgently, beside her an ethereal woman radiating warm golden-white light in flowing white and gold robes watches calmly, at the tower base a knight in brilliant polished silver armor with red cape raises his sword defiantly, the dragon roars with jaws wide"},
+    {"scene": 11, "motion": "Camera slowly tilts upward from the tiny young boy with messy brown hair standing at ground level to the MASSIVE RED DRAGON with dark crimson scales and glowing amber eyes towering above, the dragon is ancient and overwhelming in scale, beside the boy an ancient spiraling stone well glows with runes"},
+    {"scene": 12, "motion": "Camera slowly descends into well water, in the dark reflection the MASSIVE RED DRAGON with dark crimson scales and amber eyes towers above menacingly, the young boy with messy brown hair and frightened face looks down trembling, the dragon's deep voice reverberates through the water, the reflection ripples"},
+    {"scene": 13, "motion": "The MASSIVE RED DRAGON with dark crimson scales and glowing amber eyes descends its huge jaws rapidly toward camera filling the entire frame, fire builds in the dragon's throat glowing orange-red, the young boy with messy brown hair stumbles backward in awe, extreme dramatic zoom, the dragon is ancient and formidable"},
+    {"scene": 14, "motion": "The young boy with messy brown hair sinks through dark well water in slow motion clutching his wooden dragon toy to his chest, above him dragon fire from the MASSIVE RED DRAGON crashes against the water surface creating orange-red rippling light, below a bright white vortex of light pulls him downward, air bubbles trail"},
+    {"scene": 15, "motion": "Perfect stillness, the young boy with messy brown hair stands soaking wet and motionless in a shallow puddle beneath the ancient oak tree, water drips slowly from him, his face shows shock and confusion, the puddle slowly calms, a single ripple expands outward, impossibly still golden meadow"},
+    {"scene": 16, "motion": "A bright young girl age 6 with blonde hair in loose braids and light blue dress steps forward into frame laughing joyfully, the wet dark young boy with messy brown hair stares motionless and stunned, the puddle between them smooths to a perfect mirror, warm golden light"},
+    {"scene": 17, "motion": "Extreme slow zoom into the young boy's eyes with messy brown hair and mud on his face, one pupil dilates and flashes amber dragon slit like the serpent's ancient knowing amber eyes then returns to normal, a knowing dangerous smile slowly creeps across his face, half golden light half dark shadow"},
+    {"scene": 18, "motion": "The young boy with messy brown hair and the bright girl with blonde braids run away becoming small, camera descends to the still puddle, the DARK ELEGANT SERPENT with iridescent green-black scales materializes in the reflection, its ancient knowing amber eyes lock onto the viewer with deceptive menace, its mouth opens revealing flame within"},
+    {"scene": 19, "motion": "On pure black, golden text materializes letter by letter with subtle shimmer particle effects, THERA-WORLD appears then subtitle fades in below"},
 ]
+
+
+def _build_video_prompt(scene_num: int, motion_text: str) -> str:
+    """Assemble the full video prompt with tone-appropriate style, character enforcement, and negative constraints."""
+    prefix = _get_style_prefix(scene_num)
+
+    preset_scenes = _load_preset("thera_world_origin") if (_PRESETS_DIR / "thera_world_origin.json").exists() else []
+    scene_def = next((s for s in preset_scenes if s.get("scene") == scene_num), {})
+    scene_chars = scene_def.get("characters", [])
+
+    char_enforcement = ""
+    if scene_chars:
+        parts = []
+        for char in scene_chars:
+            ref = CHARACTER_REFERENCES.get(char)
+            if ref:
+                parts.append(ref["inline_desc"])
+        if parts:
+            char_enforcement = "CRITICAL — maintain exact character appearance: " + ". ".join(parts) + ". "
+
+    prompt = prefix + char_enforcement + motion_text
+
+    if SCENE_TONE.get(scene_num, "warm") == "dark":
+        prompt += " " + NEGATIVE_PROMPT_DARK
+
+    return prompt
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +266,9 @@ def _load_preset(name: str) -> list[dict]:
     return data.get("scenes", [])
 
 
-def _build_consistent_prompt(scene_prompt: str, characters: list[str]) -> str:
-    """Prepend STYLE_PREFIX and inline character descriptions for visual consistency."""
+def _build_consistent_prompt(scene_prompt: str, characters: list[str], scene_num: int = 0) -> str:
+    """Prepend tone-aware style prefix and inline character descriptions for visual consistency."""
+    prefix = _get_style_prefix(scene_num) if scene_num else STYLE_PREFIX
     char_descs = []
     for char in characters:
         ref = CHARACTER_REFERENCES.get(char)
@@ -226,11 +283,15 @@ def _build_consistent_prompt(scene_prompt: str, characters: list[str]) -> str:
     for char_name, ref in CHARACTER_REFERENCES.items():
         resolved = resolved.replace(f"{{{char_name}}}", ref["inline_desc"])
 
-    return STYLE_PREFIX + char_block + resolved
+    prompt = prefix + char_block + resolved
+    if scene_num and SCENE_TONE.get(scene_num, "warm") == "dark":
+        prompt += " " + NEGATIVE_PROMPT_DARK
+    return prompt
 
 
-def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: dict[str, dict]) -> str:
+def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: dict[str, dict], scene_num: int = 0) -> str:
     """Build prompt for LoRA generation with trigger words replacing character descriptions."""
+    prefix = _get_style_prefix(scene_num) if scene_num else STYLE_PREFIX
     trigger_parts = []
     for char in characters:
         lora_info = trained_loras.get(char)
@@ -253,7 +314,10 @@ def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: 
     if trigger_parts:
         char_block = "Characters: " + ", ".join(trigger_parts) + ". "
 
-    return STYLE_PREFIX + char_block + resolved
+    prompt = prefix + char_block + resolved
+    if scene_num and SCENE_TONE.get(scene_num, "warm") == "dark":
+        prompt += " " + NEGATIVE_PROMPT_DARK
+    return prompt
 
 
 async def _generate_image_with_lora_or_grok(
@@ -405,7 +469,7 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
             title = scene.get("title", f"scene_{num}")
             characters = scene.get("characters", [])
 
-            consistent_prompt = _build_consistent_prompt(scene["prompt"], characters)
+            consistent_prompt = _build_consistent_prompt(scene["prompt"], characters, scene_num=num)
 
             logger.info("[TRAILER] Scene %d: %s", num, title)
             try:
@@ -573,11 +637,7 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
             if not motion:
                 continue
 
-            motion_prompt = STYLE_PREFIX + motion["motion"]
-            if motion.get("transition_from"):
-                motion_prompt += f". Transitioning from: {motion['transition_from']}"
-            if motion.get("transition_to"):
-                motion_prompt += f". Leading into: {motion['transition_to']}"
+            motion_prompt = _build_video_prompt(scene_num, motion["motion"])
 
             logger.info("[TRAILER-VIDEO] Scene %d: %s", scene_num, scene_data["title"])
 
@@ -812,7 +872,7 @@ async def generate_interpolated_trailer(
                 if not relevant:
                     continue
                 try:
-                    prompt = _build_consistent_prompt(pdef.get("prompt", scene_data.get("title", "")), chars)
+                    prompt = _build_consistent_prompt(pdef.get("prompt", scene_data.get("title", "")), chars, scene_num=snum)
                     img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
                     key = f"sse/studio/projects/{project_id}/scenes/{scene_data.get('title', f'scene_{snum}')}.png"
                     new_url = await store_image(img, key)
@@ -832,11 +892,15 @@ async def generate_interpolated_trailer(
         return []
 
     motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
-    chain_state = manifest.get("chain_state", {})
-    results: list[dict] = chain_state.get("completed_clips", [])
+
+    # Fresh results — never carry forward old clips. Each run produces a clean set.
+    results: list[dict] = []
     start_idx = 0
 
     if resume_from is not None:
+        chain_state = manifest.get("chain_state", {})
+        results = [c for c in chain_state.get("completed_clips", [])
+                   if c.get("from_scene", 999) < resume_from]
         for idx, s in enumerate(scenes[:-1]):
             if s["scene"] >= resume_from:
                 start_idx = idx
@@ -852,7 +916,7 @@ async def generate_interpolated_trailer(
 
             video_result = await _generate_video_from_image(
                 image_url=start_scene["r2_url"],
-                motion_prompt=STYLE_PREFIX + motion["motion"],
+                motion_prompt=_build_video_prompt(start_scene["scene"], motion["motion"]),
                 end_frame_url=end_scene["r2_url"],
             )
 
@@ -899,31 +963,32 @@ async def generate_interpolated_trailer(
 
             await asyncio.sleep(8)
 
-        # End card (last scene standalone)
+        # End card — use Ken Burns on the title image ($0, no Grok Video)
+        # AI video models cannot reliably render specific text; the hero
+        # image already contains the correct THERA-WORLD title.
         last_scene = scenes[-1]
-        logger.info("[INTERPOLATE] End card scene %d...", last_scene["scene"])
-        end_card = await _generate_video_from_image(
-            image_url=last_scene["r2_url"],
-            motion_prompt="Golden text fades in letter by letter with shimmer particle effects",
-        )
-        if end_card and end_card.get("video_url"):
-            try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as dl:
-                    async with dl.get(end_card["video_url"]) as vr:
-                        if vr.status == 200:
-                            vid_bytes = await vr.read()
-                            r2_key = f"sse/studio/projects/{project_id}/clips/endcard_{last_scene['scene']:02d}.mp4"
-                            stored = await store_bytes(vid_bytes, r2_key, "video/mp4")
-                            end_card["video_url"] = stored
-            except Exception:
-                pass
-            results.append({
-                "from_scene": last_scene["scene"],
-                "to_scene": None,
-                "video_url": end_card["video_url"],
-                "status": "success",
-                "cost": 4.00,
-            })
+        logger.info("[INTERPOLATE] End card scene %d (Ken Burns)...", last_scene["scene"])
+        work_dir = tempfile.mkdtemp(prefix="endcard_")
+        try:
+            kb_path = os.path.join(work_dir, f"endcard_{last_scene['scene']:02d}.mp4")
+            img_src = last_scene.get("r2_key") or last_scene["r2_url"]
+            kb_ok = await _ken_burns_fallback(img_src, kb_path, duration=8)
+            if kb_ok and os.path.exists(kb_path):
+                with open(kb_path, "rb") as f:
+                    kb_bytes = f.read()
+                r2_key = f"sse/studio/projects/{project_id}/clips/endcard_{last_scene['scene']:02d}.mp4"
+                stored = await store_bytes(kb_bytes, r2_key, "video/mp4")
+                results.append({
+                    "from_scene": last_scene["scene"],
+                    "to_scene": None,
+                    "video_url": stored,
+                    "status": "success",
+                    "cost": 0,
+                })
+            else:
+                logger.warning("[INTERPOLATE] End card Ken Burns failed")
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     video_manifest = {
         "project_id": project_id,
@@ -945,6 +1010,76 @@ async def generate_interpolated_trailer(
     logger.info("[INTERPOLATE] Complete: %d/%d clips, $%.2f",
                 video_manifest["success"], video_manifest["total"], video_manifest["total_cost"])
     return results
+
+
+# ---------------------------------------------------------------------------
+#  Video Manifest Clip Management
+# ---------------------------------------------------------------------------
+
+async def delete_video_clip(project_id: str, clip_index: int) -> dict:
+    """Delete a single clip from the video manifest by index."""
+    from app.sse.infrastructure.r2_storage import _get_client, _R2_BUCKET
+
+    client = _get_client()
+    if not client:
+        return {"error": "R2 unavailable"}
+
+    key = f"sse/studio/projects/{project_id}/video_manifest.json"
+    try:
+        resp = client.get_object(Bucket=_R2_BUCKET, Key=key)
+        data = json.loads(resp["Body"].read().decode())
+    except Exception:
+        return {"error": "No video manifest found"}
+
+    clips = data.get("clips", [])
+    if clip_index < 0 or clip_index >= len(clips):
+        return {"error": f"Invalid clip index {clip_index}, manifest has {len(clips)} clips"}
+
+    removed = clips.pop(clip_index)
+    data["clips"] = clips
+    data["total"] = len(clips)
+    data["success"] = sum(1 for c in clips if c.get("status") == "success")
+    data["total_cost"] = sum(c.get("cost", 0) for c in clips)
+
+    await store_bytes(json.dumps(data, indent=2).encode(), key, "application/json")
+    return {"deleted": removed, "remaining": len(clips)}
+
+
+async def deduplicate_video_manifest(project_id: str) -> dict:
+    """Keep only the LAST clip for each unique transition, removing earlier duplicates."""
+    from app.sse.infrastructure.r2_storage import _get_client, _R2_BUCKET
+
+    client = _get_client()
+    if not client:
+        return {"error": "R2 unavailable"}
+
+    key = f"sse/studio/projects/{project_id}/video_manifest.json"
+    try:
+        resp = client.get_object(Bucket=_R2_BUCKET, Key=key)
+        data = json.loads(resp["Body"].read().decode())
+    except Exception:
+        return {"error": "No video manifest found"}
+
+    clips = data.get("clips", [])
+    before = len(clips)
+
+    # Walk in reverse so the LAST occurrence (most recent) wins
+    seen: dict[str, int] = {}
+    unique: list[dict] = []
+    for clip in reversed(clips):
+        transition_key = f"{clip.get('from_scene')}->{clip.get('to_scene')}"
+        if transition_key not in seen:
+            seen[transition_key] = 1
+            unique.append(clip)
+
+    unique.reverse()
+    data["clips"] = unique
+    data["total"] = len(unique)
+    data["success"] = sum(1 for c in unique if c.get("status") == "success")
+    data["total_cost"] = sum(c.get("cost", 0) for c in unique)
+
+    await store_bytes(json.dumps(data, indent=2).encode(), key, "application/json")
+    return {"before": before, "after": len(unique), "removed": before - len(unique)}
 
 
 # ---------------------------------------------------------------------------
@@ -997,7 +1132,7 @@ async def generate_chain_trailer(
                     chars = preset_map[scene_num].get("characters", [])
                     relevant = {c: trained_loras[c] for c in chars if c in trained_loras}
                     if relevant:
-                        prompt = _build_consistent_prompt(preset_map[scene_num]["prompt"], chars)
+                        prompt = _build_consistent_prompt(preset_map[scene_num]["prompt"], chars, scene_num=scene_num)
                         try:
                             img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
                             branch_key = f"sse/studio/projects/{project_id}/chain/branch_{scene_num:02d}.png"
@@ -1017,7 +1152,7 @@ async def generate_chain_trailer(
 
             video_result = await _generate_video_from_image(
                 image_url=hero_url,
-                motion_prompt=STYLE_PREFIX + motion["motion"],
+                motion_prompt=_build_video_prompt(scene_num, motion["motion"]),
             )
 
             if video_result and video_result.get("video_url"):
@@ -1233,8 +1368,9 @@ async def generate_cel_animation_clip(
     char_names = [
         CHARACTER_REFERENCES[c]["inline_desc"] for c in scene_characters if c in CHARACTER_REFERENCES
     ]
+    _cel_prefix = _get_style_prefix(scene_num)
     animation_prompt = (
-        f"{STYLE_PREFIX}"
+        f"{_cel_prefix}"
         f"ANIMATE the center panel of this reference plate. "
         f"The left panel shows the exact character design to use — "
         f"maintain these exact proportions, clothing, and features. "
@@ -1242,6 +1378,8 @@ async def generate_cel_animation_clip(
         f"Characters in scene: {'; '.join(char_names)}. "
         f"Action: {motion_prompt}"
     )
+    if SCENE_TONE.get(scene_num, "warm") == "dark":
+        animation_prompt += " " + NEGATIVE_PROMPT_DARK
 
     video_result = await _generate_video_from_image(
         image_url=composite_url,
