@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_PROMPT_CEILINGS = {
     "grok": 48_000,
     "sovereign": 24_000,
-    "workers_ai": 12_000,
+    "workers_ai": 48_000,
     "azure": 48_000,
     "home_gpu": 48_000,
     "digitalocean": 24_000,

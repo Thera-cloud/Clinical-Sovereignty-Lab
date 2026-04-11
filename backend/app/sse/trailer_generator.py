@@ -31,6 +31,31 @@ from app.sse.infrastructure.r2_storage import store_bytes, store_image
 logger = logging.getLogger(__name__)
 
 TRAILER_OUTPUT_DIR = "/tmp/trailer_scenes"
+
+
+async def _apply_faststart(vid_bytes: bytes) -> bytes:
+    """Re-mux MP4 with -movflags +faststart so browsers can stream progressively."""
+    tmp = tempfile.mkdtemp(prefix="faststart_")
+    src = os.path.join(tmp, "in.mp4")
+    dst = os.path.join(tmp, "out.mp4")
+    try:
+        with open(src, "wb") as f:
+            f.write(vid_bytes)
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-c", "copy",
+             "-movflags", "+faststart", dst],
+            capture_output=True, timeout=30,
+        )
+        if proc.returncode == 0 and os.path.exists(dst):
+            with open(dst, "rb") as f:
+                return f.read()
+        logger.warning("[FASTSTART] ffmpeg failed (rc=%d), using original", proc.returncode)
+        return vid_bytes
+    except Exception as e:
+        logger.warning("[FASTSTART] Error: %s, using original", e)
+        return vid_bytes
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 R2_TRAILER_PREFIX = "sse/trailer/scenes"
 _PRESETS_DIR = Path(__file__).parent / "data" / "studio_presets"
 
@@ -476,10 +501,11 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
                 image_bytes = await _generate_image_with_lora_or_grok(
                     consistent_prompt, characters, trained_loras,
                 )
-                r2_key = f"sse/studio/projects/{project_id}/scenes/{title}.png"
+                r2_key = f"sse/studio/projects/{project_id}/{num}.png"
                 r2_url = await store_image(image_bytes, r2_key)
                 used_lora = any(c in trained_loras for c in characters)
                 results.append({"scene": num, "title": title, "r2_url": r2_url,
+                                "r2_key": r2_key,
                                 "status": "success", "cost": 0.07,
                                 "used_lora": used_lora})
                 logger.info("[TRAILER] Scene %d done (lora=%s)", num, used_lora)
@@ -874,7 +900,7 @@ async def generate_interpolated_trailer(
                 try:
                     prompt = _build_consistent_prompt(pdef.get("prompt", scene_data.get("title", "")), chars, scene_num=snum)
                     img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
-                    key = f"sse/studio/projects/{project_id}/scenes/{scene_data.get('title', f'scene_{snum}')}.png"
+                    key = f"sse/studio/projects/{project_id}/{snum}.png"
                     new_url = await store_image(img, key)
                     scene_data["r2_url"] = new_url
                     scene_data["used_lora"] = True
@@ -891,9 +917,21 @@ async def generate_interpolated_trailer(
         logger.warning("[INTERPOLATE] Need at least 2 scenes, got %d", len(scenes))
         return []
 
+    from app.sse.infrastructure import r2_storage as _r2
+    for sc in scenes:
+        r2k = sc.get("r2_key", "")
+        if not r2k:
+            snum = sc["scene"]
+            r2k = f"sse/studio/projects/{project_id}/{snum}.png"
+            if not r2k:
+                continue
+        fresh = _r2.presigned_url(r2k, expires_in=7200)
+        if fresh:
+            sc["r2_url"] = fresh
+            logger.debug("[INTERPOLATE] Refreshed presigned URL for scene %d", sc["scene"])
+
     motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
 
-    # Fresh results — never carry forward old clips. Each run produces a clean set.
     results: list[dict] = []
     start_idx = 0
 
@@ -927,6 +965,7 @@ async def generate_interpolated_trailer(
                         async with dl.get(video_url) as vr:
                             if vr.status == 200:
                                 vid_bytes = await vr.read()
+                                vid_bytes = await _apply_faststart(vid_bytes)
                                 r2_key = (
                                     f"sse/studio/projects/{project_id}/clips/"
                                     f"transition_{start_scene['scene']:02d}_to_{end_scene['scene']:02d}.mp4"
@@ -1875,19 +1914,28 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
     os.makedirs(graded_dir)
 
     try:
-        logger.info("[STITCH] Downloading %d clips...", len(successful))
-        async with aiohttp.ClientSession() as sess:
-            for clip in successful:
-                local = os.path.join(clip_dir, f"scene_{clip['scene']:02d}.mp4")
-                try:
-                    async with sess.get(clip["video_url"]) as r:
-                        if r.status == 200:
-                            data = await r.read()
-                            if len(data) > 1000:
-                                with open(local, "wb") as f:
-                                    f.write(data)
-                except Exception as e:
-                    logger.warning("[STITCH] Download failed scene %d: %s", clip["scene"], e)
+        logger.info("[STITCH] Downloading %d clips from R2...", len(successful))
+        for clip in successful:
+            local = os.path.join(clip_dir, f"scene_{clip['scene']:02d}.mp4")
+            try:
+                # Build R2 key from clip metadata — bypasses stale presigned URLs
+                fs = clip.get("from_scene", clip.get("scene", 0))
+                ts = clip.get("to_scene")
+                if ts is not None:
+                    r2_key = f"sse/studio/projects/{project_id}/clips/transition_{fs:02d}_to_{ts:02d}.mp4"
+                else:
+                    r2_key = f"sse/studio/projects/{project_id}/clips/endcard_{fs:02d}.mp4"
+
+                def _dl(k=r2_key):
+                    return client.get_object(Bucket=_r2._R2_BUCKET, Key=k)["Body"].read()
+
+                vid_data = await asyncio.get_event_loop().run_in_executor(None, _dl)
+                if len(vid_data) > 1000:
+                    with open(local, "wb") as f:
+                        f.write(vid_data)
+                    logger.info("[STITCH] Downloaded %s (%dKB)", r2_key.split("/")[-1], len(vid_data) // 1024)
+            except Exception as e:
+                logger.warning("[STITCH] Download failed scene %d: %s", clip["scene"], e)
 
         if include_color_grade:
             grade_filter = COLOR_GRADE_PRESETS.get(color_preset, COLOR_GRADE_PRESETS["ghibli_warm"])
@@ -1902,7 +1950,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
                         "-c:v", "libx264", "-preset", "fast",
                         "-crf", "20", "-pix_fmt", "yuv420p", dst,
                     ]
-                    subprocess.run(cmd, capture_output=True, timeout=30)
+                    subprocess.run(cmd, capture_output=True, timeout=120)
                     if not os.path.exists(dst):
                         shutil.copy(src, dst)
         else:
@@ -1933,7 +1981,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
             "-i", concat_path, "-c:v", "libx264",
             "-pix_fmt", "yuv420p", "-preset", "fast",
             "-crf", "22", "-movflags", "+faststart", raw_output,
-        ], capture_output=True, timeout=300)
+        ], capture_output=True, timeout=900)
 
         final_output = raw_output
 
@@ -1953,7 +2001,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
                 "ffmpeg", "-y", "-i", final_output,
                 "-vf", "crop=ih*9/16:ih,scale=1080:1920",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "22", vert,
-            ], capture_output=True, timeout=300)
+            ], capture_output=True, timeout=600)
             if os.path.exists(vert):
                 final_output = vert
         elif output_format == "1:1":
@@ -1962,7 +2010,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
                 "ffmpeg", "-y", "-i", final_output,
                 "-vf", "crop=min(iw\\,ih):min(iw\\,ih),scale=1080:1080",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "22", sq,
-            ], capture_output=True, timeout=300)
+            ], capture_output=True, timeout=600)
             if os.path.exists(sq):
                 final_output = sq
 

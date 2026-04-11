@@ -22,7 +22,7 @@ _CORE_CHAR_MD = Path(__file__).parent.parent.parent / "resources" / "therapeutic
 
 _WORKERS_AI_URL = os.getenv("WORKERS_AI_URL", "")
 _WORKERS_AI_TOKEN = os.getenv("WORKERS_AI_TOKEN", "")
-_WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.1-8b-instruct")
+_WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
 
 _AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 _AZURE_API_KEY = os.getenv("AZURE_API_KEY", "")
@@ -657,6 +657,29 @@ async def stitch_project_trailer(project_id: str, options: dict, db_pool, redis=
     return result or {"error": "Stitching failed — check logs"}
 
 
+def _refresh_presigned_urls(clips: list[dict], project_id: str) -> None:
+    """Replace stale presigned video_url/r2_url with fresh ones (24h TTL)."""
+    from app.sse.infrastructure import r2_storage as _r2
+    for clip in clips:
+        fs = clip.get("from_scene", clip.get("scene"))
+        ts = clip.get("to_scene")
+        if ts is not None:
+            key = f"sse/studio/projects/{project_id}/clips/transition_{fs:02d}_to_{ts:02d}.mp4"
+        elif clip.get("status") == "ken_burns" or "endcard" in clip.get("title", ""):
+            key = f"sse/studio/projects/{project_id}/clips/endcard_{fs:02d}.mp4"
+        else:
+            key = f"sse/studio/projects/{project_id}/clips/scene_{fs:02d}.mp4"
+        fresh = _r2.presigned_url(key)
+        if fresh:
+            clip["video_url"] = fresh
+        if clip.get("r2_url"):
+            img_key = clip.get("r2_key", "")
+            if img_key:
+                img_fresh = _r2.presigned_url(img_key)
+                if img_fresh:
+                    clip["r2_url"] = img_fresh
+
+
 async def get_video_status(project_id: str) -> dict:
     """Check video generation status from R2 manifest + chain state."""
     from app.sse.trailer_generator import _load_manifest_from_r2
@@ -674,6 +697,9 @@ async def get_video_status(project_id: str) -> dict:
         data = json.loads(resp["Body"].read().decode())
     except Exception:
         data = {"status": "not_started"}
+
+    if data.get("clips"):
+        _refresh_presigned_urls(data["clips"], project_id)
 
     try:
         proj_manifest = await _load_manifest_from_r2(project_id)
@@ -701,6 +727,11 @@ async def get_trailer_status(project_id: str) -> dict:
             pass
     if not manifest:
         return {"status": "not_started"}
+    if manifest.get("trailer", {}).get("trailer_url"):
+        key = f"sse/studio/projects/{project_id}/trailer_{manifest['trailer'].get('format', '16:9').replace(':', 'x')}.mp4"
+        fresh = _r2.presigned_url(key)
+        if fresh:
+            manifest["trailer"]["trailer_url"] = fresh
     return manifest
 
 

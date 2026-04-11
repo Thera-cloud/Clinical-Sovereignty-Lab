@@ -48,7 +48,7 @@ _WORKERS_AI_MODEL = os.getenv("WORKERS_AI_MODEL", "@cf/meta/llama-3.3-70b-instru
 # Azure OpenAI (fast fallback when Workers AI is down and Grok is slow)
 _AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 _AZURE_KEY = os.getenv("AZURE_API_KEY", "")
-_AZURE_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4.1")
+_AZURE_CHAT_DEPLOYMENT = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "grok-4-1-fast-non-reasoning")
 
 _inference_banner_printed = False
 
@@ -94,7 +94,7 @@ def _reload_inference_env():
     _WORKERS_AI_MODEL = _strip_env(os.getenv("WORKERS_AI_MODEL", "")) or "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
     _AZURE_ENDPOINT = _strip_env(os.getenv("AZURE_OPENAI_ENDPOINT", ""))
     _AZURE_KEY = _strip_env(os.getenv("AZURE_API_KEY", ""))
-    _AZURE_CHAT_DEPLOYMENT = _strip_env(os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "")) or "gpt-4.1"
+    _AZURE_CHAT_DEPLOYMENT = _strip_env(os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "")) or "grok-4-1-fast-non-reasoning"
 
     if _is_placeholder_secret(_GROK_KEY):
         _GROK_KEY = ""

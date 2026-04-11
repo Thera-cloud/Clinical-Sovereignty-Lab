@@ -8345,8 +8345,18 @@ class AzureCortex:
                     _chunk_buf = ""
                     _first_token = True
                     _prev_prov = None
-                    _in_think_block = False  # QUANTUM-CRYSTAL-ARCH: suppress <think> reasoning tokens from Workers AI
+                    # QUANTUM-CRYSTAL-ARCH: buffer all output until we confirm no <think> block
                     _raw_accum = ""
+                    _think_resolved = False
+                    _in_think = False
+                    # QUANTUM-CRYSTAL-ARCH: real-time garble detection
+                    from app.services.response_sanitizer import is_chunk_garbled as _is_garbled_chunk
+                    _garble_streak = 0
+                    _garble_aborted = False
+                    _total_chars_sent = 0
+                    _GARBLE_STREAK_LIMIT = 2
+                    _MAX_CHARS_WORKERS = 4000
+                    _clean_prefix = ""
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
                         temperature=_user_temp, max_tokens=1500,
@@ -8354,40 +8364,109 @@ class AzureCortex:
                         image_data_url=_vault_image_data_url,
                     ):
                         if _prev_prov and provider != _prev_prov:
-                            full_response, _chunk_buf, _raw_accum = "", "", ""  # QUANTUM-CRYSTAL-ARCH: discard partial from failed provider
-                            _in_think_block = False
+                            full_response, _chunk_buf, _raw_accum = "", "", ""
+                            _think_resolved, _in_think = False, False
+                            _garble_streak = 0
+                            _total_chars_sent = 0
                         _prev_prov = provider
-                        _raw_accum += delta
                         _provider_used = provider
-                        if not _in_think_block and "<think>" in _raw_accum and "</think>" not in _raw_accum:
-                            _in_think_block = True
-                        if _in_think_block:
-                            if "</think>" in _raw_accum:
-                                _think_end = _raw_accum.index("</think>") + len("</think>")
-                                _after = _raw_accum[_think_end:].lstrip("\n")
-                                print(f">>> [SOVEREIGN] Stripped {_think_end} chars of <think> reasoning")
-                                full_response = _after
-                                _chunk_buf = _after
-                                _in_think_block = False
-                                _raw_accum = _after
-                            continue
-                        full_response += delta
-                        _chunk_buf += delta
-                        if _first_token:
-                            _ttft_ms = int((_time_inf.monotonic() - _t_inf_start) * 1000)
-                            print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
-                            _first_token = False
-                        if len(_chunk_buf) >= 25:
+                        _raw_accum += delta
+
+                        if not _think_resolved:
+                            if _in_think:
+                                if "</think>" in _raw_accum:
+                                    _te = _raw_accum.index("</think>") + len("</think>")
+                                    _after = _raw_accum[_te:].lstrip("\n")
+                                    print(f">>> [SOVEREIGN] Stripped {_te} chars of <think> reasoning")
+                                    full_response = _after
+                                    _chunk_buf = _after
+                                    _raw_accum = _after
+                                    _think_resolved = True
+                                    _in_think = False
+                                continue
+                            if "<think" in _raw_accum:
+                                _in_think = True
+                                continue
+                            if len(_raw_accum) > 20 and "<" not in _raw_accum:
+                                _think_resolved = True
+                                full_response = _raw_accum
+                                _chunk_buf = _raw_accum
+                            elif len(_raw_accum) > 200:
+                                _think_resolved = True
+                                full_response = _raw_accum
+                                _chunk_buf = _raw_accum
+                            else:
+                                continue
+
+                        if _think_resolved:
+                            if delta and _raw_accum != full_response:
+                                full_response += delta
+                                _chunk_buf += delta
+
+                            # QUANTUM-CRYSTAL-ARCH: garble detection before sending to client
+                            if provider == "workers_ai" and len(_chunk_buf) >= 25:
+                                if _is_garbled_chunk(_chunk_buf):
+                                    _garble_streak += 1
+                                    print(f">>> [GARBLE] Garbled chunk #{_garble_streak} from workers_ai ({len(_chunk_buf)} chars): {_chunk_buf[:80]}...")
+                                    _chunk_buf = ""
+                                    full_response = _clean_prefix
+                                    if _garble_streak >= _GARBLE_STREAK_LIMIT:
+                                        print(f">>> [GARBLE] {_garble_streak} consecutive garbled chunks — aborting workers_ai")
+                                        _garble_aborted = True
+                                        break
+                                    continue
+                                else:
+                                    _garble_streak = 0
+                                    _clean_prefix = full_response
+
+                                _total_chars_sent += len(_chunk_buf)
+                                if _total_chars_sent > _MAX_CHARS_WORKERS:
+                                    print(f">>> [GARBLE] Workers AI exceeded {_MAX_CHARS_WORKERS} char safety cap")
+                                    break
+
+                            if _first_token:
+                                _ttft_ms = int((_time_inf.monotonic() - _t_inf_start) * 1000)
+                                print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
+                                _first_token = False
+                            if len(_chunk_buf) >= 25:
+                                await self._send(uid, full_response)
+                                _chunk_buf = ""
+
+                    if _garble_aborted:
+                        print(f">>> [GARBLE] Retrying with fallback (grok→azure) after garble abort, clean prefix: {len(_clean_prefix)} chars")
+                        full_response = ""
+                        _provider_used = ""
+                        _already_streamed = False
+                        try:
+                            # QUANTUM-CRYSTAL-ARCH: TENSION signal routes grok→sovereign→azure, skipping workers_ai
+                            from app.services.sovereign_chat_client import generate_complete as _garble_fallback
+                            _fb_resp, _fb_prov = await _garble_fallback(
+                                system_prompt, user_text,
+                                odpe_signal="TENSION",
+                                temperature=_user_temp, max_tokens=1500,
+                                domain="clinical",
+                            )
+                            if _fb_resp:
+                                full_response = _fb_resp
+                                _provider_used = _fb_prov
+                                await self._send(uid, full_response)
+                                _already_streamed = True
+                                print(f">>> [GARBLE] Fallback via {_fb_prov}: {len(full_response)} chars")
+                        except Exception as _fb_err:
+                            print(f">>> [GARBLE] Fallback also failed: {_fb_err}")
+                    else:
+                        if _in_think:
+                            import re as _re_think
+                            _raw_accum = _re_think.sub(r"<think>[\s\S]*?</think>\s*", "", _raw_accum)
+                            _raw_accum = _re_think.sub(r"<think>[\s\S]*$", "", _raw_accum)
+                            full_response = _raw_accum.strip()
+                            print(f">>> [SOVEREIGN] Stripped unclosed <think> block, kept {len(full_response)} chars")
+                        elif not _think_resolved and _raw_accum:
+                            full_response = _raw_accum
+                        if _chunk_buf or (full_response and not _chunk_buf):
                             await self._send(uid, full_response)
-                            _chunk_buf = ""
-                    if _in_think_block:
-                        import re as _re_think
-                        _raw_accum = _re_think.sub(r"<think>[\s\S]*?</think>\s*", "", _raw_accum)
-                        full_response = _raw_accum.strip()
-                        print(f">>> [SOVEREIGN] Stripped unclosed <think> block, kept {len(full_response)} chars")
-                    if _chunk_buf:
-                        await self._send(uid, full_response)
-                    _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send at line 8478
+                    if not _garble_aborted:
+                        _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send
                 except Exception as _sov_err:
                     print(f">>> [SOVEREIGN] Streaming inference failed: {_sov_err}")
                     full_response = ""
