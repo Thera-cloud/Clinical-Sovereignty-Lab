@@ -170,7 +170,7 @@ try:
 except ImportError:
     _sovereign_generate = None
     _sovereign_stream = None
-_ZERO_COST_PROVIDERS = frozenset({"sovereign", "workers_ai", "grok", "home_gpu", "digitalocean", "azure"})
+_ZERO_COST_PROVIDERS = frozenset({"sovereign", "workers_ai", "grok", "home_gpu", "digitalocean"})
 
 # QUANTUM-CRYSTAL-ARCH: per-user turn accumulator for session-level crystals
 _chat_session_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
@@ -8310,8 +8310,8 @@ class AzureCortex:
         {drift_context}
         {reply_context}
         {lr_context}"""
-        # SOVEREIGN-VOICE — cap system prompt to ~12k chars (~3k tokens) for faster inference
-        _SP_CAP = 12000
+        # SOVEREIGN-VOICE — cap system prompt; workers_ai/grok handle 128K+ context  # QUANTUM-CRYSTAL-ARCH
+        _SP_CAP = 32000
         if len(system_prompt) > _SP_CAP:
             print(f">>> [PROMPT CAP] Trimming system prompt from {len(system_prompt)} to {_SP_CAP} chars")
             system_prompt = system_prompt[:_SP_CAP] + "\n\n[Context truncated for performance. Focus on the user's current message.]"
@@ -8345,6 +8345,8 @@ class AzureCortex:
                     _chunk_buf = ""
                     _first_token = True
                     _prev_prov = None
+                    _in_think_block = False  # QUANTUM-CRYSTAL-ARCH: suppress <think> reasoning tokens from Workers AI
+                    _raw_accum = ""
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
                         temperature=_user_temp, max_tokens=1500,
@@ -8352,10 +8354,24 @@ class AzureCortex:
                         image_data_url=_vault_image_data_url,
                     ):
                         if _prev_prov and provider != _prev_prov:
-                            full_response, _chunk_buf = "", ""  # QUANTUM-CRYSTAL-ARCH: discard partial from failed provider
+                            full_response, _chunk_buf, _raw_accum = "", "", ""  # QUANTUM-CRYSTAL-ARCH: discard partial from failed provider
+                            _in_think_block = False
                         _prev_prov = provider
-                        full_response += delta
+                        _raw_accum += delta
                         _provider_used = provider
+                        if not _in_think_block and "<think>" in _raw_accum and "</think>" not in _raw_accum:
+                            _in_think_block = True
+                        if _in_think_block:
+                            if "</think>" in _raw_accum:
+                                _think_end = _raw_accum.index("</think>") + len("</think>")
+                                _after = _raw_accum[_think_end:].lstrip("\n")
+                                print(f">>> [SOVEREIGN] Stripped {_think_end} chars of <think> reasoning")
+                                full_response = _after
+                                _chunk_buf = _after
+                                _in_think_block = False
+                                _raw_accum = _after
+                            continue
+                        full_response += delta
                         _chunk_buf += delta
                         if _first_token:
                             _ttft_ms = int((_time_inf.monotonic() - _t_inf_start) * 1000)
@@ -8364,6 +8380,11 @@ class AzureCortex:
                         if len(_chunk_buf) >= 25:
                             await self._send(uid, full_response)
                             _chunk_buf = ""
+                    if _in_think_block:
+                        import re as _re_think
+                        _raw_accum = _re_think.sub(r"<think>[\s\S]*?</think>\s*", "", _raw_accum)
+                        full_response = _raw_accum.strip()
+                        print(f">>> [SOVEREIGN] Stripped unclosed <think> block, kept {len(full_response)} chars")
                     if _chunk_buf:
                         await self._send(uid, full_response)
                     _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send at line 8478
@@ -8524,6 +8545,13 @@ class AzureCortex:
                     print(f">>> [ODPE] Signal log write failed (non-fatal): {_osl_err}")
 
             # === SHARED POST-PROCESSING (runs for ALL providers) ===  # SOVEREIGN-VOICE
+            # QUANTUM-CRYSTAL-ARCH: strip any residual <think> reasoning blocks from all providers
+            if "<think>" in full_response:
+                import re as _re_think_final
+                _pre_len = len(full_response)
+                full_response = _re_think_final.sub(r"<think>[\s\S]*?</think>\s*", "", full_response).strip()
+                if len(full_response) != _pre_len:
+                    print(f">>> [SOVEREIGN] Post-process stripped <think> block ({_pre_len} → {len(full_response)} chars)")
             _final_response = full_response
             if not full_response.strip():
                 await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.")
