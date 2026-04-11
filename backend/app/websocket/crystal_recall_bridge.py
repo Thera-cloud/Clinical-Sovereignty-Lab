@@ -51,9 +51,229 @@ _MIN_SCORE_VOICE = 2
 _MIN_USER_LEN = 40
 _MIN_USER_LEN_VOICE = 15
 
-# Global crystal cache (5-min TTL) — avoids repeated 113K-row scans
+# Global crystal cache (5-min TTL) — avoids repeated 21K+ row scans
 _global_crystal_cache: dict = {"rows": [], "expires": 0.0}
 _GLOBAL_CACHE_TTL = 300.0  # seconds
+
+# Two-tier deep recall cache — keyed by user_id, 5-min TTL
+_deep_recall_cache: dict[str, list] = {}
+_deep_recall_expiry: dict[str, float] = {}
+_DEEP_RECALL_TTL = 300.0  # seconds
+
+
+async def _fast_recall_crystals(conn, user_uuid, query_text: str, max_user: int = 5, max_global: int = 3) -> tuple[list, list, set]:
+    """Tier 1: single batched CTE for user crystals + cached globals. Target <500ms."""
+    import time as _t
+    _t0 = _t.monotonic()
+    _has_query = bool(query_text and len(query_text.strip()) >= 12)
+    _seen_ids: set = set()
+    user_crystals = []
+
+    if user_uuid:
+        if _has_query:
+            rows = await conn.fetch(
+                """
+                WITH topic_matched AS (
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1
+                      AND confidence >= 0.30
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $2)
+                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
+                                     plainto_tsquery('english', $2)) DESC
+                    LIMIT 3
+                ),
+                recent_user AS (
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id = $1
+                      AND confidence >= 0.30
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND id NOT IN (SELECT id FROM topic_matched)
+                    ORDER BY created_at DESC, confidence DESC
+                    LIMIT 2
+                )
+                SELECT *, 'topic' as source FROM topic_matched
+                UNION ALL
+                SELECT *, 'recent' as source FROM recent_user
+                """,
+                user_uuid, query_text.strip()[:200],
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, crystal_text, confidence, domain, metadata, 'recent' as source
+                FROM nate_intelligence_crystals
+                WHERE user_id = $1
+                  AND confidence >= 0.30
+                  AND scope NOT IN ('archived')
+                  AND superseded_by IS NULL
+                ORDER BY created_at DESC, confidence DESC
+                LIMIT $2
+                """,
+                user_uuid, max_user,
+            )
+        for r in rows:
+            if r["id"] not in _seen_ids and len(user_crystals) < max_user:
+                user_crystals.append(r)
+                _seen_ids.add(r["id"])
+
+    global_crystals = []
+    _now = _t.monotonic()
+    if _global_crystal_cache["expires"] < _now or not _global_crystal_cache["rows"]:
+        _g_top_all = await conn.fetch(
+            "SELECT id, crystal_text, confidence, domain, metadata "
+            "FROM nate_intelligence_crystals "
+            "WHERE user_id IS NULL AND confidence >= 0.55 "
+            "AND scope NOT IN ('archived') AND superseded_by IS NULL "
+            "ORDER BY confidence DESC, last_recalled_at DESC NULLS LAST LIMIT 50",
+        )
+        _global_crystal_cache["rows"] = [dict(r) for r in _g_top_all]
+        _global_crystal_cache["expires"] = _now + _GLOBAL_CACHE_TTL
+    for r in _global_crystal_cache["rows"]:
+        if r["id"] not in _seen_ids and len(global_crystals) < max_global:
+            global_crystals.append(r)
+            _seen_ids.add(r["id"])
+
+    _elapsed = (_t.monotonic() - _t0) * 1000
+    logger.info("[CRYSTAL FAST] user_cte: %.1fms, total: %.1fms (%d user + %d global)",
+                _elapsed, _elapsed, len(user_crystals), len(global_crystals))
+    return user_crystals, global_crystals, _seen_ids
+
+
+async def _deep_recall_crystals(db_pool, hardware_id: str, user_uuid, query_text: str,
+                                 seen_ids: set, affect_weight: float = 0.0) -> None:
+    """Tier 2: background task. Cold-start, clinical DNA, liminal, patterns. Stores in cache."""
+    import time as _t
+    _t0 = _t.monotonic()
+    cache_key = str(user_uuid or hardware_id)
+    deep_user = []
+    deep_clinical_dna = []
+    deep_anticipatory = ""
+    _has_query = bool(query_text and len(query_text.strip()) >= 12)
+    try:
+        async with db_pool.acquire() as conn:
+            _t_cold = _t.monotonic()
+            if user_uuid:
+                _u_cold_cnt = await conn.fetchval(
+                    "SELECT count(*) FROM nate_intelligence_crystals "
+                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                    "AND created_at > NOW() - INTERVAL '180 days'",
+                    user_uuid,
+                )
+                if _u_cold_cnt > 0:
+                    _cold = await conn.fetch(
+                        "SELECT id, crystal_text, confidence, domain, metadata "
+                        "FROM nate_intelligence_crystals "
+                        "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
+                        "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                        "AND created_at > NOW() - INTERVAL '180 days' "
+                        "ORDER BY id OFFSET $2 LIMIT 1",
+                        user_uuid, _rnd.randrange(max(_u_cold_cnt, 1)),
+                    )
+                    for r in _cold:
+                        if r["id"] not in seen_ids:
+                            deep_user.append(r)
+            _ms_cold = (_t.monotonic() - _t_cold) * 1000
+
+            if _has_query:
+                _g_cold_cnt = await conn.fetchval(
+                    "SELECT count(*) FROM nate_intelligence_crystals "
+                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
+                )
+                if _g_cold_cnt > 0:
+                    _g_cold = await conn.fetch(
+                        "SELECT id, crystal_text, confidence, domain, metadata "
+                        "FROM nate_intelligence_crystals "
+                        "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
+                        "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
+                        "ORDER BY id OFFSET $1 LIMIT 1",
+                        _rnd.randrange(max(_g_cold_cnt, 1)),
+                    )
+                    for r in _g_cold:
+                        if r["id"] not in seen_ids:
+                            deep_user.append(r)
+
+                _g_topic = await conn.fetch(
+                    """
+                    SELECT id, crystal_text, confidence, domain, metadata
+                    FROM nate_intelligence_crystals
+                    WHERE user_id IS NULL
+                      AND confidence >= 0.55
+                      AND scope NOT IN ('archived')
+                      AND superseded_by IS NULL
+                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $1)
+                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
+                                     plainto_tsquery('english', $1)) DESC
+                    LIMIT 3
+                    """,
+                    query_text.strip()[:200],
+                )
+                for r in _g_topic:
+                    if r["id"] not in seen_ids:
+                        deep_user.append(r)
+
+            _t_dna = _t.monotonic()
+            _dna_cnt = await conn.fetchval(
+                "SELECT count(*) FROM nate_intelligence_crystals "
+                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
+                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed')",
+            )
+            if _dna_cnt > 0:
+                _dna_rows = await conn.fetch(
+                    "SELECT id, crystal_text, confidence, domain, metadata "
+                    "FROM nate_intelligence_crystals "
+                    "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
+                    "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
+                    "ORDER BY id OFFSET $1 LIMIT 2",
+                    _rnd.randrange(max(_dna_cnt, 1)),
+                )
+                for r in _dna_rows:
+                    if r["id"] not in seen_ids:
+                        deep_clinical_dna.append(r)
+            _ms_dna = (_t.monotonic() - _t_dna) * 1000
+
+            _t_lim = _t.monotonic()
+            lr_status = await conn.fetchval(
+                """SELECT status FROM liminal_resolve_states
+                   WHERE user_id = $1 AND status = 'carried_forward'
+                   ORDER BY updated_at DESC LIMIT 1""",
+                hardware_id,
+            )
+            if lr_status == "carried_forward":
+                deep_anticipatory = await retrieve_anticipatory_crystals(
+                    hardware_id, db_pool, strip_task_framing=True,
+                )
+            _ms_lim = (_t.monotonic() - _t_lim) * 1000
+
+        _deep_recall_cache[cache_key] = {
+            "user": [dict(r) for r in deep_user],
+            "clinical_dna": [dict(r) for r in deep_clinical_dna],
+            "anticipatory": deep_anticipatory,
+        }
+        _deep_recall_expiry[cache_key] = _t.monotonic() + _DEEP_RECALL_TTL
+
+        _total = (_t.monotonic() - _t0) * 1000
+        logger.info("[CRYSTAL DEEP] cold_start: %.1fms, clinical_dna: %.1fms, liminal: %.1fms, total: %.1fms (%d crystals)",
+                    _ms_cold, _ms_dna, _ms_lim, _total,
+                    len(deep_user) + len(deep_clinical_dna))
+    except Exception as e:
+        logger.warning("crystal_recall_bridge: deep recall: %s", e)
+
+
+def _get_deep_cache(user_uuid, hardware_id: str) -> dict | None:
+    """Return deep recall cache if warm and not expired."""
+    import time as _t
+    cache_key = str(user_uuid or hardware_id)
+    exp = _deep_recall_expiry.get(cache_key, 0.0)
+    if _t.monotonic() < exp and cache_key in _deep_recall_cache:
+        return _deep_recall_cache[cache_key]
+    return None
 
 
 async def recall_crystals_for_context(
@@ -75,206 +295,43 @@ async def recall_crystals_for_context(
 
             user_limit = max(max_results // 2, 2)
             global_limit = max_results - user_limit
-            if affect_weight > 0.0:
-                user_limit = max(user_limit, 25)
-                global_limit = max(global_limit, 25)
 
-            _has_query = bool(query_text and len(query_text.strip()) >= 12)
-            _seen_ids: set = set()
-
-            # --- USER CRYSTALS: topic-matched + cold-start + recent ---
-            user_crystals = []
-
-            if _has_query and user_uuid:
-                _topic_limit = max(user_limit // 2, 1)
-                _topic_rows = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id = $1
-                      AND confidence >= 0.30
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $2)
-                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
-                                     plainto_tsquery('english', $2)) DESC
-                    LIMIT $3
-                    """,
-                    user_uuid, query_text.strip()[:200], _topic_limit,
-                )
-                for r in _topic_rows:
-                    if r["id"] not in _seen_ids:
-                        user_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            if len(user_crystals) < user_limit and user_uuid:
-                _u_cold_cnt = await conn.fetchval(
-                    "SELECT count(*) FROM nate_intelligence_crystals "
-                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
-                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
-                    user_uuid,
-                )
-                _cold = await conn.fetch(
-                    "SELECT id, crystal_text, confidence, domain, metadata "
-                    "FROM nate_intelligence_crystals "
-                    "WHERE user_id = $1 AND confidence >= 0.30 AND scope NOT IN ('archived') "
-                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
-                    "ORDER BY id OFFSET $2 LIMIT 1",
-                    user_uuid, _rnd.randrange(max(_u_cold_cnt, 1)),
-                ) if _u_cold_cnt > 0 else []
-                for r in _cold:
-                    if r["id"] not in _seen_ids:
-                        user_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            _u_remaining = user_limit - len(user_crystals)
-            if _u_remaining > 0:
-                _recent = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id = $1
-                      AND confidence >= 0.30
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                    ORDER BY created_at DESC, confidence DESC
-                    LIMIT $2
-                    """,
-                    user_uuid, _u_remaining + len(_seen_ids),
-                )
-                for r in _recent:
-                    if r["id"] not in _seen_ids and len(user_crystals) < user_limit:
-                        user_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            # --- GLOBAL CRYSTALS: topic-matched + cold-start + high-confidence ---
-            global_crystals = []
-
-            if _has_query:
-                _g_topic_limit = max(global_limit // 2, 1)
-                _g_topic = await conn.fetch(
-                    """
-                    SELECT id, crystal_text, confidence, domain, metadata
-                    FROM nate_intelligence_crystals
-                    WHERE user_id IS NULL
-                      AND confidence >= 0.55
-                      AND scope NOT IN ('archived')
-                      AND superseded_by IS NULL
-                      AND to_tsvector('english', crystal_text) @@ plainto_tsquery('english', $1)
-                    ORDER BY ts_rank(to_tsvector('english', crystal_text),
-                                     plainto_tsquery('english', $1)) DESC
-                    LIMIT $2
-                    """,
-                    query_text.strip()[:200], _g_topic_limit,
-                )
-                for r in _g_topic:
-                    if r["id"] not in _seen_ids:
-                        global_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            if len(global_crystals) < global_limit:
-                _g_cold_cnt = await conn.fetchval(
-                    "SELECT count(*) FROM nate_intelligence_crystals "
-                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
-                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0)",
-                )
-                _g_cold = await conn.fetch(
-                    "SELECT id, crystal_text, confidence, domain, metadata "
-                    "FROM nate_intelligence_crystals "
-                    "WHERE user_id IS NULL AND confidence >= 0.55 AND scope NOT IN ('archived') "
-                    "AND superseded_by IS NULL AND (recall_count IS NULL OR recall_count = 0) "
-                    "ORDER BY id OFFSET $1 LIMIT 1",
-                    _rnd.randrange(max(_g_cold_cnt, 1)),
-                ) if _g_cold_cnt > 0 else []
-                for r in _g_cold:
-                    if r["id"] not in _seen_ids:
-                        global_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            _g_remaining = global_limit - len(global_crystals)
-            if _g_remaining > 0:
-                import time as _t_cache
-                _now = _t_cache.monotonic()
-                if _global_crystal_cache["expires"] < _now or not _global_crystal_cache["rows"]:
-                    _g_top_all = await conn.fetch(
-                        "SELECT id, crystal_text, confidence, domain, metadata "
-                        "FROM nate_intelligence_crystals "
-                        "WHERE user_id IS NULL AND confidence >= 0.55 "
-                        "AND scope NOT IN ('archived') AND superseded_by IS NULL "
-                        "ORDER BY confidence DESC, last_recalled_at DESC NULLS LAST LIMIT 50",
-                    )
-                    _global_crystal_cache["rows"] = [dict(r) for r in _g_top_all]
-                    _global_crystal_cache["expires"] = _now + _GLOBAL_CACHE_TTL
-                for r in _global_crystal_cache["rows"]:
-                    if r["id"] not in _seen_ids and len(global_crystals) < global_limit:
-                        global_crystals.append(r)
-                        _seen_ids.add(r["id"])
-
-            # Affect reranking during LIMINAL RESOLVE
-            if affect_weight > 0.0:
-                user_crystals = _rerank_by_affect(list(user_crystals), affect_weight, max_results // 2)
-                global_crystals = _rerank_by_affect(list(global_crystals), affect_weight, max_results - max_results // 2)
-
-            # Lazy-fill affect metadata for crystals that lack it
-            if affect_weight > 0.0:
-                _lazy_fill_ids = []
-                for c in list(user_crystals) + list(global_crystals):
-                    meta = c.get("metadata") or {}
-                    if isinstance(meta, str):
-                        try:
-                            import json as _json
-                            meta = _json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    if meta.get("emotional_valence") is None:
-                        _lazy_fill_ids.append((c["id"], c.get("crystal_text", "")))
-                if _lazy_fill_ids:
-                    import asyncio as _aio
-                    _aio.create_task(_lazy_fill_affect_metadata(conn, _lazy_fill_ids))
-
-            # Check for carried_forward LIMINAL state → append anticipatory crystals
-            lr_status = await conn.fetchval(
-                """SELECT status FROM liminal_resolve_states
-                   WHERE user_id = $1 AND status = 'carried_forward'
-                   ORDER BY updated_at DESC LIMIT 1""",
-                hardware_id,
+            user_crystals, global_crystals, _seen_ids = await _fast_recall_crystals(
+                conn, user_uuid, query_text, max_user=user_limit, max_global=global_limit,
             )
-            anticipatory_section = ""
-            if lr_status == "carried_forward":
-                anticipatory_section = await retrieve_anticipatory_crystals(
-                    hardware_id, db_pool, strip_task_framing=True,
-                )
 
-            # QUANTUM-CRYSTAL-ARCH: dedicated clinical DNA slot — six-quotient growth
-            # and clinical edge crystals that define HOW Nate responds
-            clinical_dna = []
-            _dna_cnt = await conn.fetchval(
-                "SELECT count(*) FROM nate_intelligence_crystals "
-                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
-                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed')",
-            )
-            _dna_rows = await conn.fetch(
-                "SELECT id, crystal_text, confidence, domain, metadata "
-                "FROM nate_intelligence_crystals "
-                "WHERE user_id IS NULL AND confidence >= 0.85 AND scope NOT IN ('archived') "
-                "AND superseded_by IS NULL AND origin_surface IN ('growth_engine', 'clinical_edge_seed') "
-                "ORDER BY id OFFSET $1 LIMIT 2",
-                _rnd.randrange(max(_dna_cnt, 1)),
-            ) if _dna_cnt > 0 else []
-            for r in _dna_rows:
+        deep_cache = _get_deep_cache(user_uuid, hardware_id)
+        clinical_dna = []
+        anticipatory_section = ""
+        deep_extras = []
+
+        if deep_cache:
+            for r in deep_cache.get("clinical_dna", []):
                 if r["id"] not in _seen_ids:
                     clinical_dna.append(r)
                     _seen_ids.add(r["id"])
+            for r in deep_cache.get("user", []):
+                if r["id"] not in _seen_ids:
+                    deep_extras.append(r)
+                    _seen_ids.add(r["id"])
+            anticipatory_section = deep_cache.get("anticipatory", "")
 
-            crystals = list(user_crystals) + clinical_dna + list(global_crystals)
-            if not crystals:
-                return ""
+        if affect_weight > 0.0:
+            all_user = list(user_crystals) + deep_extras
+            user_crystals = _rerank_by_affect(all_user, affect_weight, max_results // 2)
+            global_crystals = _rerank_by_affect(list(global_crystals), affect_weight, max_results - max_results // 2)
+        else:
+            user_crystals = list(user_crystals) + deep_extras
 
-            crystal_ids = [c["id"] for c in crystals]
+        crystals = user_crystals + clinical_dna + list(global_crystals)
+        if not crystals:
+            return ""
 
-        # Fire-and-forget: recall log + reinforcement + co-activation (don't block reads)
+        crystal_ids = [c["id"] for c in crystals]
+
         import asyncio as _aio
         _aio.create_task(_reinforce_recalled_crystals(db_pool, hardware_id, crystal_ids, source))
+        _aio.create_task(_deep_recall_crystals(db_pool, hardware_id, user_uuid, query_text, _seen_ids, affect_weight))
 
         lines = []
         if user_crystals:
