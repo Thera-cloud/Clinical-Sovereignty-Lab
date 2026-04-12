@@ -101,18 +101,21 @@ async def break_scenes(body: BreakScenesRequest):
 
 @studio_router.post("/generate-image")
 async def generate_image(body: GenerateImageRequest, request: Request):
-    from app.sse.studio_service import generate_scene_image
+    from app.sse.studio_service import generate_scene_image, _patch_project_manifest_image
     redis = _get_redis(request)
     try:
         url = await generate_scene_image(body.description, body.project_id, body.scene_num, redis=redis, characters=body.characters)
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if db_pool:
+        await _patch_project_manifest_image(body.project_id, body.scene_num, url, db_pool)
     return {"r2_url": url}
 
 
 @studio_router.post("/generate-video")
 async def generate_video(body: GenerateVideoRequest, request: Request, background_tasks: BackgroundTasks):
-    from app.sse.studio_service import generate_scene_video
+    from app.sse.studio_service import generate_scene_video, _patch_video_manifest
     redis = _get_redis(request)
 
     async def _run():
@@ -120,6 +123,7 @@ async def generate_video(body: GenerateVideoRequest, request: Request, backgroun
             print(f"[STUDIO] Background video gen starting: scene {body.scene_num}", flush=True)
             url = await generate_scene_video(body.image_url, body.motion_prompt, body.project_id, body.scene_num, redis=redis)
             print(f"[STUDIO] Background video gen complete: scene {body.scene_num} → {url}", flush=True)
+            await _patch_video_manifest(body.project_id, body.scene_num, url)
         except Exception as e:
             import traceback
             print(f"[STUDIO] Background video gen FAILED scene {body.scene_num}: {e}", flush=True)

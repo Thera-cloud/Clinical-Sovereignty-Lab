@@ -1868,6 +1868,68 @@ COLOR_GRADE_PRESETS = {
 }
 
 
+# ---------------------------------------------------------------------------
+#  Per-scene narration helpers
+# ---------------------------------------------------------------------------
+
+def _get_clip_duration(path: str) -> float:
+    """Get actual clip duration via ffprobe. Falls back to 8.0s."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10
+        )
+        return float(result.stdout.strip()) if result.stdout.strip() else 8.0
+    except Exception:
+        return 8.0
+
+
+MAX_NARRATION_EXTENSION = 2.0
+
+
+def _overlay_narration_on_clip(clip_path: str, narration_path: str, output_path: str) -> bool:
+    """Overlay narration audio onto a single clip. Returns True on success."""
+    clip_dur = _get_clip_duration(clip_path)
+    narr_dur = _get_clip_duration(narration_path)
+
+    if narr_dur <= clip_dur:
+        cmd = ["ffmpeg", "-y", "-i", clip_path, "-i", narration_path,
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+               "-map", "0:v", "-map", "1:a", "-shortest", output_path]
+    elif narr_dur <= clip_dur + MAX_NARRATION_EXTENSION:
+        extend_by = narr_dur - clip_dur
+        cmd = ["ffmpeg", "-y", "-i", clip_path, "-i", narration_path,
+               "-filter_complex",
+               f"[0:v]tpad=stop_mode=clone:stop_duration={extend_by:.2f}[v]",
+               "-map", "[v]", "-map", "1:a",
+               "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+               "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+               "-shortest", output_path]
+    else:
+        max_dur = clip_dur + MAX_NARRATION_EXTENSION
+        cmd = ["ffmpeg", "-y", "-i", clip_path, "-i", narration_path,
+               "-filter_complex",
+               f"[0:v]tpad=stop_mode=clone:stop_duration={MAX_NARRATION_EXTENSION:.2f}[v];"
+               f"[1:a]atrim=0:{max_dur:.2f}[a]",
+               "-map", "[v]", "-map", "[a]",
+               "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+               "-c:a", "aac", "-b:a", "192k", "-pix_fmt", "yuv420p",
+               output_path]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=120)
+        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            logger.info("[STITCH] Narrated clip: %s (clip=%.1fs, narr=%.1fs)",
+                        os.path.basename(output_path), clip_dur, narr_dur)
+            return True
+        logger.warning("[STITCH] Narration overlay failed for %s (rc=%d)", output_path, proc.returncode)
+        return False
+    except Exception as e:
+        logger.warning("[STITCH] Narration overlay error: %s", e)
+        return False
+
+
 async def stitch_trailer(project_id: str, options: dict | None = None) -> Optional[dict]:
     """Stitch clips into a congruent trailer with post-processing.
 
@@ -1958,21 +2020,53 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
                 shutil.copy(os.path.join(clip_dir, f), os.path.join(graded_dir, f))
 
         narration_files: dict[int, str] = {}
+        narration_mode = options.get("narration_mode", "per_scene")
         if include_narration:
             logger.info("[STITCH] Generating narration...")
             narration_files = await _generate_all_narration(project_id, work_dir)
 
-        graded_clips = sorted([
-            os.path.join(graded_dir, f) for f in os.listdir(graded_dir) if f.endswith(".mp4")
-        ])
+        # --- Per-scene narration overlay (default) ---
+        narrated_dir = os.path.join(work_dir, "narrated")
+        os.makedirs(narrated_dir, exist_ok=True)
 
-        if len(graded_clips) < 2:
-            logger.warning("[STITCH] Not enough graded clips")
+        final_clips = []
+        for clip_info in successful:
+            scene_num = clip_info.get("scene", clip_info.get("from_scene", 0))
+            graded_path = os.path.join(graded_dir, f"scene_{scene_num:02d}.mp4")
+            if not os.path.exists(graded_path):
+                continue
+
+            if include_narration and narration_mode == "per_scene" and int(scene_num) in narration_files:
+                narr_url = narration_files[int(scene_num)]
+                narr_local = os.path.join(narrated_dir, f"narr_{scene_num:02d}.wav")
+                try:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+                        async with sess.get(narr_url) as r:
+                            if r.status == 200:
+                                with open(narr_local, "wb") as f:
+                                    f.write(await r.read())
+                except Exception as e:
+                    logger.warning("[STITCH] Failed to download narration for scene %d: %s", scene_num, e)
+                    narr_local = None
+
+                if narr_local and os.path.exists(narr_local):
+                    narrated_path = os.path.join(narrated_dir, f"scene_{scene_num:02d}.mp4")
+                    if _overlay_narration_on_clip(graded_path, narr_local, narrated_path):
+                        final_clips.append(narrated_path)
+                    else:
+                        final_clips.append(graded_path)
+                else:
+                    final_clips.append(graded_path)
+            else:
+                final_clips.append(graded_path)
+
+        if len(final_clips) < 2:
+            logger.warning("[STITCH] Not enough final clips")
             return None
 
         concat_path = os.path.join(work_dir, "concat.txt")
         with open(concat_path, "w") as f:
-            for clip_path in graded_clips:
+            for clip_path in final_clips:
                 f.write(f"file '{clip_path}'\n")
 
         raw_output = os.path.join(work_dir, "trailer_raw.mp4")
@@ -1985,12 +2079,18 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
 
         final_output = raw_output
 
-        if include_narration and narration_files:
+        # Legacy post-concat narration fallback
+        if include_narration and narration_mode == "post_concat" and narration_files:
             scene_offsets: dict[int, float] = {}
             cumulative = 0.0
-            for clip in successful:
-                scene_offsets[clip["scene"]] = cumulative
-                cumulative += 8.0
+            for clip_path in final_clips:
+                scene_num_str = os.path.basename(clip_path).replace("scene_", "").replace(".mp4", "")
+                try:
+                    sn = int(scene_num_str)
+                except ValueError:
+                    sn = 0
+                scene_offsets[sn] = cumulative
+                cumulative += _get_clip_duration(clip_path)
             narrated = os.path.join(work_dir, "trailer_narrated.mp4")
             if await _merge_narration_audio(raw_output, narration_files, scene_offsets, narrated):
                 final_output = narrated

@@ -812,3 +812,69 @@ async def generate_congruent_clips(project_id: str, mode: str, db_pool, redis=No
 async def generate_interpolated(project_id: str, db_pool, redis=None, resume_from: int | None = None) -> dict:
     """Shortcut for interpolated trailer generation (recommended default)."""
     return await generate_congruent_clips(project_id, "interpolated", db_pool, redis, resume_from)
+
+
+# ---------------------------------------------------------------------------
+#  Manifest Patching — keep stitcher in sync after single-scene regen
+# ---------------------------------------------------------------------------
+
+async def _patch_video_manifest(project_id: str, scene_num: int, new_url: str):
+    """Update a single clip entry in video_manifest.json after scene regen."""
+    from app.sse.infrastructure.r2_storage import store_bytes
+    from app.sse.infrastructure import r2_storage as _r2
+
+    client = _r2._get_client()
+    if not client:
+        logger.warning("[MANIFEST PATCH] No R2 client")
+        return
+
+    key = f"sse/studio/projects/{project_id}/video_manifest.json"
+    try:
+        def _get():
+            return client.get_object(Bucket=_r2._R2_BUCKET, Key=key)
+        resp = await asyncio.get_event_loop().run_in_executor(None, _get)
+        manifest = json.loads(resp["Body"].read().decode())
+    except Exception as e:
+        logger.warning("[MANIFEST PATCH] Could not read video manifest: %s", e)
+        return
+
+    patched = False
+    for clip in manifest.get("clips", []):
+        clip_scene = clip.get("from_scene", clip.get("scene"))
+        if clip_scene == scene_num:
+            clip["video_url"] = new_url
+            clip["status"] = "success"
+            clip["regenerated_at"] = datetime.utcnow().isoformat()
+            patched = True
+            logger.info("[MANIFEST PATCH] Updated scene %d in video_manifest.json", scene_num)
+            break
+
+    if not patched:
+        logger.warning("[MANIFEST PATCH] No clip found for scene %d", scene_num)
+        return
+
+    await store_bytes(json.dumps(manifest, indent=2).encode(), key, "application/json")
+    logger.info("[MANIFEST PATCH] Saved video manifest for project %s", project_id)
+
+
+async def _patch_project_manifest_image(project_id: str, scene_num: int, new_image_url: str, db_pool):
+    """Update a scene image URL in the project manifest (DB) after image regen."""
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT manifest FROM sse_studio_projects WHERE project_id = $1", project_id)
+            if not row:
+                return
+            manifest = json.loads(row["manifest"]) if isinstance(row["manifest"], str) else row["manifest"]
+            for scene in manifest.get("scenes", []):
+                if scene.get("scene") == scene_num:
+                    scene["r2_url"] = new_image_url
+                    scene["image_url"] = new_image_url
+                    scene["regenerated_at"] = datetime.utcnow().isoformat()
+                    break
+            await conn.execute(
+                "UPDATE sse_studio_projects SET manifest = $1::jsonb WHERE project_id = $2",
+                json.dumps(manifest), project_id)
+            logger.info("[MANIFEST PATCH] Updated image for scene %d in project manifest", scene_num)
+    except Exception as e:
+        logger.error("[MANIFEST PATCH] Failed to patch project manifest: %s", e)
