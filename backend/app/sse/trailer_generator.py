@@ -1740,7 +1740,7 @@ async def _azure_tts(text: str, voice: str = "onyx", instructions: str = "") -> 
     if not api_key or not endpoint:
         return None
 
-    url = f"https://{endpoint}/openai/deployments/{deployment}/audio/speech?api-version=2024-12-17"
+    url = f"https://{endpoint}/openai/deployments/{deployment}/audio/speech?api-version=2025-01-01-preview"
     payload: dict = {"model": deployment, "input": text, "voice": voice}
     if instructions:
         payload["instructions"] = instructions

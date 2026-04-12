@@ -305,7 +305,7 @@ async def generate_narration(text: str, voice: str, project_id: str, scene_num: 
     }
     cfg = voice_map.get(voice, voice_map["narrator"])
 
-    url = f"https://{_AZURE_ENDPOINT}/openai/deployments/{_AZURE_TTS_DEPLOYMENT}/audio/speech?api-version=2024-12-17"
+    url = f"https://{_AZURE_ENDPOINT}/openai/deployments/{_AZURE_TTS_DEPLOYMENT}/audio/speech?api-version=2025-01-01-preview"
     payload = {"model": _AZURE_TTS_DEPLOYMENT, "input": text, "voice": cfg["voice"],
                "instructions": cfg["instructions"], "response_format": "mp3"}
     headers = {"api-key": _AZURE_API_KEY, "Content-Type": "application/json"}
