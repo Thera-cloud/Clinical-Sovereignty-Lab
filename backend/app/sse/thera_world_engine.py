@@ -338,8 +338,6 @@ async def compose_journey_narrative(
             return result
         else:
             logger.warning("SSE narrative: LLM returned non-JSON for %s. raw[:200]=%s", user_id, raw[:200])
-                continue
-
     return fallback
 
 
