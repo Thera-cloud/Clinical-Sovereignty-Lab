@@ -663,6 +663,18 @@ class CycleDetectionEngine:
                     except Exception as e:
                         logger.warning("CycleDetection: store detection error: %s", e)
 
+                # UCD event hook: fire cycle_detected for TMC classification
+                try:
+                    from app.sse.ucd.event_hooks import fire_ucd_event
+                    import asyncio as _aio
+                    _aio.create_task(fire_ucd_event(
+                        user_id, "cycle_detected",
+                        {"domain": dom_id, "cycles": cycles, "phase": phase},
+                        self.db_pool, self.app_state,
+                    ))
+                except Exception:
+                    pass
+
                 # Wire detected cycles to ODPE face-path boosting
                 odpe_engine = getattr(self.app_state, 'odpe_engine', None) if self.app_state else None
                 if odpe_engine:

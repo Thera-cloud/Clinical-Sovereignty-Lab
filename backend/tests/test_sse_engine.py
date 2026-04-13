@@ -70,8 +70,8 @@ async def test_widget_engine_returns_content():
     }))
     assert isinstance(result, dict)
     assert "primary_text" in result
-    assert "widget_background_color" in result
-    assert result["widget_background_color"]  # not empty
+    assert "background_color" in result
+    assert result["background_color"]  # not empty
 
 
 @pytest.mark.asyncio
@@ -102,12 +102,12 @@ def test_biome_transition_thresholds():
 # ---------------------------------------------------------------------------
 
 def test_crystal_to_character_mapping():
-    from app.sse.thera_world_engine import CHARACTER_ARCHETYPES, _DEFAULT_CHARACTER
+    from app.sse.thera_world_engine import CRYSTAL_TO_CHARACTER, _DEFAULT_CHARACTER
     expected_domains = {"anger", "shame", "grief", "fear", "attachment",
                         "identity", "control", "faith"}
-    mapped = set(CHARACTER_ARCHETYPES.keys())
+    mapped = set(CRYSTAL_TO_CHARACTER.keys())
     assert expected_domains.issubset(mapped), f"Missing domains: {expected_domains - mapped}"
-    for domain, (name, visual) in CHARACTER_ARCHETYPES.items():
+    for domain, (name, visual) in CRYSTAL_TO_CHARACTER.items():
         assert name, f"Empty character name for domain {domain}"
         assert visual, f"Empty visual prompt for domain {domain}"
     assert _DEFAULT_CHARACTER[0], "Default character name is empty"
@@ -123,7 +123,7 @@ async def test_graceful_degradation_empty_db():
     from app.sse.widget_engine import get_widget_content
     result = await get_widget_content("brand_new_user", _pool())
     assert result.get("primary_text"), "Degradation failed — no primary_text for empty DB"
-    assert result.get("widget_background_color"), "No background color in degraded mode"
+    assert result.get("background_color"), "No background color in degraded mode"
 
 
 # ---------------------------------------------------------------------------
@@ -133,16 +133,21 @@ async def test_graceful_degradation_empty_db():
 @pytest.mark.asyncio
 async def test_compose_narrative_fallback():
     """When LLM fails, compose_journey_narrative should return a template."""
-    from app.sse.thera_world_engine import compose_journey_narrative
+    from app.sse.thera_world_engine import compose_journey_narrative, _DEFAULT_CHARACTER
     profile = {
         "current_biome": "dark_forest",
         "dominant_domain": "anger",
         "session_count": 3,
         "crystal_count": 5,
     }
+    journey = {"current_phase": "the_becoming"}
+    biome = {"biome": "dark_forest", "description": "fog and mystery"}
     with patch("app.sse.llm_fallback.chat_completion_with_fallback",
                new_callable=AsyncMock, return_value=None):
-        result = await compose_journey_narrative("test_user", profile, _pool())
+        result = await compose_journey_narrative(
+            profile, journey, biome, _DEFAULT_CHARACTER, _pool(),
+            user_id="test_user",
+        )
     assert isinstance(result, dict)
     assert result.get("narrative_text"), "Fallback narrative_text is empty"
     assert result.get("image_prompt"), "Fallback image_prompt is empty"

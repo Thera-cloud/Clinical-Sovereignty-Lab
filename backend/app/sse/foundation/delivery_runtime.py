@@ -47,7 +47,7 @@ async def _poll_video(vid_id: str, max_wait: int = 300) -> dict:
     return {"status": "timeout", "url": None}
 
 
-async def generate_daily_panels(sid: str, db_pool) -> dict[str, Any]:
+async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str, Any]:
     gen = fail = 0; cost = 0.0; today = date.today().isoformat()
     async with db_pool.acquire() as c:
         if await _breaker(c, sid):
@@ -64,6 +64,8 @@ async def generate_daily_panels(sid: str, db_pool) -> dict[str, Any]:
         for i in range(0, len(users), _BATCH):
             for u in users[i:i+_BATCH]:
                 uid, phase = u["user_id"], u["current_phase"] or "the_becoming"
+                if skip_check and await skip_check(uid):
+                    continue
                 prompt = f"{phase} panel, {style} tone, therapeutic visual"
                 h = hashlib.md5(prompt.encode()).hexdigest()[:12]
                 key = f"stories/{uid}/daily_panel/{today}/{h}.png"
@@ -196,3 +198,85 @@ async def check_and_recover_gaps(sid: str, db_pool) -> dict[str, Any]:
                 except Exception:
                     pass
     return {"recovered_days": rec, "abandoned_days": abn, "summary_panels_generated": summ}
+
+
+async def generate_from_directive(
+    user_id: str,
+    directive: dict[str, Any],
+    db_pool,
+) -> dict[str, Any]:
+    """Generate content from a UCD CreativeDirective.
+
+    Routes to the appropriate generation pipeline based on the
+    directive's selected_modality. Returns dict with generation_id.
+    """
+    gen_id = str(uuid.uuid4())
+    modality = directive.get("selected_modality", "panel")
+    moment_class = directive.get("moment_class", "INTEGRATION")
+    coherence_ctx = directive.get("coherence_context", "")
+
+    prompt = (
+        f"Therapeutic {modality} for moment: {moment_class}. "
+        f"Coherence context: {coherence_ctx[:300]}"
+    )
+
+    try:
+        if modality in ("panel", "journal_prompt"):
+            img_bytes = await grok.generate_image(prompt)
+            r2_key = f"stories/{user_id}/ucd/{gen_id}.png"
+            r2_url = await r2_storage.store_image(img_bytes, r2_key)
+        elif modality == "narration":
+            r2_url = f"ucd/narration/{gen_id}"
+        elif modality == "video_clip":
+            r2_url = f"ucd/clip/{gen_id}"
+        else:
+            r2_url = f"ucd/{modality}/{gen_id}"
+
+        async with db_pool.acquire() as c:
+            await c.execute(
+                "INSERT INTO sse_delivery_generation_log "
+                "(log_id, storyboard_id, user_id, generation_type, r2_url, "
+                "prompt_used, score, cost, status, directive_id, moment_class, "
+                "creative_directive) "
+                "VALUES ($1, 'ucd', $2, $3, $4, $5, 0.5, $6, 'ok', $7, $8, $9)",
+                gen_id, user_id, modality, r2_url, prompt[:500],
+                _IMG_COST if modality == "panel" else 0.0,
+                directive.get("directive_id"),
+                moment_class,
+                json.dumps(directive, default=str),
+            )
+
+        return {"generation_id": gen_id, "modality": modality, "r2_url": r2_url}
+
+    except Exception as e:
+        logger.error("UCD generation failed for %s (%s): %s — attempting fallback", user_id, modality, e)
+
+        fallback_id = str(uuid.uuid4())
+        fallback_prompt = f"therapeutic panel, healing journey, {moment_class.lower()} moment"
+        try:
+            fb_img = await grok.generate_image(fallback_prompt)
+            fb_key = f"stories/{user_id}/ucd/{fallback_id}.png"
+            fb_url = await r2_storage.store_image(fb_img, fb_key)
+            async with db_pool.acquire() as c:
+                await _log(c, "ucd", user_id, "daily_panel", fb_url,
+                           fallback_prompt, 0.5, _IMG_COST, "fallback",
+                           f"UCD {modality} failed: {str(e)[:200]}")
+            logger.info("UCD fallback panel generated for %s: %s", user_id, fallback_id)
+            return {"generation_id": fallback_id, "modality": "panel",
+                    "r2_url": fb_url, "fallback": True}
+        except Exception as fb_err:
+            logger.error("UCD fallback also failed for %s: %s", user_id, fb_err)
+            try:
+                async with db_pool.acquire() as c:
+                    await c.execute(
+                        "INSERT INTO sse_delivery_generation_log "
+                        "(log_id, storyboard_id, user_id, generation_type, "
+                        "prompt_used, status, error_message, directive_id, moment_class) "
+                        "VALUES ($1, 'ucd', $2, $3, $4, 'failed', $5, $6, $7)",
+                        gen_id, user_id, modality, prompt[:500],
+                        f"primary: {str(e)[:200]}; fallback: {str(fb_err)[:200]}",
+                        directive.get("directive_id"), moment_class,
+                    )
+            except Exception:
+                pass
+            return {"generation_id": gen_id, "error": str(e)}

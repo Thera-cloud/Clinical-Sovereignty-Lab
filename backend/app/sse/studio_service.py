@@ -755,8 +755,13 @@ async def start_lora_training(character_key: str, training_images_zip_url: str) 
     )
 
 
-async def poll_lora_training(training_id: str, project_id: str | None = None, character_key: str | None = None) -> dict:
-    """Check LoRA training status. On completion, saves LoRA URL to project manifest."""
+async def poll_lora_training(
+    training_id: str,
+    project_id: str | None = None,
+    character_key: str | None = None,
+    db_pool=None,
+) -> dict:
+    """Check LoRA training status. On completion, saves LoRA URL to project manifest and DB registry."""
     _require_replicate()
     from app.sse.infrastructure.replicate_client import poll_training
     result = await poll_training(training_id)
@@ -766,6 +771,16 @@ async def poll_lora_training(training_id: str, project_id: str | None = None, ch
             from app.sse.trailer_generator import save_trained_lora
             await save_trained_lora(project_id, character_key, lora_url)
             logger.info("[STUDIO] LoRA for %s saved to manifest: %s", character_key, lora_url[:80])
+            if db_pool:
+                try:
+                    from app.sse.adapters.lora_registry import register_lora
+                    await register_lora(
+                        db_pool, character_key, lora_url,
+                        trigger_word=f"THERA_{character_key.upper()}",
+                        metadata={"project_id": project_id, "training_id": training_id},
+                    )
+                except Exception as _lr_err:
+                    logger.warning("[STUDIO] LoRA registry mirror failed: %s", _lr_err)
     return result
 
 

@@ -2273,6 +2273,28 @@ class NateMemoryCrystallizer:
                         SET face_path = $1
                         WHERE id = $2 AND face_path IS NULL
                     """, face_path, crystal_id)
+
+                # UCD event hook: fire crystal_locked when confidence crosses LOCKED threshold
+                if odpe_signal == "LOCKED":
+                    try:
+                        row = await conn.fetchrow(
+                            "SELECT user_id, confidence, domain FROM nate_intelligence_crystals WHERE id = $1",
+                            crystal_id,
+                        )
+                        if row and row["confidence"] and float(row["confidence"]) >= CONFIDENCE_LOCKED:
+                            import asyncio as _aio
+                            from app.sse.ucd.event_hooks import fire_ucd_event
+                            _uid = str(row["user_id"]) if row["user_id"] else None
+                            if _uid:
+                                _aio.create_task(fire_ucd_event(
+                                    _uid, "crystal_locked",
+                                    {"crystal_id": crystal_id, "confidence": float(row["confidence"]),
+                                     "domain": row["domain"]},
+                                    self._db_pool, self._app_state,
+                                ))
+                    except Exception:
+                        pass
+
         except Exception as e:
             logger.warning("Recall tracking failed for crystal %s: %s", crystal_id, e)
 

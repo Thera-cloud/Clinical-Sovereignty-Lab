@@ -1248,6 +1248,22 @@ class NevedalEngine:
                 except Exception as _ds_err:
                     print(f">>> [NEVEDAL] domain_state write: {_ds_err}")
 
+                # UCD event hook: fire ec_shift when CEE detected with significant C_emo
+                try:
+                    if event.peak_c_emo > 0.4:
+                        from app.sse.ucd.event_hooks import fire_ucd_event
+                        import asyncio as _aio
+                        _uid = str(hw_id)
+                        _aio.create_task(fire_ucd_event(
+                            _uid, "ec_shift",
+                            {"c_emo": round(event.peak_c_emo, 5),
+                             "duration": event.duration_seconds,
+                             "domain": event.trigger_context or "general"},
+                            self.db_pool, None,
+                        ))
+                except Exception:
+                    pass
+
         except Exception as e:
             print(f">>> [NEVEDAL] Failed to persist CEE event: {e}")
 

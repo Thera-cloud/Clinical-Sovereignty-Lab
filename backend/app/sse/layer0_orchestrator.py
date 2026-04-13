@@ -3,6 +3,10 @@
 AsyncIOScheduler-based runtime that reads sse_cron_schedules and
 registers APScheduler jobs for daily panels, weekly clips, and monthly recaps.
 Follows the DripScheduler pattern exactly.
+
+NOTE: With UCD active, this orchestrator is demoted to *fallback* — the
+TemporalOrchestrator fires event-driven generations.  Cron jobs skip users
+who already received UCD-generated content in the current window.
 """
 from __future__ import annotations
 
@@ -99,11 +103,28 @@ class SSEOrchestrator:
     async def stop(self):
         self.shutdown()
 
+    async def _ucd_already_generated(self, user_id: str, hours: int = 24) -> bool:
+        """Return True if UCD produced a directive for this user in the last N hours."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT 1 FROM ucd_creative_directives "
+                    "WHERE user_id = $1 AND created_at > NOW() - make_interval(hours => $2) "
+                    "AND executed_at IS NOT NULL LIMIT 1",
+                    user_id, hours,
+                )
+                return row is not None
+        except Exception:
+            return False
+
     async def _run_daily_panels(self, storyboard_id: str):
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr
-                result = await dr.generate_daily_panels(storyboard_id, self.db_pool)
+                result = await dr.generate_daily_panels(
+                    storyboard_id, self.db_pool,
+                    skip_check=self._ucd_already_generated,
+                )
                 logger.info("SSE daily_panel %s: %d generated, %d failed",
                             storyboard_id, result.get("panels_generated", 0),
                             result.get("panels_failed", 0))
@@ -151,14 +172,18 @@ class SSEOrchestrator:
                         "AND hardware_id IS NOT NULL AND hardware_id != ''")
                 for r in rows:
                     try:
+                        hw = r["hardware_id"]
+                        if await self._ucd_already_generated(hw, hours=24):
+                            logger.info("Skipping %s — UCD already generated today", hw)
+                            continue
                         async with self.db_pool.acquire() as c2:
                             exists = await c2.fetchval(
                                 "SELECT 1 FROM sse_panel_log WHERE user_id=$1 AND generated_at::date = CURRENT_DATE LIMIT 1",
-                                r["hardware_id"])
+                                hw)
                         if exists:
-                            logger.info("Skipping %s — panel already exists today", r["hardware_id"])
+                            logger.info("Skipping %s — panel already exists today", hw)
                             continue
-                        await generate_journey_panel(r["hardware_id"], self.db_pool)
+                        await generate_journey_panel(hw, self.db_pool)
                         ok += 1
                     except Exception as e:
                         fail += 1

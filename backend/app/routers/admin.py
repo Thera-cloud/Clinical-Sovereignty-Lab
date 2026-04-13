@@ -6054,3 +6054,131 @@ async def sse_trailer_status(request: Request):
         with open(manifest_path) as f:
             return json.load(f)
     return {"status": "not_started"}
+
+
+# ── UCD: Engagement tracking endpoint ─────────────────────────────
+@sse_client_router.post("/engagement")
+async def sse_record_engagement(request: Request):
+    """Record user engagement (viewed/discussed/skipped/ignored) with a generation."""
+    body = await request.json()
+    generation_id = body.get("generation_id")
+    engagement_action = body.get("engagement_action")
+    user_id = body.get("user_id")
+    if not generation_id or not engagement_action:
+        raise HTTPException(422, "generation_id and engagement_action required")
+    valid_actions = ("viewed", "discussed", "skipped", "ignored")
+    if engagement_action not in valid_actions:
+        raise HTTPException(422, f"engagement_action must be one of {valid_actions}")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    async with pool.acquire() as conn:
+        updated = await conn.fetchval(
+            "UPDATE sse_delivery_generation_log "
+            "SET engagement_action = $1 "
+            "WHERE generation_id = $2 "
+            "RETURNING generation_id",
+            engagement_action, generation_id,
+        )
+        if not updated:
+            raise HTTPException(404, "generation_id not found")
+
+        if user_id:
+            crystal_ids = body.get("crystal_ids", [])
+            if crystal_ids:
+                await conn.execute(
+                    "UPDATE sse_delivery_generation_log "
+                    "SET user_response_crystal_ids = $1::text[] "
+                    "WHERE generation_id = $2",
+                    crystal_ids, generation_id,
+                )
+
+            gen_row = await conn.fetchrow(
+                "SELECT moment_class, creative_directive "
+                "FROM sse_delivery_generation_log WHERE generation_id = $1",
+                generation_id,
+            )
+            if gen_row and gen_row["moment_class"]:
+                try:
+                    from app.sse.ucd.tmc_trainer import record_training_sample
+                    directive_data = gen_row["creative_directive"]
+                    if isinstance(directive_data, str):
+                        directive_data = json.loads(directive_data)
+                    signals = (directive_data or {}).get("signals", {})
+                    await record_training_sample(
+                        pool, user_id, signals,
+                        gen_row["moment_class"],
+                        actual_engagement=engagement_action,
+                        generation_id=generation_id,
+                        crystal_response_ids=crystal_ids or None,
+                    )
+                except Exception as _tmc_err:
+                    logger.warning("TMC training sample failed: %s", _tmc_err)
+
+    return {"generation_id": generation_id, "engagement_action": engagement_action}
+
+
+# ── UCD: NSO admin endpoints ──────────────────────────────────────
+@sse_router.get("/ucd/nso/{user_id}")
+async def sse_get_nso(user_id: str, request: Request):
+    """Read the current Narrative State Object for a user."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    from app.sse.adapters.narrative_state import read_nso
+    nso = await read_nso(user_id, pool)
+    if not nso:
+        return {"user_id": user_id, "state": None, "message": "no NSO exists"}
+    return dict(nso)
+
+
+@sse_router.get("/ucd/nso/{user_id}/history")
+async def sse_get_nso_history(user_id: str, request: Request):
+    """Retrieve NSO history snapshots for a user."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    from app.sse.adapters.narrative_state import get_nso_history
+    history = await get_nso_history(user_id, pool)
+    return {"user_id": user_id, "snapshots": history}
+
+
+@sse_router.post("/ucd/nso/{user_id}/revert")
+async def sse_revert_nso(user_id: str, request: Request):
+    """Revert a user's NSO to a historical snapshot (admin tool)."""
+    body = await request.json()
+    snapshot_id = body.get("snapshot_id")
+    if not snapshot_id:
+        raise HTTPException(422, "snapshot_id required")
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    from app.sse.adapters.narrative_state import revert_nso
+    result = await revert_nso(user_id, snapshot_id, pool)
+    if not result:
+        raise HTTPException(404, "snapshot not found or revert failed")
+    return {"reverted": True, "user_id": user_id, "snapshot_id": snapshot_id}
+
+
+@sse_router.get("/ucd/tmc/{user_id}")
+async def sse_tmc_classify(user_id: str, request: Request):
+    """Run the TMC classifier for a user and return classification result."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    from app.sse.ucd.tmc import TherapeuticMomentClassifier
+    tmc = TherapeuticMomentClassifier(pool)
+    return await tmc.classify(user_id)
+
+
+@sse_router.post("/ucd/tmc/train")
+async def sse_tmc_train(request: Request):
+    """Train a logistic regression TMC from accumulated engagement data (admin)."""
+    pool = getattr(request.app.state, "db_pool", None)
+    if not pool:
+        raise HTTPException(503, "no db")
+    from app.sse.ucd.tmc_trainer import train_tmc_model
+    result = await train_tmc_model(pool)
+    if not result:
+        return {"trained": False, "message": "insufficient training samples (need 100+)"}
+    return {"trained": True, **result}

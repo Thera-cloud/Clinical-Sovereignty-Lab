@@ -3,9 +3,11 @@
 Priority: Azure Foundry (Grok) → xAI direct → Anthropic Claude.
 Returns None if all providers fail so the caller can use a template fallback.
 """
+from __future__ import annotations
 
 import logging
 import os
+from typing import Optional
 
 import httpx
 
@@ -18,7 +20,7 @@ async def chat_completion_with_fallback(
     messages: list,
     max_tokens: int = 400,
     temperature: float = 0.7,
-) -> str | None:
+) -> Optional[str]:
     """Try LLM providers in priority order. Returns content string or None."""
     from app.services.nate_ai_config import (
         NATE_CHAT_KEY as _pri_key,

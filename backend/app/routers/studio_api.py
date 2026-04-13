@@ -349,10 +349,11 @@ async def lora_train(body: LoraTrainRequest):
 
 
 @studio_router.get("/lora/status/{training_id}")
-async def lora_status(training_id: str, project_id: str | None = None, character_key: str | None = None):
+async def lora_status(request: Request, training_id: str, project_id: str | None = None, character_key: str | None = None):
     from app.sse.studio_service import poll_lora_training
+    _db = getattr(request.app.state, "db_pool", None)
     try:
-        return await poll_lora_training(training_id, project_id=project_id, character_key=character_key)
+        return await poll_lora_training(training_id, project_id=project_id, character_key=character_key, db_pool=_db)
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
