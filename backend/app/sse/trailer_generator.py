@@ -775,11 +775,11 @@ async def _generate_video_from_image(
         payload["end_frame"] = end_frame_url
 
     from app.sse.infrastructure.grok_imagine_client import (
-        _get_api_key, _get_fallback_key, _get_session, _headers_for,
+        _get_studio_key, _get_fallback_key, _get_session, _headers_for,
         _VIDEO_URL,
     )
 
-    key = _get_api_key()
+    key = _get_studio_key()
     fallback = _get_fallback_key()
     session = _get_session()
     video_id: str | None = None

@@ -11676,9 +11676,10 @@ async def handle_client(websocket, path=None):
                                 
                                 # Auto-create Zoom meeting if enabled
                                 try:
-                                    if ENABLE_ZOOM:
+                                    _zoom_enabled = os.environ.get("ENABLE_ZOOM", "").lower() in ("true", "1", "yes")
+                                    if _zoom_enabled:
                                         from app.services.zoom_client import ZoomClient
-                                        zoom = ZoomClient()
+                                        zoom = ZoomClient.from_env()
                                         dur_min = 50
                                         try:
                                             st = datetime.datetime.fromisoformat(scheduled_start)
@@ -11689,7 +11690,7 @@ async def handle_client(websocket, path=None):
                                             pass
                                         meeting = await zoom.create_meeting(
                                             topic=f"Session: {client_name}",
-                                            start_time=scheduled_start,
+                                            start_time_iso=scheduled_start,
                                             duration_minutes=dur_min,
                                         )
                                         if meeting:
@@ -11701,7 +11702,15 @@ async def handle_client(websocket, path=None):
                                 
                                 sessions.append(new_session)
                                 save_json_file(SESSIONS_FILE, sessions)
-                                
+
+                                # PG dual-write
+                                if db_pool:
+                                    try:
+                                        from app.services.pg_data_helpers import upsert_session_pg
+                                        await upsert_session_pg(db_pool, new_session)
+                                    except Exception as _pg_e:
+                                        print(f">>> [BOOKING] PG upsert failed (non-blocking): {_pg_e}")
+
                                 await websocket.send(json.dumps({
                                     "type": "session_booked",
                                     "session": new_session,
@@ -11835,10 +11844,10 @@ async def handle_client(websocket, path=None):
                                     _zoom_ok = os.environ.get("ENABLE_ZOOM", "").lower() in ("true", "1", "yes")
                                     if _zoom_ok:
                                         from app.services.zoom_client import ZoomClient
-                                        _zc = ZoomClient()
+                                        _zc = ZoomClient.from_env()
                                         _zm = await _zc.create_meeting(
                                             topic=f"Master Consultation: {current_username} + {_assistant_username}",
-                                            start_time=_now_iso,
+                                            start_time_iso=_now_iso,
                                             duration_minutes=15,
                                         )
                                         if _zm:
@@ -12026,9 +12035,10 @@ async def handle_client(websocket, path=None):
                                 
                                 # Auto-create Zoom meeting on approval
                                 try:
-                                    if ENABLE_ZOOM:
+                                    _zoom_enabled = os.environ.get("ENABLE_ZOOM", "").lower() in ("true", "1", "yes")
+                                    if _zoom_enabled:
                                         from app.services.zoom_client import ZoomClient
-                                        zoom = ZoomClient()
+                                        zoom = ZoomClient.from_env()
                                         dur_min = 50
                                         try:
                                             st = datetime.datetime.fromisoformat(found_session.get("scheduled_start", ""))
@@ -12039,7 +12049,7 @@ async def handle_client(websocket, path=None):
                                             pass
                                         meeting = await zoom.create_meeting(
                                             topic=f"Session: {found_session.get('client_name', '')}",
-                                            start_time=found_session.get("scheduled_start", ""),
+                                            start_time_iso=found_session.get("scheduled_start", ""),
                                             duration_minutes=dur_min,
                                         )
                                         if meeting:
@@ -12049,7 +12059,15 @@ async def handle_client(websocket, path=None):
                                             save_json_file(SESSIONS_FILE, sessions)
                                 except Exception as ze:
                                     print(f">>> [ZOOM] Auto-create on approve failed: {ze}")
-                                
+
+                                # PG dual-write on approval
+                                if db_pool:
+                                    try:
+                                        from app.services.pg_data_helpers import upsert_session_pg
+                                        await upsert_session_pg(db_pool, found_session)
+                                    except Exception as _pg_e:
+                                        print(f">>> [APPROVE] PG upsert failed (non-blocking): {_pg_e}")
+
                                 await websocket.send(json.dumps({
                                     "type": "booking_approved",
                                     "session": found_session,
@@ -13874,15 +13892,11 @@ async def handle_client(websocket, path=None):
                     if result.get("status") == "both_confirmed":
                         try:
                             from app.services.zoom_client import ZoomClient
-                            import os as _os
-                            zoom = ZoomClient(
-                                account_id=_os.getenv("ZOOM_ACCOUNT_ID", ""),
-                                client_id=_os.getenv("ZOOM_CLIENT_ID", ""),
-                                client_secret=_os.getenv("ZOOM_CLIENT_SECRET", ""),
-                            )
+                            zoom = ZoomClient.from_env()
                             meeting = await zoom.create_meeting(
                                 topic=f"Judge Nate Courtroom - {session_id}",
-                                duration_min=60,
+                                start_time_iso=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                duration_minutes=60,
                                 agenda="Coach-vs-Coach debate with Judge Nate presiding",
                             )
                             start_result = manager.start_debate(
@@ -13970,15 +13984,11 @@ async def handle_client(websocket, path=None):
                         # Create Zoom meeting
                         try:
                             from app.services.zoom_client import ZoomClient
-                            import os as _os
-                            zoom = ZoomClient(
-                                account_id=_os.getenv("ZOOM_ACCOUNT_ID", ""),
-                                client_id=_os.getenv("ZOOM_CLIENT_ID", ""),
-                                client_secret=_os.getenv("ZOOM_CLIENT_SECRET", ""),
-                            )
+                            zoom = ZoomClient.from_env()
                             meeting = await zoom.create_meeting(
                                 topic=f"Judge Nate Mentoring - {session_id}",
-                                duration_min=60,
+                                start_time_iso=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                duration_minutes=60,
                                 agenda="Coach-as-Judge mentoring session with Judge Nate observing",
                             )
                             start_result = manager.start_mentoring(

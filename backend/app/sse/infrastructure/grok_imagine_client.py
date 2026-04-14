@@ -19,7 +19,11 @@ GROK_IMAGINE_LOCK = asyncio.Lock()
 
 
 def _get_api_key() -> str:
-    return os.getenv("XAI_API_KEY", "") or os.getenv("NATE_CHAT_KEY", "").strip()
+    return os.getenv("XAI_SSE_KEY", "").strip() or os.getenv("XAI_API_KEY", "").strip()
+
+
+def _get_studio_key() -> str:
+    return os.getenv("XAI_STUDIO_KEY", "").strip() or _get_api_key()
 
 
 def _get_fallback_key() -> str:
@@ -29,7 +33,7 @@ def _get_fallback_key() -> str:
 def _get_session() -> aiohttp.ClientSession:
     global _session
     if _session is None or _session.closed:
-        timeout = aiohttp.ClientTimeout(total=120, sock_read=90)
+        timeout = aiohttp.ClientTimeout(total=30, sock_read=25)
         connector = aiohttp.TCPConnector(limit=10, keepalive_timeout=120)
         _session = aiohttp.ClientSession(timeout=timeout, connector=connector)
     return _session

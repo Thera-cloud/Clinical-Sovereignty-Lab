@@ -1,0 +1,73 @@
+# xAI API Key Separation
+
+## Three Keys, Three Purposes
+
+Little Nate uses three separate xAI API keys. Each key is scoped to a specific workload. Never swap or share them.
+
+| # | Key Name | Env Var | Suffix | xAI Dashboard Name | Purpose | Used By |
+|---|---|---|---|---|---|---|
+| 1 | SSE Image Generator | `XAI_SSE_KEY` | `...lZAm` | "SSE Image Generator" | Journey panels, quest panels, mission panels, workbook illustrations | `grok_imagine_client.py` |
+| 2 | Studio Generator | `XAI_STUDIO_KEY` | `...4QTy` | (Studio key) | Trailer scene generation, studio image/video pipeline | `trailer_generator.py`, `studio_service.py` |
+| 3 | Voice Inference | `XAI_API_KEY` | `...1klh` | (Voice/chat key) | Grok voice inference, real-time chat completions | `llm_fallback.py` (xai_direct provider), `layer1_identity_forge.py` |
+
+## Env Var Mapping
+
+```bash
+# .env on production server
+XAI_API_KEY=xai-...1klh          # Voice/chat inference (legacy name, kept for bridge compat)
+XAI_SSE_KEY=xai-...lZAm          # SSE journey/quest/mission image generation
+XAI_STUDIO_KEY=xai-...4QTy       # Studio trailer/scene generation
+XAI_FALLBACK_KEY=xai-...         # Fallback for any Imagine API 429 (optional)
+```
+
+## Code File → Key Mapping
+
+| File | What It Does | Must Use |
+|---|---|---|
+| `backend/app/sse/infrastructure/grok_imagine_client.py` | `generate_image()`, `generate_video()` | `XAI_SSE_KEY` (primary), `XAI_FALLBACK_KEY` (429 retry) |
+| `backend/app/sse/trailer_generator.py` | Trailer scene image/video generation | `XAI_STUDIO_KEY` (primary), `XAI_FALLBACK_KEY` (429 retry) |
+| `backend/app/sse/studio_service.py` | Studio pipeline orchestration | `XAI_STUDIO_KEY` via trailer_generator imports |
+| `backend/app/sse/llm_fallback.py` | xai_direct chat completions fallback | `XAI_API_KEY` (voice/chat key) |
+| `backend/app/sse/layer1_identity_forge.py` | Identity forge archetype generation | `XAI_API_KEY` (voice/chat key) |
+| `backend/app/services/nate_ai_config.py` | `NATE_CHAT_KEY` for Azure Foundry Grok | `NATE_CHAT_KEY` (Azure API key, separate from xAI) |
+
+## Rules
+
+1. **Never use `XAI_API_KEY` for image generation.** That key is scoped for voice/chat inference. Image generation must use `XAI_SSE_KEY` or `XAI_STUDIO_KEY`.
+
+2. **`grok_imagine_client.py` reads `XAI_SSE_KEY` first, falls back to `XAI_API_KEY`.** The fallback exists for backwards compatibility but should not be relied upon. Always set `XAI_SSE_KEY`.
+
+3. **`trailer_generator.py` reads `XAI_STUDIO_KEY` first, falls back to `XAI_SSE_KEY`.** Studio and SSE share the Imagine API but use separate keys for rate-limit isolation.
+
+4. **After adding/changing any xAI key in `.env`**, use `docker compose -f docker-compose.prod.yml up -d backend` (not `docker restart`) to pick up new values.
+
+5. **`NATE_CHAT_KEY` is NOT an xAI key.** It's an Azure API key for Azure Foundry (Grok model hosted on Azure). Despite the name, it authenticates via `api-key` header to Azure endpoints, not xAI endpoints.
+
+6. **Rate limit isolation is the reason for separate keys.** xAI rate-limits per API key. A burst of trailer renders must not starve journey panel generation, and neither should starve voice inference.
+
+7. **`XAI_FALLBACK_KEY` is shared across SSE and Studio.** It activates only on 429 (rate limit) from the primary key. It can be the same key as one of the other two, or a fourth dedicated key.
+
+## Incident History
+
+- **Apr 13, 2026**: `generate_journey_panel()` hung for 120s because `XAI_API_KEY` (voice key, `...1klh`) was being used for Imagine API calls instead of the SSE Image Generator key (`...lZAm`). The voice key worked for chat completions but returned errors or timeouts on the Imagine endpoint.
+
+## Verification
+
+```bash
+# Confirm all 3 keys are set and distinct:
+ssh root@68.183.168.75 "docker exec nate_backend python3 -c \"
+import os
+keys = {
+    'XAI_API_KEY': os.getenv('XAI_API_KEY','')[-4:],
+    'XAI_SSE_KEY': os.getenv('XAI_SSE_KEY','')[-4:],
+    'XAI_STUDIO_KEY': os.getenv('XAI_STUDIO_KEY','')[-4:],
+    'XAI_FALLBACK_KEY': os.getenv('XAI_FALLBACK_KEY','')[-4:],
+}
+for k,v in keys.items(): print(f'{k}: ...{v}' if v else f'{k}: NOT SET')
+\""
+# Expected:
+# XAI_API_KEY: ...1klh
+# XAI_SSE_KEY: ...lZAm
+# XAI_STUDIO_KEY: ...4QTy
+# XAI_FALLBACK_KEY: ...(any)
+```

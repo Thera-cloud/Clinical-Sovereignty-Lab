@@ -442,6 +442,7 @@ class CrystalDB:
     def __init__(self, db_url: str):
         self._db_url = db_url
         self._pool = None
+        self._dedup_running = False
 
     async def connect(self):
         import asyncpg
@@ -613,8 +614,14 @@ class CrystalDB:
         semantic similarity. Catches verbatim and near-verbatim duplicates
         across nodes but won't catch paraphrased content.
         """
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch("""
+        if self._dedup_running:
+            return []
+        self._dedup_running = True
+        try:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL statement_timeout = '30s'")
+                    rows = await conn.fetch("""
                 SELECT a.id AS a_id, b.id AS b_id,
                        a.confidence AS a_conf, b.confidence AS b_conf,
                        a.recall_count AS a_rc, b.recall_count AS b_rc
@@ -629,8 +636,10 @@ class CrystalDB:
                 WHERE a.scope != 'archived' AND b.scope != 'archived'
                 LIMIT $1
             """, limit)
-            return [(r["a_id"], r["b_id"], r["a_conf"], r["b_conf"],
-                     r["a_rc"], r["b_rc"]) for r in rows]
+                    return [(r["a_id"], r["b_id"], r["a_conf"], r["b_conf"],
+                             r["a_rc"], r["b_rc"]) for r in rows]
+        finally:
+            self._dedup_running = False
 
     async def merge_duplicates(self, keep_id: int, remove_id: int,
                                 combined_recalls: int):

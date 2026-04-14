@@ -1,6 +1,7 @@
 """LLM fallback chain for SSE story generation.
 
-Priority: Azure Foundry (Grok) → xAI direct → Anthropic Claude.
+Priority: xAI direct → Anthropic Claude.
+Azure Foundry skipped — endpoint unreachable from VPS (Apr 2026).
 Returns None if all providers fail so the caller can use a template fallback.
 """
 from __future__ import annotations
@@ -22,24 +23,7 @@ async def chat_completion_with_fallback(
     temperature: float = 0.7,
 ) -> Optional[str]:
     """Try LLM providers in priority order. Returns content string or None."""
-    from app.services.nate_ai_config import (
-        NATE_CHAT_KEY as _pri_key,
-        NATE_CHAT_MODEL as _pri_model,
-        NATE_CHAT_URL as _pri_url,
-    )
-
     providers = []
-
-    if _pri_url and _pri_key:
-        is_azure = "azure" in _pri_url.lower() or "services.ai" in _pri_url.lower()
-        providers.append({
-            "name": "azure_foundry",
-            "url": _pri_url,
-            "headers": {"Content-Type": "application/json",
-                        **({"api-key": _pri_key} if is_azure else {"Authorization": f"Bearer {_pri_key}"})},
-            "payload": {"model": _pri_model, "max_tokens": max_tokens,
-                        "temperature": temperature, "messages": messages},
-        })
 
     xai_key = os.getenv("XAI_API_KEY", "")
     if xai_key:

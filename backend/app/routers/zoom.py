@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.api_server import require_coach, require_admin
 from app.services.zoom_client import ZoomClient
 from app.services.zoom_webhook import verify_signature, url_validation_response
 
@@ -92,7 +93,7 @@ class CreateMeetingRequest(BaseModel):
     agenda: str = ""
 
 
-@router.post("/meetings/create")
+@router.post("/meetings/create", dependencies=[Depends(require_coach)])
 async def create_meeting(req: CreateMeetingRequest):
     if not settings.ENABLE_ZOOM:
         raise HTTPException(status_code=400, detail="Zoom disabled (ENABLE_ZOOM=false)")
@@ -453,7 +454,7 @@ async def _process_recording_event(
 # =============================================================================
 # ADMIN: List ingested Zoom sessions
 # =============================================================================
-@router.get("/ingested-sessions")
+@router.get("/ingested-sessions", dependencies=[Depends(require_admin)])
 async def get_ingested_sessions():
     """Return list of Zoom sessions that have been ingested."""
     if not settings.ENABLE_ZOOM:
