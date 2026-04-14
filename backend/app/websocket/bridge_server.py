@@ -9191,7 +9191,8 @@ class AzureCortex:
                                 min_score=3,
                                 origin_surface="family_sanctuary",
                             ))
-                except Exception:
+                except Exception as e:
+                    logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "family_sanctuary", sanctuary_data.get("head_of_household_id") or sanctuary_data.get("created_by") or "", e)
                     pass
 
                 return {
@@ -9478,7 +9479,8 @@ class AzureCortex:
                                 min_score=3,
                                 origin_surface="group_coaching",
                             ))
-                except Exception:
+                except Exception as e:
+                    logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "group_coaching", target_member.get("hardware_id", ""), e)
                     pass
 
                 return result
@@ -9757,7 +9759,8 @@ class AzureCortex:
                             min_score=3,
                             origin_surface="private_coaching",
                         ))
-                    except Exception:
+                    except Exception as e:
+                        logging.getLogger("bridge").warning("Crystallization failed in %s for %s: %s", "private_coaching", member_id or "", e)
                         pass
 
                     return {
