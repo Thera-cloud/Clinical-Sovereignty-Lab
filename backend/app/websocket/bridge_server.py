@@ -9515,12 +9515,12 @@ class AzureCortex:
                 # Get member's history and metrics
                 memory = self.mem.recall(member_profile, limit=5)
                 metrics = self.metrics.load_metrics(member_profile)
+                triggering_message = coaching_session.get("triggering_message", "")
                 pc_crystal_ctx = await recall_crystals_for_context(db_pool, member_id or "", max_results=5, source="private_coaching", query_text=triggering_message[:200])  # QUANTUM-CRYSTAL-ARCH
                 
                 # Get coaching session context
                 attempt_number = coaching_session.get("attempt_number", 1)
                 coaching_messages = coaching_session.get("messages", [])
-                triggering_message = coaching_session.get("triggering_message", "")
                 
                 # Format private conversation so far
                 private_convo = ""
