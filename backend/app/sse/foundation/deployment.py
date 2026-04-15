@@ -107,7 +107,7 @@ async def save_delivery_config(
 
 _CRON = {
     "daily_panel": "0 3 * * *",
-    "weekly_clip": "0 4 * * 0",
+    "weekly_clip": "0 4 * * 6",
     "monthly_recap": "0 5 28-31 * *",
 }
 
