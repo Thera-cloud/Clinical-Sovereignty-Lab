@@ -2,16 +2,26 @@
 
 Core generation functions for daily panels, weekly clips, monthly recaps,
 and gap recovery. Called by SSEOrchestrator.
+
+LoRA-personalized generation uses replicate_client (Replicate Flux).
+grok_imagine_client is retained for video animation (image-to-video)
+and non-personalized recovery/summary panels only.
 """
 from __future__ import annotations
 import asyncio, hashlib, json, logging, uuid
+import aiohttp
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from app.sse.infrastructure import grok_imagine_client as grok, r2_storage
+from app.sse.infrastructure import replicate_client as replicate
+from app.sse.adapters.lora_resolver import get_lora_ref
 from app.sse.foundation import vault_integration as vault
 
 logger = logging.getLogger(__name__)
-_BATCH, _COST_CAP, _IMG_COST, _VID_COST = 10, 50.0, 0.07, 0.25
+_BATCH, _COST_CAP = 10, 50.0
+_IMG_COST_GROK, _VID_COST = 0.07, 0.25
+_IMG_COST_REPLICATE = 0.04
+_IMG_COST = _IMG_COST_REPLICATE
 
 
 async def _log(c, sid, uid, gtype, url, prompt, score, cost, status, err=None):
@@ -66,16 +76,30 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                 uid, phase = u["user_id"], u["current_phase"] or "the_becoming"
                 if skip_check and await skip_check(uid):
                     continue
+                lora_ref = await get_lora_ref(uid, db_pool)
+                if not lora_ref:
+                    await _log(c, sid, uid, "daily_panel", "", "", 0, 0,
+                               "skipped", "No active LoRA — generation skipped")
+                    fail += 1; continue
                 prompt = f"{phase} panel, {style} tone, therapeutic visual"
                 h = hashlib.md5(prompt.encode()).hexdigest()[:12]
                 key = f"stories/{uid}/daily_panel/{today}/{h}.png"
                 try:
-                    img = await grok.generate_image(prompt)
+                    urls = await replicate.generate_with_loras(
+                        prompt, lora_urls=[lora_ref], lora_scales=[0.8])
+                    if not urls:
+                        raise RuntimeError("Replicate returned no images")
+                    img_url = urls[0]
+                    async with aiohttp.ClientSession() as sess:
+                        async with sess.get(img_url) as resp:
+                            img = await resp.read()
                     url = await r2_storage.store_image(img, key)
-                    await _log(c, sid, uid, "daily_panel", url, prompt, 1.0, _IMG_COST, "success")
+                    await _log(c, sid, uid, "daily_panel", url, prompt, 1.0,
+                               _IMG_COST_REPLICATE, "success")
+                    logger.info("[COST] daily_panel %s: $%.4f (replicate)", uid, _IMG_COST_REPLICATE)
                     try: await vault.register_panel_in_vault(uid, url, phase, sid, "daily_panel", style, db_pool)
                     except Exception: logger.warning("Vault reg failed for %s/%s", sid, uid)
-                    gen += 1; cost += _IMG_COST
+                    gen += 1; cost += _IMG_COST_REPLICATE
                 except Exception as e:
                     await _log(c, sid, uid, "daily_panel", "", prompt, 0, 0, "failed", str(e)[:300])
                     fail += 1
@@ -89,17 +113,24 @@ async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
         return {"storyboard_id": sid, "clips_generated": 0,
                 "clips_failed": 0, "substitutions": 0, "cost": 0}
     gen = fail = subs = 0; cost = 0.0
-    ws = (now - timedelta(days=now.weekday())).date()
+    ws = (now - timedelta(days=7)).date()
+    we = now.date()
     async with db_pool.acquire() as c:
         users = await c.fetch(
             "SELECT user_id,current_phase FROM sse_enrolled_users "
             "WHERE storyboard_id=$1 AND status='active'", sid)
         for u in users:
             uid = u["user_id"]
+            lora_ref = await get_lora_ref(uid, db_pool)
+            if not lora_ref:
+                await _log(c, sid, uid, "weekly_clip", "", "", 0, 0,
+                           "skipped", "No active LoRA — generation skipped")
+                fail += 1; continue
             pc = await c.fetchval(
                 "SELECT COUNT(*) FROM sse_delivery_generation_log "
                 "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='daily_panel' "
-                "AND status='success' AND generated_at::date>=$3", sid, uid, ws)
+                "AND status='success' AND generated_at::date>=$3 AND generated_at::date<$4",
+                sid, uid, ws, we)
             if (pc or 0) < 4:
                 await _log(c, sid, uid, "weekly_clip", "", "fog_substitute",
                            0.5, 0, "substituted", f"Only {pc}/7 panels")
@@ -107,7 +138,8 @@ async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
             src = await c.fetchrow(
                 "SELECT r2_url FROM sse_delivery_generation_log "
                 "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='daily_panel' "
-                "AND status='success' ORDER BY score DESC,generated_at DESC LIMIT 1", sid, uid)
+                "AND status='success' AND generated_at::date>=$3 AND generated_at::date<$4 "
+                "ORDER BY score DESC,generated_at DESC LIMIT 1", sid, uid, ws, we)
             prompt = f"Weekly therapeutic clip for {u['current_phase'] or 'journey'}"
             try:
                 vid_id = await grok.generate_video(prompt, src["r2_url"] if src else None)
@@ -135,6 +167,11 @@ async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
             "WHERE storyboard_id=$1 AND status='active'", sid)
         for u in users:
             uid = u["user_id"]
+            lora_ref = await get_lora_ref(uid, db_pool)
+            if not lora_ref:
+                await _log(c, sid, uid, "monthly_recap", "", "", 0, 0,
+                           "skipped", "No active LoRA — generation skipped")
+                fb += 1; continue
             clips = await c.fetchval(
                 "SELECT COUNT(*) FROM sse_delivery_generation_log "
                 "WHERE storyboard_id=$1 AND user_id=$2 AND generation_type='weekly_clip' "
@@ -149,16 +186,24 @@ async def generate_monthly_recap(sid: str, db_pool) -> dict[str, Any]:
                 fb += 1; continue
             prompt = "Monthly therapeutic recap — three-act structure"
             try:
-                vid_id = await grok.generate_video(prompt)
+                recap_imgs = await replicate.generate_with_loras(
+                    prompt, lora_urls=[lora_ref], lora_scales=[0.8])
+                if not recap_imgs:
+                    raise RuntimeError("Replicate returned no images for recap")
+                source_img_url = recap_imgs[0]
+                logger.info("[COST] monthly_recap image %s: $%.4f (replicate)", uid, _IMG_COST_REPLICATE)
+                vid_id = await grok.generate_video(prompt, source_img_url)
                 r = await _poll_video(vid_id)
+                recap_cost = _IMG_COST_REPLICATE + _VID_COST * 3
                 if r["status"] == "completed" and r.get("url"):
                     url = await r2_storage.store_video(
                         r["url"], f"stories/{uid}/monthly_recap/{ms}/{vid_id}.mp4")
                     await _log(c, sid, uid, "monthly_recap", url, prompt,
-                               1.0, _VID_COST * 3, "success")
+                               1.0, recap_cost, "success")
+                    logger.info("[COST] monthly_recap video %s: $%.4f total", uid, recap_cost)
                     try: await vault.register_panel_in_vault(uid, url, "monthly_recap", sid, "monthly_recap", "cinematic", db_pool)
                     except Exception: logger.warning("Vault reg failed for recap %s/%s", sid, uid)
-                    gen += 1; cost += _VID_COST * 3
+                    gen += 1; cost += recap_cost
                 else:
                     raise RuntimeError(f"Video {r['status']}")
             except Exception as e:

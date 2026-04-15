@@ -1,4 +1,14 @@
-"""SSE Infrastructure — Grok Imagine + Video API client."""
+"""SSE Infrastructure — Grok Imagine + Video API client.
+
+NOT used for LoRA-personalized generation. All personalized SSE content
+(daily panels, weekly clips, monthly recaps, group videos) uses
+replicate_client.py instead.
+
+Retained for:
+- Video animation (generate_video / poll_video_status) — image-to-video
+- Non-personalized recovery/summary panels (gap recovery)
+- Admin preview generation
+"""
 from __future__ import annotations
 
 import asyncio

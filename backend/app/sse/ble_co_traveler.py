@@ -1,5 +1,9 @@
-"""BLE Co-Traveler Detection — creates anonymous proximity events for family members."""
+"""BLE Co-Traveler Detection — creates anonymous proximity events for family members.
 
+Also auto-enrolls BLE proximity pairs into group_entities for group video generation.
+"""
+
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -39,6 +43,7 @@ async def process_proximity_event(user1_id: str, user2_id: str, db_pool) -> dict
             }))
 
     logger.info("co_traveler: proximity recorded %s <-> %s (family %s)", user1_id, user2_id, fam1)
+    asyncio.create_task(_ensure_group_entity(fam1, user1_id, user2_id, db_pool))
     return {"recorded": True, "family_id": fam1}
 
 
@@ -63,3 +68,34 @@ async def get_co_traveler_prompt_addition(user_id: str, db_pool) -> str:
     except Exception as e:
         logger.warning("co_traveler prompt check: %s", e)
     return ""
+
+
+async def _ensure_group_entity(family_id: str, user1: str, user2: str, db_pool) -> None:
+    """Auto-enroll BLE proximity pair into group_entities for group video."""
+    try:
+        async with db_pool.acquire() as conn:
+            ge_id = await conn.fetchval(
+                "SELECT group_entity_id FROM families WHERE family_id = $1",
+                family_id)
+
+            if not ge_id:
+                ge_id = await conn.fetchval(
+                    "INSERT INTO group_entities (group_type, group_name, scene_context) "
+                    "VALUES ('ble_proximity', $1, 'ble_proximity') "
+                    "RETURNING group_entity_id",
+                    f"BLE Family {family_id[:8]}")
+                await conn.execute(
+                    "UPDATE families SET group_entity_id = $1 WHERE family_id = $2",
+                    ge_id, family_id)
+
+            for uid in (user1, user2):
+                await conn.execute(
+                    "INSERT INTO group_entity_members (group_entity_id, client_id) "
+                    "VALUES ($1, $2::uuid) ON CONFLICT (group_entity_id, client_id) DO NOTHING",
+                    ge_id, uid)
+
+        from app.sse.adapters.group_lora_manager import compile_group_lora_folder
+        asyncio.create_task(compile_group_lora_folder(str(ge_id), db_pool))
+
+    except Exception as e:
+        logger.warning("BLE group entity enrollment failed: %s", e)

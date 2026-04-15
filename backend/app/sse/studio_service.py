@@ -776,11 +776,24 @@ async def poll_lora_training(
                     from app.sse.adapters.lora_registry import register_lora
                     await register_lora(
                         db_pool, character_key, lora_url,
+                        project_id=project_id,
                         trigger_word=f"THERA_{character_key.upper()}",
-                        metadata={"project_id": project_id, "training_id": training_id},
+                        metadata={"training_id": training_id},
                     )
                 except Exception as _lr_err:
                     logger.warning("[STUDIO] LoRA registry mirror failed: %s", _lr_err)
+                try:
+                    lora_record = await db_pool.fetchrow(
+                        "SELECT user_id FROM character_lora_models "
+                        "WHERE project_id = $1 AND status = 'active' "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        project_id)
+                    if lora_record:
+                        from app.sse.adapters.group_lora_manager import on_member_lora_updated
+                        asyncio.create_task(
+                            on_member_lora_updated(lora_record["user_id"], db_pool))
+                except Exception as _gl_err:
+                    logger.warning("[STUDIO] Group LoRA sync failed: %s", _gl_err)
     return result
 
 

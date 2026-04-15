@@ -208,6 +208,38 @@ class CommunityMeshEngine:
             logger.error("record_session failed: %s", e, exc_info=True)
             raise
 
+    async def _ensure_community_group_entity(
+        self, session_id: str, group_name: Optional[str]
+    ) -> None:
+        """Auto-create a group_entity for community sessions with checked-in users."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                participants = await conn.fetch(
+                    "SELECT user_id FROM community_check_ins "
+                    "WHERE session_id = $1", session_id)
+                if len(participants) < 2:
+                    return
+
+                label = (group_name or session_id)[:64]
+                ge_id = await conn.fetchval(
+                    "INSERT INTO group_entities (group_type, group_name, scene_context) "
+                    "VALUES ('community_session', $1, 'therapy_circle') "
+                    "RETURNING group_entity_id", label)
+
+                for p in participants:
+                    await conn.execute(
+                        "INSERT INTO group_entity_members (group_entity_id, client_id) "
+                        "VALUES ($1, $2::uuid) "
+                        "ON CONFLICT (group_entity_id, client_id) DO NOTHING",
+                        ge_id, p["user_id"])
+
+            from app.sse.adapters.group_lora_manager import compile_group_lora_folder
+            asyncio.create_task(compile_group_lora_folder(str(ge_id), self.db_pool))
+            logger.info("Community group entity created: %s (%d members)",
+                        ge_id, len(participants))
+        except Exception as e:
+            logger.warning("Community group entity enrollment failed: %s", e)
+
     # ── Check-in / Check-out ────────────────────────────────────────────
 
     async def record_check_in(
@@ -238,6 +270,7 @@ class CommunityMeshEngine:
         except Exception as e:
             logger.error("record_check_in failed: %s", e, exc_info=True)
             raise
+        asyncio.create_task(self._ensure_community_group_entity(session_id, None))
 
     async def record_check_out(self, session_id: str, user_id: str) -> None:
         """Record a user's check-out from a session."""

@@ -87,6 +87,13 @@ class SSEOrchestrator:
             replace_existing=True,
         )
 
+        self.scheduler.add_job(
+            self._run_group_videos,
+            CronTrigger(minute="0", hour="6", day="28-31"),
+            id="sse_group_videos", name="SSE monthly group videos",
+            replace_existing=True,
+        )
+
         if not self.scheduler.running:
             self.scheduler.start()
         logger.info("SSEOrchestrator: started with %d schedule(s) + heartbeat", len(schedules))
@@ -146,9 +153,6 @@ class SSEOrchestrator:
                 logger.error("SSE weekly_clip %s error: %s", storyboard_id, e)
 
     async def _run_monthly_recap(self, storyboard_id: str):
-        # TODO Phase 5: Select best panels + weekly clips → narrative voiceover via Grok TTS →
-        #   compose 3-min video → upload to Cloudflare Stream + R2 + IPFS hash.
-        #   Family recap: aggregate family member panels into shared video.
         async with self._semaphore:
             try:
                 from app.sse.foundation import delivery_runtime as dr
@@ -158,6 +162,45 @@ class SSEOrchestrator:
                             result.get("fallbacks", 0))
             except Exception as e:
                 logger.error("SSE monthly_recap %s error: %s", storyboard_id, e)
+
+    async def _run_group_videos(self):
+        """Generate monthly group videos for all active groups.
+
+        Runs AFTER individual monthly recaps. One group at a time via semaphore.
+        Fires on the last days of each month (28-31) at 06:00 UTC.
+        """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        month, year = now.month, now.year
+        async with self._semaphore:
+            ok = fail = 0
+            try:
+                from app.sse.group_video_generator import generate_monthly_group_video
+                from app.sse.adapters.group_lora_manager import sync_group_lora_folder
+                async with self.db_pool.acquire() as conn:
+                    groups = await conn.fetch(
+                        "SELECT ge.group_entity_id FROM group_entities ge "
+                        "JOIN group_entity_members gem ON gem.group_entity_id = ge.group_entity_id "
+                        "WHERE gem.is_active = TRUE "
+                        "GROUP BY ge.group_entity_id HAVING COUNT(*) >= 2")
+                for g in groups:
+                    gid = str(g["group_entity_id"])
+                    try:
+                        await sync_group_lora_folder(gid, self.db_pool)
+                        r = await generate_monthly_group_video(gid, month, year, self.db_pool)
+                        if r["status"] == "success":
+                            ok += 1
+                        else:
+                            fail += 1
+                            logger.warning("Group video %s: %s — %s",
+                                           gid, r["status"], r.get("error", ""))
+                    except Exception as e:
+                        fail += 1
+                        logger.error("Group video %s error: %s", gid, e)
+                    await asyncio.sleep(10)
+                logger.info("SSE group_videos: %d generated, %d failed", ok, fail)
+            except Exception as e:
+                logger.error("SSE group_videos batch error: %s", e)
 
     async def _run_journey_panels(self):
         """Generate Thera-World journey panels for all active clients."""
