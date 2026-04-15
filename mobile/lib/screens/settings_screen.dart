@@ -132,6 +132,67 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _fetchCoachInfo();
     _fetchArchetypeStatus();
     _fetchQuestsAndMissions();
+    _refreshProfileFromServer();
+  }
+
+  Future<void> _refreshProfileFromServer() async {
+    final token = _profile['token']?.toString() ?? '';
+    final hwId = _profile['hardware_id']?.toString() ?? '';
+    if (token.isEmpty || hwId.isEmpty) return;
+
+    WebSocketChannel? sock;
+    StreamSubscription? sub;
+    try {
+      sock = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+      final completer = Completer<Map<String, dynamic>?>();
+
+      sub = sock.stream.listen((raw) {
+        if (completer.isCompleted) return;
+        try {
+          final data = jsonDecode(raw) as Map<String, dynamic>;
+          final type = (data['type'] ?? '').toString();
+          if (type == 'connected') {
+            sock?.sink.add(jsonEncode({
+              'type': 'auth',
+              'token': token,
+              'hardware_id': hwId,
+            }));
+          } else if (type == 'auth_success' || type == 'login_success') {
+            completer.complete(data);
+          } else if (type == 'auth_failed') {
+            completer.complete(null);
+          }
+        } catch (_) {}
+      }, onError: (_) {
+        if (!completer.isCompleted) completer.complete(null);
+      }, onDone: () {
+        if (!completer.isCompleted) completer.complete(null);
+      });
+
+      final result = await completer.future.timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => null,
+      );
+
+      if (result != null && mounted) {
+        final fresh = Map<String, dynamic>.from(_profile);
+        for (final key in ['subscription_plan', 'tier', 'subscription_status',
+                           'family_id', 'family_role', 'name', 'email', 'phone']) {
+          if (result.containsKey(key) && result[key] != null) {
+            fresh[key] = result[key];
+          }
+        }
+        final wasSovereign = _isSovereignCircle;
+        setState(() => _profile = fresh);
+        if (!wasSovereign && _isSovereignCircle) {
+          _fetchFamilyMembers();
+        }
+      }
+    } catch (_) {
+    } finally {
+      try { sub?.cancel(); } catch (_) {}
+      try { sock?.sink.close(); } catch (_) {}
+    }
   }
 
   Future<void> _fetchArchetypeStatus() async {
@@ -1165,11 +1226,29 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         validMembers.add({'name': name, 'contact': contact, 'role': role});
       }
     }
-    if (validMembers.isEmpty) return;
+    if (validMembers.isEmpty) {
+      ScaffoldMessenger.of(dialogCtx).showSnackBar(const SnackBar(
+        content: Text('Please enter a name and phone/email for each member.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 4),
+      ));
+      return;
+    }
 
     Navigator.pop(dialogCtx);
 
     if (!mounted) return;
+
+    final inviteToken = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    if (inviteToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Session expired \u2014 please log out and back in.'),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 5),
+      ));
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('Sending ${validMembers.length} invite${validMembers.length > 1 ? 's' : ''}...'),
       duration: const Duration(seconds: 3),
@@ -1191,11 +1270,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           if (type == 'family_invite_batch_result') {
             completer.complete(data);
           } else if (type == 'family_invite_error') {
-            completer.completeError(data['message'] ?? 'Batch invite failed');
+            completer.completeError(Exception(data['message']?.toString() ?? 'Batch invite failed'));
+          } else if (type == 'auth_failed') {
+            completer.completeError(Exception('__auth_failed__'));
           } else if (type == 'connected') {
             inviteSocket?.sink.add(jsonEncode({
               'type': 'auth',
-              'token': _profile['token'] ?? widget.profile['token'] ?? '',
+              'token': inviteToken,
               'hardware_id': _profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '',
             }));
           } else if (type == 'auth_success' || type == 'login_success') {
@@ -1206,9 +1287,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           }
         } catch (_) {}
       }, onError: (e) {
-        if (!completer.isCompleted) completer.completeError(e);
+        if (!completer.isCompleted) {
+          completer.completeError(Exception('__connection_error__'));
+        }
       }, onDone: () {
-        if (!completer.isCompleted) completer.completeError('Connection closed');
+        if (!completer.isCompleted) {
+          completer.completeError(Exception('__connection_closed__'));
+        }
       });
 
       final result = await completer.future.timeout(
@@ -1256,8 +1341,20 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       try { sub?.cancel(); } catch (_) {}
       try { inviteSocket?.sink.close(); } catch (_) {}
       if (mounted) {
+        final errStr = e.toString();
+        String userMsg;
+        if (errStr.contains('__auth_failed__')) {
+          userMsg = 'Authentication failed \u2014 please log out and back in.';
+        } else if (errStr.contains('__connection_error__') || errStr.contains('__connection_closed__')) {
+          userMsg = 'Could not reach server \u2014 check your connection.';
+        } else if (e is TimeoutException) {
+          userMsg = 'Server did not respond in time \u2014 please try again.';
+        } else {
+          final raw = errStr.replaceAll('Exception: ', '').replaceAll('TimeoutException:', '').trim();
+          userMsg = raw.isNotEmpty ? raw : 'Could not send invites.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not send invites: ${e.toString().replaceAll('TimeoutException:', '').trim()}'),
+          content: Text(userMsg),
           backgroundColor: _Design.red,
           duration: const Duration(seconds: 5),
         ));
