@@ -2890,7 +2890,7 @@ async def lifespan(app: FastAPI):
         _sse_orchestrator = SSEOrchestrator(db_pool=db_pool)
         await _sse_orchestrator.start()
         app.state.sse_orchestrator = _sse_orchestrator
-        print("   ✅ SSEOrchestrator started (daily panels + weekly clips + monthly recaps)")
+        print("   ✅ SSEOrchestrator started (daily panels + weekly clips + monthly recaps + group monthly videos)")
     except Exception as _sse_err:
         print(f"   ⚠️  SSEOrchestrator init failed: {_sse_err}")
 
