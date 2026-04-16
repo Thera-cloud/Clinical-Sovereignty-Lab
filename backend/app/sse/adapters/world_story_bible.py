@@ -13,12 +13,16 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_LIB_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..", "..", "..",
-    "resources", "therapeutic_library", "imagery_guides",
-    "archetypes", "sse_archetype_reference_library.json",
-)
+_LIB_CANDIDATES = [
+    os.path.normpath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "..",
+        "resources", "therapeutic_library", "imagery_guides",
+        "archetypes", "sse_archetype_reference_library.json")),
+    os.path.normpath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "data", "sse_archetype_reference_library.json")),
+]
 
 _ARCHETYPE_LIB: dict | None = None
 
@@ -27,12 +31,16 @@ def _load_archetype_lib() -> dict:
     global _ARCHETYPE_LIB
     if _ARCHETYPE_LIB is not None:
         return _ARCHETYPE_LIB
-    try:
-        with open(os.path.normpath(_LIB_PATH)) as f:
-            _ARCHETYPE_LIB = json.load(f)
-    except Exception as e:
-        logger.warning("world_story_bible: could not load archetype library: %s", e)
-        _ARCHETYPE_LIB = {}
+    for path in _LIB_CANDIDATES:
+        if os.path.isfile(path):
+            try:
+                with open(path) as f:
+                    _ARCHETYPE_LIB = json.load(f)
+                return _ARCHETYPE_LIB
+            except Exception as e:
+                logger.warning("world_story_bible: failed to parse %s: %s", path, e)
+    logger.warning("world_story_bible: archetype library not found at any candidate path")
+    _ARCHETYPE_LIB = {}
     return _ARCHETYPE_LIB
 
 
