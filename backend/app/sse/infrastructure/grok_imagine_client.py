@@ -1,13 +1,16 @@
 """SSE Infrastructure — Grok Imagine + Video API client.
 
-NOT used for LoRA-personalized generation. All personalized SSE content
-(daily panels, weekly clips, monthly recaps, group videos) uses
-replicate_client.py instead.
-
-Retained for:
-- Video animation (generate_video / poll_video_status) — image-to-video
-- Non-personalized recovery/summary panels (gap recovery)
+Primary generation API for all SSE delivery content:
+- Daily panels (generate_image)
+- Weekly clips (generate_video with source panel)
+- Monthly recaps (generate_video with archetype reference)
+- Group videos (generate_image for composite + generate_video for animation)
+- Gap recovery panels
 - Admin preview generation
+
+Character consistency is achieved via source_image_url parameter using
+archetype_image_url from sse_identity_forge — the same approach as the
+Thera-World Studio Pipeline "Generate Character Refs".
 """
 from __future__ import annotations
 

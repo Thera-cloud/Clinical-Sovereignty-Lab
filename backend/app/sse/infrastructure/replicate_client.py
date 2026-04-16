@@ -1,4 +1,9 @@
-"""SSE Infrastructure — Replicate API client for LoRA training + Flux generation."""
+"""SSE Infrastructure — Replicate API client for LoRA training + Flux generation.
+
+Available for future use. Not currently called by SSE delivery or group video
+pipeline. All personalized content generation uses Grok Imagine with
+archetype_ref_url (source_image_url) for character consistency.
+"""
 from __future__ import annotations
 
 import logging

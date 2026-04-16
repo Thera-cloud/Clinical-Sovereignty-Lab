@@ -1,18 +1,16 @@
-"""Group LoRA Folder Manager — compile, sync, and serve group LoRA sets.
+"""Group Member Manager — compile, sync, and serve group archetype refs.
 
 compile_group_lora_folder: called at group creation or membership change
-sync_group_lora_folder: called when an individual member's LoRA is retrained
-get_group_lora_folder: single entry point for video generation
-on_member_lora_updated: hook called after any member LoRA training completes
-
-R2 verification of LoRA paths happens here (not in lora_resolver.py).
+sync_group_lora_folder: called when an individual member's archetype ref is updated
+get_group_lora_folder: single entry point for group video generation
+on_member_lora_updated: hook called after any member archetype ref changes
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
-from app.sse.adapters.lora_resolver import get_lora_ref
+from app.sse.adapters.archetype_resolver import get_archetype_ref
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,7 @@ async def compile_group_lora_folder(
                 group_entity_id)
 
             for m in members:
-                ref = await get_lora_ref(str(m["client_id"]), db_pool)
+                ref = await get_archetype_ref(str(m["client_id"]), db_pool)
                 if ref:
                     await conn.execute(
                         "UPDATE group_entity_members SET lora_snapshot_path = $1 "
@@ -85,7 +83,7 @@ async def sync_group_lora_folder(
                 group_entity_id)
 
             for m in members:
-                current_ref = await get_lora_ref(str(m["client_id"]), db_pool)
+                current_ref = await get_archetype_ref(str(m["client_id"]), db_pool)
                 if not current_ref:
                     continue
                 if current_ref != m["lora_snapshot_path"]:
