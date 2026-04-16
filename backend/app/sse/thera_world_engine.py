@@ -341,6 +341,116 @@ async def compose_journey_narrative(
     return fallback
 
 
+async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
+    """Build the rich image prompt and narrative without generating the image.
+
+    Returns {"image_prompt": str, "narrative_text": str, "panel_tone": str,
+             "biome": str, "character": str} for callers that handle their
+    own image generation, R2 storage, and logging (e.g. delivery_runtime).
+    """
+    journey = await get_or_create_journey(user_id, db_pool)
+    profile = await get_therapeutic_profile(user_id, db_pool)
+    await check_biome_transition(user_id, profile, journey, db_pool)
+
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM sse_user_journeys WHERE user_id = $1", user_id)
+            if row:
+                journey = dict(row)
+    except Exception:
+        pass
+
+    current_biome_name = journey.get("current_biome", "dark_forest")
+    biome = next((b for b in BIOME_THRESHOLDS if b["biome"] == current_biome_name), BIOME_THRESHOLDS[0])
+    character = await determine_character(profile)
+
+    last_summary = journey.get("last_panel_summary", "") or ""
+    last_npcs = journey.get("last_panel_npcs") or []
+    if isinstance(last_npcs, str):
+        last_npcs = json.loads(last_npcs)
+    panel_seq = journey.get("panel_sequence", 0) or 0
+
+    # Phase 6: family context enrichment
+    try:
+        from app.sse.family_engine import (
+            get_family_for_user, check_age_gate, get_heritage_landmarks,
+            get_couples_crystal_overlap, detect_family_cycles, get_family_session_crystals,
+        )
+        fam = await get_family_for_user(user_id, db_pool)
+        age_info = await check_age_gate(user_id, db_pool)
+        fctx: Dict[str, Any] = {"age_gated": age_info.get("age_gated"), "age_tier": age_info.get("age_tier")}
+        if fam:
+            fctx["heritage_landmarks"] = await get_heritage_landmarks(user_id, db_pool)
+            fctx["family_crystals"] = await get_family_session_crystals(user_id, fam["family_id"], db_pool)
+            spouses = [m for m in fam.get("members", []) if m.get("relationship") == "spouse"]
+            if spouses:
+                fctx["couples_overlap"] = await get_couples_crystal_overlap(user_id, spouses[0]["user_id"], db_pool)
+                async with db_pool.acquire() as conn:
+                    trend = await conn.fetchval(
+                        "SELECT growth_pct FROM nevedal_metrics WHERE user_id = "
+                        "(SELECT id FROM users WHERE hardware_id=$1 OR username=$1 LIMIT 1) "
+                        "ORDER BY recorded_at DESC LIMIT 1", user_id)
+                fctx["coherence_trend"] = float(trend) if trend else 0
+            storms = await detect_family_cycles(fam["family_id"], db_pool)
+            if storms:
+                fctx["family_storm"] = True
+        if age_info.get("age_gated"):
+            from app.sse.family_engine import _BRIGHT_BIOME_MAP
+            bname = _BRIGHT_BIOME_MAP.get(current_biome_name, current_biome_name)
+            biome = {"biome": bname, "description": biome.get("description", "").replace("fog", "mist").replace("shadow", "shade")}
+        profile["_family_context"] = fctx
+    except Exception as _fam_err:
+        logger.warning("build_rich_panel_prompt family enrichment failed for %s: %s", user_id, _fam_err)
+
+    narrative = await compose_journey_narrative(
+        profile, journey, biome, character, db_pool,
+        last_panel_summary=last_summary, last_panel_npcs=last_npcs,
+        panel_sequence=panel_seq, user_id=user_id)
+
+    image_prompt = narrative.get("image_prompt", "")
+    if not image_prompt:
+        image_prompt = f"{biome['description']}, a solitary figure, {character[1]}, painterly style"
+
+    jmeta = journey.get("journey_metadata") or {}
+    if isinstance(jmeta, str):
+        jmeta = json.loads(jmeta)
+    arch_hint = jmeta.get("archetype_hint", "")
+    if arch_hint:
+        image_prompt = image_prompt.replace("a solitary figure", f"a {arch_hint} figure, the protagonist")
+
+    current_npcs: list = []
+    try:
+        for q in profile.get("active_quests", []):
+            pn = q.get("progress_notes", [])
+            if isinstance(pn, str):
+                pn = json.loads(pn)
+            if pn and pn[0].get("npcs"):
+                current_npcs.extend(pn[0]["npcs"][:2])
+        for m in profile.get("active_missions", []):
+            pn = m.get("progress_notes", [])
+            if isinstance(pn, str):
+                pn = json.loads(pn)
+            if pn and pn[0].get("npcs"):
+                current_npcs.extend(pn[0]["npcs"][:1])
+    except Exception:
+        pass
+    for npc in current_npcs[:3]:
+        frag = npc.get("visual_prompt_fragment", "")
+        if frag:
+            image_prompt += f", {frag}"
+
+    image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
+    image_prompt += f", {character[1]}"
+
+    return {
+        "image_prompt": image_prompt,
+        "narrative_text": narrative.get("narrative_text", ""),
+        "panel_tone": narrative.get("panel_tone", "meditative"),
+        "biome": current_biome_name,
+        "character": character[0],
+    }
+
+
 async def generate_journey_panel(user_id: str, db_pool) -> dict:
     """Full pipeline: profile → biome → character → narrative → image → R2 → log."""
     from app.sse.infrastructure.grok_imagine_client import generate_image

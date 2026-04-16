@@ -19,13 +19,22 @@
       "hopeful_but_cautious": true,
       "gaze_averted_or_lowered": true
     },
-    "evolution_stages": ["early", "mid", "late", "transformed"],
-    "biomes": ["dark_forest", "fortress_plains", "river_valley", "crystal_mountains", "open_sky"],
+    "evolution_stages": [
+      "early",
+      "mid",
+      "late",
+      "transformed"
+    ],
+    "biomes": [
+      "dark_forest",
+      "fortress_plains",
+      "river_valley",
+      "crystal_mountains",
+      "open_sky"
+    ],
     "copyright": "(c) 2026 Sovereign Sanctuary. Patent Pending."
   },
-
   "categories": {
-
     "warriors": {
       "count": 9,
       "description": "Characters who lead with strength, combat, and direct confrontation as defense",
@@ -43,7 +52,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "The wall protects but also imprisons",
           "visual_description": "Full ornate plate armor head to toe, helm hiding most of face, sword held point-down defensively, arms crossed over hilt, gaze averted sideways, misty forest backdrop",
-          "early_stage_markers": "Completely encased in ornate armor, beauty hidden behind metal, sword defensive not aggressive, identity obscured by helm"
+          "early_stage_markers": "Completely encased in ornate armor, beauty hidden behind metal, sword defensive not aggressive, identity obscured by helm",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, bold heroic composition",
+            "color_palette": "muted silvers, deep steel blues, warm amber mist accents",
+            "lighting": "dramatic rim lighting through dense fog",
+            "mood": "fierce, guarded, defiant",
+            "atmosphere": "misty dark forest edge, towering trees half-lost in fog, silence before battle"
+          }
         },
         {
           "id": "gladiator",
@@ -56,7 +72,14 @@
           "defense": "reactive_formation",
           "therapeutic_direction": "Fighting because it's the only language learned",
           "visual_description": "Full helm hiding face, shield raised covering torso, sword low, kneeling not standing, fortress and distant army behind, muted earth tones",
-          "early_stage_markers": "Face completely hidden behind helm, kneeling not standing, shield covering core, arena is only world known"
+          "early_stage_markers": "Face completely hidden behind helm, kneeling not standing, shield covering core, arena is only world known",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, ground-level heroic composition",
+            "color_palette": "muted earth tones, dusty bronze, weathered iron gray",
+            "lighting": "overcast battlefield light with warm breaks through clouds",
+            "mood": "battle-worn, kneeling, weary resolve",
+            "atmosphere": "vast fortress plains, distant armies in fog, arena dust settling"
+          }
         },
         {
           "id": "amazon",
@@ -69,7 +92,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Self-reliance as survival, learning to accept help",
           "visual_description": "Hooded face in shadow, spear held upright, bow undrawn at hip, shoulder armor, standing among overgrown jungle ruins, warm green tones",
-          "early_stage_markers": "Armed for every scenario but hasn't engaged, hood hides identity, multiple weapons as over-preparation"
+          "early_stage_markers": "Armed for every scenario but hasn't engaged, hood hides identity, multiple weapons as over-preparation",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, jungle-depth layered composition",
+            "color_palette": "warm greens, vine-draped gold, shadow-dappled amber",
+            "lighting": "filtered jungle canopy light, warm shafts through leaves",
+            "mood": "self-reliant, distant, quietly defiant",
+            "atmosphere": "overgrown jungle ruins reclaimed by nature, ancient stone and vine"
+          }
         },
         {
           "id": "samurai",
@@ -82,7 +112,14 @@
           "defense": "discipline_as_control",
           "therapeutic_direction": "Duty without self-compassion is another cage",
           "visual_description": "Full ceremonial armor with kabuto helmet, face entirely masked, katana drawn but held low across body, rigid formal posture, bamboo forest, dark muted palette",
-          "early_stage_markers": "Face entirely masked, rigid formal posture, discipline as total identity concealment, no human skin visible"
+          "early_stage_markers": "Face entirely masked, rigid formal posture, discipline as total identity concealment, no human skin visible",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, formal ceremonial composition",
+            "color_palette": "dark muted indigo, lacquer red accents, bamboo green-gray",
+            "lighting": "cold diffused forest light through bamboo, no direct sun",
+            "mood": "rigid, disciplined, identity through structure",
+            "atmosphere": "silent bamboo forest, ceremonial stillness, duty-weight in the air"
+          }
         },
         {
           "id": "shield_bearer",
@@ -95,7 +132,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "The shield protects but prevents embrace",
           "visual_description": "Full plate armor, closed helm, massive ornate shield covering entire front, no face visible, fog erasing all context, muted silvers and golds",
-          "early_stage_markers": "Most armored image in entire library, pure defense, the shield IS the identity, zero humanity visible"
+          "early_stage_markers": "Most armored image in entire library, pure defense, the shield IS the identity, zero humanity visible",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, fortress-scale monumental composition",
+            "color_palette": "muted silvers, burnished golds, cold fog white",
+            "lighting": "diffused overcast, metallic reflections in fog",
+            "mood": "absolute defense, identity as barrier, immovable",
+            "atmosphere": "fog-erased battlefield, no context visible, the shield IS the world"
+          }
         },
         {
           "id": "dragon_slayer",
@@ -108,7 +152,14 @@
           "defense": "reactive_formation",
           "therapeutic_direction": "Slaying vs making peace — only one works",
           "visual_description": "Blood-stained armor, sword raised, helm closed, dragon looming in fog behind, green hills, warm muted palette with red accents",
-          "early_stage_markers": "Already wounded from fighting, dragon isn't defeated — still looming, blood on armor shows cost of the fight"
+          "early_stage_markers": "Already wounded from fighting, dragon isn't defeated — still looming, blood on armor shows cost of the fight",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, action-tension composition",
+            "color_palette": "blood-stained bronze, warm amber, fog-muted red accents",
+            "lighting": "overcast with ember-glow from dragon presence",
+            "mood": "restless, channeling pain into action, wounded but fighting",
+            "atmosphere": "green hills under gathering fog, dragon silhouette looming, cost of battle visible"
+          }
         },
         {
           "id": "knight_meadow",
@@ -121,7 +172,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "Beauty surrounds but armor prevents feeling it",
           "visual_description": "Full plate, great helm completely sealed, sword planted in ground, standing in wildflower meadow, rusted armor, warm golden fog",
-          "early_stage_markers": "Beauty surrounds but knight can't feel through armor, rust shows cost of staying sealed, helm completely closed in a gentle environment"
+          "early_stage_markers": "Beauty surrounds but knight can't feel through armor, rust shows cost of staying sealed, helm completely closed in a gentle environment",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, contrast of armor in beauty",
+            "color_palette": "warm golden fog, wildflower colors muted by rust, meadow greens",
+            "lighting": "golden hour warmth filtering around cold armor",
+            "mood": "surrounded by beauty, unable to feel it, sealed off",
+            "atmosphere": "wildflower meadow in golden fog, rust and petals, beauty unregistered"
+          }
         },
         {
           "id": "viking",
@@ -134,7 +192,14 @@
           "defense": "externalized_aggression",
           "therapeutic_direction": "Strength that protects vs strength that destroys",
           "visual_description": "Heavy leather and plate armor, fur pelts, braided hair, axe held low behind back, facing away toward the sea, coastal cliffs, muted earth tones",
-          "early_stage_markers": "Turned away from viewer, axe behind back not raised, ocean represents emotional depth he won't face"
+          "early_stage_markers": "Turned away from viewer, axe behind back not raised, ocean represents emotional depth he won't face",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, coastal epic composition",
+            "color_palette": "muted earth tones, sea-gray, fur-brown, cold steel",
+            "lighting": "cold northern coastal light, overcast ocean horizon",
+            "mood": "stoic, turned away, emotional depth refused",
+            "atmosphere": "coastal cliffs above churning sea, the ocean as unexamined emotion"
+          }
         },
         {
           "id": "knight_forest",
@@ -147,11 +212,17 @@
           "defense": "externalized_aggression",
           "therapeutic_direction": "Contemplating whether the weapon is still needed",
           "visual_description": "Scale mail, cloak, sword held out examining it, head bowed, alone in misty autumn forest, warm muted browns and golds",
-          "early_stage_markers": "Quietest warrior image, introspection before next fight, examining the sword rather than wielding it"
+          "early_stage_markers": "Quietest warrior image, introspection before next fight, examining the sword rather than wielding it",
+          "visual_style": {
+            "art_direction": "dramatic painterly illustration, quiet introspective composition",
+            "color_palette": "warm muted browns, autumn golds, cloak-gray",
+            "lighting": "soft diffused autumn forest light, warm and contemplative",
+            "mood": "contemplative, paused, examining the weapon",
+            "atmosphere": "misty autumn forest, fallen leaves, the quietest warrior moment"
+          }
         }
       ]
     },
-
     "guardians": {
       "count": 6,
       "description": "Characters who protect, watch over, and maintain boundaries for others",
@@ -169,7 +240,14 @@
           "defense": "caretaking",
           "therapeutic_direction": "Holding the keys but afraid to open the gate",
           "visual_description": "Plate armor, keys hanging from belt, one hand on gate door, gaze turned away not through opening, light pouring in from behind, castle gate setting",
-          "early_stage_markers": "Gate cracked open but blocking it with his body, holds keys to let people in but hasn't decided to open"
+          "early_stage_markers": "Gate cracked open but blocking it with his body, holds keys to let people in but hasn't decided to open",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, threshold framing composition",
+            "color_palette": "warm gold light against cold stone gray, iron key tones",
+            "lighting": "warm light pouring through cracked gate, cold stone shadows",
+            "mood": "watchful, protective, torn between opening and guarding",
+            "atmosphere": "castle gate threshold, light beyond, weight of the keys"
+          }
         },
         {
           "id": "lighthouse_keeper",
@@ -182,7 +260,14 @@
           "defense": "caretaking",
           "therapeutic_direction": "Keeping the light burning for others while standing alone in the storm",
           "visual_description": "Armor under cloak, lantern held out into storm, head bowed, waves crashing, lighthouse looming above, dark stormy palette with warm lantern glow",
-          "early_stage_markers": "Caretaking at personal cost, lantern is small against the dark, standing in the storm himself"
+          "early_stage_markers": "Caretaking at personal cost, lantern is small against the dark, standing in the storm himself",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, storm-against-warmth composition",
+            "color_palette": "dark storm grays, warm lantern gold, wave-white",
+            "lighting": "warm lantern glow cutting through storm darkness",
+            "mood": "selfless, worn, keeping light alive at personal cost",
+            "atmosphere": "storm-battered cliff, lighthouse above, waves crashing, small warmth in vast dark"
+          }
         },
         {
           "id": "watchwoman",
@@ -195,7 +280,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "Vigilance as identity — who are you when you stop watching?",
           "visual_description": "Armor under dark cloak, lantern held over parapet, gaze down into fog below, castle towers fading into mist behind, dark muted palette",
-          "early_stage_markers": "Watching for threats that may never come, castle wall IS the boundary between self and world"
+          "early_stage_markers": "Watching for threats that may never come, castle wall IS the boundary between self and world",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, high vantage atmospheric composition",
+            "color_palette": "dark muted blues, fog white, warm lantern amber accent",
+            "lighting": "warm lantern glow above cold fog, parapet shadows",
+            "mood": "alert, vigilant, identity as watchfulness",
+            "atmosphere": "castle parapet above fog, towers fading into mist, watching for what may never come"
+          }
         },
         {
           "id": "sentinel",
@@ -208,7 +300,14 @@
           "defense": "duty_as_identity",
           "therapeutic_direction": "The post was never relieved — who said you had to stay?",
           "visual_description": "Full helm, cracked weathered armor, spear and shield, standing in narrow mountain pass, face completely hidden, worn earth tones",
-          "early_stage_markers": "Armor old and worn from standing too long, the post was never relieved, guarding passage between two worlds"
+          "early_stage_markers": "Armor old and worn from standing too long, the post was never relieved, guarding passage between two worlds",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, narrow pass monumental composition",
+            "color_palette": "worn earth tones, cracked stone gray, weathered iron",
+            "lighting": "cold mountain pass light, no warmth source",
+            "mood": "steadfast, worn, duty above self, unrelieved",
+            "atmosphere": "narrow mountain pass between two worlds, the post was never relieved"
+          }
         },
         {
           "id": "gatekeeper",
@@ -221,7 +320,14 @@
           "defense": "spiritual_management",
           "therapeutic_direction": "Protecting what's sacred by never entering it yourself",
           "visual_description": "Hooded robes over ornate armor, key-staff held upright, standing centered in glowing archway, face shadowed, forest behind, warm golden arch light",
-          "early_stage_markers": "Blocking and protecting threshold simultaneously, light behind but facing outward into forest, protecting sacred space by never entering"
+          "early_stage_markers": "Blocking and protecting threshold simultaneously, light behind but facing outward into forest, protecting sacred space by never entering",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, sacred threshold composition",
+            "color_palette": "warm golden arch light, forest shadow green, ornate silver",
+            "lighting": "warm sacred glow from archway behind, forest dark ahead",
+            "mood": "reverent, guarding sacred space, facing outward into darkness",
+            "atmosphere": "glowing archway in ancient forest, sacred space protected by never entering"
+          }
         },
         {
           "id": "guardian_angel",
@@ -234,11 +340,17 @@
           "defense": "caretaking",
           "therapeutic_direction": "Protecting something precious but won't show it or let go",
           "visual_description": "Shoulder armor, wings spread but curved inward protectively, arms crossed over chest holding something close, head bowed, eyes down, warm muted light",
-          "early_stage_markers": "Wings could carry anywhere but standing still, holding something precious against chest, protecting not soaring"
+          "early_stage_markers": "Wings could carry anywhere but standing still, holding something precious against chest, protecting not soaring",
+          "visual_style": {
+            "art_direction": "protective painterly illustration, sweeping vertical wing composition",
+            "color_palette": "warm muted gold and white, feather-soft ivory, gentle amber",
+            "lighting": "soft diffused warm light from above, gentle and embracing",
+            "mood": "selfless, protective, holding something precious, grounded not soaring",
+            "atmosphere": "open sky meeting warm earth, wings as shelter not flight"
+          }
         }
       ]
     },
-
     "explorers": {
       "count": 7,
       "description": "Characters who seek, wander, and maintain freedom through movement and distance",
@@ -256,7 +368,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "The map is the illusion of control — the territory is the truth",
           "visual_description": "Shoulder armor, sword at side, studying a map with furrowed brow, kneeling in thick brush, gaze down at map not ahead, misty overgrown forest",
-          "early_stage_markers": "Has a plan but doesn't trust it, the map is the illusion of control, forest denser than the map shows"
+          "early_stage_markers": "Has a plan but doesn't trust it, the map is the illusion of control, forest denser than the map shows",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, ground-level discovery composition",
+            "color_palette": "mossy greens, parchment tan, misty forest gray",
+            "lighting": "filtered forest canopy light, map-reading intimacy",
+            "mood": "analytical, controlled, trusting the plan but doubting the territory",
+            "atmosphere": "thick overgrown forest, kneeling in brush, map as illusion of control"
+          }
         },
         {
           "id": "nomad",
@@ -269,7 +388,14 @@
           "defense": "flight",
           "therapeutic_direction": "Always ready to move because staying means being found",
           "visual_description": "Layered wraps and shoulder plate armor, walking beside loaded horse, wary direct gaze, dwelling fading in fog behind, steppe landscape, muted earth tones",
-          "early_stage_markers": "Left home but keeps looking back, horse carries everything owned, always ready to move"
+          "early_stage_markers": "Left home but keeps looking back, horse carries everything owned, always ready to move",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, journey-road composition",
+            "color_palette": "muted earth tones, steppe gold, travel-worn brown",
+            "lighting": "overcast steppe light, dwelling fading in fog behind",
+            "mood": "restless, always ready to move, looking back while leaving",
+            "atmosphere": "vast steppe landscape, dwelling disappearing in fog, loaded horse beside"
+          }
         },
         {
           "id": "rogue",
@@ -282,7 +408,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Learning that needing someone is not weakness",
           "visual_description": "Full dark armor under hooded cloak, sword sheathed, face shadowed, overlooking city at sunset from rooftop, muted warm tones",
-          "early_stage_markers": "Above the city not in it, watching from the edge, the hood is the wall, counter-dependence visualized"
+          "early_stage_markers": "Above the city not in it, watching from the edge, the hood is the wall, counter-dependence visualized",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, elevated urban vantage composition",
+            "color_palette": "dark leather tones, warm sunset amber, rooftop shadow",
+            "lighting": "warm sunset against dark silhouette, city below",
+            "mood": "self-reliant, above the world, choosing isolation as safety",
+            "atmosphere": "city rooftop at sunset, above the crowd not among it, hood as wall"
+          }
         },
         {
           "id": "cartographer",
@@ -295,7 +428,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Mapping the world as substitute for experiencing it",
           "visual_description": "Plate armor, sword on back, hunched over compass and half-drawn map, quill in hand, seated among ruins, warm muted palette",
-          "early_stage_markers": "Documenting world instead of entering it, intellectualization through documentation, ruins say old map failed"
+          "early_stage_markers": "Documenting world instead of entering it, intellectualization through documentation, ruins say old map failed",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, intimate study-amid-ruins composition",
+            "color_palette": "warm muted amber, parchment cream, ruin-stone gray",
+            "lighting": "warm ambient light on instruments, ruins in soft background",
+            "mood": "analytical, documenting instead of experiencing",
+            "atmosphere": "ancient ruins, compass and half-drawn map, intellectualization through documentation"
+          }
         },
         {
           "id": "scout",
@@ -308,7 +448,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "Safety through distance — what happens when you come down from the mountain?",
           "visual_description": "Camouflage-patterned armor, hooded, crouching at cliff edge, gaze outward across forest canopy, mountain overlook, muted earth tones",
-          "early_stage_markers": "Sees far but stays hidden, elevated position is safety through distance, observing world from above not within"
+          "early_stage_markers": "Sees far but stays hidden, elevated position is safety through distance, observing world from above not within",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, elevated observation composition",
+            "color_palette": "camouflage earth tones, mountain gray, distant forest green",
+            "lighting": "natural overcast mountain light, distance clarity",
+            "mood": "hidden, elevated, safety through distance",
+            "atmosphere": "cliff edge mountain overlook, vast forest canopy below, observing not participating"
+          }
         },
         {
           "id": "ranger",
@@ -321,7 +468,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Stillness is not entrapment",
           "visual_description": "Green hooded cloak, white armor underneath, bow held but undrawn, face hidden in shadow, standing among undergrowth, misty forest greens",
-          "early_stage_markers": "Armed and capable but frozen between trees, forest is both home and cage"
+          "early_stage_markers": "Armed and capable but frozen between trees, forest is both home and cage",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, forest stillness composition",
+            "color_palette": "misty forest greens, white armor accent, shadow-dappled brown",
+            "lighting": "soft filtered green forest light, misty diffusion",
+            "mood": "frozen, capable but still, forest as both home and cage",
+            "atmosphere": "deep misty forest undergrowth, bow held but undrawn, stillness is not entrapment"
+          }
         },
         {
           "id": "wanderer",
@@ -334,11 +488,17 @@
           "defense": "flight",
           "therapeutic_direction": "The destination is visible but the journey requires presence",
           "visual_description": "Shoulder armor, tattered cloak, staff in hand, pack on back, facing away toward distant ruin on horizon, path visible through fog, golden hills",
-          "early_stage_markers": "Most hopeful explorer image, goal visible but fog between here and there is the therapeutic work"
+          "early_stage_markers": "Most hopeful explorer image, goal visible but fog between here and there is the therapeutic work",
+          "visual_style": {
+            "art_direction": "expansive painterly illustration, path-to-horizon hopeful composition",
+            "color_palette": "golden hills, fog-silver, tattered cloak brown",
+            "lighting": "warm golden light on distant horizon, fog between here and there",
+            "mood": "hopeful, determined, fog as therapeutic work ahead",
+            "atmosphere": "golden hills with path through fog toward distant destination, most hopeful explorer"
+          }
         }
       ]
     },
-
     "mystics": {
       "count": 8,
       "description": "Characters who seek meaning through spiritual, esoteric, or transcendent practice",
@@ -356,7 +516,14 @@
           "defense": "spiritual_management",
           "therapeutic_direction": "The ancestors are present but the shaman isn't ready to face them",
           "visual_description": "Feather headdress and armor bracers, drum held close to chest, eyes closed, head bowed, spirit figures in fog behind, dark forest, warm muted tones",
-          "early_stage_markers": "Drum held like a shield not raised to play, spirit figures present in fog but not faced, eyes closed"
+          "early_stage_markers": "Drum held like a shield not raised to play, spirit figures present in fog but not faced, eyes closed",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, spirit-world layered composition",
+            "color_palette": "warm muted earth tones, feather-brown, spirit-fog white",
+            "lighting": "soft forest twilight, spirit figures glowing faintly in fog",
+            "mood": "reverent, unready, ancestors present but unfaced",
+            "atmosphere": "dark forest spirit gathering, drum held like shield, fog between worlds"
+          }
         },
         {
           "id": "seer",
@@ -369,7 +536,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Seeing truth but not ready to name it",
           "visual_description": "Blindfolded, shoulder armor under draped robes, third eye faintly glowing above cloth, hands open reaching hesitantly, seated among temple ruins, starlit sky",
-          "early_stage_markers": "Blindfold is chosen not imposed, insight as defense against having to act on what's seen, hands reaching but not grasping"
+          "early_stage_markers": "Blindfold is chosen not imposed, insight as defense against having to act on what's seen, hands reaching but not grasping",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, sacred ruins starlit composition",
+            "color_palette": "deep indigo, starlit silver, faint third-eye glow",
+            "lighting": "starlit sky above temple ruins, subtle inner glow",
+            "mood": "knowing, blindfolded by choice, insight as defense",
+            "atmosphere": "temple ruins under starlit sky, truth visible but unnamed"
+          }
         },
         {
           "id": "healer",
@@ -382,7 +556,14 @@
           "defense": "caretaking",
           "therapeutic_direction": "Healing others to avoid healing self",
           "visual_description": "Hooded, runic bracers as armor, hands glowing faintly over flowers, gaze down at the healing not at anyone, alone in meadow field, warm orange and gold tones",
-          "early_stage_markers": "Glow is for the flowers not for herself, hood says 'don't look at me, look at what I can do for you'"
+          "early_stage_markers": "Glow is for the flowers not for herself, hood says 'don't look at me, look at what I can do for you'",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, intimate healing light composition",
+            "color_palette": "warm orange and gold, meadow green, healing-glow white",
+            "lighting": "soft golden hour with faint healing luminescence",
+            "mood": "selfless, hidden behind the work, healing others to avoid self",
+            "atmosphere": "solitary meadow field, healing glow over flowers, hood as deflection"
+          }
         },
         {
           "id": "sage",
@@ -395,7 +576,14 @@
           "defense": "knowledge_as_control",
           "therapeutic_direction": "Wisdom without vulnerability is isolation",
           "visual_description": "Hooded, layered shoulder armor, glowing book held closed against chest, seated within ancient tree roots, gaze down into book, misty forest",
-          "early_stage_markers": "Knowledge as shelter, tree is the fortress, reading alone, book holds answers but won't share them"
+          "early_stage_markers": "Knowledge as shelter, tree is the fortress, reading alone, book holds answers but won't share them",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, ancient wisdom den composition",
+            "color_palette": "misty forest green, aged wood brown, glowing book amber",
+            "lighting": "glowing book illumination in dark forest hollow",
+            "mood": "wise, isolated, knowledge as shelter",
+            "atmosphere": "ancient tree roots forming natural study, book as fortress, reading alone"
+          }
         },
         {
           "id": "druid",
@@ -408,7 +596,14 @@
           "defense": "somatic_displacement",
           "therapeutic_direction": "Connecting through the body before the mind — can they face the therapist directly?",
           "visual_description": "Veiled, antler crown, bark-scale armor on arms, hand pressed flat against ancient tree, face hidden behind veil and branches, oak grove, warm earthy tones",
-          "early_stage_markers": "Touching the source but won't show face, tree is the therapist, connecting through body not eyes"
+          "early_stage_markers": "Touching the source but won't show face, tree is the therapist, connecting through body not eyes",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, nature-merged organic composition",
+            "color_palette": "warm earthy tones, bark brown, veil-white, antler bone",
+            "lighting": "soft dappled oak grove light, warm and grounding",
+            "mood": "body-connected, grounded through physical contact, veiled",
+            "atmosphere": "ancient oak grove, hand on tree, connecting through body not words"
+          }
         },
         {
           "id": "monk",
@@ -421,7 +616,14 @@
           "defense": "spiritual_management",
           "therapeutic_direction": "Is faith a fortress or a meadow?",
           "visual_description": "Layered shoulder armor under white robes, prayer beads gripped tightly in both hands, eyes closed, head bowed, seated in stillness, warm light, monastery setting",
-          "early_stage_markers": "Beads held like a lifeline, spiritual practice as containment, discipline as structure holding self together"
+          "early_stage_markers": "Beads held like a lifeline, spiritual practice as containment, discipline as structure holding self together",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, meditative stillness composition",
+            "color_palette": "white robes, warm golden light, prayer-bead amber",
+            "lighting": "warm monastery light, soft and embracing stillness",
+            "mood": "reverent, contained, spiritual practice as structure",
+            "atmosphere": "monastery of stillness, prayer beads as lifeline, discipline holding self together"
+          }
         },
         {
           "id": "oracle",
@@ -434,7 +636,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "The gift is present but not yet trusted",
           "visual_description": "Veiled, ornate forearm armor, crystal held in lap, head bowed over crystal, candlelit temple chamber, seated alone, warm amber and teal tones",
-          "early_stage_markers": "Studying light in private, veil says vision is for oracle alone, not ready to share what's seen"
+          "early_stage_markers": "Studying light in private, veil says vision is for oracle alone, not ready to share what's seen",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, luminous sacred detail, veiled intimacy",
+            "color_palette": "warm amber, deep teal, candlelight gold, crystal prismatic",
+            "lighting": "candlelit interior glow, crystal refractions on stone",
+            "mood": "mysterious, contemplative, gift present but untrusted",
+            "atmosphere": "ancient temple chamber, incense haze, crystal light on walls, vision kept private"
+          }
         },
         {
           "id": "alchemist",
@@ -447,11 +656,17 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Transmutation as isolation — turning pain into something useful alone",
           "visual_description": "Hooded, shoulder plate armor, face shadowed, hunched over glowing flasks on workbench, gloved hands carefully pouring, forest ruins, warm amber glow",
-          "early_stage_markers": "Working alone in the dark, hood and gloves say 'don't touch me while I work', transmutation as isolation"
+          "early_stage_markers": "Working alone in the dark, hood and gloves say 'don't touch me while I work', transmutation as isolation",
+          "visual_style": {
+            "art_direction": "ethereal painterly illustration, workshop-glow intimate composition",
+            "color_palette": "warm amber glow, bronze flask, dark forest shadow",
+            "lighting": "warm amber glow from alchemical flasks in dark workshop",
+            "mood": "isolated, transmuting pain into something useful, alone in the dark",
+            "atmosphere": "forest ruin workshop, glowing flasks, transmutation as isolation"
+          }
         }
       ]
     },
-
     "nature": {
       "count": 7,
       "description": "Characters who identify with natural elements, landscapes, and organic forces",
@@ -469,7 +684,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "The lone wolf survives but doesn't live — the pack is the healing",
           "visual_description": "Thick fur with armor-like scale plating on shoulders and back, alert stance on hilltop, head watchful but not aggressive, distant wolf silhouette in fog, misty pine forest, muted browns and golds",
-          "early_stage_markers": "Pack exists in distance but hasn't joined, surviving alone by choice, armor-like markings suggest natural defense"
+          "early_stage_markers": "Pack exists in distance but hasn't joined, surviving alone by choice, armor-like markings suggest natural defense",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, lone-against-pack composition",
+            "color_palette": "muted browns and golds, pine-forest green, fog-silver",
+            "lighting": "soft misty pine forest light, dawn diffusion",
+            "mood": "alert, self-reliant, pack exists but unchosen",
+            "atmosphere": "misty pine forest hilltop, distant wolf silhouette in fog, surviving alone"
+          }
         },
         {
           "id": "wildflower",
@@ -482,7 +704,14 @@
           "defense": "dissociation",
           "therapeutic_direction": "Beautiful but can't feel the ground — can she land?",
           "visual_description": "Petal-like dress figure with vine armor patterns on torso, arms wrapped inward, head slightly bowed, face turned away, backlit in sun-dappled meadow, muted golds and whites",
-          "early_stage_markers": "Armor woven into body itself, defenses so integrated person doesn't know they're wearing them, present but not fully embodied"
+          "early_stage_markers": "Armor woven into body itself, defenses so integrated person doesn't know they're wearing them, present but not fully embodied",
+          "visual_style": {
+            "art_direction": "soft watercolor illustration, organic flowing forms, dreamy diffusion",
+            "color_palette": "sun-faded golds, petal whites, meadow sage greens",
+            "lighting": "soft diffused backlight through petals, sun-dappled warmth",
+            "mood": "gentle, ethereal, present but not fully embodied",
+            "atmosphere": "sun-dappled meadow, petal-strewn breeze, defenses woven into the body itself"
+          }
         },
         {
           "id": "storm_rider",
@@ -495,7 +724,14 @@
           "defense": "anticipatory_anxiety",
           "therapeutic_direction": "The storm hasn't arrived yet — will you face it or flee?",
           "visual_description": "Green cloak over light armor, standing on cliff edge, cloak whipping in wind, defensive bracing posture, storm clouds gathering distantly, muted earth tones",
-          "early_stage_markers": "Storm gathering but distant, bracing not charging, feet planted but body language reads as preparing not confronting"
+          "early_stage_markers": "Storm gathering but distant, bracing not charging, feet planted but body language reads as preparing not confronting",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, approaching-storm dramatic composition",
+            "color_palette": "muted earth tones, storm-cloud gray, wind-whipped green",
+            "lighting": "storm-filtered dramatic light, pre-storm electricity",
+            "mood": "bracing, anticipatory, storm gathering but not yet arrived",
+            "atmosphere": "cliff edge before gathering storm, wind-whipped cloak, bracing not charging"
+          }
         },
         {
           "id": "mountain_climber",
@@ -508,7 +744,14 @@
           "defense": "over_preparation",
           "therapeutic_direction": "Maximum gear for minimum trust — what if the mountain is friendlier than you think?",
           "visual_description": "Heavy layered gear with rope and armor plates, ice axe held defensively at side, headgear and scarf covering face, cautious sideways gaze, steep crystal mountain slope, warm amber against cold crystals",
-          "early_stage_markers": "Heaviest armor in nature set, over-preparation as defense, crystals tie to Crystal Mountains biome, hasn't reached summit"
+          "early_stage_markers": "Heaviest armor in nature set, over-preparation as defense, crystals tie to Crystal Mountains biome, hasn't reached summit",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, vertical ascent composition",
+            "color_palette": "warm amber against cold crystal blue, heavy gear earth tones",
+            "lighting": "cold crystal mountain ambient with warm body heat glow",
+            "mood": "over-prepared, cautious, trust deficit, not yet at summit",
+            "atmosphere": "steep crystal mountain slope, heaviest gear in nature set, crystals glowing around"
+          }
         },
         {
           "id": "tree_keeper",
@@ -521,7 +764,14 @@
           "defense": "somatic_displacement",
           "therapeutic_direction": "Safety through becoming invisible within nature — the tree is the safe attachment",
           "visual_description": "Bark-patterned skin merging with tree, ivy-leaf cloak as natural armor, head bowed, eyes closed, pressing into ancient oak protectively, misty deep forest, warm earthy tones",
-          "early_stage_markers": "Defenses literally becoming part of environment, embrace is protective not relaxed, can't let go of the tree yet"
+          "early_stage_markers": "Defenses literally becoming part of environment, embrace is protective not relaxed, can't let go of the tree yet",
+          "visual_style": {
+            "art_direction": "soft organic illustration, figure-merging-with-nature composition",
+            "color_palette": "warm earthy tones, bark brown, ivy green, moss soft",
+            "lighting": "deep forest filtered light, warm and ancient",
+            "mood": "grounded, invisible within nature, tree as safe attachment",
+            "atmosphere": "deep misty forest, figure becoming part of ancient oak, embrace protective not relaxed"
+          }
         },
         {
           "id": "garden_tender",
@@ -534,7 +784,14 @@
           "defense": "caretaking",
           "therapeutic_direction": "Healing the garden instead of healing self",
           "visual_description": "Earth-toned robes with light protective bracers at wrists, kneeling among herbs and flowers, head bowed, hands reaching toward plants, misty garden valley, warm subdued colors",
-          "early_stage_markers": "Tending plants not people, flowers not yet in full bloom, nurturing but inward-focused"
+          "early_stage_markers": "Tending plants not people, flowers not yet in full bloom, nurturing but inward-focused",
+          "visual_style": {
+            "art_direction": "soft watercolor illustration, intimate garden-level composition",
+            "color_palette": "earth tones, herb green, warm subdued flower colors",
+            "lighting": "soft valley garden light, warm and nurturing",
+            "mood": "nurturing, inward-focused, healing garden instead of self",
+            "atmosphere": "misty garden valley, herbs and flowers, kneeling among growing things"
+          }
         },
         {
           "id": "river_walker",
@@ -547,11 +804,17 @@
           "defense": "emotional_depth_avoidance",
           "therapeutic_direction": "Untapped emotional depth — not yet trusting own capacity",
           "visual_description": "Light armor at shoulder under flowing robes, wading in misty river, swirling blue-white energy around legs, head bowed, gaze downward at water, warm golden backlight",
-          "early_stage_markers": "Magic happening around but not being directed, horizon obscured by mist, no visible destination, hasn't turned to face the light behind"
+          "early_stage_markers": "Magic happening around but not being directed, horizon obscured by mist, no visible destination, hasn't turned to face the light behind",
+          "visual_style": {
+            "art_direction": "soft watercolor illustration, flowing water luminous composition",
+            "color_palette": "blue-white swirling energy, warm golden backlight, river silver",
+            "lighting": "warm golden backlight behind, cool river glow around legs",
+            "mood": "untapped depth, surface-skimming, capacity present but unfaced",
+            "atmosphere": "misty river crossing, magic happening uncontrolled, horizon obscured by mist"
+          }
         }
       ]
     },
-
     "creative": {
       "count": 7,
       "description": "Characters who express, create, and process through art, music, craft, and story",
@@ -569,7 +832,14 @@
           "defense": "sublimation",
           "therapeutic_direction": "Expressing emotion through art because direct expression feels unsafe",
           "visual_description": "Armor under scarf and cloak, head bowed into lute, playing alone by campfire, colorful patchwork skirt muted by fog, no audience, misty dark forest",
-          "early_stage_markers": "Playing for no audience, armor hidden under colorful cloth, expressing through instrument not voice"
+          "early_stage_markers": "Playing for no audience, armor hidden under colorful cloth, expressing through instrument not voice",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, campfire circle composition",
+            "color_palette": "warm campfire amber, patchwork colors muted by fog, dark forest shadow",
+            "lighting": "warm campfire glow in dark forest, intimate task lighting",
+            "mood": "expressive, playing for no one, channeling through instrument",
+            "atmosphere": "solitary campfire in dark misty forest, no audience, armor hidden under color"
+          }
         },
         {
           "id": "artist",
@@ -582,7 +852,14 @@
           "defense": "sublimation",
           "therapeutic_direction": "Creating in the wreckage but hasn't looked at the bigger picture yet",
           "visual_description": "Paint-stained apron as only protection, canvas barely started, gaze fixed downward at brush not canvas, ruins behind, warm muted palette",
-          "early_stage_markers": "Canvas barely started, looking at tool not creation, ruins behind unacknowledged"
+          "early_stage_markers": "Canvas barely started, looking at tool not creation, ruins behind unacknowledged",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, creative process intimate composition",
+            "color_palette": "paint-stain colors, warm muted palette, ruin-stone gray behind",
+            "lighting": "diffused open-air studio light, soft and truthful",
+            "mood": "absorbed, creating in wreckage, bigger picture unseen",
+            "atmosphere": "open-air studio among ruins, canvas barely started, tools as companions"
+          }
         },
         {
           "id": "dreamweaver",
@@ -595,7 +872,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Building connection one thread at a time — control through craft",
           "visual_description": "Cloak with silver thread armor patterns, head bowed, hands working threads meticulously at loom, light falling around but not on face, warm silvers and golds",
-          "early_stage_markers": "Light falls around but not on face, building connection through craft not relationship, control through meticulous work"
+          "early_stage_markers": "Light falls around but not on face, building connection through craft not relationship, control through meticulous work",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, luminous thread-work detail composition",
+            "color_palette": "warm silvers and golds, thread-light shimmer, soft shadow",
+            "lighting": "thread-generated luminescence, light falls around but not on face",
+            "mood": "absorbed, building connection through craft, control through meticulous work",
+            "atmosphere": "intimate weaving space, silver threads catching light, craft as relationship substitute"
+          }
         },
         {
           "id": "architect",
@@ -608,7 +892,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Plans to rebuild but hasn't started — the blueprint is the security blanket",
           "visual_description": "Shoulder armor, tool belt with instruments, blueprints held close to body not unfurled, gaze down, crumbling structures behind, muted earth tones",
-          "early_stage_markers": "Blueprints held close not unfurled, crumbling structures behind, carrying the plan as comfort object"
+          "early_stage_markers": "Blueprints held close not unfurled, crumbling structures behind, carrying the plan as comfort object",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, blueprint-study grounded composition",
+            "color_palette": "muted earth tones, parchment cream, crumbling stone gray",
+            "lighting": "overcast light on blueprints, structures crumbling softly behind",
+            "mood": "analytical, planning as comfort, blueprint as security blanket",
+            "atmosphere": "crumbling structures with blueprints held close, the plan as shelter"
+          }
         },
         {
           "id": "dancer",
@@ -621,7 +912,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "Movement as expression exists but the dancer won't be seen yet",
           "visual_description": "Hooded, face fully hidden, armor gauntlets under flowing robes, staff gripped tight, moonlit temple, warm amber and white tones",
-          "early_stage_markers": "Face fully hidden, staff gripped tight as anchor, moonlit but shrouded, the dancer won't be seen yet"
+          "early_stage_markers": "Face fully hidden, staff gripped tight as anchor, moonlit but shrouded, the dancer won't be seen yet",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, moonlit sacred movement composition",
+            "color_palette": "warm amber and white, moonlit temple stone, flowing robe ivory",
+            "lighting": "cool moonlight in warm temple space, ethereal contrast",
+            "mood": "hidden, movement exists but the dancer will not be seen yet",
+            "atmosphere": "moonlit temple, flowing robes, face hidden, movement frozen mid-gesture"
+          }
         },
         {
           "id": "inventor",
@@ -634,7 +932,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Machines don't feel — can you build one with a heart?",
           "visual_description": "Heavy leather armor with etched plates, scrutinizing small mechanical bird with furrowed brow, gears surrounding, forest workshop, warm amber and bronze tones",
-          "early_stage_markers": "Studying mechanical bird clinically not trusting it to fly, building something with a heart but examining it analytically"
+          "early_stage_markers": "Studying mechanical bird clinically not trusting it to fly, building something with a heart but examining it analytically",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, workshop tinkering detail composition",
+            "color_palette": "warm amber and bronze, gear-metal gray, forest workshop green",
+            "lighting": "warm amber workshop firelight, intimate mechanical glow",
+            "mood": "analytical, studying creation clinically, machines as safe connection",
+            "atmosphere": "forest workshop, gears surrounding, mechanical bird examined analytically"
+          }
         },
         {
           "id": "storyteller",
@@ -647,11 +952,17 @@
           "defense": "caretaking",
           "therapeutic_direction": "Has wisdom to share but the audience isn't fully present yet",
           "visual_description": "Aged elder, shoulder armor, hand extended, indistinct figures in fog, seated on log not standing, misty forest gathering, muted warm tones",
-          "early_stage_markers": "Teaching into the mist, audience not fully present, seated not commanding, wisdom available but connection incomplete"
+          "early_stage_markers": "Teaching into the mist, audience not fully present, seated not commanding, wisdom available but connection incomplete",
+          "visual_style": {
+            "art_direction": "warm intimate illustration, gathering-in-mist composition",
+            "color_palette": "muted warm tones, elder-skin amber, fog-white audience",
+            "lighting": "soft warm diffused gathering light, figures in fog",
+            "mood": "wise, available but connection incomplete, teaching into mist",
+            "atmosphere": "misty forest gathering, seated on log, wisdom available but audience half-present"
+          }
         }
       ]
     },
-
     "mythical": {
       "count": 8,
       "description": "Characters drawn from mythology, legend, and supernatural archetypes",
@@ -669,7 +980,14 @@
           "defense": "caretaking",
           "therapeutic_direction": "The gift of flight exists but she's folding inward — protecting not soaring",
           "visual_description": "Large wings wrapped forward shielding body, eyes closed, head bowed, armor at shoulders hidden under feathers, warm muted browns and golds, painterly sky",
-          "early_stage_markers": "Wings wrapped forward as shield not spread for flight, eyes closed, folding inward"
+          "early_stage_markers": "Wings wrapped forward as shield not spread for flight, eyes closed, folding inward",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, vertical wing-shield composition",
+            "color_palette": "warm muted browns and golds, feather-soft ivory, sky-warm",
+            "lighting": "soft golden sky light, warm embrace from above",
+            "mood": "protective, folding inward, flight exists but unchosen",
+            "atmosphere": "painterly sky meeting warm earth, wings as shield not freedom"
+          }
         },
         {
           "id": "unicorn_rider",
@@ -682,7 +1000,14 @@
           "defense": "idealization",
           "therapeutic_direction": "Bonded to purity and innocence but guarded — not yet trusting the journey",
           "visual_description": "Armor visible over cloak, gaze down toward unicorn not horizon, riding white unicorn through misty pastel meadow, muted pinks and greens",
-          "early_stage_markers": "Riding but not galloping freely, looking at companion not destination, armored on a creature of innocence"
+          "early_stage_markers": "Riding but not galloping freely, looking at companion not destination, armored on a creature of innocence",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, bonded-pair intimate composition",
+            "color_palette": "muted pinks and greens, pastel meadow, soft unicorn white",
+            "lighting": "soft pastel diffused meadow light, dreamlike warmth",
+            "mood": "bonded to innocence, guarded, not yet trusting the journey",
+            "atmosphere": "misty pastel meadow, riding but not galloping, looking at companion not destination"
+          }
         },
         {
           "id": "shapeshifter",
@@ -695,7 +1020,14 @@
           "defense": "adaptive_self",
           "therapeutic_direction": "Who are you when no one is watching?",
           "visual_description": "Body dissolving into smoke, face barely visible, armor fragment glimpsed at wrist, identity literally unformed, forest background, warm sepia tones",
-          "early_stage_markers": "Most raw early-stage image in collection, can't be seen because they don't know who they are, identity as vapor"
+          "early_stage_markers": "Most raw early-stage image in collection, can't be seen because they don't know who they are, identity as vapor",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, dissolving-identity spectral composition",
+            "color_palette": "warm sepia smoke, vapor-white, armor-fragment glint",
+            "lighting": "warm ambient forest glow through dissipating smoke",
+            "mood": "formless, identity as vapor, searching for true self",
+            "atmosphere": "dark forest, body dissolving into smoke, most raw early-stage image, identity unformed"
+          }
         },
         {
           "id": "griffin_rider",
@@ -708,7 +1040,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Allied with power but hasn't claimed it yet",
           "visual_description": "Light armor, standing behind griffin not mounted, looking at creature not outward, muted earth tones, mountain backdrop with fog",
-          "early_stage_markers": "Standing behind power not riding it, looking at the beast not the horizon, letting the creature lead"
+          "early_stage_markers": "Standing behind power not riding it, looking at the beast not the horizon, letting the creature lead",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, creature-companion heroic composition",
+            "color_palette": "muted earth tones, mountain fog gray, creature-feather gold",
+            "lighting": "cold mountain light with warm creature presence",
+            "mood": "power available but unclaimed, letting the creature lead",
+            "atmosphere": "mountain backdrop with fog, standing behind griffin not mounted, power present"
+          }
         },
         {
           "id": "mermaid_merman",
@@ -721,7 +1060,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "Caught between two identities — not yet choosing either",
           "visual_description": "Knees drawn up, arms hugging self, hair windswept, gaze down at rocks not sea, sitting on rocky shore at ocean boundary, muted blues and purples at sunset",
-          "early_stage_markers": "Sitting at boundary between worlds, not choosing either, self-protective posture at the edge"
+          "early_stage_markers": "Sitting at boundary between worlds, not choosing either, self-protective posture at the edge",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, boundary-sitting liminal composition",
+            "color_palette": "muted blues, sunset purples, rocky shore gray, sea-foam white",
+            "lighting": "sunset light at ocean boundary, warm above cold below",
+            "mood": "caught between identities, not yet choosing either",
+            "atmosphere": "rocky shore at ocean boundary, sitting between land and sea, self-protective at edge"
+          }
         },
         {
           "id": "dragon",
@@ -734,7 +1080,14 @@
           "defense": "externalized_rage",
           "therapeutic_direction": "The fire is a boy's pain wearing armor",
           "visual_description": "Coiled around mountain peak, smoke wisping not blazing, scales as natural armor, head lowered and watchful, muted golds and grays, atmospheric fog",
-          "early_stage_markers": "Fire contained, rage present but held, circling not striking, smoke not flame"
+          "early_stage_markers": "Fire contained, rage present but held, circling not striking, smoke not flame",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, coiled-power mountain composition",
+            "color_palette": "muted golds and grays, smoke-wisp white, scale-armor dark",
+            "lighting": "atmospheric fog with faint ember glow within",
+            "mood": "contained fire, rage present but held, power coiled",
+            "atmosphere": "mountain peak wreathed in smoke, fire contained not blazing, circling not striking"
+          }
         },
         {
           "id": "fairy",
@@ -747,7 +1100,14 @@
           "defense": "dissociation",
           "therapeutic_direction": "Beautiful but can't feel the ground — can she land?",
           "visual_description": "Tiny figure, knees pulled to chest, wings folded back not spread, sitting still on mushroom cap, muted iridescent wings, gaze down, soft forest bokeh",
-          "early_stage_markers": "Already landed but can't look up, grounded but dissociated from own capacity, wings folded not spread"
+          "early_stage_markers": "Already landed but can't look up, grounded but dissociated from own capacity, wings folded not spread",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, miniature intimate scale composition",
+            "color_palette": "muted iridescent wing colors, soft forest bokeh, mushroom earth tones",
+            "lighting": "soft forest bokeh light, gentle and small-scale",
+            "mood": "grounded but dissociated, already landed but unable to look up",
+            "atmosphere": "forest floor mushroom cap, wings folded not spread, small and still"
+          }
         },
         {
           "id": "phoenix",
@@ -760,11 +1120,17 @@
           "defense": "reactive_formation",
           "therapeutic_direction": "Rebirth is possible but hasn't happened yet — sitting in the ashes before the rise",
           "visual_description": "Perched on rubble not flying, flames present but subdued at edges, head tilted down, talons gripping stone, ruined temple columns, warm reds and ambers",
-          "early_stage_markers": "Sitting in ashes before the rise, flames subdued not blazing, gripping stone not taking flight"
+          "early_stage_markers": "Sitting in ashes before the rise, flames subdued not blazing, gripping stone not taking flight",
+          "visual_style": {
+            "art_direction": "fantastical painterly illustration, pre-rebirth ash composition",
+            "color_palette": "warm reds and ambers, ash gray, ruined stone, subdued flame",
+            "lighting": "subdued flame glow at edges, ember warmth in ruin",
+            "mood": "pre-rebirth, sitting in ashes, flames subdued not blazing",
+            "atmosphere": "ruined temple columns, rubble and ash, perched not flying, rebirth possible but not yet"
+          }
         }
       ]
     },
-
     "royal": {
       "count": 5,
       "description": "Characters who carry inherited authority, lineage weight, and the burden of leadership",
@@ -782,7 +1148,14 @@
           "defense": "compliance",
           "therapeutic_direction": "Royalty bestowed but not yet accepted — the crown's weight is held inward",
           "visual_description": "Delicate leaf crown with faint stars, hands clasped over heart, eyes closed, leaf-armor at shoulders, simple robes, sacred grove with warm golden light",
-          "early_stage_markers": "Crown present but power unassumed, hands clasped over heart holding weight inward, eyes closed"
+          "early_stage_markers": "Crown present but power unassumed, hands clasped over heart holding weight inward, eyes closed",
+          "visual_style": {
+            "art_direction": "regal painterly illustration, sacred grove intimate coronation composition",
+            "color_palette": "warm golden light, leaf-green crown, soft earth robes",
+            "lighting": "warm golden sacred grove light, gentle and affirming",
+            "mood": "burdened by gift, power unassumed, weight held inward",
+            "atmosphere": "sacred grove with warm golden light, crown present but power unassumed"
+          }
         },
         {
           "id": "throne_keeper",
@@ -795,7 +1168,14 @@
           "defense": "parentification",
           "therapeutic_direction": "Inherited a seat of power but won't claim it — will you sit?",
           "visual_description": "Armor visible, standing beside empty throne not sitting in it, sword planted, head bowed, vast empty great hall with tall columns, muted warm tones",
-          "early_stage_markers": "Standing beside throne not in it, guarding the role rather than inhabiting it, alone in vast hall"
+          "early_stage_markers": "Standing beside throne not in it, guarding the role rather than inhabiting it, alone in vast hall",
+          "visual_style": {
+            "art_direction": "regal painterly illustration, empty great hall monumental composition",
+            "color_palette": "muted warm stone, cold throne gray, sword-steel",
+            "lighting": "vast hall ambient light, cold and echoey, warm accent from above",
+            "mood": "prematurely responsible, guarding the seat, alone in grandeur",
+            "atmosphere": "empty great hall with tall columns, standing beside throne not in it, vast emptiness"
+          }
         },
         {
           "id": "princess",
@@ -808,7 +1188,14 @@
           "defense": "compliance",
           "therapeutic_direction": "The role demands she be seen but she's turning inward — armor under the dress",
           "visual_description": "Crown worn, shoulder armor over gown, hands pressed together in prayer or self-soothing, eyes downcast, kingdom blurred behind, castle balcony, soft warm light",
-          "early_stage_markers": "Armor under the dress, hands pressed together self-soothing, balcony is a cage with a view"
+          "early_stage_markers": "Armor under the dress, hands pressed together self-soothing, balcony is a cage with a view",
+          "visual_style": {
+            "art_direction": "regal painterly illustration, balcony portrait intimate composition",
+            "color_palette": "soft warm light, armor-under-gown silver, kingdom-blur pastel",
+            "lighting": "soft warm balcony light, kingdom blurred behind",
+            "mood": "dutiful, burdened, armor under the dress, self-soothing",
+            "atmosphere": "castle balcony overlooking blurred kingdom, cage with a view"
+          }
         },
         {
           "id": "king",
@@ -821,7 +1208,14 @@
           "defense": "role_identification",
           "therapeutic_direction": "The weight of inherited authority — wearing the crown but crushed by it",
           "visual_description": "Heavy crown on bowed head, armor under ornate robes, seated on throne but slumped not upright, gaze down, hands gripping armrests, dark throne room",
-          "early_stage_markers": "Crown heavy on bowed head, slumped not upright, power without peace, gripping armrests for stability"
+          "early_stage_markers": "Crown heavy on bowed head, slumped not upright, power without peace, gripping armrests for stability",
+          "visual_style": {
+            "art_direction": "regal painterly illustration, dark throne room weight composition",
+            "color_palette": "heavy crown gold, dark throne room shadow, ornate robe burgundy",
+            "lighting": "dim throne room light, weight pressing from above",
+            "mood": "crushed by inheritance, power without peace, gripping for stability",
+            "atmosphere": "dark throne room, slumped on throne, crown heavy on bowed head"
+          }
         },
         {
           "id": "empress",
@@ -834,11 +1228,17 @@
           "defense": "role_identification",
           "therapeutic_direction": "Maximum external status, maximum internal isolation",
           "visual_description": "Full jeweled crown, elaborate armor under ceremonial robes, fur-lined cloak, standing rigid in empty hall with banners, gaze averted to side, rich warm tones",
-          "early_stage_markers": "Heaviest regalia in Royal set, alone in room built for hundreds, rigid posture as defense against collapse"
+          "early_stage_markers": "Heaviest regalia in Royal set, alone in room built for hundreds, rigid posture as defense against collapse",
+          "visual_style": {
+            "art_direction": "regal painterly illustration, ceremonial isolation grand composition",
+            "color_palette": "rich warm tones, jeweled crown, fur-lined cloak, banner colors",
+            "lighting": "warm ceremonial hall light, richly appointed but empty",
+            "mood": "maximum external status, maximum internal isolation, rigid as defense",
+            "atmosphere": "empty hall built for hundreds, heaviest regalia, alone in ceremony"
+          }
         }
       ]
     },
-
     "shadow": {
       "count": 6,
       "description": "Characters who dwell in darkness, liminality, and the unseen spaces of the psyche",
@@ -856,7 +1256,14 @@
           "defense": "shadow_identification",
           "therapeutic_direction": "Existing in the liminal space — one foot in light, one in shadow",
           "visual_description": "Dark ornate armor under hooded cloak, face half-hidden in shadow, eyes closed, standing at threshold between lit and dark columns, moonlit ruins",
-          "early_stage_markers": "At threshold between light and dark, hasn't chosen which world to inhabit, eyes closed at the boundary"
+          "early_stage_markers": "At threshold between light and dark, hasn't chosen which world to inhabit, eyes closed at the boundary",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, high contrast chiaroscuro threshold composition",
+            "color_palette": "deep blacks, moonlit silver, bruised purple undertones",
+            "lighting": "stark moonlight through broken columns, deep pooling shadows",
+            "mood": "liminal, haunted, one foot in light one in shadow",
+            "atmosphere": "moonlit ruins at threshold between lit corridor and dark passage"
+          }
         },
         {
           "id": "night_hunter",
@@ -869,7 +1276,14 @@
           "defense": "shadow_identification",
           "therapeutic_direction": "Understanding darkness vs living in it",
           "visual_description": "All-black cloak and armor, hooded, bow or blade held low, moving through fallen leaves, face barely visible, autumn dark forest",
-          "early_stage_markers": "Hunting in the dark because dark feels familiar, weapon is comfort not aggression"
+          "early_stage_markers": "Hunting in the dark because dark feels familiar, weapon is comfort not aggression",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, forest-floor stealth composition",
+            "color_palette": "all-black, autumn leaf rust, forest-shadow green",
+            "lighting": "minimal moonlight filtered through autumn canopy",
+            "mood": "dark-dwelling, weapon as comfort, darkness as familiar home",
+            "atmosphere": "autumn dark forest, fallen leaves, moving through shadows as native habitat"
+          }
         },
         {
           "id": "shadow_raven",
@@ -882,7 +1296,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "Sees death and transformation but sits with it rather than fleeing",
           "visual_description": "Pure black feathers as total armor, perched on gnarled moss-draped branch, head turned in profile, dark eye watchful, darkest palette in entire library",
-          "early_stage_markers": "Watching from the boundary, darkest image in collection, not choosing a side"
+          "early_stage_markers": "Watching from the boundary, darkest image in collection, not choosing a side",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, darkest-palette perch composition",
+            "color_palette": "pure black, moss-draped green, darkest palette in entire library",
+            "lighting": "barely perceptible ambient glow, near-darkness",
+            "mood": "watching from boundary, not choosing a side, darkest observer",
+            "atmosphere": "gnarled moss-draped branch, darkest image in collection, boundary between worlds"
+          }
         },
         {
           "id": "phantom",
@@ -895,7 +1316,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "Caught between existing and disappearing — the graveyard is the past they can't leave",
           "visual_description": "Body partially dissolving into mist, tattered armor and cloak, standing among gravestones, face obscured by fog, hands at sides, warm sepia mist",
-          "early_stage_markers": "Half-present half-gone, graveyard is past they can't leave, caught between existence and disappearance"
+          "early_stage_markers": "Half-present half-gone, graveyard is past they can't leave, caught between existence and disappearance",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, dissolving-figure spectral composition",
+            "color_palette": "warm sepia mist, tattered iron, graveyard stone gray",
+            "lighting": "soft sepia mist glow, figure half-dissolving",
+            "mood": "half-present, caught between existing and disappearing",
+            "atmosphere": "graveyard among gravestones, body dissolving into mist, past that cannot be left"
+          }
         },
         {
           "id": "ghost",
@@ -908,7 +1336,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "What would it feel like to be visible and still safe?",
           "visual_description": "Translucent figure, arms crossed over chest, head bowed, surrounded by rubble and dust in ruined hall, light passing through body, warm ethereal glow",
-          "early_stage_markers": "Light goes through the body, can't be visible at all, decided invisibility is safer than being seen"
+          "early_stage_markers": "Light goes through the body, can't be visible at all, decided invisibility is safer than being seen",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, translucent-figure ethereal composition",
+            "color_palette": "ethereal warm glow, transparent body, rubble dust gray",
+            "lighting": "light passing through translucent body, warm ethereal glow",
+            "mood": "invisible, chosen disappearance, longing to be seen but afraid",
+            "atmosphere": "ruined hall, dust and rubble, light goes through the body, invisibility as safety"
+          }
         },
         {
           "id": "dark_knight",
@@ -921,11 +1356,17 @@
           "defense": "shadow_identification",
           "therapeutic_direction": "The shadow worn as identity rather than fought — protecting something in the dark",
           "visual_description": "Full black plate armor, closed helm, sword planted, standing in crumbling fortress, scratched battle-worn armor, zero skin visible, dark warm tones",
-          "early_stage_markers": "Shadow integration through warrior identity, black armor IS the shadow worn as self, protecting something in the dark"
+          "early_stage_markers": "Shadow integration through warrior identity, black armor IS the shadow worn as self, protecting something in the dark",
+          "visual_style": {
+            "art_direction": "dark atmospheric illustration, fortress-shadow monumental composition",
+            "color_palette": "deep black plate, dark warm undertones, battle-scratch silver",
+            "lighting": "minimal fortress interior light, warm dark tones",
+            "mood": "shadow worn as identity, protecting something in the dark",
+            "atmosphere": "crumbling fortress interior, full black armor, zero skin visible, shadow as self"
+          }
         }
       ]
     },
-
     "child": {
       "count": 6,
       "description": "Characters representing the inner child, exile parts, innocence, and vulnerability",
@@ -943,7 +1384,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "The IFS exile made visible — small, hidden, holding one fragile beautiful thing",
           "visual_description": "Wrapped entirely in oversized cloak, only eyes and one hand visible, clutching single glowing flower, wide watchful eyes, empty field, warm sepia tones",
-          "early_stage_markers": "Entire body hidden except eyes and one hand, glowing flower is the one thing the exile protects, wide watchful eyes"
+          "early_stage_markers": "Entire body hidden except eyes and one hand, glowing flower is the one thing the exile protects, wide watchful eyes",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, intimate small-scale composition",
+            "color_palette": "warm sepia tones, oversized cloak earth, single glowing flower light",
+            "lighting": "soft warm ambient with single glowing flower as light source",
+            "mood": "tiny, hidden, protecting one precious thing, wide watchful eyes",
+            "atmosphere": "empty field, oversized cloak, only eyes and one hand visible, exile made visible"
+          }
         },
         {
           "id": "seedling",
@@ -956,7 +1404,14 @@
           "defense": "freeze",
           "therapeutic_direction": "Just emerged — the world is enormous, armored but still so small",
           "visual_description": "Tiny figure in leaf-wing armor, standing among seedling sprouts barely taller than them, solemn face, fists at sides, garden soil, warm backlit green",
-          "early_stage_markers": "Just emerged, world is enormous, armored but still so small against it all, fists at sides"
+          "early_stage_markers": "Just emerged, world is enormous, armored but still so small against it all, fists at sides",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, garden-level small-scale perspective",
+            "color_palette": "warm backlit green, garden-soil brown, leaf-armor soft sage",
+            "lighting": "warm backlight through seedling sprouts, garden dawn",
+            "mood": "just emerged, armored but so small, world enormous",
+            "atmosphere": "garden soil among seedling sprouts, tiny figure in vast growing world"
+          }
         },
         {
           "id": "star_child",
@@ -969,7 +1424,14 @@
           "defense": "dissociation",
           "therapeutic_direction": "Connected to something vast but sitting alone — the stars are in them but they haven't realized their own light",
           "visual_description": "Seated on hillside, light armor at wrists and legs, star-dusted hair, gazing outward at horizon not up, soft white garments, starlit sky meeting warm earth",
-          "early_stage_markers": "Stars are in them but haven't realized own light, sitting alone, gazing outward not up"
+          "early_stage_markers": "Stars are in them but haven't realized own light, sitting alone, gazing outward not up",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, cosmic-intimate blended composition",
+            "color_palette": "star-dust silver, warm earth tones, soft white garments",
+            "lighting": "starlit sky meeting warm earth glow, gentle cosmic light",
+            "mood": "connected to vastness but sitting alone, light undiscovered within",
+            "atmosphere": "hillside where starlit sky meets warm earth, stars within but unrealized"
+          }
         },
         {
           "id": "lamb",
@@ -982,7 +1444,14 @@
           "defense": "compliance",
           "therapeutic_direction": "Innocence paired with innocence — the lamb is the safe attachment but the child hasn't reached out",
           "visual_description": "Child in simple cloth standing beside lamb, no armor, gaze averted downward, hands at sides not touching animal, meadow at golden hour, warm muted tones",
-          "early_stage_markers": "Vulnerability without protection, safe attachment present but child hasn't reached out to touch it yet"
+          "early_stage_markers": "Vulnerability without protection, safe attachment present but child hasn't reached out to touch it yet",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, golden hour pastoral composition",
+            "color_palette": "warm muted golden hour tones, simple cloth white, meadow soft",
+            "lighting": "golden hour meadow light, gentle and safe",
+            "mood": "innocent, vulnerable, safe attachment present but unreached",
+            "atmosphere": "meadow at golden hour, lamb beside child, safety available but untouched"
+          }
         },
         {
           "id": "lost_child",
@@ -995,7 +1464,14 @@
           "defense": "freeze",
           "therapeutic_direction": "The forest is alive and watching — the child is found by nature but doesn't know it yet",
           "visual_description": "Small child in miniature armor and cloak, wide uncertain eyes looking directly at viewer, forest animals surrounding at distance, alone in clearing, warm storybook illustration style",
-          "early_stage_markers": "Only early-stage image with direct eye contact — the lost child is looking for connection, big eyes say 'I'm here, do you see me?'"
+          "early_stage_markers": "Only early-stage image with direct eye contact — the lost child is looking for connection, big eyes say 'I'm here, do you see me?'",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, direct-gaze intimate forest composition",
+            "color_palette": "warm sepia, forest greens, miniature armor gleam, soft amber",
+            "lighting": "filtered canopy light, warm storybook glow, gentle forest clearing",
+            "mood": "searching, eyes saying do you see me, hopeful beneath fear",
+            "atmosphere": "enchanted forest clearing, woodland creatures nearby, the one who looks directly at you"
+          }
         },
         {
           "id": "fledgling",
@@ -1008,11 +1484,17 @@
           "defense": "freeze",
           "therapeutic_direction": "Has the capacity to fly but won't let go of the branch",
           "visual_description": "Small winged child perched on branch, feathered armor over tiny frame, wings present but folded, gripping branch with both hands, cautious upward gaze, warm forest light",
-          "early_stage_markers": "Wings present but folded, gripping branch with both hands, frozen between nest below and sky above"
+          "early_stage_markers": "Wings present but folded, gripping branch with both hands, frozen between nest below and sky above",
+          "visual_style": {
+            "art_direction": "warm storybook illustration, branch-perch vertical composition",
+            "color_palette": "warm forest light, feathered armor soft brown, wing-edge gold",
+            "lighting": "warm forest light from above, gentle and beckoning",
+            "mood": "frozen between nest and sky, wings present but folded, gripping tight",
+            "atmosphere": "forest branch between ground and canopy, wings ready but unused, both hands gripping"
+          }
         }
       ]
     },
-
     "technological": {
       "count": 6,
       "description": "Characters who relate to the world through systems, code, machines, and digital constructs",
@@ -1030,7 +1512,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Searching for signal in the noise — navigating broken systems one step at a time",
           "visual_description": "Shoulder armor, lantern held out cautiously, walking through crumbling ruins with floating digital glyphs and code, gaze down at path, dark muted palette with warm lantern glow",
-          "early_stage_markers": "Walking through broken systems, gaze at path not ahead, lantern is small light in data ruins"
+          "early_stage_markers": "Walking through broken systems, gaze at path not ahead, lantern is small light in data ruins",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, data-ruins exploration composition",
+            "color_palette": "dark muted palette, warm lantern amber, floating digital glyph cyan",
+            "lighting": "warm lantern glow cutting through digital darkness, code-glow ambient",
+            "mood": "searching for signal in noise, navigating broken systems",
+            "atmosphere": "crumbling ruins with floating digital glyphs, small light in data ruins"
+          }
         },
         {
           "id": "cyber_knight",
@@ -1043,7 +1532,14 @@
           "defense": "hypervigilance",
           "therapeutic_direction": "Maximum digital defense — the code-lines in the armor are the walls",
           "visual_description": "Full plate armor with glowing orange circuit lines, sword held point-down defensively, gaze averted to side, vines and glowing particles surrounding, digital overgrowth forest",
-          "early_stage_markers": "Maximum digital defense, circuit lines are the walls, hasn't raised sword yet, nature reclaiming the tech"
+          "early_stage_markers": "Maximum digital defense, circuit lines are the walls, hasn't raised sword yet, nature reclaiming the tech",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, nature-reclaiming-tech composition",
+            "color_palette": "glowing orange circuit lines, dark plate armor, vine-green, particle glow",
+            "lighting": "circuit-line luminescence against dark organic overgrowth",
+            "mood": "maximum digital defense, circuit lines as walls, nature reclaiming",
+            "atmosphere": "digital overgrowth forest, glowing circuit armor, vines and particles interweaving"
+          }
         },
         {
           "id": "technomancer",
@@ -1056,7 +1552,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Machines don't feel — can you build one with a heart?",
           "visual_description": "Circuit-patterned robes over mechanical arm, holographic display held close to body, head bowed studying data, warm candlelit workshop room, white and amber tones",
-          "early_stage_markers": "Canonical SSE Technomancer, wisdom and tech merged but isolated in workshop, studying data not sharing it"
+          "early_stage_markers": "Canonical SSE Technomancer, wisdom and tech merged but isolated in workshop, studying data not sharing it",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, candlelit workshop intimate composition",
+            "color_palette": "white and amber, circuit-pattern blue, candlelit workshop warmth",
+            "lighting": "warm candlelit workshop with holographic data-glow accents",
+            "mood": "wisdom and tech merged but isolated, studying data not sharing",
+            "atmosphere": "candlelit workshop room, circuit-patterned robes, holographic display held close"
+          }
         },
         {
           "id": "network_weaver",
@@ -1069,7 +1572,14 @@
           "defense": "intellectualization",
           "therapeutic_direction": "Building relationships as data structures — understanding connection intellectually before emotionally",
           "visual_description": "Shoulder armor, seated, holding glowing network graph in palm, code floating in air, head bowed studying connections, crystal clearing in forest, warm golds and blues",
-          "early_stage_markers": "Building connection as data structure, seated not standing, studying relationships intellectually"
+          "early_stage_markers": "Building connection as data structure, seated not standing, studying relationships intellectually",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, network-in-palm intimate composition",
+            "color_palette": "warm golds and blues, crystal clearing light, network-graph glow",
+            "lighting": "warm crystal clearing light with network luminescence in palm",
+            "mood": "building relationships as data structures, intellectual connection",
+            "atmosphere": "crystal clearing in forest, glowing network graph in palm, seated among code-streams"
+          }
         },
         {
           "id": "code_runner",
@@ -1082,7 +1592,14 @@
           "defense": "flight",
           "therapeutic_direction": "Moving too fast to be caught or known — speed as defense",
           "visual_description": "Hooded, light armor with circuit patterns, running through cascading binary and code streams, face hidden, body in motion, warm cyan and amber data streams",
-          "early_stage_markers": "Fleeing through systems, hood hides identity, speed as defense, moving too fast to be caught or known"
+          "early_stage_markers": "Fleeing through systems, hood hides identity, speed as defense, moving too fast to be caught or known",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, motion-blur data-stream composition",
+            "color_palette": "warm cyan and amber data streams, dark hood shadow, binary cascade",
+            "lighting": "streaming data-light in motion, hood-shadow contrast",
+            "mood": "fleeing through systems, speed as defense, identity hidden in motion",
+            "atmosphere": "cascading binary and code streams, running too fast to be caught or known"
+          }
         },
         {
           "id": "robot",
@@ -1095,11 +1612,17 @@
           "defense": "intellectualization",
           "therapeutic_direction": "The entire body IS the defense but the heart exists inside — can it learn to feel?",
           "visual_description": "Full mechanical body, heart-shaped glow on chest (dim not bright), reaching toward butterfly with cautious fingertips, seated on rock in moss clearing, warm forest light",
-          "early_stage_markers": "Most therapeutically precise image in library — heart exists encased in metal, butterfly is first organic thing dared to touch, body IS the armor"
+          "early_stage_markers": "Most therapeutically precise image in library — heart exists encased in metal, butterfly is first organic thing dared to touch, body IS the armor",
+          "visual_style": {
+            "art_direction": "digital-organic fusion illustration, mechanical-meets-organic intimate composition",
+            "color_palette": "warm forest light, mechanical silver-gray, dim heart-glow amber, butterfly color",
+            "lighting": "warm forest light on mechanical surface, dim heart-shaped glow from chest",
+            "mood": "body IS the defense, heart exists inside, reaching toward organic life",
+            "atmosphere": "moss clearing in forest, mechanical body reaching toward butterfly, most precise therapeutic image"
+          }
         }
       ]
     },
-
     "animal": {
       "count": 7,
       "description": "Characters who identify as or with animals — instinct, survival, and non-verbal wisdom",
@@ -1117,7 +1640,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Pack exists but hasn't joined — surviving alone by choice",
           "visual_description": "Thick fur with armor-like scale plating on shoulders and back, alert stance on hilltop, head watchful, distant wolf silhouette in fog, misty pine forest, muted browns and golds",
-          "early_stage_markers": "Pack visible in distance but hasn't joined, armor-like markings, surviving alone by choice"
+          "early_stage_markers": "Pack visible in distance but hasn't joined, armor-like markings, surviving alone by choice",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, hilltop sentinel composition",
+            "color_palette": "muted browns and golds, pine-forest green, armor-scale silver",
+            "lighting": "soft misty dawn light, forest edge diffusion",
+            "mood": "alert, pack visible but unchosen, surviving alone",
+            "atmosphere": "misty pine forest hilltop, distant wolf silhouettes, choosing solitude over pack"
+          }
         },
         {
           "id": "stag",
@@ -1130,7 +1660,14 @@
           "defense": "counter-dependence",
           "therapeutic_direction": "Nobility and strength present but the path forward is obscured",
           "visual_description": "Antlers as natural crown and defense, strong stance but body angled away, gaze averted, river path disappearing into fog below, forest overlook, dark muted earth tones",
-          "early_stage_markers": "Path forward obscured by fog, body angled away, antlers as natural defense crown"
+          "early_stage_markers": "Path forward obscured by fog, body angled away, antlers as natural defense crown",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, noble overlook composition",
+            "color_palette": "dark muted earth tones, antler bone-white, river-fog silver",
+            "lighting": "soft overcast forest light, fog obscuring the path ahead",
+            "mood": "noble, strength present, path forward obscured, body angled away",
+            "atmosphere": "forest overlook above fog-filled river path, antlers as natural crown and defense"
+          }
         },
         {
           "id": "lion",
@@ -1143,7 +1680,14 @@
           "defense": "externalized_aggression",
           "therapeutic_direction": "Power at rest — watchful but not yet willing to move",
           "visual_description": "Mane as natural armor, lying down not standing, gaze out to side not at viewer, paws crossed defensively, storm clouds gathering behind, golden plains, warm amber tones",
-          "early_stage_markers": "Lying down not standing, power at rest, paws crossed defensively, storm gathering behind"
+          "early_stage_markers": "Lying down not standing, power at rest, paws crossed defensively, storm gathering behind",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, resting-power plains composition",
+            "color_palette": "warm amber, golden plains, mane-gold, storm-cloud gray",
+            "lighting": "warm golden plains light with storm gathering behind",
+            "mood": "power at rest, watchful but unwilling to move, paws crossed",
+            "atmosphere": "golden plains with storm gathering behind, lying down not standing, power conserved"
+          }
         },
         {
           "id": "fox",
@@ -1156,7 +1700,14 @@
           "defense": "adaptive_self",
           "therapeutic_direction": "Intelligence as survival — always calculating the exit",
           "visual_description": "Light armor harness on back, low crouching posture, direct but wary gaze, body compressed and ready to bolt, autumn forest, muted oranges and grays",
-          "early_stage_markers": "Low crouch, direct but wary gaze, always calculating the exit, hypervigilant adaptive self"
+          "early_stage_markers": "Low crouch, direct but wary gaze, always calculating the exit, hypervigilant adaptive self",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, low-crouch alert composition",
+            "color_palette": "muted oranges and grays, autumn forest, light armor harness glint",
+            "lighting": "autumn forest filtered light, wary and watchful",
+            "mood": "calculating, adaptive, always planning the exit, hypervigilant",
+            "atmosphere": "autumn forest floor, low crouch, compressed and ready to bolt"
+          }
         },
         {
           "id": "bear",
@@ -1169,7 +1720,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "The safe space is behind, the world is ahead — hasn't committed to leaving yet",
           "visual_description": "Massive natural bulk as defense, standing at cave entrance not venturing out, head turned sideways, warm glow from cave behind, dark forest with rock formations",
-          "early_stage_markers": "At cave entrance not venturing out, safe space behind, world ahead, hasn't committed to leaving"
+          "early_stage_markers": "At cave entrance not venturing out, safe space behind, world ahead, hasn't committed to leaving",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, cave-entrance threshold composition",
+            "color_palette": "dark forest tones, warm cave-glow amber, rock-formation gray",
+            "lighting": "warm glow from cave behind, dark forest ahead",
+            "mood": "withdrawal, safe space behind, world ahead, uncommitted",
+            "atmosphere": "cave entrance in dark forest, massive presence, have not committed to leaving yet"
+          }
         },
         {
           "id": "owl",
@@ -1182,7 +1740,14 @@
           "defense": "knowledge_as_control",
           "therapeutic_direction": "Sees everything, reveals nothing — wisdom as isolation",
           "visual_description": "Feathers as layered armor, perched still and watchful, crystal fortress in fog behind, large dark eyes observing, mountain perch, muted purples and browns",
-          "early_stage_markers": "Sees everything reveals nothing, wisdom as isolation, crystal fortress behind in fog"
+          "early_stage_markers": "Sees everything reveals nothing, wisdom as isolation, crystal fortress behind in fog",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, elevated wisdom-perch composition",
+            "color_palette": "muted purples and browns, feather-layer texture, crystal fortress distant",
+            "lighting": "cool mountain ambient, crystal fortress fog-glow behind",
+            "mood": "all-seeing, revealing nothing, wisdom as isolation",
+            "atmosphere": "mountain perch above fog, crystal fortress behind, feather-armored observer"
+          }
         },
         {
           "id": "raven",
@@ -1195,7 +1760,14 @@
           "defense": "withdrawal",
           "therapeutic_direction": "Between worlds — watching from the boundary, not yet choosing a side",
           "visual_description": "Iridescent black feathers as armor, perched on weathered branch, head turned to profile, misty valley below, dead tree overlook, muted blacks and warm earth tones",
-          "early_stage_markers": "Between worlds, watching from boundary, not choosing a side"
+          "early_stage_markers": "Between worlds, watching from boundary, not choosing a side",
+          "visual_style": {
+            "art_direction": "naturalistic painterly illustration, dead-tree boundary composition",
+            "color_palette": "iridescent black, warm earth undertones, weathered branch gray, misty valley",
+            "lighting": "soft overcast with iridescent feather sheen",
+            "mood": "between worlds, watching from boundary, not choosing sides",
+            "atmosphere": "dead tree overlook, misty valley below, perched at boundary between realms"
+          }
         }
       ]
     }

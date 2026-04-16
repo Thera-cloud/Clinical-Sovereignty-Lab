@@ -120,19 +120,27 @@ def _soften_prompt(prompt: str) -> str:
     return f"Whimsical fantasy illustration, family-friendly animated style: {result}"
 
 
-async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
+async def generate_image(
+    prompt: str,
+    size: str = "1024x1024",
+    source_image_url: Optional[str] = None,
+) -> bytes:
     """Generate a static image via Grok Imagine API.
 
     Returns raw image bytes downloaded from the response URL.
     Tries primary key first, falls back to XAI_FALLBACK_KEY on 429.
     On content moderation rejection, retries once with a softened prompt.
+    When source_image_url is provided, sends image_url in the payload
+    for image-to-image generation (character consistency anchor).
     Raises RuntimeError on API failure.
     """
     key = _get_api_key()
     if not key:
         raise RuntimeError("XAI_API_KEY not set — cannot call Grok Imagine")
 
-    payload = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
+    payload: dict = {"model": "grok-imagine-image", "prompt": prompt, "n": 1}
+    if source_image_url:
+        payload["image_url"] = source_image_url
 
     try:
         result = await _imagine_with_key(key, payload)
@@ -143,7 +151,9 @@ async def generate_image(prompt: str, size: str = "1024x1024") -> bytes:
         if "content moderation" in err_str.lower():
             logger.warning("Grok Imagine moderation rejection — retrying with softened prompt")
             softened = _soften_prompt(prompt)
-            payload_soft = {"model": "grok-imagine-image", "prompt": softened, "n": 1}
+            payload_soft: dict = {"model": "grok-imagine-image", "prompt": softened, "n": 1}
+            if source_image_url:
+                payload_soft["image_url"] = source_image_url
             result = await _imagine_with_key(key, payload_soft)
             await asyncio.sleep(2)
             return result

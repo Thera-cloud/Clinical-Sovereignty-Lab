@@ -13,7 +13,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from app.sse.infrastructure import grok_imagine_client as grok, r2_storage
 from app.sse.adapters.archetype_resolver import get_archetype_ref
+from app.sse.adapters.world_story_bible import (
+    get_character_manifestation, get_visual_style_suffix,
+)
 from app.sse.foundation import vault_integration as vault
+from app.sse.thera_world_engine import build_rich_panel_prompt
 
 logger = logging.getLogger(__name__)
 _BATCH, _COST_CAP = 10, 50.0
@@ -73,11 +77,34 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                 if skip_check and await skip_check(uid):
                     continue
                 archetype_url = await get_archetype_ref(uid, db_pool)
-                prompt = f"{phase} panel, {style} tone, therapeutic visual"
+                arch_hint = None
+                try:
+                    async with db_pool.acquire() as _fc:
+                        arch_hint = await _fc.fetchval(
+                            "SELECT archetype_hint FROM sse_identity_forge "
+                            "WHERE user_id=$1 AND status='complete' LIMIT 1", uid)
+                except Exception:
+                    pass
+                try:
+                    rich = await build_rich_panel_prompt(uid, db_pool)
+                    prompt = rich["image_prompt"]
+                except Exception as _prompt_err:
+                    logger.warning("Rich prompt failed for %s, using fallback: %s", uid, _prompt_err)
+                    prompt = f"{phase} panel, {style} tone, therapeutic visual"
+                vs_suffix = get_visual_style_suffix(arch_hint)
+                if vs_suffix:
+                    prompt += f", {vs_suffix}"
+                try:
+                    manifestation = await get_character_manifestation(
+                        phase, archetype_hint=arch_hint)
+                    prompt += f", {manifestation}"
+                except Exception as _man_err:
+                    logger.warning("Manifestation suffix failed for %s: %s", uid, _man_err)
                 h = hashlib.md5(prompt.encode()).hexdigest()[:12]
                 key = f"stories/{uid}/daily_panel/{today}/{h}.png"
                 try:
-                    img = await grok.generate_image(prompt)
+                    img = await grok.generate_image(
+                        prompt, source_image_url=archetype_url)
                     url = await r2_storage.store_image(img, key)
                     await _log(c, sid, uid, "daily_panel", url, prompt, 1.0,
                                _IMG_COST, "success")
@@ -234,7 +261,8 @@ async def generate_from_directive(
     try:
         if modality in ("panel", "journal_prompt"):
             archetype_url = await get_archetype_ref(user_id, db_pool)
-            img_bytes = await grok.generate_image(prompt)
+            img_bytes = await grok.generate_image(
+                prompt, source_image_url=archetype_url)
             r2_key = f"stories/{user_id}/ucd/{gen_id}.png"
             r2_url = await r2_storage.store_image(img_bytes, r2_key)
         elif modality == "narration":
