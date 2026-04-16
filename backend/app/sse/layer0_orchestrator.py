@@ -20,6 +20,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
 
+_SINGLETON_STARTED = False
+
 
 class SSEOrchestrator:
     """Background scheduler for SSE delivery pipeline."""
@@ -31,6 +33,11 @@ class SSEOrchestrator:
 
     async def start(self):
         """Load enabled cron schedules from DB and register APScheduler jobs."""
+        global _SINGLETON_STARTED
+        if _SINGLETON_STARTED:
+            logger.warning("SSEOrchestrator.start() called again — skipping duplicate (lifespan double-fire)")
+            return
+        _SINGLETON_STARTED = True
         schedules = []
         try:
             async with self.db_pool.acquire() as conn:
@@ -104,7 +111,9 @@ class SSEOrchestrator:
         await self.start()
 
     def shutdown(self):
+        global _SINGLETON_STARTED
         self.scheduler.shutdown(wait=False)
+        _SINGLETON_STARTED = False
         logger.info("SSEOrchestrator: shut down")
 
     async def stop(self):

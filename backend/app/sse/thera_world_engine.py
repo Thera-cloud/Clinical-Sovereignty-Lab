@@ -568,9 +568,18 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     image_prompt += ", no text, no words, no lettering, no calligraphy, no writing on image"
     image_prompt += f", {character[1]}"
 
+    archetype_ref_url = None
+    try:
+        async with db_pool.acquire() as conn:
+            archetype_ref_url = await conn.fetchval(
+                "SELECT archetype_image_url FROM sse_identity_forge WHERE user_id = $1",
+                user_id)
+    except Exception as _arc_err:
+        logger.warning("Archetype ref lookup failed for %s: %s", user_id, _arc_err)
+
     r2_url = None
     try:
-        image_bytes = await generate_image(image_prompt)
+        image_bytes = await generate_image(image_prompt, source_image_url=archetype_ref_url)
         content_hash = hashlib.sha256(image_bytes).hexdigest()[:12]
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         r2_key = f"sse/journey/{user_id}/{today}/{content_hash}.png"
@@ -597,7 +606,8 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 "INSERT INTO sse_panel_log "
                 "(panel_id, user_id, panel_type, source_id, source_type, r2_url, prompt_used, "
                 "biome, character_manifest, narrative_text, panel_tone, crystal_domains_used) "
-                "VALUES ($1,$2,'journey',$3,'thera_world',$4,$5,$6,$7,$8,$9,$10::jsonb)",
+                "VALUES ($1,$2,'journey',$3,'thera_world',$4,$5,$6,$7,$8,$9,$10::jsonb) "
+                "ON CONFLICT DO NOTHING",
                 panel_id, user_id, journey.get("journey_id"), r2_url,
                 image_prompt[:500], current_biome_name, character[0],
                 nar_text, narrative.get("panel_tone", "meditative"),
