@@ -30,15 +30,15 @@ SEGMENTS = [
     {
         "name": "narration_act1",
         "text": (
-            "There comes a moment when life pulls you somewhere you never "
-            "expected to go. And in that moment — you discover you were "
-            "never meant to go alone."
+            "In a parallel universe, you're drawn into an unknown experience — "
+            "but not alone. This is the beginning of your journey together."
         ),
         "instructions": (
             "Speak in a warm, calm, grounded male voice with gentle authority. "
             "Pace: slightly slower than conversational — deliberate and present. "
-            "Add a natural breath pause after 'go.' before 'And'. "
-            "Place emphasis on the word 'never' in the last line. "
+            "Brief pause after 'experience'. "
+            "Emphasis on 'not alone'. "
+            "Say 'journey together' with warmth and quiet conviction. "
             "Sound like a wise companion, not a narrator."
         ),
         "delay_ms": 200,
@@ -47,16 +47,13 @@ SEGMENTS = [
     },
     {
         "name": "narration_act2",
-        "text": (
-            "This is the Thera-World. Where every battle you face becomes "
-            "a story worth telling — and every step forward is yours to keep."
-        ),
+        "text": "Where the real world meets fantasy.",
         "instructions": (
             "Speak in a warm, calm, grounded male voice with gentle authority. "
-            "Pace: slightly slower than conversational. "
-            "Pause slightly after 'Thera-World.' "
-            "Say 'yours to keep' with quiet weight and conviction. "
-            "Sound like someone sharing a truth, not reading a script."
+            "Pace: deliberate, unhurried. "
+            "Let the words breathe — slight pause after 'world'. "
+            "Say 'fantasy' with a sense of wonder, not drama. "
+            "Sound like someone revealing something beautiful."
         ),
         "delay_ms": 8000,
         "max_duration": 4.8,
@@ -64,12 +61,12 @@ SEGMENTS = [
     },
     {
         "name": "narration_act3",
-        "text": "Where your healing journey begins... but never alone.",
+        "text": "Welcome to Thera-World.",
         "instructions": (
             "Speak in a warm, calm, grounded male voice. "
-            "Pause for 400 milliseconds between 'begins' and 'but'. "
-            "Say 'never alone' softly and warmly — like a promise, not a tagline. "
-            "This is the landing moment. Make it feel intimate and assured."
+            "Say it softly and warmly — like a promise, like arriving home. "
+            "Slight pause before 'Thera-World'. "
+            "This is the landing moment. Intimate and assured."
         ),
         "delay_ms": 13000,
         "max_duration": 2.0,
