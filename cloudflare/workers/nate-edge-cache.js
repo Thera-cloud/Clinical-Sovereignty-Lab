@@ -121,26 +121,77 @@ const INDEX_BINDINGS = {
   annotation: "ANNOTATION_INDEX",
 };
 
+async function validateEdgeAuth(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  if (!auth.startsWith("Bearer ")) return null;
+  const token = auth.slice(7);
+  if (!token) return null;
+
+  const cacheKey = `edge:auth:${token.slice(0, 16)}`;
+  if (env.EDGE_CACHE_KV) {
+    try {
+      const cached = await env.EDGE_CACHE_KV.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch { /* */ }
+  }
+
+  try {
+    const resp = await fetch(`${env.SOVEREIGN_API || "https://api.sovereignsanctuary.net"}/api/edge/auth/validate`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data.valid) return null;
+    if (env.EDGE_CACHE_KV) {
+      try { await env.EDGE_CACHE_KV.put(cacheKey, JSON.stringify(data), { expirationTtl: 300 }); } catch { /* */ }
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
+    _edgeCacheOrigin = request.headers.get("Origin") || "";
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // --- D1 edge queries (sub-ms reads) ---
+    if (request.method === "OPTIONS") {
+      return jsonResponse({}, 204);
+    }
+    if (request.method === "POST") {
+      const clientIP = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+      if (!checkRateLimit(clientIP)) {
+        return jsonResponse({ error: "Rate limit exceeded" }, 429);
+      }
+    }
+    }
+
+    // --- D1 edge queries (sub-ms reads) — require auth ---
     if (path.startsWith("/api/edge/d1/") && request.method === "GET") {
-      return handleD1Query(path, url, env);
+      const user = await validateEdgeAuth(request, env);
+      if (!user) return jsonResponse({ error: "Authentication required" }, 401);
+      return handleD1Query(path, url, env, user);
     }
     if (path === "/api/edge/d1/social-dashboard" && request.method === "GET") {
+      const user = await validateEdgeAuth(request, env);
+      if (!user) return jsonResponse({ error: "Authentication required" }, 401);
       return handleSocialDashboardEdge(url, env);
     }
     if (path.startsWith("/api/edge/d1/compliance/") && request.method === "GET") {
+      const user = await validateEdgeAuth(request, env);
+      if (!user) return jsonResponse({ error: "Authentication required" }, 401);
       const jurisdiction = decodeURIComponent(path.replace("/api/edge/d1/compliance/", ""));
       return handleComplianceEdge(jurisdiction, env);
     }
 
-    // --- Semantic search at the edge ---
+    // --- Semantic search at the edge — require auth, enforce ownership ---
     if (path === "/api/edge/semantic-search" && request.method === "POST") {
-      return handleSemanticSearch(request, env);
+      const user = await validateEdgeAuth(request, env);
+      if (!user) return jsonResponse({ error: "Authentication required" }, 401);
+      return handleSemanticSearch(request, env, user);
     }
 
     // --- Vectorize pipeline health at the edge ---
@@ -220,7 +271,7 @@ export default {
  *   /api/edge/d1/gate/:username      → tier gate check
  *   /api/edge/d1/live-sessions       → active coaching sessions
  */
-async function handleD1Query(path, url, env) {
+async function handleD1Query(path, url, env, user) {
   if (!env.D1_HOT) {
     return jsonResponse({ error: "D1 not configured" }, 503);
   }
@@ -416,14 +467,15 @@ async function handleComplianceEdge(jurisdiction, env) {
  * Request body: { query: string, user_id: string, indexes?: string[], top_k?: number }
  * Response: { results: { [index]: matches[] }, search_type: "edge_semantic" }
  */
-async function handleSemanticSearch(request, env) {
+async function handleSemanticSearch(request, env, user) {
   try {
     const body = await request.json();
-    const { query, user_id, indexes, top_k } = body;
+    const { query, indexes, top_k } = body;
+    const user_id = user.username || user.hardware_id;
 
-    if (!query || !user_id) {
+    if (!query) {
       return jsonResponse(
-        { error: "query and user_id required" },
+        { error: "query required" },
         400,
       );
     }
@@ -556,12 +608,39 @@ async function handleVectorizeHealth(env) {
   });
 }
 
+const _ALLOWED_ORIGINS = new Set([
+  "https://app.sovereignsanctuary.net",
+  "https://coach.sovereignsanctuary.net",
+  "https://command.sovereignsanctuary.net",
+  "https://api.sovereignsanctuary.net",
+]);
+let _edgeCacheOrigin = "";
+
+const _rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX_POST = 30;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = _rateLimitMap.get(ip);
+  if (!entry || now - entry.start > RATE_LIMIT_WINDOW_MS) {
+    _rateLimitMap.set(ip, { start: now, count: 1 });
+    if (_rateLimitMap.size > 10000) {
+      const oldest = _rateLimitMap.keys().next().value;
+      _rateLimitMap.delete(oldest);
+    }
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT_MAX_POST;
+}
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": _ALLOWED_ORIGINS.has(_edgeCacheOrigin) ? _edgeCacheOrigin : "",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },

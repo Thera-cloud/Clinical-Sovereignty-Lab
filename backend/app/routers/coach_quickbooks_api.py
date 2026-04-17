@@ -464,20 +464,20 @@ async def coach_qb_callback(code: str, realmId: str, request: Request, state: st
     if not QB_CLIENT_ID or not QB_CLIENT_SECRET:
         raise HTTPException(503, "QB credentials not configured")
 
+    if not state:
+        raise HTTPException(400, "Missing OAuth state parameter — possible CSRF")
     r = await _get_auth_redis()
     coach_username = None
-    if r and state:
-        state_data = await r.get(f"qb_oauth_state:{state}")
-        if not state_data:
-            raise HTTPException(400, "Invalid or expired OAuth state")
-        await r.delete(f"qb_oauth_state:{state}")
-        parsed = json.loads(state_data)
-        if parsed.get("role") != "coach":
-            raise HTTPException(400, "State mismatch: expected coach")
-        coach_username = parsed.get("scope_id")
-    elif not state:
-        logger.warning("Coach QB callback received without state parameter")
-        raise HTTPException(400, "Missing OAuth state parameter")
+    if not r:
+        raise HTTPException(503, "Redis unavailable — cannot validate OAuth state")
+    state_data = await r.get(f"qb_oauth_state:{state}")
+    if not state_data:
+        raise HTTPException(400, "Invalid or expired OAuth state")
+    await r.delete(f"qb_oauth_state:{state}")
+    parsed = json.loads(state_data)
+    if parsed.get("role") != "coach":
+        raise HTTPException(400, "State mismatch: expected coach")
+    coach_username = parsed.get("scope_id")
 
     if not coach_username:
         raise HTTPException(400, "Could not determine coach from OAuth state")

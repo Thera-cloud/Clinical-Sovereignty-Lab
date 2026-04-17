@@ -32,18 +32,31 @@ def _memory_path(hw_id: str, role: str = "CLIENT") -> Path:
     return _VAULT_ROOT / folder / hw_id / "memory.json"
 
 
+def _verify_ownership(hw_id: str, user: dict):
+    caller_hw = user.get("hardware_id", "")
+    caller_role = user.get("role", "")
+    if caller_role == "ADMIN":
+        return
+    if caller_hw == hw_id:
+        return
+    if caller_role == "COACH":
+        return
+    raise HTTPException(403, "Access denied")
+
 @router.get("/memory/search/{hw_id}")
 async def memory_search(
     hw_id: str,
     q: str = "",
     limit: int = 30,
     request: Request = None,
+    _user: dict = Depends(_require_auth),
 ):
     """
     Search a client's conversation memory by keyword.
     PG-first: uses conversation_history FTS index.
     Falls back to memory.json if db_pool is unavailable.
     """
+    _verify_ownership(hw_id, _user)
     query = q.strip()
     if not query:
         return {"query": "", "total_matches": 0, "results": []}
@@ -134,12 +147,14 @@ def _search_memory_json(hw_id: str, query: str, limit: int) -> dict:
 async def memory_sessions(
     hw_id: str,
     request: Request = None,
+    _user: dict = Depends(_require_auth),
 ):
     """
     Return memory entries grouped by session/date as story chapters.
     PG-first: uses conversation_history table.
     Falls back to memory.json if db_pool is unavailable.
     """
+    _verify_ownership(hw_id, _user)
     db_pool = getattr(request.app.state, "db_pool", None) if request else None
     if db_pool:
         try:
@@ -250,6 +265,7 @@ def _sessions_from_json(hw_id: str) -> dict:
 async def get_family_members(
     hw_id: str,
     request: Request = None,
+    _user: dict = Depends(_require_auth),
 ):
     """
     Get family members and pending invites for a client's family.
@@ -257,6 +273,7 @@ async def get_family_members(
     Falls back to JSON registry if db_pool is unavailable.
     Excludes ADMIN-role accounts from the member list.
     """
+    _verify_ownership(hw_id, _user)
     db_pool = getattr(request.app.state, "db_pool", None) if request else None
     if db_pool:
         try:

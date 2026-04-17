@@ -18,9 +18,37 @@
  *   3. Sovereign Brain fallback — forward to VPS auth endpoint
  */
 
+const ALLOWED_ORIGINS = new Set([
+  'https://app.sovereignsanctuary.net',
+  'https://coach.sovereignsanctuary.net',
+  'https://command.sovereignsanctuary.net',
+  'https://api.sovereignsanctuary.net',
+]);
+
+let _requestOrigin = '';
+
+const _rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX = 60;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = _rateLimitMap.get(ip);
+  if (!entry || now - entry.start > RATE_LIMIT_WINDOW_MS) {
+    _rateLimitMap.set(ip, { start: now, count: 1 });
+    if (_rateLimitMap.size > 10000) {
+      const oldest = _rateLimitMap.keys().next().value;
+      _rateLimitMap.delete(oldest);
+    }
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT_MAX;
+}
+
 function corsHeaders() {
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(_requestOrigin) ? _requestOrigin : '',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json',
@@ -462,8 +490,33 @@ async function handleBootstrap(request, env) {
   }), { headers: corsHeaders() });
 }
 
-async function handleGate(env, username) {
+async function handleGate(request, env, username) {
   const started = Date.now();
+  const token = extractToken(request);
+  if (!token) {
+    return new Response(JSON.stringify({ error: 'Authentication required' }), {
+      status: 401, headers: corsHeaders(),
+    });
+  }
+
+  let caller = await validateFromKV(env, token);
+  if (!caller) caller = await validateFromD1(env, token);
+  if (!caller) caller = await validateFromSovereign(env, token);
+  if (!caller) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401, headers: corsHeaders(),
+    });
+  }
+
+  const callerRole = (caller.role || '').toUpperCase();
+  const callerName = (caller.username || '').toLowerCase();
+  const targetName = (username || '').toLowerCase();
+  if (callerName !== targetName && callerRole !== 'ADMIN' && callerRole !== 'COACH') {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403, headers: corsHeaders(),
+    });
+  }
+
   try {
     const row = await env.D1_HOT.prepare(
       'SELECT username, role, tier, token_balance FROM users WHERE username = ?'
@@ -471,14 +524,9 @@ async function handleGate(env, username) {
 
     if (!row) {
       emitAE(env, {
-        type: 'auth_gate',
-        service: 'nate-auth-edge',
-        stage: 'gate',
-        status: 'warning',
-        source: 'edge',
-        error_code: 'user_not_found',
-        latency_ms: Date.now() - started,
-        actor_id: username || '',
+        type: 'auth_gate', service: 'nate-auth-edge', stage: 'gate',
+        status: 'warning', source: 'edge', error_code: 'user_not_found',
+        latency_ms: Date.now() - started, actor_id: username || '',
         target: '/api/edge/auth/gate',
       });
       return new Response(JSON.stringify({ error: 'User not found' }), {
@@ -490,36 +538,22 @@ async function handleGate(env, username) {
     const features = TIER_FEATURES[tier] || TIER_FEATURES.STANDARD;
 
     emitAE(env, {
-      type: 'auth_gate',
-      service: 'nate-auth-edge',
-      stage: 'gate',
-      status: 'ok',
-      source: 'edge',
-      latency_ms: Date.now() - started,
-      actor_id: row.username || '',
-      target: '/api/edge/auth/gate',
-      value: row.token_balance || 0,
-      message: tier,
+      type: 'auth_gate', service: 'nate-auth-edge', stage: 'gate',
+      status: 'ok', source: 'edge', latency_ms: Date.now() - started,
+      actor_id: row.username || '', target: '/api/edge/auth/gate',
+      value: row.token_balance || 0, message: tier,
     });
 
     return new Response(JSON.stringify({
-      username: row.username,
-      tier,
-      role: row.role,
-      token_balance: row.token_balance,
-      features,
+      username: row.username, tier, role: row.role,
+      token_balance: row.token_balance, features,
       gated: tier === 'TRIAL' || tier === 'COACH_ONLY',
     }), { headers: corsHeaders() });
   } catch (e) {
     emitAE(env, {
-      type: 'error',
-      service: 'nate-auth-edge',
-      stage: 'gate',
-      status: 'error',
-      source: 'edge',
-      error_code: 'gate_check_failed',
-      latency_ms: Date.now() - started,
-      actor_id: username || '',
+      type: 'error', service: 'nate-auth-edge', stage: 'gate',
+      status: 'error', source: 'edge', error_code: 'gate_check_failed',
+      latency_ms: Date.now() - started, actor_id: username || '',
       target: '/api/edge/auth/gate',
       message: String(e && e.message ? e.message : 'gate check failed').slice(0, 120),
     });
@@ -552,7 +586,22 @@ async function handleHealth(env) {
   }), { headers: corsHeaders() });
 }
 
-async function handleDeviceReputation(env, deviceId) {
+async function handleDeviceReputation(request, env, deviceId) {
+  const token = extractToken(request);
+  if (!token) {
+    return new Response(JSON.stringify({ error: 'Authentication required' }), {
+      status: 401, headers: corsHeaders(),
+    });
+  }
+  let caller = await validateFromKV(env, token);
+  if (!caller) caller = await validateFromD1(env, token);
+  if (!caller) caller = await validateFromSovereign(env, token);
+  if (!caller) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401, headers: corsHeaders(),
+    });
+  }
+
   if (!deviceId) {
     return new Response(JSON.stringify({ error: 'device_id required' }), {
       status: 400, headers: corsHeaders(),
@@ -593,8 +642,15 @@ async function handleDeviceReputation(env, deviceId) {
 
 export default {
   async fetch(request, env) {
+    _requestOrigin = request.headers.get('Origin') || '';
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+    const clientIP = request.headers.get('CF-Connecting-IP') || '0.0.0.0';
+    if (!checkRateLimit(clientIP)) {
+      return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+        status: 429, headers: { ...corsHeaders(), 'Retry-After': '60' },
+      });
     }
 
     const url = new URL(request.url);
@@ -607,11 +663,11 @@ export default {
     }
     if (url.pathname.startsWith('/api/edge/auth/gate/')) {
       const username = url.pathname.split('/').pop();
-      return handleGate(env, decodeURIComponent(username));
+      return handleGate(request, env, decodeURIComponent(username));
     }
     if (url.pathname.startsWith('/api/edge/auth/device-reputation/')) {
       const deviceId = url.pathname.split('/').pop();
-      return handleDeviceReputation(env, decodeURIComponent(deviceId || ''));
+      return handleDeviceReputation(request, env, decodeURIComponent(deviceId || ''));
     }
     if (url.pathname === '/api/edge/auth/jwt/validate' && request.method === 'POST') {
       return handleJWTValidate(request, env);

@@ -338,7 +338,13 @@ async def get_current_user(
             token_key = f"{_REDIS_KEY_PREFIX}:{_REDIS_KEY_ENV}:auth:{token}"
             raw = await r.get(token_key)
             if raw:
-                return json.loads(raw)
+                profile = json.loads(raw)
+                profile.pop("password_hash", None)
+                profile.pop("password", None)
+                creds = profile.get("credentials")
+                if isinstance(creds, dict):
+                    creds.pop("password", None)
+                return profile
         except Exception:
             pass
 
@@ -347,7 +353,11 @@ async def get_current_user(
         try:
             async with db.pool.acquire() as conn:
                 row = await conn.fetchrow("""
-                    SELECT u.* FROM users u
+                    SELECT u.id, u.username, u.name, u.role, u.tier,
+                           u.hardware_id, u.family_id, u.company_id,
+                           u.subscription_status, u.profile_data,
+                           u.created_at, u.updated_at
+                    FROM users u
                     JOIN active_tokens t ON t.user_id = u.id
                     WHERE t.token = $1 AND t.is_valid = TRUE
                       AND t.expires_at > NOW()

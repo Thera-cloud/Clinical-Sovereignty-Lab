@@ -3410,9 +3410,12 @@ from app.middleware.transit_inspection import TransitInspectionMiddleware
 from app.middleware.drum_tap import DrumTapMiddleware
 from app.middleware.webhook_rate_limit import WebhookRateLimitMiddleware
 
+from app.middleware.cache_control import CacheControlMiddleware
+
 app.add_middleware(TransitInspectionMiddleware, app_state=app.state)
 app.add_middleware(DrumTapMiddleware, app_state=app.state)
 app.add_middleware(WebhookRateLimitMiddleware, max_requests=120, window_seconds=60)
+app.add_middleware(CacheControlMiddleware)
 
 
 # =============================================================================

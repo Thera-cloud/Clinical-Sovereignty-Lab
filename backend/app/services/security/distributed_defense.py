@@ -21,7 +21,7 @@ import secrets
 import time
 from datetime import datetime, timezone
 from enum import Enum, IntEnum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -373,8 +373,32 @@ class ZKCrystalStorage:
             "sha256", self._master_key, b"nate_mesh_crystals_v1", 100000
         )
 
+    @staticmethod
+    def _aes_gcm_encrypt(data: bytes, key: bytes) -> Tuple[bytes, bytes]:
+        """AES-256-GCM authenticated encryption. Returns (nonce, ciphertext+tag)."""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce = secrets.token_bytes(12)
+        aesgcm = AESGCM(key)
+        ct = aesgcm.encrypt(nonce, data, None)
+        return nonce, ct
+
+    @staticmethod
+    def _aes_gcm_decrypt(nonce: bytes, ciphertext: bytes, key: bytes) -> bytes:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext, None)
+
+    @staticmethod
+    def _xor_cipher_legacy(data: bytes, key: bytes, nonce: bytes) -> bytes:
+        """Legacy XOR stream cipher — kept ONLY for reading pre-migration crystals."""
+        stream_key = hashlib.sha256(key + nonce).digest()
+        result = bytearray(len(data))
+        for i in range(len(data)):
+            result[i] = data[i] ^ stream_key[i % len(stream_key)]
+        return bytes(result)
+
     def encrypt_global(self, crystal_text: str) -> Dict[str, Any]:
-        """Encrypt a global-scope crystal with the mesh-wide key.
+        """Encrypt a global-scope crystal with AES-256-GCM.
         Blocks when key rotation is in progress (re-encryption pending).
         """
         import base64
@@ -382,13 +406,13 @@ class ZKCrystalStorage:
             raise RuntimeError(
                 "Cannot store new crystals until re-encryption completes after DEFCON key rotation"
             )
-        nonce = secrets.token_bytes(16)
-        cipher_bytes = self._xor_cipher(crystal_text.encode(), self._mesh_key, nonce)
+        nonce, ct = self._aes_gcm_encrypt(crystal_text.encode(), self._mesh_key)
         return {
-            "ciphertext": base64.b64encode(cipher_bytes).decode(),
+            "ciphertext": base64.b64encode(ct).decode(),
             "nonce": base64.b64encode(nonce).decode(),
             "key_version": self._key_version,
             "scope": "global",
+            "cipher": "aes-gcm",
         }
 
     def decrypt_global(self, encrypted: Dict[str, Any]) -> str:
@@ -399,31 +423,23 @@ class ZKCrystalStorage:
         key = self._mesh_key if key_version == self._key_version else self._previous_mesh_key
         if key is None:
             raise ValueError("Cannot decrypt: key version not available (already rotated)")
-        plain = self._xor_cipher(cipher_bytes, key, nonce)
-        return plain.decode()
+        if encrypted.get("cipher") == "aes-gcm":
+            return self._aes_gcm_decrypt(nonce, cipher_bytes, key).decode()
+        return self._xor_cipher_legacy(cipher_bytes, key, nonce).decode()
 
     def encrypt_user(self, crystal_text: str, user_passphrase: str) -> Dict[str, Any]:
-        """Encrypt a user-scope crystal with the user's passphrase."""
+        """Encrypt a user-scope crystal with AES-256-GCM."""
         import base64
         user_key = hashlib.pbkdf2_hmac(
             "sha256", user_passphrase.encode(), b"nate_user_crystal_v1", 100000
         )
-        nonce = secrets.token_bytes(16)
-        cipher_bytes = self._xor_cipher(crystal_text.encode(), user_key, nonce)
+        nonce, ct = self._aes_gcm_encrypt(crystal_text.encode(), user_key)
         return {
-            "ciphertext": base64.b64encode(cipher_bytes).decode(),
+            "ciphertext": base64.b64encode(ct).decode(),
             "nonce": base64.b64encode(nonce).decode(),
             "scope": "user",
+            "cipher": "aes-gcm",
         }
-
-    @staticmethod
-    def _xor_cipher(data: bytes, key: bytes, nonce: bytes) -> bytes:
-        """Simple XOR stream cipher. Production should use AES-256-GCM."""
-        stream_key = hashlib.sha256(key + nonce).digest()
-        result = bytearray(len(data))
-        for i in range(len(data)):
-            result[i] = data[i] ^ stream_key[i % len(stream_key)]
-        return bytes(result)
 
     def rotate_mesh_key(self) -> int:
         """Rotate mesh-wide key. Saves previous key for re-encryption of old crystals."""

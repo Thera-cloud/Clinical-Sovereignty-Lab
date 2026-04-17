@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["LittleNate-1.X API"])
 
 
+def _require_admin():
+    from app.services.api_server import require_admin
+    return require_admin
+
+
 class ChatMessage(BaseModel):
     role: str = "user"
     content: str
@@ -122,7 +127,7 @@ async def list_models():
 
 
 @router.post("/chat/completions")
-async def chat_completions(body: ChatCompletionRequest, request: Request):
+async def chat_completions(body: ChatCompletionRequest, request: Request, _admin: dict = Depends(_require_admin())):
     start = time.time()
     inference = getattr(request.app.state, "littlenate_inference", None)
     if not inference:
@@ -199,7 +204,7 @@ async def chat_completions(body: ChatCompletionRequest, request: Request):
 
 
 @router.post("/audio/speech")
-async def text_to_speech(body: SpeechRequest, request: Request):
+async def text_to_speech(body: SpeechRequest, request: Request, _admin: dict = Depends(_require_admin())):
     from fastapi.responses import Response
     from app.services import edge_tts_service
 
@@ -219,7 +224,7 @@ async def text_to_speech(body: SpeechRequest, request: Request):
 
 
 @router.post("/audio/transcriptions")
-async def speech_to_text(request: Request):
+async def speech_to_text(request: Request, _admin: dict = Depends(_require_admin())):
     from app.services.sovereign_whisper import transcribe
 
     form = await request.form()
@@ -445,7 +450,7 @@ async def twilio_media_stream(websocket: WebSocket, call_id: str = "", user_id: 
 
 
 @router.post("/coherence/score")
-async def coherence_score(body: CoherenceRequest, request: Request):
+async def coherence_score(body: CoherenceRequest, request: Request, _admin: dict = Depends(_require_admin())):
     inference = getattr(request.app.state, "littlenate_inference", None)
     if not inference:
         raise HTTPException(503, "Inference service not available")

@@ -3,7 +3,7 @@
 # This file provides lightweight routers for domains that don't yet have
 # a dedicated file, keeping the app bootable.
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException
 from uuid import UUID
 
 # ─── Auth Router ─────────────────────────────────────────────────────────────
@@ -79,19 +79,30 @@ async def register(request: Request):
 users = APIRouter(prefix="/api/users", tags=["users"])
 
 
+def _get_require_admin():
+    from app.services.api_server import require_admin
+    return require_admin
+
+
 @users.get("/")
-async def list_users(request: Request, role: str = None, limit: int = 50, offset: int = 0):
-    """List users, optionally filtered by role."""
+async def list_users(
+    request: Request,
+    current_user: dict = Depends(_get_require_admin()),
+    role: str = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List users, optionally filtered by role. Admin only."""
     db = request.app.state.db_pool
     if role:
         rows = await db.fetch(
-            "SELECT id, username, name, email, role, tier, created_at "
+            "SELECT id, username, name, role, tier, created_at "
             "FROM users WHERE role = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
             role.upper(), limit, offset,
         )
     else:
         rows = await db.fetch(
-            "SELECT id, username, name, email, role, tier, created_at "
+            "SELECT id, username, name, role, tier, created_at "
             "FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2",
             limit, offset,
         )
@@ -101,7 +112,6 @@ async def list_users(request: Request, role: str = None, limit: int = 50, offset
                 "id": str(r["id"]),
                 "username": r["username"],
                 "name": r["name"],
-                "email": r["email"],
                 "role": r["role"],
                 "tier": r["tier"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
@@ -112,22 +122,34 @@ async def list_users(request: Request, role: str = None, limit: int = 50, offset
     }
 
 
+def _get_current_user():
+    from app.services.api_server import get_current_user
+    return get_current_user
+
+
 @users.get("/{user_id}")
-async def get_user(user_id: UUID, request: Request):
-    """Get a single user by ID."""
+async def get_user(
+    user_id: UUID,
+    request: Request,
+    current_user: dict = Depends(_get_current_user()),
+):
+    """Get a single user by ID. Self-access or admin only."""
+    caller_role = (current_user.get("role") or "").upper()
+    caller_hw = current_user.get("hardware_id", "")
     db = request.app.state.db_pool
     row = await db.fetchrow(
-        "SELECT id, username, name, email, role, tier, family_id, created_at, updated_at "
+        "SELECT id, username, name, role, tier, hardware_id, family_id, created_at, updated_at "
         "FROM users WHERE id = $1",
         user_id,
     )
     if not row:
         raise HTTPException(404, "User not found")
+    if caller_role != "ADMIN" and caller_hw != (row["hardware_id"] or ""):
+        raise HTTPException(403, "Access denied")
     return {
         "id": str(row["id"]),
         "username": row["username"],
         "name": row["name"],
-        "email": row["email"],
         "role": row["role"],
         "tier": row["tier"],
         "family_id": str(row["family_id"]) if row["family_id"] else None,

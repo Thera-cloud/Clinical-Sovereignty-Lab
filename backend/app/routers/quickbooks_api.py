@@ -129,8 +129,10 @@ async def qb_callback(code: str, realmId: str, request: Request, state: str = ""
     if not QB_CLIENT_ID or not QB_CLIENT_SECRET:
         raise HTTPException(503, "QB credentials not configured")
 
+    if not state:
+        raise HTTPException(400, "Missing OAuth state parameter — possible CSRF")
     r = await _get_auth_redis()
-    if r and state:
+    if r:
         state_data = await r.get(f"qb_oauth_state:{state}")
         if not state_data:
             raise HTTPException(400, "Invalid or expired OAuth state")
@@ -138,8 +140,8 @@ async def qb_callback(code: str, realmId: str, request: Request, state: str = ""
         parsed = json.loads(state_data)
         if parsed.get("role") != "admin":
             raise HTTPException(400, "State mismatch: expected admin")
-    elif not state:
-        logger.warning("Admin QB callback received without state parameter")
+    else:
+        raise HTTPException(503, "Redis unavailable — cannot validate OAuth state")
 
     import aiohttp
     import base64

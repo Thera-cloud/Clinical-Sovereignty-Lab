@@ -20,9 +20,17 @@
  *   GET  /api/edge/agent/health  — Worker health
  */
 
+const ALLOWED_ORIGINS = new Set([
+  'https://app.sovereignsanctuary.net',
+  'https://coach.sovereignsanctuary.net',
+  'https://command.sovereignsanctuary.net',
+  'https://api.sovereignsanctuary.net',
+]);
+let _agentOrigin = '';
+
 function corsHeaders() {
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(_agentOrigin) ? _agentOrigin : '',
     'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json',
@@ -97,6 +105,7 @@ export class SovereignAgentSession {
   }
 
   async fetch(request) {
+    _agentOrigin = request.headers.get('Origin') || '';
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -310,6 +319,7 @@ export class SovereignAgentSession {
 
 export default {
   async fetch(request, env) {
+    _agentOrigin = request.headers.get('Origin') || '';
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }

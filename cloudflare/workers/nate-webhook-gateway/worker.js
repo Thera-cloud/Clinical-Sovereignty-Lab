@@ -97,13 +97,66 @@ async function verifyStripe(request, env, body) {
 async function verifyTwilio(request, env, body) {
   const twilioSig = request.headers.get('X-Twilio-Signature');
   if (!twilioSig || !env.TWILIO_AUTH_TOKEN) return false;
-  return true;
+
+  const url = new URL(request.url);
+  const fullUrl = url.origin + url.pathname;
+
+  const params = new URLSearchParams(body);
+  const sortedKeys = [...params.keys()].sort();
+  let dataString = fullUrl;
+  for (const key of sortedKeys) {
+    dataString += key + params.get(key);
+  }
+
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(env.TWILIO_AUTH_TOKEN),
+    { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(dataString));
+  const computed = btoa(String.fromCharCode(...new Uint8Array(sig)));
+
+  if (computed.length !== twilioSig.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < computed.length; i++) {
+    mismatch |= computed.charCodeAt(i) ^ twilioSig.charCodeAt(i);
+  }
+  return mismatch === 0;
 }
 
-function verifySendGrid(request, body) {
+async function verifySendGrid(request, env, body) {
+  const signature = request.headers.get('X-Twilio-Email-Event-Webhook-Signature');
+  const timestamp = request.headers.get('X-Twilio-Email-Event-Webhook-Timestamp');
+
+  if (!signature || !timestamp || !env.SENDGRID_WEBHOOK_VERIFICATION_KEY) {
+    try {
+      const parsed = JSON.parse(body);
+      return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   try {
-    const parsed = JSON.parse(body);
-    return Array.isArray(parsed) && parsed.length > 0;
+    const publicKeyPem = env.SENDGRID_WEBHOOK_VERIFICATION_KEY;
+    const pemBody = publicKeyPem
+      .replace(/-----BEGIN PUBLIC KEY-----/, '')
+      .replace(/-----END PUBLIC KEY-----/, '')
+      .replace(/\s/g, '');
+    const binaryKey = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+
+    const ecKey = await crypto.subtle.importKey(
+      'spki', binaryKey.buffer,
+      { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']
+    );
+
+    const payload = timestamp + body;
+    const sigBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    const payloadBytes = new TextEncoder().encode(payload);
+
+    const valid = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, ecKey, sigBytes, payloadBytes
+    );
+    return valid;
   } catch {
     return false;
   }
@@ -277,12 +330,12 @@ async function handleTwilio(request, env) {
 async function handleSendGrid(request, env) {
   const started = Date.now();
   const body = await request.text();
-  const valid = verifySendGrid(request, body);
+  const valid = await verifySendGrid(request, env, body);
 
   if (!valid) {
     await recordMetric(env, 'sendgrid', { action: 'rejected' });
-    return new Response(JSON.stringify({ error: 'Invalid payload' }), {
-      status: 400, headers: corsHeaders(),
+    return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+      status: 403, headers: corsHeaders(),
     });
   }
 

@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Request, HTTPException, Form
+from fastapi import APIRouter, Depends, Request, HTTPException, Form
 from fastapi.responses import Response
 
 logger = logging.getLogger("nate.voice_billing_api")
@@ -257,8 +257,13 @@ async def get_balance(phone: str, request: Request):
     }
 
 
+def _auth():  # SOVEREIGN-VOICE
+    from app.services.api_server import get_current_user
+    return get_current_user
+
+
 @router.post("/recharge")
-async def create_recharge(request: Request):
+async def create_recharge(request: Request, _u: dict = Depends(_auth())):
     """Create a Stripe Checkout session for voice block purchase."""
     billing = getattr(request.app.state, "voice_billing", None)
     if not billing:
@@ -295,7 +300,7 @@ async def create_recharge(request: Request):
 
 
 @router.get("/sessions/{user_id}")
-async def get_sessions(user_id: str, request: Request):
+async def get_sessions(user_id: str, request: Request, _u: dict = Depends(_auth())):
     """Get voice session history for a user."""
     pool = getattr(request.app.state, "db_pool", None)
     if not pool:
@@ -316,7 +321,7 @@ async def get_sessions(user_id: str, request: Request):
 
 
 @router.get("/monthly-summary")
-async def monthly_summary(request: Request, user_id: str = "", phone: str = ""):
+async def monthly_summary(request: Request, _u: dict = Depends(_auth()), user_id: str = "", phone: str = ""):
     """Monthly usage summary (data endpoint for future email invoice)."""
     pool = getattr(request.app.state, "db_pool", None)
     billing = getattr(request.app.state, "voice_billing", None)

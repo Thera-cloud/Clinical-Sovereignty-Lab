@@ -9,11 +9,13 @@ content queue, platform connections, moderation, and content generation.
 
 import json
 import logging
+import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
 
 from app.services.api_server import require_admin
 
@@ -27,6 +29,37 @@ router = APIRouter(
 
 # Public router for OAuth callbacks (called by external platforms, no auth)
 oauth_router = APIRouter(prefix="/api/skyeye", tags=["skyeye-oauth"])
+
+
+_STATIC_OAUTH_STATES = frozenset({
+    "skyeye_youtube", "skyeye_tiktok", "skyeye_reddit", "skyeye_pinterest",
+    "skyeye_linkedin", "skyeye_linkedin_community", "skyeye_instagram", "skyeye_facebook",
+})
+
+
+async def _store_oauth_state_from_url(request: Request, platform: str, oauth_url: str) -> str:
+    """Extract state from OAuth URL, replace static ones with random tokens, store in Redis."""
+    parsed = urlparse(oauth_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    state_values = params.get("state", [])
+    state_token = state_values[0] if state_values else ""
+    if not state_token or state_token in _STATIC_OAUTH_STATES:
+        state_token = secrets.token_urlsafe(32)
+        params["state"] = [state_token]
+        new_query = urlencode({k: v[0] for k, v in params.items()})
+        oauth_url = urlunparse(parsed._replace(query=new_query))
+    try:
+        r = getattr(request.app.state, "auth_redis", None)
+        if not r:
+            r = getattr(request.app.state, "redis_pool", None)
+        if r:
+            await r.setex(
+                f"skyeye_oauth_state:{state_token}", 600,
+                json.dumps({"platform": platform}),
+            )
+    except Exception as e:
+        logger.warning("Failed to store OAuth state in Redis: %s", e)
+    return oauth_url
 
 
 # =============================================================================
@@ -1348,6 +1381,7 @@ async def initiate_platform_connect(platform: str, request: Request):
 
     try:
         oauth_url = await adapter.get_oauth_url(redirect_uri)
+        oauth_url = await _store_oauth_state_from_url(request, platform, oauth_url)
         return {
             "needs_setup": False,
             "oauth_url": oauth_url,
@@ -1382,6 +1416,7 @@ async def platform_connect_redirect(platform: str, request: Request):
 
     try:
         oauth_url = await adapter.get_oauth_url(redirect_uri)
+        oauth_url = await _store_oauth_state_from_url(request, platform, oauth_url)
         return RedirectResponse(url=oauth_url)
     except NotImplementedError:
         raise HTTPException(status_code=501, detail=f"OAuth not implemented for {platform}")
@@ -1414,6 +1449,29 @@ async def platform_oauth_callback(
     if not code:
         raise HTTPException(status_code=400, detail="No authorization code received")
 
+    # CSRF state validation
+    if state:
+        try:
+            r = getattr(request.app.state, "auth_redis", None)
+            if not r:
+                r = getattr(request.app.state, "redis_pool", None)
+            if r:
+                state_data = await r.get(f"skyeye_oauth_state:{state}")
+                if state_data:
+                    await r.delete(f"skyeye_oauth_state:{state}")
+                    parsed_state = json.loads(state_data)
+                    if parsed_state.get("platform") != platform:
+                        _log.warning("OAuth state platform mismatch: expected %s, got %s", platform, parsed_state.get("platform"))
+                        raise HTTPException(status_code=400, detail="OAuth state platform mismatch")
+                else:
+                    _log.warning("OAuth state not found in Redis for %s (expired or replayed)", platform)
+        except HTTPException:
+            raise
+        except Exception as e:
+            _log.warning("OAuth state validation error for %s: %s", platform, e)
+    else:
+        _log.warning("OAuth callback for %s received without state parameter", platform)
+
     from app.services.platforms import get_adapter
     from app.config import settings as _settings
     adapter = get_adapter(platform, request.app.state.db_pool)
@@ -1423,7 +1481,7 @@ async def platform_oauth_callback(
     base_url = _settings.PUBLIC_BASE_URL or str(request.base_url).rstrip("/")
     redirect_uri = f"{base_url}/api/skyeye/platforms/{platform}/callback"
 
-    _log.info(f"OAuth callback for {platform}: code_len={len(code)}, state={state}, redirect_uri={redirect_uri}")
+    _log.info("OAuth callback for %s: code_len=%d, state_present=%s", platform, len(code), bool(state))
 
     try:
         success = await adapter.handle_oauth_callback(code, redirect_uri, state=state)
