@@ -167,7 +167,6 @@ export default {
         return jsonResponse({ error: "Rate limit exceeded" }, 429);
       }
     }
-    }
 
     // --- D1 edge queries (sub-ms reads) — require auth ---
     if (path.startsWith("/api/edge/d1/") && request.method === "GET") {
