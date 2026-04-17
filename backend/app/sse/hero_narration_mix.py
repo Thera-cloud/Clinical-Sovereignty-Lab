@@ -91,6 +91,49 @@ def _wav_duration(path: str) -> float:
         return 0.0
 
 
+def _atempo_compress(src: str, dst: str, target_duration: float) -> bool:
+    """Compress audio to fit target duration using chained atempo filters.
+
+    FFmpeg atempo only accepts 0.5-100.0 per stage but quality degrades
+    above ~2.0, so we chain multiple stages for large ratios.
+    """
+    actual = _wav_duration(src)
+    if actual <= 0 or actual <= target_duration:
+        if src != dst:
+            import shutil
+            shutil.copy(src, dst)
+        return True
+
+    ratio = actual / target_duration
+    filters = []
+    remaining = ratio
+    while remaining > 1.01:
+        step = min(remaining, 2.0)
+        filters.append(f"atempo={step:.4f}")
+        remaining /= step
+
+    if not filters:
+        if src != dst:
+            import shutil
+            shutil.copy(src, dst)
+        return True
+
+    af = ",".join(filters)
+    r = _run([
+        "ffmpeg", "-y", "-i", src,
+        "-af", af,
+        "-ac", "2", "-ar", "44100",
+        dst,
+    ], 30)
+    if r.returncode != 0:
+        logger.error("atempo failed: %s", r.stderr.decode()[-200:])
+        return False
+    new_dur = _wav_duration(dst)
+    logger.info("  Compressed %.2fs → %.2fs (ratio %.2fx) via %s",
+                 actual, new_dur, ratio, af)
+    return True
+
+
 def _generate_ambient(duration: float, output_path: str) -> bool:
     """Generate a soft wind/nature ambient pad using FFmpeg's noise filter."""
     _run([
@@ -153,10 +196,38 @@ async def main() -> dict:
         else:
             report["segments"][seg["name"]] = {"error": "TTS failed"}
 
-    # ── STEP 2: Verify timing ────────────────────────────────────────────
+    # ── STEP 2: Verify timing and compress to fit ─────────────────────────
     logger.info("═" * 60)
-    logger.info("STEP 2 — Verify Timing")
+    logger.info("STEP 2 — Verify Timing & Compress")
     logger.info("═" * 60)
+
+    for seg in SEGMENTS:
+        name = seg["name"]
+        info = report["segments"].get(name, {})
+        if "error" in info or name not in wav_paths:
+            continue
+
+        raw_dur = info.get("duration_s", 0)
+        target = seg["max_duration"]
+
+        if raw_dur > target:
+            src = wav_paths[name]
+            compressed = os.path.join(WORK_DIR, f"{name}_fit.wav")
+            padding = 0.2
+            ok = _atempo_compress(src, compressed, target - padding)
+            if ok and os.path.exists(compressed):
+                new_dur = _wav_duration(compressed)
+                wav_paths[name] = compressed
+                report["segments"][name] = {
+                    "raw_duration_s": round(raw_dur, 2),
+                    "compressed_duration_s": round(new_dur, 2),
+                    "max_allowed": target,
+                    "fits": new_dur <= target,
+                    "compression_ratio": round(raw_dur / max(new_dur, 0.1), 2),
+                    "window": seg["window"],
+                }
+            else:
+                logger.warning("  %s compression failed — using raw audio", name)
 
     all_fit = all(
         report["segments"].get(seg["name"], {}).get("fits", False)
@@ -164,43 +235,13 @@ async def main() -> dict:
     )
     report["timing_ok"] = all_fit
 
-    if not all_fit:
-        for seg in SEGMENTS:
-            info = report["segments"].get(seg["name"], {})
-            if not info.get("fits", False) and "error" not in info:
-                logger.warning("  %s runs %.2fs but window is %.1fs — regenerating faster",
-                                seg["name"], info.get("duration_s", 0), seg["max_duration"])
-                path = os.path.join(WORK_DIR, f"{seg['name']}.wav")
-                faster_instructions = seg["instructions"] + " Speak at a slightly faster pace to fit within the time window."
-                ok = await _generate_tts(seg["text"], faster_instructions, path)
-                if ok:
-                    dur = _wav_duration(path)
-                    wav_paths[seg["name"]] = path
-                    report["segments"][seg["name"]] = {
-                        "duration_s": round(dur, 2),
-                        "max_allowed": seg["max_duration"],
-                        "fits": dur <= seg["max_duration"],
-                        "window": seg["window"],
-                        "retried": True,
-                    }
-                    logger.info("  RETRY %s: %.2fs %s",
-                                 seg["name"], dur,
-                                 "OK" if dur <= seg["max_duration"] else "STILL LONG")
-
-        all_fit = all(
-            report["segments"].get(seg["name"], {}).get("fits", False)
-            for seg in SEGMENTS
-        )
-        report["timing_ok"] = all_fit
-
-    if not all_fit:
-        logger.error("Timing verification FAILED — proceeding anyway with best effort")
-
     for seg in SEGMENTS:
         info = report["segments"].get(seg["name"], {})
-        logger.info("  %s: %.2fs / %.1fs window — %s",
+        comp_dur = info.get("compressed_duration_s", info.get("duration_s", 0))
+        logger.info("  %s: %.2fs → %.2fs / %.1fs window — %s",
                      seg["name"],
-                     info.get("duration_s", 0),
+                     info.get("raw_duration_s", info.get("duration_s", 0)),
+                     comp_dur,
                      seg["max_duration"],
                      "PASS" if info.get("fits") else "FAIL")
 
