@@ -10291,6 +10291,10 @@ async def handle_client(websocket, path=None):
                 "admin_resolve_crisis",
                 # --- Admin read-only analysis ---
                 "admin_member_removal_scenario",
+                # --- Coach request / directory (read + lightweight writes) ---
+                "coach_request_submit", "coach_request_cancel", "coach_request_nudge",
+                "coach_get_inbound_requests", "coach_accept_request", "coach_decline_request",
+                "coach_send_message", "coach_get_request_status",
                 # --- Autonomous health broadcast ---
                 "health_status",
                 # --- Crystal system control --- # QUANTUM-CRYSTAL-ARCH
@@ -11463,53 +11467,71 @@ async def handle_client(websocket, path=None):
                     target_date = (d.get("date") or "").strip()
                     if not coach_id:
                         await websocket.send(json.dumps({"type": "error", "message": "No coach assigned"}))
+                    elif not db_pool:
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
                     else:
                         try:
-                            avail_file = VAULT_ROOT / "Coaches" / coach_id / "availability.json"
-                            avail_data = load_json_file(str(avail_file), {"slots": [], "timezone": "America/New_York"})
-                            
-                            # If a specific date is requested, compute available slots
-                            available_slots = []
-                            booked_slots = []
-                            if target_date:
-                                from datetime import timezone as tz_module
-                                sessions = load_json_file(SESSIONS_FILE, [])
-                                try:
-                                    target_dt = datetime.datetime.fromisoformat(target_date)
-                                    day_name = target_dt.strftime("%A").lower()
-                                except Exception:
-                                    target_dt = None
-                                    day_name = ""
-                                
-                                if target_dt:
-                                    day_slots = [s for s in avail_data.get("slots", []) if s.get("day", "").lower() == day_name]
-                                    for s in sessions:
-                                        if s.get("coach_id") == coach_id and s.get("status") in ["scheduled", "active"]:
-                                            try:
-                                                st = datetime.datetime.fromisoformat(s.get("scheduled_start", ""))
-                                                if st.date() == target_dt.date():
-                                                    booked_slots.append({"start": s["scheduled_start"], "end": s["scheduled_end"]})
-                                            except Exception:
-                                                pass
-                                    for slot in day_slots:
-                                        start_h = int(slot.get("start", "09:00").split(":")[0])
-                                        end_h = int(slot.get("end", "17:00").split(":")[0])
-                                        for hour in range(start_h, end_h):
-                                            slot_start = target_dt.replace(hour=hour, minute=0, second=0)
-                                            slot_end = slot_start + datetime.timedelta(hours=1)
-                                            is_free = True
-                                            for b in booked_slots:
-                                                try:
-                                                    bs = datetime.datetime.fromisoformat(b["start"])
-                                                    be = datetime.datetime.fromisoformat(b["end"])
-                                                    if slot_start < be and slot_end > bs:
-                                                        is_free = False
-                                                        break
-                                                except Exception:
-                                                    pass
-                                            if is_free and slot_start > datetime.datetime.now():
-                                                available_slots.append({"start": slot_start.isoformat(), "end": slot_end.isoformat()})
-                            
+                            async with db_pool.acquire() as _aconn:
+                                _coach_uuid = await _aconn.fetchval(
+                                    "SELECT id FROM users WHERE hardware_id = $1", coach_id
+                                )
+                                if not _coach_uuid:
+                                    await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
+                                    continue
+
+                                _slots_rows = await _aconn.fetch(
+                                    "SELECT day_of_week, start_time, end_time FROM coach_availability "
+                                    "WHERE coach_id = $1 AND is_blocked = false ORDER BY day_of_week, start_time",
+                                    _coach_uuid,
+                                )
+                                avail_slots = [
+                                    {"day": r["day_of_week"], "start": r["start_time"], "end": r["end_time"]}
+                                    for r in _slots_rows
+                                ]
+                                avail_data = {"slots": avail_slots, "timezone": "America/New_York"}
+
+                                available_slots = []
+                                booked_slots = []
+                                if target_date:
+                                    try:
+                                        target_dt = datetime.datetime.fromisoformat(target_date)
+                                        day_name = target_dt.strftime("%A").lower()
+                                    except Exception:
+                                        target_dt = None
+                                        day_name = ""
+
+                                    if target_dt:
+                                        day_slots = [s for s in avail_slots if s.get("day", "").lower() == day_name]
+                                        _booked = await _aconn.fetch(
+                                            "SELECT scheduled_start, scheduled_end FROM coaching_sessions "
+                                            "WHERE coach_id = $1 AND status IN ('scheduled','active') "
+                                            "AND scheduled_start::date = $2::date",
+                                            coach_id, target_date,
+                                        )
+                                        for _br in _booked:
+                                            booked_slots.append({
+                                                "start": _br["scheduled_start"].isoformat() if _br["scheduled_start"] else "",
+                                                "end": _br["scheduled_end"].isoformat() if _br["scheduled_end"] else "",
+                                            })
+                                        for slot in day_slots:
+                                            start_h = int(slot.get("start", "09:00").split(":")[0])
+                                            end_h = int(slot.get("end", "17:00").split(":")[0])
+                                            for hour in range(start_h, end_h):
+                                                slot_start = target_dt.replace(hour=hour, minute=0, second=0)
+                                                slot_end = slot_start + datetime.timedelta(hours=1)
+                                                is_free = True
+                                                for b in booked_slots:
+                                                    try:
+                                                        bs = datetime.datetime.fromisoformat(b["start"])
+                                                        be = datetime.datetime.fromisoformat(b["end"])
+                                                        if slot_start < be and slot_end > bs:
+                                                            is_free = False
+                                                            break
+                                                    except Exception:
+                                                        pass
+                                                if is_free and slot_start > datetime.datetime.now():
+                                                    available_slots.append({"start": slot_start.isoformat(), "end": slot_end.isoformat()})
+
                             await websocket.send(json.dumps({
                                 "type": "coach_availability",
                                 "coach_id": coach_id,
@@ -11660,6 +11682,7 @@ async def handle_client(websocket, path=None):
                                     "zoom_meeting_id": "",
                                     "zoom_host_url": "",
                                     "notes": d.get("notes", ""),
+                                    "intake_note": d.get("intake_note", ""),
                                     "coach_notes": "",
                                     "topics_covered": [],
                                     "homework_assigned": [],
@@ -11731,6 +11754,364 @@ async def handle_client(websocket, path=None):
                         except Exception as e:
                             print(f">>> [ERROR] Booking failed: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "BOOKING_FAILED"}))
+
+            # === CLIENT: SUBMIT COACH REQUEST ===
+            elif t == "coach_request_submit":
+                if current_profile and current_profile.get("role") == "CLIENT" and db_pool:
+                    _cr_client_id = (current_profile.get("hardware_id") or "").strip()
+                    _cr_client_user = (current_profile.get("username") or "").strip()
+                    _cr_coach_id = (d.get("coach_user_id") or "").strip()
+                    _cr_note = (d.get("intake_note") or "").strip()
+                    if not _cr_coach_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing coach_user_id"}))
+                    else:
+                        try:
+                            async with db_pool.acquire() as _cr_conn:
+                                _cr_accepting = await _cr_conn.fetchval(
+                                    "SELECT accepting_new_clients FROM coach_profiles WHERE coach_user_id = $1",
+                                    _cr_coach_id,
+                                )
+                                if not _cr_accepting:
+                                    await websocket.send(json.dumps({"type": "error", "message": "COACH_NOT_ACCEPTING"}))
+                                    continue
+                                _cr_row = await _cr_conn.fetchrow(
+                                    """INSERT INTO coach_requests (client_id, client_username, coach_user_id, intake_note)
+                                       VALUES ($1, $2, $3, $4) RETURNING request_id, requested_at""",
+                                    _cr_client_id, _cr_client_user, _cr_coach_id, _cr_note or None,
+                                )
+                            _cr_req_id = str(_cr_row["request_id"])
+                            await websocket.send(json.dumps({
+                                "type": "coach_request_status",
+                                "status": "pending",
+                                "request_id": _cr_req_id,
+                                "coach_user_id": _cr_coach_id,
+                                "requested_at": _cr_row["requested_at"].isoformat(),
+                                "messages": [],
+                            }))
+                            _cr_coach_ws = connected_coaches.get(_cr_coach_id)
+                            if _cr_coach_ws:
+                                try:
+                                    await _cr_coach_ws.send(json.dumps({
+                                        "type": "coach_request_new",
+                                        "request_id": _cr_req_id,
+                                        "client_name": current_profile.get("name") or _cr_client_user,
+                                        "intake_note": _cr_note,
+                                        "requested_at": _cr_row["requested_at"].isoformat(),
+                                    }))
+                                except Exception:
+                                    pass
+                        except Exception as _cr_err:
+                            _cr_msg = str(_cr_err)
+                            if "idx_coach_requests_one_pending" in _cr_msg:
+                                await websocket.send(json.dumps({"type": "error", "message": "ALREADY_HAVE_PENDING_REQUEST"}))
+                            elif "idx_coach_requests_active" in _cr_msg:
+                                await websocket.send(json.dumps({"type": "error", "message": "DUPLICATE_REQUEST"}))
+                            else:
+                                print(f">>> [COACH_REQUEST] Submit failed: {_cr_err}")
+                                await websocket.send(json.dumps({"type": "error", "message": "REQUEST_FAILED"}))
+
+            # === CLIENT: CANCEL COACH REQUEST ===
+            elif t == "coach_request_cancel":
+                if current_profile and current_profile.get("role") == "CLIENT" and db_pool:
+                    _cc_req_id = (d.get("request_id") or "").strip()
+                    _cc_client_id = (current_profile.get("hardware_id") or "").strip()
+                    if not _cc_req_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing request_id"}))
+                    else:
+                        try:
+                            async with db_pool.acquire() as _cc_conn:
+                                _cc_result = await _cc_conn.execute(
+                                    """UPDATE coach_requests SET status = 'cancelled_by_client', responded_at = NOW()
+                                       WHERE request_id = $1::uuid AND client_id = $2 AND status = 'pending'""",
+                                    _cc_req_id, _cc_client_id,
+                                )
+                            if "UPDATE 0" in _cc_result:
+                                await websocket.send(json.dumps({"type": "error", "message": "REQUEST_NOT_FOUND"}))
+                            else:
+                                await websocket.send(json.dumps({"type": "coach_request_cancelled", "request_id": _cc_req_id}))
+                        except Exception as _cc_err:
+                            print(f">>> [COACH_REQUEST] Cancel failed: {_cc_err}")
+                            await websocket.send(json.dumps({"type": "error", "message": "CANCEL_FAILED"}))
+
+            # === CLIENT: NUDGE COACH (24h server-side rate limit) ===
+            elif t == "coach_request_nudge":
+                if current_profile and current_profile.get("role") == "CLIENT" and db_pool:
+                    _cn_req_id = (d.get("request_id") or "").strip()
+                    _cn_client_id = (current_profile.get("hardware_id") or "").strip()
+                    if not _cn_req_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing request_id"}))
+                    else:
+                        try:
+                            async with db_pool.acquire() as _cn_conn:
+                                _cn_row = await _cn_conn.fetchrow(
+                                    """SELECT coach_user_id, last_nudge_at FROM coach_requests
+                                       WHERE request_id = $1::uuid AND client_id = $2 AND status = 'pending'""",
+                                    _cn_req_id, _cn_client_id,
+                                )
+                                if not _cn_row:
+                                    await websocket.send(json.dumps({"type": "error", "message": "REQUEST_NOT_FOUND"}))
+                                    continue
+                                _cn_last = _cn_row["last_nudge_at"]
+                                if _cn_last:
+                                    _cn_elapsed = (datetime.datetime.now(datetime.timezone.utc) - _cn_last).total_seconds()
+                                    if _cn_elapsed < 86400:
+                                        _cn_next = (_cn_last + datetime.timedelta(hours=24)).isoformat()
+                                        await websocket.send(json.dumps({
+                                            "type": "coach_request_nudge_error",
+                                            "error": "24h rate limit",
+                                            "next_allowed_at": _cn_next,
+                                        }))
+                                        continue
+                                await _cn_conn.execute(
+                                    """UPDATE coach_requests SET last_nudge_at = NOW(), nudge_count = nudge_count + 1
+                                       WHERE request_id = $1::uuid""",
+                                    _cn_req_id,
+                                )
+                            await websocket.send(json.dumps({"type": "coach_request_nudge_sent", "request_id": _cn_req_id}))
+                            _cn_coach_ws = connected_coaches.get(_cn_row["coach_user_id"])
+                            if _cn_coach_ws:
+                                try:
+                                    await _cn_coach_ws.send(json.dumps({
+                                        "type": "coach_request_nudge_alert",
+                                        "request_id": _cn_req_id,
+                                        "client_name": current_profile.get("name") or current_profile.get("username", ""),
+                                    }))
+                                except Exception:
+                                    pass
+                        except Exception as _cn_err:
+                            print(f">>> [COACH_REQUEST] Nudge failed: {_cn_err}")
+                            await websocket.send(json.dumps({"type": "error", "message": "NUDGE_FAILED"}))
+
+            # === COACH: GET INBOUND REQUESTS ===
+            elif t == "coach_get_inbound_requests":
+                if current_profile and current_profile.get("role") in ("COACH", "ADMIN") and db_pool:
+                    _gi_coach_id = (current_profile.get("hardware_id") or "").strip()
+                    try:
+                        async with db_pool.acquire() as _gi_conn:
+                            _gi_rows = await _gi_conn.fetch(
+                                """SELECT r.request_id, r.client_id, r.client_username, r.intake_note,
+                                          r.requested_at, r.last_nudge_at, r.nudge_count,
+                                          u.profile_data->>'name' AS client_name
+                                   FROM coach_requests r
+                                   LEFT JOIN users u ON u.hardware_id = r.client_id
+                                   WHERE r.coach_user_id = $1 AND r.status = 'pending'
+                                   ORDER BY r.requested_at ASC""",
+                                _gi_coach_id,
+                            )
+                        _gi_now = datetime.datetime.now(datetime.timezone.utc)
+                        _gi_list = []
+                        for _gi_r in _gi_rows:
+                            _gi_elapsed = (_gi_now - _gi_r["requested_at"]).days if _gi_r["requested_at"] else 0
+                            _gi_list.append({
+                                "request_id": str(_gi_r["request_id"]),
+                                "client_id": _gi_r["client_id"],
+                                "client_name": _gi_r["client_name"] or _gi_r["client_username"] or "Client",
+                                "intake_note": _gi_r["intake_note"],
+                                "requested_at": _gi_r["requested_at"].isoformat() if _gi_r["requested_at"] else None,
+                                "days_elapsed": _gi_elapsed,
+                                "nudge_count": _gi_r["nudge_count"] or 0,
+                            })
+                        await websocket.send(json.dumps({"type": "coach_inbound_requests", "requests": _gi_list}))
+                    except Exception as _gi_err:
+                        print(f">>> [COACH_REQUEST] Get inbound failed: {_gi_err}")
+                        await websocket.send(json.dumps({"type": "coach_inbound_requests", "requests": []}))
+
+            # === COACH: ACCEPT REQUEST (transactional) ===
+            elif t == "coach_accept_request":
+                if current_profile and current_profile.get("role") in ("COACH", "ADMIN") and db_pool:
+                    _ca_req_id = (d.get("request_id") or "").strip()
+                    _ca_coach_id = (current_profile.get("hardware_id") or "").strip()
+                    _ca_coach_user = (current_profile.get("username") or "").strip()
+                    if not _ca_req_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing request_id"}))
+                    else:
+                        try:
+                            _ca_client_id = None
+                            async with db_pool.acquire() as _ca_conn:
+                                async with _ca_conn.transaction():
+                                    _ca_row = await _ca_conn.fetchrow(
+                                        """UPDATE coach_requests SET status = 'accepted', responded_at = NOW()
+                                           WHERE request_id = $1::uuid AND coach_user_id = $2 AND status = 'pending'
+                                           RETURNING client_id, client_username""",
+                                        _ca_req_id, _ca_coach_id,
+                                    )
+                                    if not _ca_row:
+                                        await websocket.send(json.dumps({"type": "error", "message": "REQUEST_NOT_FOUND"}))
+                                        continue
+                                    _ca_client_id = _ca_row["client_id"]
+                                    await _ca_conn.execute(
+                                        """UPDATE users SET profile_data = jsonb_set(
+                                               jsonb_set(
+                                                   jsonb_set(profile_data, '{coach_id}', $2::jsonb),
+                                                   '{assigned_coach_id}', $2::jsonb),
+                                               '{assigned_coach}', $3::jsonb)
+                                           WHERE hardware_id = $1""",
+                                        _ca_client_id,
+                                        json.dumps(_ca_coach_id),
+                                        json.dumps(_ca_coach_user),
+                                    )
+                                    await _ca_conn.execute(
+                                        """INSERT INTO coach_assignments (coach_id, entity_type, entity_id, is_primary)
+                                           VALUES ($1, 'client', $2, true)
+                                           ON CONFLICT (coach_id, entity_type, entity_id) DO NOTHING""",
+                                        _ca_coach_id, _ca_client_id,
+                                    )
+                                    await _ca_conn.execute(
+                                        """UPDATE coach_profiles SET current_caseload = current_caseload + 1,
+                                                  updated_at = NOW()
+                                           WHERE coach_user_id = $1""",
+                                        _ca_coach_id,
+                                    )
+                            registry = load_registry()
+                            for _rk, _rv in registry.items():
+                                _rp = (_rv or {}).get("profile", {})
+                                if _rp.get("hardware_id") == _ca_client_id:
+                                    _rp["coach_id"] = _ca_coach_id
+                                    _rp["assigned_coach_id"] = _ca_coach_id
+                                    _rp["assigned_coach"] = _ca_coach_user
+                                    break
+                            save_registry(registry)
+                            await websocket.send(json.dumps({"type": "coach_request_accepted_confirm", "request_id": _ca_req_id, "client_id": _ca_client_id}))
+                            _ca_client_ws = connected_clients.get(_ca_client_id)
+                            if _ca_client_ws:
+                                try:
+                                    await _ca_client_ws.send(json.dumps({
+                                        "type": "coach_request_accepted",
+                                        "coach_user_id": _ca_coach_id,
+                                        "coach_name": current_profile.get("name") or _ca_coach_user,
+                                    }))
+                                except Exception:
+                                    pass
+                        except Exception as _ca_err:
+                            print(f">>> [COACH_REQUEST] Accept failed: {_ca_err}")
+                            await websocket.send(json.dumps({"type": "error", "message": "ACCEPT_FAILED"}))
+
+            # === COACH: DECLINE REQUEST ===
+            elif t == "coach_decline_request":
+                if current_profile and current_profile.get("role") in ("COACH", "ADMIN") and db_pool:
+                    _cd_req_id = (d.get("request_id") or "").strip()
+                    _cd_coach_id = (current_profile.get("hardware_id") or "").strip()
+                    _cd_reason = (d.get("decline_reason") or "").strip()
+                    if not _cd_req_id:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing request_id"}))
+                    else:
+                        try:
+                            async with db_pool.acquire() as _cd_conn:
+                                _cd_row = await _cd_conn.fetchrow(
+                                    """UPDATE coach_requests SET status = 'declined', responded_at = NOW(),
+                                              decline_reason = $3
+                                       WHERE request_id = $1::uuid AND coach_user_id = $2 AND status = 'pending'
+                                       RETURNING client_id""",
+                                    _cd_req_id, _cd_coach_id, _cd_reason or None,
+                                )
+                            if not _cd_row:
+                                await websocket.send(json.dumps({"type": "error", "message": "REQUEST_NOT_FOUND"}))
+                            else:
+                                await websocket.send(json.dumps({"type": "coach_request_declined_confirm", "request_id": _cd_req_id}))
+                                _cd_client_ws = connected_clients.get(_cd_row["client_id"])
+                                if _cd_client_ws:
+                                    try:
+                                        await _cd_client_ws.send(json.dumps({
+                                            "type": "coach_request_declined",
+                                            "coach_user_id": _cd_coach_id,
+                                        }))
+                                    except Exception:
+                                        pass
+                        except Exception as _cd_err:
+                            print(f">>> [COACH_REQUEST] Decline failed: {_cd_err}")
+                            await websocket.send(json.dumps({"type": "error", "message": "DECLINE_FAILED"}))
+
+            # === COACH: SEND PRE-ACCEPTANCE MESSAGE ===
+            elif t == "coach_send_message":
+                if current_profile and current_profile.get("role") in ("COACH", "ADMIN") and db_pool:
+                    _cm_req_id = (d.get("request_id") or "").strip()
+                    _cm_text = (d.get("message_text") or "").strip()
+                    _cm_coach_id = (current_profile.get("hardware_id") or "").strip()
+                    if not _cm_req_id or not _cm_text:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing request_id or message_text"}))
+                    else:
+                        try:
+                            async with db_pool.acquire() as _cm_conn:
+                                _cm_req = await _cm_conn.fetchrow(
+                                    """SELECT client_id FROM coach_requests
+                                       WHERE request_id = $1::uuid AND coach_user_id = $2 AND status = 'pending'""",
+                                    _cm_req_id, _cm_coach_id,
+                                )
+                                if not _cm_req:
+                                    await websocket.send(json.dumps({"type": "error", "message": "REQUEST_NOT_FOUND"}))
+                                    continue
+                                _cm_row = await _cm_conn.fetchrow(
+                                    """INSERT INTO coach_messages (from_id, to_id, request_id, message_text)
+                                       VALUES ($1, $2, $3::uuid, $4) RETURNING id, created_at""",
+                                    _cm_coach_id, _cm_req["client_id"], _cm_req_id, _cm_text,
+                                )
+                            await websocket.send(json.dumps({
+                                "type": "coach_message_sent",
+                                "message_id": str(_cm_row["id"]),
+                                "created_at": _cm_row["created_at"].isoformat(),
+                            }))
+                            _cm_client_ws = connected_clients.get(_cm_req["client_id"])
+                            if _cm_client_ws:
+                                try:
+                                    await _cm_client_ws.send(json.dumps({
+                                        "type": "coach_message_received",
+                                        "message_id": str(_cm_row["id"]),
+                                        "coach_name": current_profile.get("name") or current_profile.get("username", ""),
+                                        "message_text": _cm_text,
+                                        "created_at": _cm_row["created_at"].isoformat(),
+                                    }))
+                                except Exception:
+                                    pass
+                        except Exception as _cm_err:
+                            print(f">>> [COACH_MSG] Send failed: {_cm_err}")
+                            await websocket.send(json.dumps({"type": "error", "message": "MESSAGE_FAILED"}))
+
+            # === CLIENT: GET COACH REQUEST STATUS (with messages) ===
+            elif t == "coach_get_request_status":
+                if current_profile and current_profile.get("role") == "CLIENT" and db_pool:
+                    _gs_client_id = (current_profile.get("hardware_id") or "").strip()
+                    try:
+                        async with db_pool.acquire() as _gs_conn:
+                            _gs_row = await _gs_conn.fetchrow(
+                                """SELECT r.request_id, r.coach_user_id, r.status, r.requested_at,
+                                          r.last_nudge_at, r.nudge_count,
+                                          cp.display_name AS coach_name, cp.photo_url AS coach_photo
+                                   FROM coach_requests r
+                                   LEFT JOIN coach_profiles cp ON cp.coach_user_id = r.coach_user_id
+                                   WHERE r.client_id = $1 AND r.status = 'pending'
+                                   LIMIT 1""",
+                                _gs_client_id,
+                            )
+                            _gs_msgs = []
+                            if _gs_row:
+                                _gs_msg_rows = await _gs_conn.fetch(
+                                    """SELECT id, message_text, created_at, read_at
+                                       FROM coach_messages
+                                       WHERE request_id = $1::uuid AND to_id = $2
+                                       ORDER BY created_at ASC""",
+                                    str(_gs_row["request_id"]), _gs_client_id,
+                                )
+                                _gs_msgs = [
+                                    {"message_id": str(m["id"]), "message_text": m["message_text"],
+                                     "created_at": m["created_at"].isoformat(), "read": m["read_at"] is not None}
+                                    for m in _gs_msg_rows
+                                ]
+                        if _gs_row:
+                            await websocket.send(json.dumps({
+                                "type": "coach_request_status",
+                                "status": _gs_row["status"],
+                                "request_id": str(_gs_row["request_id"]),
+                                "coach_user_id": _gs_row["coach_user_id"],
+                                "coach_name": _gs_row["coach_name"] or "Coach",
+                                "coach_photo": _gs_row["coach_photo"],
+                                "requested_at": _gs_row["requested_at"].isoformat() if _gs_row["requested_at"] else None,
+                                "messages": _gs_msgs,
+                            }))
+                        else:
+                            await websocket.send(json.dumps({"type": "coach_request_status", "status": "none"}))
+                    except Exception as _gs_err:
+                        print(f">>> [COACH_REQUEST] Status check failed: {_gs_err}")
+                        await websocket.send(json.dumps({"type": "coach_request_status", "status": "none"}))
 
             # === MASTER COACH: FREE CONSULTATION ===
             elif t == "master_consultation_request":
@@ -17376,19 +17757,39 @@ If 'challenge', respectfully push the coach's thinking."""
                     except Exception:
                         memories = []
 
+                    _intake_note_text = None
+                    if db_pool:
+                        try:
+                            async with db_pool.acquire() as _bconn:
+                                _inrow = await _bconn.fetchrow(
+                                    "SELECT intake_note, scheduled_start FROM coaching_sessions "
+                                    "WHERE client_id = $1 AND status = 'scheduled' "
+                                    "AND scheduled_start > NOW() "
+                                    "ORDER BY scheduled_start ASC LIMIT 1",
+                                    client_id,
+                                )
+                                if _inrow and _inrow["intake_note"]:
+                                    _intake_note_text = _inrow["intake_note"]
+                        except Exception:
+                            pass
+
+                    _briefing_data = {
+                        "generated_at": datetime.datetime.now().isoformat(),
+                        "scope": "client",
+                        "client_id": client_id,
+                        "client_name": client_profile.get("name", "Unknown"),
+                        "family_id": client_profile.get("family_id", ""),
+                        "risk_level": ns.get("risk_level", "LOW"),
+                        "nevedal_state": ns,
+                        "recent_memory": memories,
+                    }
+                    if _intake_note_text:
+                        _briefing_data["intake_note"] = _intake_note_text
+
                     await websocket.send(json.dumps({
                         "type": "coach_briefing",
                         "client_id": client_id,
-                        "briefing": {
-                            "generated_at": datetime.datetime.now().isoformat(),
-                            "scope": "client",
-                            "client_id": client_id,
-                            "client_name": client_profile.get("name", "Unknown"),
-                            "family_id": client_profile.get("family_id", ""),
-                            "risk_level": ns.get("risk_level", "LOW"),
-                            "nevedal_state": ns,
-                            "recent_memory": memories,
-                        }
+                        "briefing": _briefing_data,
                     }))
 
             # === DOJO: SHARE LEARNING FOR APPROVAL ===

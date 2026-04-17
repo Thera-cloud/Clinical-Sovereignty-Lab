@@ -4139,6 +4139,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   bool _classroomUploading = false;
   final TextEditingController _classroomCoachQueryController = TextEditingController();
   
+  // Inbound coach requests from clients
+  List<Map<String, dynamic>> _inboundRequests = [];
+
   // Pending bookings & Financial state
   List<Map<String, dynamic>> _pendingBookings = [];
   Map<String, dynamic> _financialData = {};
@@ -4423,6 +4426,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   void _fetchDashboard() {
     _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
     _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+    _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
     _requestPendingBookings();
     _requestFinancials();
     _loadConnectStatus();
@@ -5327,6 +5331,56 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               : "Share w/ Nate failed: $reason";
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(msg)),
+          );
+        }
+      }
+      else if (data['type'] == 'coach_inbound_requests') {
+        if (mounted) {
+          setState(() {
+            _inboundRequests = List<Map<String, dynamic>>.from(
+              (data['requests'] ?? []).map((r) => Map<String, dynamic>.from(r)),
+            );
+          });
+        }
+      }
+      else if (data['type'] == 'coach_request_new') {
+        if (mounted) {
+          final name = data['client_name'] ?? 'A client';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$name sent you a coaching request'), backgroundColor: const Color(0xFFC9A962)),
+          );
+          _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
+        }
+      }
+      else if (data['type'] == 'coach_request_accepted_confirm') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Client accepted — they\'re now on your caseload'), backgroundColor: Color(0xFF4ECDC4)),
+          );
+          _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
+          _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
+        }
+      }
+      else if (data['type'] == 'coach_request_declined_confirm') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Request declined'), backgroundColor: Colors.grey),
+          );
+          _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
+        }
+      }
+      else if (data['type'] == 'coach_request_nudge_alert') {
+        if (mounted) {
+          final name = data['client_name'] ?? 'A client';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$name nudged you — they\'re waiting for your response'), backgroundColor: const Color(0xFF4ECDC4)),
+          );
+        }
+      }
+      else if (data['type'] == 'coach_message_sent') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Message sent to client'), backgroundColor: Color(0xFF4ECDC4)),
           );
         }
       }
@@ -6754,6 +6808,92 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         : ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // ===== INBOUND COACH REQUESTS =====
+              if (_inboundRequests.isNotEmpty) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0A1A1A),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Icon(Icons.person_add, color: Color(0xFFC9A962), size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          "CLIENT REQUESTS (${_inboundRequests.length})",
+                          style: const TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.bold, fontFamily: 'Courier', fontSize: 13, letterSpacing: 1),
+                        ),
+                      ]),
+                      const SizedBox(height: 12),
+                      ..._inboundRequests.map((req) {
+                        final reqId = (req['request_id'] ?? '').toString();
+                        final clientName = (req['client_name'] ?? 'Client').toString();
+                        final intakeNote = (req['intake_note'] ?? '').toString();
+                        final daysElapsed = (req['days_elapsed'] ?? 0) as int;
+                        final nudgeCount = (req['nudge_count'] ?? 0) as int;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0A0A0F),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white10),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                const Icon(Icons.person, color: Color(0xFF4ECDC4), size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(child: Text(clientName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+                                if (nudgeCount > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(color: const Color(0xFFC9A962).withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
+                                    child: Text("${nudgeCount}x nudged", style: const TextStyle(color: Color(0xFFC9A962), fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                              ]),
+                              if (intakeNote.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(intakeNote, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                              ],
+                              const SizedBox(height: 4),
+                              Text("${daysElapsed}d ago", style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+                              const SizedBox(height: 12),
+                              Row(children: [
+                                Expanded(child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.check, size: 18),
+                                  label: const Text("Accept"),
+                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4ECDC4).withOpacity(0.2), foregroundColor: const Color(0xFF4ECDC4), side: const BorderSide(color: Color(0xFF4ECDC4)), padding: const EdgeInsets.symmetric(vertical: 12)),
+                                  onPressed: () => _socket?.sink.add(jsonEncode({"type": "coach_accept_request", "request_id": reqId})),
+                                )),
+                                const SizedBox(width: 8),
+                                Expanded(child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.message, size: 16),
+                                  label: const Text("Message"),
+                                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFC9A962), side: const BorderSide(color: Color(0xFFC9A962)), padding: const EdgeInsets.symmetric(vertical: 12)),
+                                  onPressed: () => _showCoachMessageDialog(reqId, clientName),
+                                )),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.redAccent, size: 20),
+                                  tooltip: "Decline",
+                                  onPressed: () => _showCoachDeclineDialog(reqId),
+                                ),
+                              ]),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ],
+                  ),
+                ),
+              ],
               // ===== PENDING BOOKINGS APPROVAL SECTION =====
               if (hasPending) ...[
                 Container(
@@ -12044,6 +12184,92 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             onPressed: () {
               Navigator.pop(ctx);
               _declineBooking(sessionId, reasonController.text.trim());
+            },
+            child: const Text("Decline"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoachMessageDialog(String requestId, String clientName) {
+    final msgController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: Text("Message $clientName", style: const TextStyle(color: Color(0xFFC9A962))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Send a message before accepting:", style: TextStyle(color: Colors.white70)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: msgController,
+              style: const TextStyle(color: Colors.white),
+              maxLines: 4,
+              maxLength: 500,
+              decoration: InputDecoration(
+                hintText: "e.g., Tell me more about your goals...",
+                hintStyle: TextStyle(color: Colors.grey[600]),
+                filled: true,
+                fillColor: const Color(0xFF111111),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
+            onPressed: () {
+              Navigator.pop(ctx);
+              final text = msgController.text.trim();
+              if (text.isNotEmpty) {
+                _socket?.sink.add(jsonEncode({"type": "coach_send_message", "request_id": requestId, "message_text": text}));
+              }
+            },
+            child: const Text("Send"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoachDeclineDialog(String requestId) {
+    final reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: const Text("Decline Request", style: TextStyle(color: Colors.redAccent)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Provide a reason (optional):", style: TextStyle(color: Colors.white70)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              style: const TextStyle(color: Colors.white),
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: "e.g., Caseload full, specialty mismatch...",
+                hintStyle: TextStyle(color: Colors.grey[600]),
+                filled: true,
+                fillColor: const Color(0xFF111111),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _socket?.sink.add(jsonEncode({"type": "coach_decline_request", "request_id": requestId, "decline_reason": reasonController.text.trim()}));
             },
             child: const Text("Decline"),
           ),

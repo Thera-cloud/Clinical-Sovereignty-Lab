@@ -23,6 +23,8 @@ STAGGER_DELAY = 310
 CLIENT_ALERT_HOURS = 62
 CLIENT_OUTREACH_HOURS = 72
 COACH_OUTREACH_HOURS = 72
+COACH_REQUEST_ESCALATION_HOURS = 72  # 3 days
+SESSION_REMINDER_HOURS = 24
 
 
 class NateCheckInAgent:
@@ -63,6 +65,10 @@ class NateCheckInAgent:
 
     async def _tick(self):
         now = datetime.now(timezone.utc)
+
+        await self._escalate_stale_requests()
+        await self._send_session_reminders()
+
         async with self.db_pool.acquire() as conn:
             users = await conn.fetch("""
                 SELECT username, role, hardware_id, profile_data
@@ -258,6 +264,183 @@ class NateCheckInAgent:
                                  "Little Nate coaching check-in",
                                  msg[:200])
         logger.info("72h check-in sent to coach %s via %s", username, channel or "nudge-only")
+
+    # ── Coach Request Escalation ──────────────────────────────────────
+
+    async def _escalate_stale_requests(self):
+        """Notify coaches about pending requests older than 3 days."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                stale = await conn.fetch("""
+                    SELECT cr.request_id, cr.client_username, cr.coach_user_id,
+                           EXTRACT(EPOCH FROM (NOW() - cr.requested_at))/3600 AS hours_pending,
+                           u_coach.profile_data AS coach_profile,
+                           u_coach.username AS coach_username,
+                           u_client.profile_data AS client_profile,
+                           ch.master_coach_id
+                    FROM coach_requests cr
+                    JOIN users u_coach ON u_coach.hardware_id = cr.coach_user_id
+                    JOIN users u_client ON u_client.username = cr.client_username
+                    LEFT JOIN coach_hierarchy ch
+                        ON ch.assistant_id = cr.coach_user_id AND ch.status = 'active'
+                    WHERE cr.status = 'pending'
+                      AND cr.requested_at < NOW() - INTERVAL '%s hours'
+                """ % COACH_REQUEST_ESCALATION_HOURS)
+
+                for row in stale:
+                    req_id = str(row["request_id"])
+                    if await self._recent_checkin(conn, req_id, "coach_request_escalation", hours=72):
+                        continue
+
+                    coach_profile = row["coach_profile"] or {}
+                    if isinstance(coach_profile, str):
+                        try:
+                            coach_profile = json.loads(coach_profile)
+                        except Exception:
+                            coach_profile = {}
+
+                    client_profile = row["client_profile"] or {}
+                    if isinstance(client_profile, str):
+                        try:
+                            client_profile = json.loads(client_profile)
+                        except Exception:
+                            client_profile = {}
+
+                    coach_email = coach_profile.get("email")
+                    coach_name = coach_profile.get("name") or row["coach_username"]
+                    client_name = client_profile.get("name") or row["client_username"]
+                    hours = int(row["hours_pending"])
+                    days = hours // 24
+
+                    msg = (
+                        f"Hi {coach_name}, a coaching request from {client_name} has been "
+                        f"waiting for {hours} hours. Please accept or decline at your earliest "
+                        f"convenience: https://coach.sovereignsanctuary.net"
+                    )
+
+                    channel = None
+                    if coach_email and self.notification_system:
+                        sent = await self.notification_system._send_email(
+                            coach_email,
+                            f"Pending coaching request from {client_name}",
+                            msg,
+                            notification_type="coach_request_escalation",
+                        )
+                        if sent:
+                            channel = "email"
+
+                    await self._record_checkin(
+                        conn, req_id, "SYSTEM", "coach_request_escalation",
+                        channel, msg, {"coach": row["coach_username"], "client": row["client_username"]},
+                    )
+                    logger.info("Escalated stale coach request %s to %s", req_id, row["coach_username"])
+
+                    master_id = row["master_coach_id"]
+                    if master_id:
+                        try:
+                            master_row = await conn.fetchrow(
+                                "SELECT username, profile_data FROM users WHERE hardware_id = $1",
+                                master_id,
+                            )
+                            if master_row:
+                                mp = master_row["profile_data"] or {}
+                                if isinstance(mp, str):
+                                    try:
+                                        mp = json.loads(mp)
+                                    except Exception:
+                                        mp = {}
+                                master_email = mp.get("email")
+                                master_name = mp.get("name") or master_row["username"]
+                                master_msg = (
+                                    f"Hi {master_name}, {coach_name} has not responded to "
+                                    f"{client_name}'s coaching request ({days} days). "
+                                    f"Please follow up."
+                                )
+                                if master_email and self.notification_system:
+                                    await self.notification_system._send_email(
+                                        master_email,
+                                        f"Unresponded coaching request: {coach_name} / {client_name}",
+                                        master_msg,
+                                        notification_type="coach_request_escalation",
+                                    )
+                                logger.info("Escalated to master coach %s for request %s", master_name, req_id)
+                        except Exception as _me:
+                            logger.warning("Master coach escalation failed for %s: %s", req_id, _me)
+        except Exception as e:
+            logger.warning("NateCheckInAgent: request escalation failed: %s", e)
+
+    # ── Session Reminders ──────────────────────────────────────────────
+
+    async def _send_session_reminders(self):
+        """Send 24h reminders for upcoming coaching sessions."""
+        try:
+            async with self.db_pool.acquire() as conn:
+                upcoming = await conn.fetch("""
+                    SELECT cs.session_id, cs.client_id, cs.coach_id, cs.scheduled_start,
+                           u_client.username AS client_username,
+                           u_client.profile_data AS client_profile,
+                           u_coach.username AS coach_username,
+                           u_coach.profile_data AS coach_profile
+                    FROM coaching_sessions cs
+                    JOIN users u_client ON u_client.hardware_id = cs.client_id
+                    JOIN users u_coach ON u_coach.hardware_id = cs.coach_id
+                    WHERE cs.status = 'scheduled'
+                      AND cs.scheduled_start BETWEEN NOW() + INTERVAL '23 hours'
+                                                 AND NOW() + INTERVAL '25 hours'
+                """)
+
+                for row in upcoming:
+                    session_id = str(row["session_id"])
+                    if await self._recent_checkin(conn, session_id, "session_reminder_24h", hours=24):
+                        continue
+
+                    client_profile = row["client_profile"] or {}
+                    if isinstance(client_profile, str):
+                        try:
+                            client_profile = json.loads(client_profile)
+                        except Exception:
+                            client_profile = {}
+
+                    coach_profile = row["coach_profile"] or {}
+                    if isinstance(coach_profile, str):
+                        try:
+                            coach_profile = json.loads(coach_profile)
+                        except Exception:
+                            coach_profile = {}
+
+                    client_name = client_profile.get("name") or row["client_username"]
+                    coach_name = coach_profile.get("name") or row["coach_username"]
+                    client_email = client_profile.get("email")
+                    coach_email = coach_profile.get("email")
+
+                    start_str = row["scheduled_start"].strftime("%A, %B %d at %I:%M %p")
+
+                    if client_email and self.notification_system:
+                        await self.notification_system._send_email(
+                            client_email,
+                            f"Session reminder: {start_str}",
+                            f"Hi {client_name}, you have a coaching session with {coach_name} "
+                            f"tomorrow at {start_str}. See you there!",
+                            notification_type="session_reminder",
+                        )
+
+                    if coach_email and self.notification_system:
+                        await self.notification_system._send_email(
+                            coach_email,
+                            f"Session reminder: {client_name} tomorrow",
+                            f"Hi {coach_name}, reminder that you have a session with "
+                            f"{client_name} tomorrow at {start_str}.",
+                            notification_type="session_reminder",
+                        )
+
+                    await self._record_checkin(
+                        conn, session_id, "SYSTEM", "session_reminder_24h",
+                        "email", f"Reminder for session {session_id}",
+                        {"client": row["client_username"], "coach": row["coach_username"]},
+                    )
+                    logger.info("24h reminder sent for session %s", session_id)
+        except Exception as e:
+            logger.warning("NateCheckInAgent: session reminder failed: %s", e)
 
     # ── DOJO-Aware AI Question Generator ──────────────────────────────
 

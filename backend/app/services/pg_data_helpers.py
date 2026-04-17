@@ -250,6 +250,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
             "zoom_meeting_id", "zoom_host_url", "notes", "coach_notes",
             "topics_covered", "homework_assigned", "mood_at_start", "mood_at_end",
             "nate_summary", "recording_url", "payment_status", "created_at",
+            "intake_note",
         }
         extra = {k: v for k, v in session.items() if k not in known_keys and k != "updated_at"}
         payment_status = str(session.get("payment_status") or "pending")[:32]
@@ -262,8 +263,9 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      actual_start, actual_end, duration_minutes, zoom_link,
                      zoom_meeting_id, zoom_host_url, notes, coach_notes,
                      topics_covered, homework_assigned, mood_at_start,
-                     mood_at_end, nate_summary, recording_url, payment_status, session_data, created_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+                     mood_at_end, nate_summary, recording_url, payment_status,
+                     intake_note, session_data, created_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
                    ON CONFLICT (session_id) DO UPDATE SET
                      client_id = EXCLUDED.client_id,
                      coach_id = EXCLUDED.coach_id,
@@ -288,6 +290,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      nate_summary = EXCLUDED.nate_summary,
                      recording_url = EXCLUDED.recording_url,
                      payment_status = EXCLUDED.payment_status,
+                     intake_note = EXCLUDED.intake_note,
                      session_data = EXCLUDED.session_data""",
                 session.get("session_id"),
                 session.get("client_id", ""),
@@ -313,6 +316,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 session.get("nate_summary", ""),
                 session.get("recording_url", ""),
                 payment_status,
+                session.get("intake_note", ""),
                 json.dumps(extra),
                 _parse_ts(session.get("created_at")) or datetime.now(timezone.utc),
             )

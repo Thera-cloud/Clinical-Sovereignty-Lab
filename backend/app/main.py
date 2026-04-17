@@ -3653,6 +3653,13 @@ try:
 except Exception as _fc_err:
     print(f"   ⚠️  F-Code API router failed: {_fc_err}")
 
+# Coach Directory API (public coach listing for client discovery)
+try:
+    from app.routers.coach_directory_api import router as coach_directory_router
+    app.include_router(coach_directory_router)
+except Exception as _cd_err:
+    print(f"   ⚠️  Coach Directory API router failed: {_cd_err}")
+
 # Coach Schedule API (availability, calendar sync)
 try:
     from app.routers.schedule_api import router as schedule_router

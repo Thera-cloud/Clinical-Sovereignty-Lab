@@ -10209,6 +10209,15 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   
   Timer? _loadingTimeout;
 
+  // Coach directory + request state
+  List<Map<String, dynamic>> _directoryCoaches = [];
+  bool _directoryLoading = false;
+  Map<String, dynamic>? _pendingRequest;
+  List<Map<String, dynamic>> _requestMessages = [];
+  bool _submittingRequest = false;
+
+  bool get _hasCoach => _coachId.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -10244,7 +10253,12 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       
       if (type == 'login_success') {
         _loadingTimeout?.cancel();
-        _requestUpcomingSessions();
+        if (_hasCoach) {
+          _requestUpcomingSessions();
+        } else {
+          _fetchCoachDirectory();
+          _fetchRequestStatus();
+        }
       } else if (type == 'login_failed' || type == 'wrong_portal') {
         _loadingTimeout?.cancel();
         if (mounted) setState(() => _isLoading = false);
@@ -10271,8 +10285,58 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         }
       } else if (type == 'session_cancelled') {
         _requestUpcomingSessions();
+      } else if (type == 'coach_request_status') {
+        if (data['status'] == 'none') {
+          setState(() { _pendingRequest = null; _requestMessages = []; _isLoading = false; });
+        } else {
+          setState(() {
+            _pendingRequest = Map<String, dynamic>.from(data);
+            _requestMessages = List<Map<String, dynamic>>.from(
+              (data['messages'] ?? []).map((m) => Map<String, dynamic>.from(m)),
+            );
+            _isLoading = false;
+          });
+        }
+      } else if (type == 'coach_request_accepted') {
+        setState(() {
+          _coachId = data['coach_user_id']?.toString() ?? '';
+          _pendingRequest = null;
+          _requestMessages = [];
+        });
+        _requestUpcomingSessions();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${data['coach_name'] ?? 'Your coach'} accepted your request!'), backgroundColor: Colors.green),
+          );
+        }
+      } else if (type == 'coach_request_declined') {
+        setState(() { _pendingRequest = null; _requestMessages = []; });
+        _fetchCoachDirectory();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Coach declined — you can request another'), backgroundColor: Colors.orange),
+          );
+        }
+      } else if (type == 'coach_request_cancelled') {
+        setState(() { _pendingRequest = null; _requestMessages = []; _submittingRequest = false; });
+      } else if (type == 'coach_request_nudge_sent') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Nudge sent to your coach'), backgroundColor: Color(0xFF4ECDC4)),
+          );
+        }
+      } else if (type == 'coach_request_nudge_error') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Nudge limit: try again after ${data['next_allowed_at'] ?? '24h'}'), backgroundColor: Colors.orange),
+          );
+        }
+      } else if (type == 'coach_message_received') {
+        setState(() {
+          _requestMessages.add(Map<String, dynamic>.from(data));
+        });
       } else if (type == 'error') {
-        setState(() => _isBooking = false);
+        setState(() { _isBooking = false; _submittingRequest = false; });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(data['detail'] ?? data['message'] ?? 'Error'), backgroundColor: Colors.red),
@@ -10298,13 +10362,66 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   }
   
   void _bookSession(String start, String end) {
+    _showBookingIntakeDialog(start, end);
+  }
+
+  void _showBookingIntakeDialog(String start, String end) {
+    final noteCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Session Note', style: TextStyle(color: Color(0xFFC9A962))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Anything your coach should know before this session? (optional)', style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteCtrl,
+              maxLines: 3,
+              maxLength: 300,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Topics, goals, or concerns...',
+                hintStyle: const TextStyle(color: Colors.grey),
+                filled: true, fillColor: const Color(0xFF1A1A1A),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _confirmBookSession(start, end, '');
+            },
+            child: const Text('Skip', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _confirmBookSession(start, end, noteCtrl.text.trim());
+            },
+            child: const Text('Book Session'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmBookSession(String start, String end, String intakeNote) {
     setState(() => _isBooking = true);
-    _socket?.sink.add(jsonEncode({
+    final payload = <String, dynamic>{
       "type": "client_book_session",
       "coach_id": _coachId,
       "scheduled_start": start,
       "scheduled_end": end,
-    }));
+    };
+    if (intakeNote.isNotEmpty) payload["intake_note"] = intakeNote;
+    _socket?.sink.add(jsonEncode(payload));
   }
   
   void _cancelSession(String sessionId) {
@@ -10313,7 +10430,62 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       "session_id": sessionId,
     }));
   }
-  
+
+  void _fetchCoachDirectory() async {
+    setState(() => _directoryLoading = true);
+    try {
+      final token = widget.currentUserProfile?['token'] ?? '';
+      final uri = Uri.parse('${AppConfig.apiBaseUrl}/api/coach/directory');
+      final resp = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        if (mounted) {
+          setState(() {
+            _directoryCoaches = List<Map<String, dynamic>>.from(
+              (body['coaches'] ?? []).map((c) => Map<String, dynamic>.from(c)),
+            );
+            _directoryLoading = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _directoryLoading = false);
+      }
+    } catch (e) {
+      debugLog('Directory fetch error: $e');
+      if (mounted) setState(() => _directoryLoading = false);
+    }
+  }
+
+  void _fetchRequestStatus() {
+    _socket?.sink.add(jsonEncode({"type": "coach_get_request_status"}));
+  }
+
+  void _submitCoachRequest(String coachUserId, String intakeNote) {
+    setState(() => _submittingRequest = true);
+    _socket?.sink.add(jsonEncode({
+      "type": "coach_request_submit",
+      "coach_user_id": coachUserId,
+      "intake_note": intakeNote,
+    }));
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _fetchRequestStatus();
+    });
+  }
+
+  void _cancelCoachRequest(String requestId) {
+    _socket?.sink.add(jsonEncode({
+      "type": "coach_request_cancel",
+      "request_id": requestId,
+    }));
+  }
+
+  void _nudgeCoach(String requestId) {
+    _socket?.sink.add(jsonEncode({
+      "type": "coach_request_nudge",
+      "request_id": requestId,
+    }));
+  }
+
   @override
   void dispose() {
     _loadingTimeout?.cancel();
@@ -10347,57 +10519,289 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       ),
       body: _isLoading
         ? const Center(child: CircularProgressIndicator(color: Color(0xFFC9A962)))
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Upcoming Sessions
-                const Text('UPCOMING SESSIONS', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
-                if (_upcomingSessions.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111111),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF252525)),
-                    ),
-                    child: const Center(
-                      child: Text('No upcoming sessions', style: TextStyle(color: Colors.grey)),
-                    ),
-                  )
-                else
-                  ..._upcomingSessions.map((s) => _buildSessionCard(s)),
-                
-                const SizedBox(height: 24),
-                
-                // Book New Session
-                const Text('BOOK A SESSION', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
-                _buildDatePicker(),
-                if (_availableSlots.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  const Text('Available Time Slots', style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  ..._availableSlots.map((slot) => _buildSlotCard(slot)),
-                ] else if (_selectedDate != null) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111111),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text('No available slots for this date', style: TextStyle(color: Colors.grey)),
-                  ),
-                ],
-              ],
-            ),
-          ),
+        : _hasCoach
+          ? _buildScheduleView()
+          : _pendingRequest != null
+            ? _buildPendingRequestView()
+            : _buildCoachDirectoryView(),
     );
   }
   
+  Widget _buildScheduleView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('UPCOMING SESSIONS', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          if (_upcomingSessions.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111111),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF252525)),
+              ),
+              child: const Center(child: Text('No upcoming sessions', style: TextStyle(color: Colors.grey))),
+            )
+          else
+            ..._upcomingSessions.map((s) => _buildSessionCard(s)),
+          const SizedBox(height: 24),
+          const Text('BOOK A SESSION', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          _buildDatePicker(),
+          if (_availableSlots.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('Available Time Slots', style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            ..._availableSlots.map((slot) => _buildSlotCard(slot)),
+          ] else if (_selectedDate != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(8)),
+              child: const Text('No available slots for this date', style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoachDirectoryView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('FIND YOUR COACH', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          const Text('Select a coach to begin your journey', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          const SizedBox(height: 16),
+          if (_directoryLoading)
+            const Center(child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(color: Color(0xFFC9A962)),
+            ))
+          else if (_directoryCoaches.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111111),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF252525)),
+              ),
+              child: const Center(child: Text('No coaches are currently accepting new clients.\nCheck back soon.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey))),
+            )
+          else
+            ..._directoryCoaches.map((coach) => _buildCoachCard(coach)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoachCard(Map<String, dynamic> coach) {
+    final name = coach['display_name'] ?? 'Coach';
+    final bio = coach['bio'] ?? '';
+    final tags = List<String>.from((coach['specialty_tags'] ?? []).map((t) => t.toString()));
+    final years = coach['years_experience'] ?? 0;
+    final duration = coach['session_duration_minutes'] ?? 60;
+    final coachUserId = coach['coach_user_id'] ?? '';
+    final photo = coach['photo_url']?.toString() ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF252525)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: const Color(0xFF252525),
+                backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+                child: photo.isEmpty ? Text(name.isNotEmpty ? name[0] : 'C', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 20)) : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
+                  if (years > 0) Text('$years years experience · ${duration}min sessions', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ],
+              )),
+            ],
+          ),
+          if (bio.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(bio, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 13)),
+          ],
+          if (tags.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 6, runSpacing: 4, children: tags.map((t) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(color: const Color(0xFF4ECDC4).withOpacity(0.12), borderRadius: BorderRadius.circular(12)),
+              child: Text(t, style: const TextStyle(color: Color(0xFF4ECDC4), fontSize: 11)),
+            )).toList()),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
+              onPressed: _submittingRequest ? null : () => _showIntakeDialog(coachUserId, name),
+              child: _submittingRequest
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                : const Text('Request This Coach', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showIntakeDialog(String coachUserId, String coachName) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: Text('Request $coachName', style: const TextStyle(color: Color(0xFFC9A962))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Briefly share what brings you to coaching (optional):', style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 4,
+              maxLength: 500,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'What are you hoping to work on?',
+                hintStyle: const TextStyle(color: Colors.grey),
+                filled: true, fillColor: const Color(0xFF1A1A1A),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _submitCoachRequest(coachUserId, controller.text.trim());
+            },
+            child: const Text('Send Request'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingRequestView() {
+    final coachName = _pendingRequest?['coach_name'] ?? 'Coach';
+    final requestId = _pendingRequest?['request_id'] ?? '';
+    final requestedAt = _pendingRequest?['requested_at'] ?? '';
+
+    String timeAgo = '';
+    try {
+      final dt = DateTime.parse(requestedAt);
+      final diff = DateTime.now().difference(dt);
+      if (diff.inDays > 0) { timeAgo = '${diff.inDays}d ago'; }
+      else if (diff.inHours > 0) { timeAgo = '${diff.inHours}h ago'; }
+      else { timeAgo = '${diff.inMinutes}m ago'; }
+    } catch (_) {}
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('PENDING COACH REQUEST', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.hourglass_top, color: Color(0xFFC9A962), size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text('Awaiting $coachName\'s response', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+                ]),
+                if (timeAgo.isNotEmpty) Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text('Requested $timeAgo', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                ),
+                const SizedBox(height: 16),
+                Row(children: [
+                  Expanded(child: OutlinedButton.icon(
+                    icon: const Icon(Icons.notifications_active, size: 16),
+                    label: const Text('Nudge'),
+                    style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF4ECDC4), side: const BorderSide(color: Color(0xFF4ECDC4))),
+                    onPressed: () => _nudgeCoach(requestId),
+                  )),
+                  const SizedBox(width: 12),
+                  Expanded(child: OutlinedButton.icon(
+                    icon: const Icon(Icons.close, size: 16),
+                    label: const Text('Cancel'),
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+                    onPressed: () => _cancelCoachRequest(requestId),
+                  )),
+                ]),
+              ],
+            ),
+          ),
+          if (_requestMessages.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            const Text('MESSAGES FROM COACH', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ..._requestMessages.map((m) => Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A2E),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(m['message_text'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text(_formatMsgTime(m['created_at']), style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                ],
+              ),
+            )),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatMsgTime(dynamic ts) {
+    if (ts == null) return '';
+    try {
+      final dt = DateTime.parse(ts.toString());
+      return '${dt.month}/${dt.day} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) { return ''; }
+  }
+
   Widget _buildSessionCard(Map<String, dynamic> session) {
     final start = session['scheduled_start'] ?? '';
     final zoomLink = session['zoom_link'] ?? '';

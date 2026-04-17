@@ -562,6 +562,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     try { sock?.sink.close(); } catch (_) {}
   }
 
+  bool get _isCoachOnly => _currentPlanKey == 'COACH_ONLY';
+
   bool get _isSovereignCircle {
     final plan = (_profile['subscription_plan'] ?? _profile['tier'] ?? '').toString().toUpperCase();
     return plan == 'TOP_TIER' || plan.contains('SOVEREIGN') || plan == 'TOP';
@@ -1740,6 +1742,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          if (!_isCoachOnly) ...[
           // --- Share / Invite ---
           _sectionHeader('SHARE', Icons.share),
           _settingsCard([
@@ -1788,6 +1791,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
           ]),
           const SizedBox(height: 20),
+          ], // end !_isCoachOnly guard (Share)
 
           // --- Family (Sovereign Circle only) ---
           if (_isSovereignCircle) ...[
@@ -1954,7 +1958,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             const SizedBox(height: 20),
           ],
 
-          // --- Subscription ---
+          // --- Subscription (hidden for COACH_ONLY) ---
+          if (!_isCoachOnly) ...[
           _sectionHeader('SUBSCRIPTION', Icons.workspace_premium),
           _settingsCard([
             _infoRow('Current Plan', _tierDisplayName(plan.toString())),
@@ -2125,6 +2130,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
           ]),
           const SizedBox(height: 20),
+          ], // end !_isCoachOnly guard (Subscription + Token Vault)
 
           // --- Sovereign Vault (STANDARD / TOP_TIER only) ---
           if (AppConfig.ENABLE_SOVEREIGN_VAULT && _hasVaultAccess) ...[
@@ -2256,6 +2262,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          if (!_isCoachOnly) ...[
           // --- Your Tools ---
           _sectionHeader('YOUR TOOLS', Icons.dashboard),
           _settingsCard([
@@ -2284,8 +2291,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             }, danger: true),
           ]),
           const SizedBox(height: 20),
+          ], // end !_isCoachOnly guard (Your Tools)
 
-          if (!kIsWeb) ...[
+          if (!kIsWeb && !_isCoachOnly) ...[
             _sectionHeader('HOME WIDGET', Icons.widgets_outlined),
             _settingsCard([
               _actionRow(Icons.widgets_outlined, 'Set Up Home Widget', 'Daily encouragement on your home screen', () {
@@ -2355,6 +2363,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          if (!_isCoachOnly) ...[
           // --- Coaching Tools ---
           _sectionHeader('COACHING TOOLS', Icons.fitness_center),
           _settingsCard([
@@ -2422,6 +2431,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             _actionRow(Icons.group_add, 'New Mission', 'Work on a relationship', _showNewMissionDialogSettings),
           ]),
           const SizedBox(height: 20),
+          ], // end !_isCoachOnly guard (Coaching Tools, Archetype, Quests)
 
           // --- Security ---
           _sectionHeader('SECURITY', Icons.security),
@@ -2489,6 +2499,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
           ]),
           const SizedBox(height: 20),
 
+          if (!_isCoachOnly) ...[
           // --- Become a Coach ---
           _sectionHeader('BECOME A COACH', Icons.school),
           _settingsCard([
@@ -2500,6 +2511,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               _actionRow(Icons.trending_up, 'Upgrade to Coach', 'Access DOJOs, mentoring, and client tools', _requestCoachUpgrade),
           ]),
           const SizedBox(height: 20),
+          ], // end !_isCoachOnly guard (Become a Coach)
 
           // --- Account ---
           _sectionHeader('ACCOUNT', Icons.manage_accounts),
