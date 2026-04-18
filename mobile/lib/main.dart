@@ -29,6 +29,7 @@ import 'screens/ai_consent_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'shared_widgets.dart';
+import 'widgets/calendar_views.dart';
 import 'services/device_shield.dart';
 import 'services/nevedal_flutter.dart';
 import 'config/app_config.dart';
@@ -10212,6 +10213,45 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   Set<int> _calRecurringDays = {}; // Mon=0..Sun=6
   Set<String> _calBlockedDates = {}; // YYYY-MM-DD
   bool _calLoadedOnce = false;
+  CalendarView _calView = CalendarView.month;
+  DateTime _calFocusedDate = DateTime.now();
+
+  List<CalendarEvent> _buildCalendarEvents() {
+    final out = <CalendarEvent>[];
+    for (final s in _upcomingSessions) {
+      final startStr = (s['scheduled_start'] ?? '').toString();
+      final endStr = (s['scheduled_end'] ?? '').toString();
+      if (startStr.isEmpty) continue;
+      DateTime? st;
+      DateTime? en;
+      try {
+        st = DateTime.parse(startStr).toLocal();
+      } catch (_) {
+        continue;
+      }
+      try {
+        en = endStr.isEmpty ? null : DateTime.parse(endStr).toLocal();
+      } catch (_) {}
+      en ??= st.add(const Duration(minutes: 60));
+      final status = (s['status'] ?? '').toString();
+      final coach = (s['coach_name'] ?? 'Coach').toString();
+      final color = status == 'pending_approval'
+          ? const Color(0xFFE8D5A3)
+          : const Color(0xFF4ECDC4);
+      out.add(CalendarEvent(
+        id: (s['session_id'] ?? s['id'] ?? '').toString(),
+        start: st,
+        end: en,
+        title: coach,
+        subtitle: status == 'pending_approval' ? 'Pending' : (s['session_type'] ?? '').toString(),
+        color: color,
+        tooltip: '$coach\n${s['date'] ?? ''} ${s['time'] ?? ''}\n${status}',
+        source: 'sanctuary',
+        raw: s,
+      ));
+    }
+    return out;
+  }
   
   Timer? _loadingTimeout;
 
@@ -10398,6 +10438,37 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
     'January','February','March','April','May','June',
     'July','August','September','October','November','December'
   ];
+
+  Widget _buildSwitchedCalendar() {
+    final events = _buildCalendarEvents();
+    void onTap(CalendarEvent ev) {
+      final raw = ev.raw is Map<String, dynamic> ? ev.raw as Map<String, dynamic> : <String, dynamic>{};
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: Text(ev.title, style: const TextStyle(color: Color(0xFFC9A962))),
+          content: Text(
+            '${raw['date'] ?? ''} ${raw['time'] ?? ''}\n${raw['session_type'] ?? ''}\nStatus: ${raw['status'] ?? ''}',
+            style: const TextStyle(color: Colors.white),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        ),
+      );
+    }
+    switch (_calView) {
+      case CalendarView.week:
+        return CalendarWeekGrid(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.day:
+        return CalendarDayGrid(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.list:
+        return CalendarListView(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.timeline:
+        return CalendarTimelineView(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.month:
+        return _buildClientCalendarGrid();
+    }
+  }
 
   Widget _buildClientCalendarGrid() {
     final firstOfMonth = DateTime(_calMonth.year, _calMonth.month, 1);
@@ -10916,7 +10987,20 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           const SizedBox(height: 24),
           const Text('BOOK A SESSION', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
-          _buildClientCalendarGrid(),
+          CalendarToolbar(
+            view: _calView,
+            focusedDate: _calFocusedDate,
+            onViewChanged: (v) => setState(() => _calView = v),
+            onDateChanged: (d) => setState(() {
+              _calFocusedDate = d;
+              _calMonth = DateTime(d.year, d.month, 1);
+            }),
+          ),
+          const SizedBox(height: 8),
+          if (_calView == CalendarView.month)
+            _buildClientCalendarGrid()
+          else
+            SizedBox(height: 480, child: _buildSwitchedCalendar()),
           if (_selectedDate != null) ...[
             const SizedBox(height: 12),
             Row(

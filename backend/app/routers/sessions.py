@@ -48,6 +48,11 @@ from app.services.pg_data_helpers import (
     load_registry_pg, find_user_pg,
 )
 
+try:
+    from app.services.google_calendar_session_sync import sync_session_for_participants as _gcal_sync
+except Exception:
+    _gcal_sync = None
+
 # Initialize classroom analyzer for auto-analysis
 _classroom_analyzer = None
 if CLASSROOM_AVAILABLE:
@@ -430,7 +435,16 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
     
     sessions.append(session)
     await _save_session_dual(request, session, sessions)
-    
+
+    # Fire-and-forget Google Calendar push for both coach and client (if connected).
+    if _gcal_sync:
+        try:
+            db_pool = getattr(request.app.state, "db_pool", None)
+            if db_pool:
+                asyncio.create_task(_gcal_sync(db_pool, session, action="create"))
+        except Exception:
+            pass
+
     resp = {"session": session}
     if zoom_error:
         resp["zoom_error"] = zoom_error
@@ -1099,6 +1113,14 @@ async def update_session(session_id: str, req: UpdateSessionRequest, request: Re
             if req.homework_assigned: s["homework_assigned"] = req.homework_assigned
             s["updated_at"] = str(datetime.now())
             await _save_session_dual(request, s, sessions)
+            if _gcal_sync:
+                try:
+                    db_pool = getattr(request.app.state, "db_pool", None)
+                    if db_pool:
+                        action = "delete" if s.get("status") in ("cancelled", "no_show") else "update"
+                        asyncio.create_task(_gcal_sync(db_pool, s, action=action))
+                except Exception:
+                    pass
             return {"session": s}
 
     raise HTTPException(404, "Session not found")
@@ -1127,12 +1149,26 @@ async def cancel_session(session_id: str, request: Request, current_user: str = 
                     except Exception as e:
                         _logger.warning("cancel_session: PG delete failed: %s", e)
                 save_json(DATA_DIR / "sessions.json", sessions)
+                if _gcal_sync:
+                    try:
+                        db_pool = getattr(request.app.state, "db_pool", None)
+                        if db_pool:
+                            asyncio.create_task(_gcal_sync(db_pool, deleted_session, action="delete"))
+                    except Exception:
+                        pass
                 return {"message": "Session permanently deleted", "session": deleted_session}
             else:
                 s["status"] = "cancelled"
                 s["cancellation_reason"] = reason
                 s["cancelled_at"] = str(datetime.now())
                 await _save_session_dual(request, s, sessions)
+                if _gcal_sync:
+                    try:
+                        db_pool = getattr(request.app.state, "db_pool", None)
+                        if db_pool:
+                            asyncio.create_task(_gcal_sync(db_pool, s, action="delete"))
+                    except Exception:
+                        pass
                 return {"message": "Session cancelled", "session": s}
 
     raise HTTPException(404, "Session not found")

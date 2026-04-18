@@ -316,7 +316,119 @@ async def zoom_webhook(
                 "detail": str(e),
             })
 
+    # =========================================================================
+    # MEETING UPDATE / DELETE → mirror to coaching_sessions + Google Calendar
+    # =========================================================================
+    if event in ("meeting.updated", "meeting.deleted") and meeting_id:
+        dedup_key = f"{meeting_id}_{event}_{(payload.get('event_ts') or '')}"
+        if dedup_key in _processed_zoom_events:
+            return {"status": "already_processed"}
+        _processed_zoom_events.add(dedup_key)
+        if len(_processed_zoom_events) > 10000:
+            _processed_zoom_events.clear()
+        try:
+            asyncio.create_task(
+                _process_meeting_lifecycle_event(event, payload, meeting_id, mapping)
+            )
+        except Exception as e:
+            logger.error(f"[Zoom] Failed to spawn meeting lifecycle task: {e}")
+
     return {"status": "ok"}
+
+
+# =============================================================================
+# BACKGROUND: meeting.updated / meeting.deleted → coaching_sessions + Google
+# =============================================================================
+async def _process_meeting_lifecycle_event(
+    event: str,
+    payload: Dict[str, Any],
+    meeting_id: str,
+    mapping: Dict[str, Any],
+) -> None:
+    """Mirror Zoom meeting.updated/deleted into coaching_sessions and push to
+    Google Calendar (best-effort, fire-and-forget)."""
+    try:
+        from app.main import app  # late import to avoid circular at module load
+    except Exception:
+        return
+    db_pool = getattr(app.state, "db_pool", None) if app else None
+    if not db_pool:
+        return
+
+    obj = (payload.get("payload") or {}).get("object") or {}
+    new_start = obj.get("start_time") or ""  # ISO 8601, e.g. 2026-04-20T14:00:00Z
+    new_duration = obj.get("duration") or 0  # minutes
+    new_topic = obj.get("topic") or ""
+
+    session_id = (mapping or {}).get("session_id") or ""
+    try:
+        async with db_pool.acquire() as conn:
+            row = None
+            if session_id:
+                row = await conn.fetchrow(
+                    "SELECT * FROM coaching_sessions WHERE session_id = $1",
+                    session_id,
+                )
+            if row is None:
+                # Fallback: look up by zoom_meeting_id
+                row = await conn.fetchrow(
+                    "SELECT * FROM coaching_sessions WHERE zoom_meeting_id = $1 "
+                    "ORDER BY scheduled_at DESC LIMIT 1",
+                    str(meeting_id),
+                )
+            if row is None:
+                logger.info(f"[Zoom] meeting {meeting_id} not mapped to a session; skipping")
+                return
+
+            updated_session: Dict[str, Any] = dict(row)
+            if event == "meeting.deleted":
+                await conn.execute(
+                    "UPDATE coaching_sessions SET status = 'cancelled', updated_at = NOW() "
+                    "WHERE session_id = $1",
+                    updated_session.get("session_id"),
+                )
+                _gcal_action = "delete"
+            else:
+                # meeting.updated — refresh time / title if provided
+                if new_start:
+                    try:
+                        start_dt = dt.datetime.fromisoformat(new_start.replace("Z", "+00:00"))
+                        end_dt = start_dt + dt.timedelta(minutes=int(new_duration or 60))
+                        await conn.execute(
+                            "UPDATE coaching_sessions SET scheduled_at = $1, ended_at = $2, "
+                            "scheduled_start = $1, scheduled_end = $2, updated_at = NOW() "
+                            "WHERE session_id = $3",
+                            start_dt, end_dt, updated_session.get("session_id"),
+                        )
+                        updated_session["scheduled_start"] = start_dt.isoformat()
+                        updated_session["scheduled_end"] = end_dt.isoformat()
+                    except Exception as e:
+                        logger.warning(f"[Zoom] failed to parse start_time {new_start}: {e}")
+                if new_topic:
+                    await conn.execute(
+                        "UPDATE coaching_sessions SET title = $1 WHERE session_id = $2",
+                        new_topic[:200], updated_session.get("session_id"),
+                    )
+                    updated_session["title"] = new_topic
+                _gcal_action = "update"
+
+        # Best-effort Google Calendar mirror (skip if helper unavailable).
+        try:
+            from app.services.google_calendar_session_sync import sync_session_for_participants
+            asyncio.create_task(
+                sync_session_for_participants(db_pool, updated_session, action=_gcal_action)
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(f"[Zoom] meeting lifecycle handler failed: {e}")
+        _append_json_list(ZOOM_WEBHOOK_ERRORS_FILE, {
+            "received_at": dt.datetime.utcnow().isoformat(),
+            "error": "meeting_lifecycle_failed",
+            "event": event,
+            "meeting_id": meeting_id,
+            "detail": str(e),
+        })
 
 
 # =============================================================================

@@ -134,15 +134,28 @@ class CoachNexusV2:
             except:
                 pass
 
-        # Also include sessions scheduled via FastAPI `sessions.json`
-        # (so "Start Zoom" appears without duplicating a separate schedule store).
+        # Also include sessions scheduled via WebSocket `client_book_session`
+        # (which writes to the bridge's own /app/data/sessions.json — plaintext).
+        # The backend's /app/backend_data/sessions.json is Fernet-encrypted and
+        # cannot be JSON-decoded here; try bridge first, then backend as fallback.
         try:
-            # Prefer backend store when available (prod); fallback to local store (dev).
-            sessions_file = (self._backend_data_dir() or self._data_dir()) / "sessions.json"
             sessions_raw = []
-            if sessions_file.exists():
-                with open(sessions_file, "r") as f:
-                    sessions_raw = json.load(f) or []
+            for _candidate in (self._data_dir(), self._backend_data_dir()):
+                if not _candidate:
+                    continue
+                _sf = _candidate / "sessions.json"
+                if not _sf.exists():
+                    continue
+                try:
+                    with open(_sf, "r") as f:
+                        _loaded = json.load(f) or []
+                    if isinstance(_loaded, list) and _loaded:
+                        sessions_raw = _loaded
+                        break
+                except (json.JSONDecodeError, UnicodeDecodeError) as _je:
+                    # Encrypted or corrupted file — skip and try next candidate
+                    print(f">>> [WARN] get_calendar_data: skipping {_sf}: {type(_je).__name__}")
+                    continue
 
             for ses in (sessions_raw or []):
                 try:

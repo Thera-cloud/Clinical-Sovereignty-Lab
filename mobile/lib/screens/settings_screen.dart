@@ -23,6 +23,7 @@ import 'vault_browser_screen.dart';
 import 'nate_organizer_screen.dart';
 import 'quiz_screen.dart';
 import 'nevedal_reports_screen.dart';
+import '../widgets/google_calendar_section.dart';
 import 'distress_beacon_screen.dart';
 import 'secure_search_screen.dart';
 import 'coaching_mesh_screen.dart';
@@ -1740,6 +1741,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               ],
             ),
           ]),
+          const SizedBox(height: 20),
+
+          // --- Calendar Sync ---
+          _sectionHeader('CALENDAR SYNC', Icons.event_available),
+          GoogleCalendarSection(
+            token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+          ),
           const SizedBox(height: 20),
 
           if (!_isCoachOnly) ...[
@@ -4154,6 +4162,13 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
               ],
             ),
           ]),
+          const SizedBox(height: 20),
+
+          // --- Calendar Sync ---
+          _sectionHeader('CALENDAR SYNC', Icons.event_available),
+          GoogleCalendarSection(
+            token: (_profile['token'] ?? widget.profile['token'] ?? '').toString(),
+          ),
           const SizedBox(height: 20),
 
           // --- Practice & Fees ---

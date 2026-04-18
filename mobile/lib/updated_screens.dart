@@ -20,6 +20,7 @@ import 'metrics_widgets.dart';
 import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 
 import 'shared_widgets.dart';
+import 'widgets/calendar_views.dart';
 import 'services/nevedal_flutter.dart';
 import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS;
 import 'debug_logger.dart';
@@ -4157,6 +4158,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   // Calendar navigation
   DateTime _calMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime? _calSelectedDay;
+  CalendarView _calView = CalendarView.month;
+  DateTime _calFocusedDate = DateTime.now();
   
   // Payout / Stripe Connect state
   Map<String, dynamic> _connectStatus = {};
@@ -6863,7 +6866,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             children: [
               // ===== AVAILABILITY SUMMARY + CALENDAR (always visible) =====
               _buildAvailabilitySummaryCard(),
-              _buildCalendarGrid(),
+              CalendarToolbar(
+                view: _calView,
+                focusedDate: _calFocusedDate,
+                onViewChanged: (v) => setState(() => _calView = v),
+                onDateChanged: (d) => setState(() {
+                  _calFocusedDate = d;
+                  _calMonth = DateTime(d.year, d.month, 1);
+                }),
+              ),
+              const SizedBox(height: 8),
+              if (_calView == CalendarView.month)
+                _buildCalendarGrid()
+              else
+                SizedBox(height: 480, child: _buildCoachSwitchedCalendar()),
 
               // ===== INBOUND COACH REQUESTS =====
               if (_inboundRequests.isNotEmpty) ...[
@@ -7428,6 +7444,93 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   bool _hasRecurringForDay(int dow) =>
       _myRecurring.any((r) => (r['day_of_week'] ?? -1) == dow);
+
+  // Build CalendarEvent list from _schedule + _pendingBookings for switched views.
+  List<CalendarEvent> _buildCoachCalendarEvents() {
+    final out = <CalendarEvent>[];
+    void addFromMap(Map<String, dynamic> m, {required bool pending}) {
+      DateTime? start;
+      DateTime? end;
+      try {
+        final ss = (m['scheduled_start'] ?? '').toString();
+        if (ss.isNotEmpty) start = DateTime.parse(ss).toLocal();
+      } catch (_) {}
+      try {
+        final se = (m['scheduled_end'] ?? '').toString();
+        if (se.isNotEmpty) end = DateTime.parse(se).toLocal();
+      } catch (_) {}
+      if (start == null) {
+        try {
+          final ds = (m['date'] ?? '').toString();
+          final ts = (m['time'] ?? '09:00 AM').toString();
+          if (ds.isNotEmpty) {
+            start = DateTime.parse(ds);
+          }
+        } catch (_) {}
+      }
+      if (start == null) return;
+      final dur = (m['duration_minutes'] is int)
+          ? m['duration_minutes'] as int
+          : int.tryParse('${m['duration_minutes'] ?? ''}') ?? 60;
+      end ??= start.add(Duration(minutes: dur));
+      final clientName = (m['client_name'] ?? 'Client').toString();
+      final status = (m['status'] ?? '').toString();
+      final color = pending
+          ? const Color(0xFFC9A962)
+          : (status == 'pending_approval'
+              ? const Color(0xFFC9A962)
+              : const Color(0xFF4ECDC4));
+      out.add(CalendarEvent(
+        id: (m['session_id'] ?? m['booking_id'] ?? '${start.millisecondsSinceEpoch}').toString(),
+        start: start,
+        end: end,
+        title: clientName,
+        subtitle: (m['session_type'] ?? '').toString(),
+        color: color,
+        tooltip: '$clientName • ${m['time'] ?? ''}${pending ? ' (pending)' : ''}',
+        source: 'sanctuary',
+        raw: m,
+      ));
+    }
+    for (final raw in _schedule) {
+      if (raw is Map) addFromMap(Map<String, dynamic>.from(raw), pending: false);
+    }
+    for (final raw in _pendingBookings) {
+      addFromMap(Map<String, dynamic>.from(raw), pending: true);
+    }
+    return out;
+  }
+
+  Widget _buildCoachSwitchedCalendar() {
+    final events = _buildCoachCalendarEvents();
+    void onTap(CalendarEvent ev) {
+      final raw = ev.raw is Map<String, dynamic> ? ev.raw as Map<String, dynamic> : <String, dynamic>{};
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF111111),
+          title: Text(ev.title, style: const TextStyle(color: Color(0xFFC9A962))),
+          content: Text(
+            '${raw['date'] ?? ''} ${raw['time'] ?? ''}\n${raw['session_type'] ?? ''}\nStatus: ${raw['status'] ?? ''}',
+            style: const TextStyle(color: Colors.white),
+          ),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        ),
+      );
+    }
+    switch (_calView) {
+      case CalendarView.week:
+        return CalendarWeekGrid(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.day:
+        return CalendarDayGrid(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.list:
+        return CalendarListView(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.timeline:
+        return CalendarTimelineView(focusedDate: _calFocusedDate, events: events, onEventTap: onTap);
+      case CalendarView.month:
+        return _buildCalendarGrid();
+    }
+  }
 
   // List of confirmed sessions on a given date (best-effort match against _schedule items)
   List<Map<String, dynamic>> _sessionsOnDate(DateTime d) {

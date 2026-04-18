@@ -2626,6 +2626,17 @@ async def lifespan(app: FastAPI):
     except Exception as qb_err:
         print(f"   ⚠️  QuickBooksSyncAgent init failed: {qb_err}")
 
+    # ── Google Calendar Sync Agent — pulls Google events every 5 min for all connected users ──
+    _google_calendar_sync_agent = None
+    try:
+        from app.services.google_calendar_sync_agent import GoogleCalendarSyncAgent
+        _google_calendar_sync_agent = GoogleCalendarSyncAgent(db_pool=db_pool, app_state=app.state)
+        await _google_calendar_sync_agent.start()
+        app.state.google_calendar_sync_agent = _google_calendar_sync_agent
+        print("   ✅ GoogleCalendarSyncAgent started (5min cycle)")
+    except Exception as gcsa_err:
+        print(f"   ⚠️  GoogleCalendarSyncAgent init failed: {gcsa_err}")
+
     # ── QuickBooks Auditor — 3x daily 10-check trust scorecard ──
     _qb_auditor = None
     try:
@@ -2972,6 +2983,7 @@ async def lifespan(app: FastAPI):
         ("session_payment_agent", _session_payment_agent is not None),
         ("signup_sharing_agent", _signup_sharing_agent is not None),
         ("quickbooks_sync_agent", _qb_sync_agent is not None),
+        ("google_calendar_sync_agent", _google_calendar_sync_agent is not None),
         ("quickbooks_auditor", _qb_auditor is not None),
         ("corporate_command_auditor", _corp_auditor is not None),
         ("hot_memory", getattr(app.state, "hot_memory", None) is not None),
@@ -3353,6 +3365,7 @@ async def lifespan(app: FastAPI):
     # Stop QB Sync Agent, QB Auditor, Corp Command Auditor
     for _agent_name, _agent_var in [
         ("QuickBooksSyncAgent", _qb_sync_agent),
+        ("GoogleCalendarSyncAgent", _google_calendar_sync_agent),
         ("QuickBooksAuditor", _qb_auditor),
         ("CorporateCommandAuditor", _corp_auditor),
     ]:
@@ -3704,6 +3717,14 @@ try:
     app.include_router(coach_qb_oauth_router)
 except Exception as _coqb_err:
     print(f"   ⚠️  Coach QuickBooks router failed: {_coqb_err}")
+
+# Google Calendar API (per-user auth-gated + public OAuth callback)
+try:
+    from app.routers.google_calendar_api import router as google_calendar_router, oauth_router as google_calendar_oauth_router
+    app.include_router(google_calendar_router)
+    app.include_router(google_calendar_oauth_router)
+except Exception as _gcal_err:
+    print(f"   ⚠️  Google Calendar router failed: {_gcal_err}")
 
 # Corporate Command API (CORP_ADMIN dashboard)
 try:

@@ -11529,6 +11529,36 @@ async def handle_client(websocket, path=None):
                                                     "start": _bs.isoformat(),
                                                     "end": _be.isoformat() if _be else "",
                                                 })
+                                        # Subtract Google Calendar external busy windows for this coach.
+                                        # Resolve coach username from the registry (table is keyed by username).
+                                        try:
+                                            _coach_username = None
+                                            try:
+                                                _registry = load_registry()
+                                                for _k, _v in _registry.items():
+                                                    _p = (_v or {}).get("profile", {})
+                                                    if _p.get("hardware_id") == coach_id and _p.get("role") == "COACH":
+                                                        _coach_username = _p.get("username") or _k
+                                                        break
+                                            except Exception:
+                                                _coach_username = None
+                                            if _coach_username:
+                                                _ext = await _aconn.fetch(
+                                                    "SELECT start_at, end_at FROM google_external_busy "
+                                                    "WHERE user_id = $1 AND start_at::date = $2",
+                                                    _coach_username, _target_date_obj,
+                                                )
+                                                for _xr in _ext:
+                                                    _xs = _xr["start_at"]
+                                                    _xe = _xr["end_at"]
+                                                    if _xs and _xe:
+                                                        booked_slots.append({
+                                                            "start": _xs.isoformat(),
+                                                            "end": _xe.isoformat(),
+                                                            "source": "google",
+                                                        })
+                                        except Exception as _ext_err:
+                                            print(f">>> [WARN] external busy lookup failed: {_ext_err}")
                                         for slot in day_slots:
                                             _st_str = slot.get("start", "09:00:00")
                                             _en_str = slot.get("end", "17:00:00")
@@ -11757,7 +11787,18 @@ async def handle_client(websocket, path=None):
                                     "type": "session_booked",
                                     "session": new_session,
                                 }))
-                                
+
+                                # Fire-and-forget Google Calendar push for both coach and client.
+                                # Guarded internally by sync_state dedup.
+                                try:
+                                    from app.services.google_calendar_session_sync import (
+                                        sync_session_for_participants as _gcal_push,
+                                    )
+                                    if db_pool:
+                                        asyncio.create_task(_gcal_push(db_pool, new_session, action="create"))
+                                except Exception:
+                                    pass
+
                                 # Notify coach of pending booking
                                 coach_ws = connected_coaches.get(coach_id)
                                 if coach_ws:
@@ -12337,16 +12378,27 @@ async def handle_client(websocket, path=None):
                         try:
                             sessions = load_json_file(SESSIONS_FILE, [])
                             found = False
+                            cancelled_session = None
                             for s in sessions:
                                 if s.get("session_id") == session_id and s.get("client_id") == client_id:
                                     s["status"] = "cancelled"
                                     s["cancelled_at"] = str(datetime.datetime.now())
                                     s["cancelled_by"] = "CLIENT"
+                                    cancelled_session = s
                                     found = True
                                     break
                             if found:
                                 save_json_file(SESSIONS_FILE, sessions)
                                 await websocket.send(json.dumps({"type": "session_cancelled", "session_id": session_id}))
+                                # Fire-and-forget Google Calendar delete for both participants.
+                                try:
+                                    from app.services.google_calendar_session_sync import (
+                                        sync_session_for_participants as _gcal_push,
+                                    )
+                                    if db_pool and cancelled_session:
+                                        asyncio.create_task(_gcal_push(db_pool, cancelled_session, action="delete"))
+                                except Exception:
+                                    pass
                             else:
                                 await websocket.send(json.dumps({"type": "error", "message": "Session not found"}))
                         except Exception as e:
@@ -12506,7 +12558,19 @@ async def handle_client(websocket, path=None):
                                     "type": "booking_approved",
                                     "session": found_session,
                                 }))
-                                
+
+                                # Fire-and-forget Google Calendar update for both participants
+                                # (status moved pending → scheduled, and zoom link may have appeared).
+                                try:
+                                    from app.services.google_calendar_session_sync import (
+                                        sync_session_for_participants as _gcal_push,
+                                    )
+                                    if db_pool:
+                                        _gact = "update" if found_session.get("google_event_id") else "create"
+                                        asyncio.create_task(_gcal_push(db_pool, found_session, action=_gact))
+                                except Exception:
+                                    pass
+
                                 # Notify client
                                 client_id = found_session.get("client_id", "")
                                 client_ws = connected_clients.get(client_id)
