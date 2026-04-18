@@ -1206,7 +1206,6 @@ RULES:
                 {"role": "user", "content": conversation_text},
             ],
             "max_completion_tokens": 8000,
-            "reasoning_effort": "high",
         }
 
         try:
@@ -3604,7 +3603,6 @@ RULES:
                 {"role": "user", "content": conversation_text},
             ],
             "max_completion_tokens": 16000,
-            "reasoning_effort": "high",
         }
 
         try:

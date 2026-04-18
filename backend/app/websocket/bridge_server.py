@@ -10259,13 +10259,16 @@ async def handle_client(websocket, path=None):
                 "get_my_devices", "get_coherence_report",
                 "get_client_profile", "get_family_members",
                 "client_get_coach_info", "client_get_coach_availability",
+                "client_get_coach_month_overview",
                 "search_consent_approved", "search_request",
                 "client_get_upcoming_sessions",
                 # --- Coach data-fetch ---
                 "coach_get_clients", "fetch_coach_calendar", "fetch_coach_sessions",
                 "coach_request_briefing", "coach_get_briefing",
                 "coach_get_client_briefing",
-                "coach_get_pending_bookings", "coach_get_financials",
+                "coach_get_pending_bookings", "coach_get_financials", "update_availability",
+                "coach_get_my_availability", "coach_block_time", "coach_unblock_time",
+                "get_profile",
                 "coach_get_master", "coach_get_hours", "coach_export_hours",
                 "fetch_reports", "fetch_coaching_advice", "fetch_avatar_config",
                 # --- Coach mesh / hierarchy (read + lightweight writes) ---
@@ -11471,6 +11474,7 @@ async def handle_client(websocket, path=None):
                         await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
                     else:
                         try:
+                            _DAY_INT_TO_NAME = {0: "monday", 1: "tuesday", 2: "wednesday", 3: "thursday", 4: "friday", 5: "saturday", 6: "sunday"}
                             async with db_pool.acquire() as _aconn:
                                 _coach_uuid = await _aconn.fetchval(
                                     "SELECT id FROM users WHERE hardware_id = $1", coach_id
@@ -11481,11 +11485,13 @@ async def handle_client(websocket, path=None):
 
                                 _slots_rows = await _aconn.fetch(
                                     "SELECT day_of_week, start_time, end_time FROM coach_availability "
-                                    "WHERE coach_id = $1 AND is_blocked = false ORDER BY day_of_week, start_time",
+                                    "WHERE coach_id = $1 AND specific_date IS NULL "
+                                    "AND (is_blocked IS NULL OR is_blocked = false) "
+                                    "ORDER BY day_of_week, start_time",
                                     _coach_uuid,
                                 )
                                 avail_slots = [
-                                    {"day": r["day_of_week"], "start": r["start_time"], "end": r["end_time"]}
+                                    {"day": r["day_of_week"], "day_name": _DAY_INT_TO_NAME.get(r["day_of_week"], ""), "start": str(r["start_time"]), "end": str(r["end_time"])}
                                     for r in _slots_rows
                                 ]
                                 avail_data = {"slots": avail_slots, "timezone": "America/New_York"}
@@ -11501,21 +11507,33 @@ async def handle_client(websocket, path=None):
                                         day_name = ""
 
                                     if target_dt:
-                                        day_slots = [s for s in avail_slots if s.get("day", "").lower() == day_name]
+                                        _target_date_obj = target_dt.date()
+                                        _is_blocked_date = await _aconn.fetchval(
+                                            "SELECT 1 FROM coach_availability "
+                                            "WHERE coach_id = $1 AND specific_date = $2 "
+                                            "AND is_blocked = true LIMIT 1",
+                                            _coach_uuid, _target_date_obj,
+                                        )
+                                        day_slots = [] if _is_blocked_date else [s for s in avail_slots if s.get("day_name", "") == day_name]
                                         _booked = await _aconn.fetch(
-                                            "SELECT scheduled_start, scheduled_end FROM coaching_sessions "
-                                            "WHERE coach_id = $1 AND status IN ('scheduled','active') "
-                                            "AND scheduled_start::date = $2::date",
-                                            coach_id, target_date,
+                                            "SELECT scheduled_at, ended_at FROM coaching_sessions "
+                                            "WHERE coach_id = $1 AND status IN ('scheduled','active','SCHEDULED','ACTIVE') "
+                                            "AND scheduled_at::date = $2",
+                                            coach_id, _target_date_obj,
                                         )
                                         for _br in _booked:
-                                            booked_slots.append({
-                                                "start": _br["scheduled_start"].isoformat() if _br["scheduled_start"] else "",
-                                                "end": _br["scheduled_end"].isoformat() if _br["scheduled_end"] else "",
-                                            })
+                                            _bs = _br["scheduled_at"]
+                                            _be = _br["ended_at"] or (_bs + datetime.timedelta(hours=1)) if _bs else None
+                                            if _bs:
+                                                booked_slots.append({
+                                                    "start": _bs.isoformat(),
+                                                    "end": _be.isoformat() if _be else "",
+                                                })
                                         for slot in day_slots:
-                                            start_h = int(slot.get("start", "09:00").split(":")[0])
-                                            end_h = int(slot.get("end", "17:00").split(":")[0])
+                                            _st_str = slot.get("start", "09:00:00")
+                                            _en_str = slot.get("end", "17:00:00")
+                                            start_h = int(_st_str.split(":")[0])
+                                            end_h = int(_en_str.split(":")[0])
                                             for hour in range(start_h, end_h):
                                                 slot_start = target_dt.replace(hour=hour, minute=0, second=0)
                                                 slot_end = slot_start + datetime.timedelta(hours=1)
@@ -11541,6 +11559,7 @@ async def handle_client(websocket, path=None):
                                 "date": target_date,
                             }))
                         except Exception as e:
+                            import traceback; traceback.print_exc()
                             print(f">>> [ERROR] Failed to load availability: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
@@ -12340,21 +12359,55 @@ async def handle_client(websocket, path=None):
                     client_id = (current_profile.get("hardware_id") or "").strip()
                     try:
                         sessions = load_json_file(SESSIONS_FILE, [])
+                        # Build coach lookup once
+                        _registry_for_coach = load_registry()
+                        _coach_lookup = {}
+                        for _rk, _rv in _registry_for_coach.items():
+                            _p = _rv.get("profile", {}) if isinstance(_rv, dict) else {}
+                            if _p.get("role") == "COACH":
+                                _hid = _p.get("hardware_id", "")
+                                if _hid:
+                                    _coach_lookup[_hid] = (
+                                        _p.get("name")
+                                        or _p.get("display_name")
+                                        or _p.get("full_name")
+                                        or _p.get("username")
+                                        or "Coach"
+                                    )
                         upcoming = []
                         for s in sessions:
-                            if s.get("client_id") == client_id and s.get("status") in ["scheduled", "active"]:
+                            if s.get("client_id") == client_id and s.get("status") in ["scheduled", "active", "pending_approval"]:
+                                _st_iso = (s.get("scheduled_start") or "")
+                                _en_iso = (s.get("scheduled_end") or "")
+                                _date_str, _time_str, _dur_min = "", "", 50
+                                try:
+                                    _st_dt = datetime.datetime.fromisoformat(_st_iso.replace("Z", "+00:00")) if _st_iso else None
+                                    _en_dt = datetime.datetime.fromisoformat(_en_iso.replace("Z", "+00:00")) if _en_iso else None
+                                    if _st_dt:
+                                        _date_str = _st_dt.date().isoformat()
+                                        _time_str = _st_dt.strftime("%H:%M")
+                                    if _st_dt and _en_dt and _en_dt > _st_dt:
+                                        _dur_min = max(5, int((_en_dt - _st_dt).total_seconds() / 60))
+                                except Exception:
+                                    pass
+                                _coach_id = s.get("coach_id", "") or ""
                                 upcoming.append({
                                     "session_id": s.get("session_id"),
-                                    "coach_id": s.get("coach_id"),
-                                    "scheduled_start": s.get("scheduled_start"),
-                                    "scheduled_end": s.get("scheduled_end"),
+                                    "coach_id": _coach_id,
+                                    "coach_name": _coach_lookup.get(_coach_id, "Coach"),
+                                    "scheduled_start": _st_iso,
+                                    "scheduled_end": _en_iso,
+                                    "date": _date_str,
+                                    "time": _time_str,
+                                    "duration_minutes": _dur_min,
                                     "status": s.get("status"),
                                     "zoom_link": s.get("zoom_link", ""),
                                     "session_type": s.get("session_type", "COACH"),
                                     "client_name": s.get("client_name", ""),
                                     "notes": s.get("notes", ""),
+                                    "platform": s.get("platform", "Zoom"),
                                 })
-                        upcoming.sort(key=lambda x: x.get("scheduled_start", ""))
+                        upcoming.sort(key=lambda x: x.get("scheduled_start") or "")
                         await websocket.send(json.dumps({
                             "type": "client_upcoming_sessions",
                             "sessions": upcoming,
@@ -12521,14 +12574,415 @@ async def handle_client(websocket, path=None):
                     coach_id = (current_profile.get("hardware_id") or "").strip()
                     try:
                         sessions = load_json_file(SESSIONS_FILE, [])
-                        pending = [s for s in sessions if s.get("coach_id") == coach_id and s.get("status") == "pending_approval"]
-                        pending.sort(key=lambda x: x.get("scheduled_start", ""))
+                        # Build client lookup once
+                        _registry_for_clients = load_registry()
+                        _client_lookup = {}
+                        for _rk, _rv in _registry_for_clients.items():
+                            _p = _rv.get("profile", {}) if isinstance(_rv, dict) else {}
+                            if _p.get("role") == "CLIENT":
+                                _hid = _p.get("hardware_id", "")
+                                if _hid:
+                                    _client_lookup[_hid] = (
+                                        _p.get("name")
+                                        or _p.get("display_name")
+                                        or _p.get("full_name")
+                                        or _p.get("username")
+                                        or "Client"
+                                    )
+                        pending = []
+                        for s in sessions:
+                            if s.get("coach_id") != coach_id or s.get("status") != "pending_approval":
+                                continue
+                            _st_iso = (s.get("scheduled_start") or "")
+                            _en_iso = (s.get("scheduled_end") or "")
+                            _date_str, _time_str, _dur_min = "", "", 50
+                            try:
+                                _st_dt = datetime.datetime.fromisoformat(_st_iso.replace("Z", "+00:00")) if _st_iso else None
+                                _en_dt = datetime.datetime.fromisoformat(_en_iso.replace("Z", "+00:00")) if _en_iso else None
+                                if _st_dt:
+                                    _date_str = _st_dt.date().isoformat()
+                                    _time_str = _st_dt.strftime("%H:%M")
+                                if _st_dt and _en_dt and _en_dt > _st_dt:
+                                    _dur_min = max(5, int((_en_dt - _st_dt).total_seconds() / 60))
+                            except Exception:
+                                pass
+                            _client_id = s.get("client_id", "") or ""
+                            _client_name = s.get("client_name") or _client_lookup.get(_client_id, "Client")
+                            enriched = dict(s)
+                            enriched["date"] = _date_str
+                            enriched["time"] = _time_str
+                            enriched["duration"] = _dur_min
+                            enriched["duration_minutes"] = _dur_min
+                            enriched["client_name"] = _client_name
+                            pending.append(enriched)
+                        pending.sort(key=lambda x: x.get("scheduled_start") or "")
                         await websocket.send(json.dumps({
                             "type": "coach_pending_bookings",
                             "sessions": pending,
                         }))
                     except Exception as e:
                         print(f">>> [ERROR] Pending bookings fetch failed: {e}")
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === GET PROFILE (refresh from PostgreSQL) ===
+            elif t == "get_profile":
+                if not current_profile:
+                    await websocket.send(json.dumps({"type": "error", "message": "Not authenticated"}))
+                    continue
+                try:
+                    _gp_hw = current_profile.get("hardware_id", "")
+                    _gp_uname = current_profile.get("username", "")
+                    _gp_profile = dict(current_profile)
+                    if db_pool and (_gp_hw or _gp_uname):
+                        try:
+                            async with db_pool.acquire() as _gp_conn:
+                                _gp_row = await _gp_conn.fetchrow(
+                                    """SELECT username, role, email, name, hardware_id, family_id,
+                                              tier, subscription_status, token_balance,
+                                              coach_id, profile_data, created_at, last_login_at,
+                                              company_id, password_hash IS NOT NULL AS has_password
+                                       FROM users
+                                       WHERE hardware_id = $1 OR username = $1
+                                       LIMIT 1""",
+                                    _gp_hw or _gp_uname,
+                                )
+                                if _gp_row:
+                                    _gp_pdata = _gp_row["profile_data"] or {}
+                                    if isinstance(_gp_pdata, str):
+                                        try:
+                                            _gp_pdata = json.loads(_gp_pdata)
+                                        except Exception:
+                                            _gp_pdata = {}
+                                    if isinstance(_gp_pdata, dict):
+                                        _gp_profile.update(_gp_pdata)
+                                    _gp_profile["username"] = _gp_row["username"]
+                                    _gp_profile["role"] = _gp_row["role"]
+                                    _gp_profile["email"] = _gp_row["email"] or _gp_profile.get("email", "")
+                                    _gp_profile["name"] = _gp_row["name"] or _gp_profile.get("name", "")
+                                    _gp_profile["hardware_id"] = _gp_row["hardware_id"]
+                                    _gp_profile["family_id"] = str(_gp_row["family_id"]) if _gp_row["family_id"] else None
+                                    _gp_profile["tier"] = _gp_row["tier"]
+                                    _gp_profile["subscription_status"] = _gp_row["subscription_status"]
+                                    _gp_profile["token_balance"] = int(_gp_row["token_balance"] or 0)
+                                    _gp_profile["coach_id"] = _gp_row["coach_id"]
+                                    _gp_profile["company_id"] = str(_gp_row["company_id"]) if _gp_row["company_id"] else None
+                                    if _gp_row.get("created_at"):
+                                        _gp_profile["created_at"] = _gp_row["created_at"].isoformat()
+                                    if _gp_row.get("last_login_at"):
+                                        _gp_profile["last_login_at"] = _gp_row["last_login_at"].isoformat()
+                                    # Refresh in-memory current_profile so subsequent handlers see fresh data
+                                    current_profile.update(_gp_profile)
+                        except Exception as _gp_e:
+                            print(f">>> [GET_PROFILE] DB lookup failed: {_gp_e}")
+                    # Strip sensitive fields before returning
+                    for _sensitive in ("password", "password_hash", "credentials", "totp_secret",
+                                       "webauthn_challenge", "webauthn_auth_challenge",
+                                       "sms_verification_code", "session_token"):
+                        _gp_profile.pop(_sensitive, None)
+                    await websocket.send(json.dumps({
+                        "type": "profile_loaded",
+                        "profile": _gp_profile,
+                    }))
+                except Exception as _gp_top:
+                    import traceback; traceback.print_exc()
+                    print(f">>> [ERROR] get_profile failed: {_gp_top}")
+                    await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === COACH: UPDATE AVAILABILITY ===
+            elif t == "update_availability":
+                if current_profile and current_profile.get("role") == "COACH":
+                    if not db_pool:
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                    else:
+                        try:
+                            _ca_hw = current_profile.get("hardware_id", "")
+                            _ca_slots = d.get("slots", [])
+                            async with db_pool.acquire() as _aconn:
+                                _ca_uuid = await _aconn.fetchval(
+                                    "SELECT id FROM users WHERE hardware_id = $1", _ca_hw
+                                )
+                                if not _ca_uuid:
+                                    await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
+                                    continue
+                                _DAY_NAME_TO_INT = {"mon": 0, "monday": 0, "tue": 1, "tuesday": 1, "wed": 2, "wednesday": 2, "thu": 3, "thursday": 3, "fri": 4, "friday": 4, "sat": 5, "saturday": 5, "sun": 6, "sunday": 6}
+                                # Clean-slate: delete existing recurring (non-blocked, no specific_date) rows before reinsert
+                                _ca_replace = bool(d.get("replace_recurring", True))
+                                if _ca_replace:
+                                    await _aconn.execute(
+                                        "DELETE FROM coach_availability "
+                                        "WHERE coach_id = $1 AND specific_date IS NULL "
+                                        "AND (is_blocked IS NULL OR is_blocked = false)",
+                                        _ca_uuid,
+                                    )
+                                _ca_added = 0
+                                for _raw_slot in _ca_slots:
+                                    if isinstance(_raw_slot, str):
+                                        _parts = _raw_slot.strip().split()
+                                        if len(_parts) >= 2:
+                                            _day_str = _parts[0].lower().rstrip(",")
+                                            _day_int = _DAY_NAME_TO_INT.get(_day_str)
+                                            if _day_int is None:
+                                                continue
+                                            _time_str = _parts[1]
+                                            _am_pm = _parts[2].upper() if len(_parts) > 2 else ""
+                                            try:
+                                                _th, _tm = _time_str.split(":")
+                                                _th = int(_th)
+                                                _tm = int(_tm) if _tm else 0
+                                                if _am_pm == "PM" and _th < 12:
+                                                    _th += 12
+                                                elif _am_pm == "AM" and _th == 12:
+                                                    _th = 0
+                                                _start = datetime.time(_th, _tm)
+                                                _end = datetime.time(min(_th + 1, 23), _tm)
+                                            except Exception:
+                                                continue
+                                            await _aconn.execute(
+                                                "INSERT INTO coach_availability (coach_id, day_of_week, start_time, end_time, is_available) "
+                                                "VALUES ($1, $2, $3, $4, true)",
+                                                _ca_uuid, _day_int, _start, _end,
+                                            )
+                                            _ca_added += 1
+                                    elif isinstance(_raw_slot, dict):
+                                        _day_int = _raw_slot.get("day_of_week")
+                                        _st = _raw_slot.get("start_time", "09:00")
+                                        _et = _raw_slot.get("end_time", "10:00")
+                                        if _day_int is None:
+                                            continue
+                                        try:
+                                            _start = datetime.time.fromisoformat(_st) if isinstance(_st, str) else _st
+                                            _end = datetime.time.fromisoformat(_et) if isinstance(_et, str) else _et
+                                        except Exception:
+                                            continue
+                                        await _aconn.execute(
+                                            "INSERT INTO coach_availability (coach_id, day_of_week, start_time, end_time, is_available) "
+                                            "VALUES ($1, $2, $3, $4, true)",
+                                            _ca_uuid, int(_day_int), _start, _end,
+                                        )
+                                        _ca_added += 1
+                            print(f">>> [AVAIL] Coach {_ca_hw} added {_ca_added} availability slot(s)")
+                            await websocket.send(json.dumps({
+                                "type": "availability_updated",
+                                "added": _ca_added,
+                                "status": "ok",
+                            }))
+                        except Exception as e:
+                            import traceback; traceback.print_exc()
+                            print(f">>> [ERROR] Failed to update availability: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === COACH: GET MY AVAILABILITY (recurring slots + blocks) ===
+            elif t == "coach_get_my_availability":
+                if current_profile and current_profile.get("role") == "COACH":
+                    if not db_pool:
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                    else:
+                        try:
+                            _gma_hw = current_profile.get("hardware_id", "")
+                            async with db_pool.acquire() as _aconn:
+                                _gma_uuid = await _aconn.fetchval(
+                                    "SELECT id FROM users WHERE hardware_id = $1", _gma_hw
+                                )
+                                _recurring = []
+                                _blocks = []
+                                if _gma_uuid:
+                                    _rrows = await _aconn.fetch(
+                                        "SELECT day_of_week, start_time, end_time "
+                                        "FROM coach_availability "
+                                        "WHERE coach_id = $1 AND specific_date IS NULL "
+                                        "AND (is_blocked IS NULL OR is_blocked = false) "
+                                        "ORDER BY day_of_week, start_time",
+                                        _gma_uuid,
+                                    )
+                                    for _rr in _rrows:
+                                        _recurring.append({
+                                            "day_of_week": _rr["day_of_week"],
+                                            "start_time": _rr["start_time"].strftime("%H:%M"),
+                                            "end_time": _rr["end_time"].strftime("%H:%M"),
+                                        })
+                                    _brows = await _aconn.fetch(
+                                        "SELECT id, specific_date, start_time, end_time "
+                                        "FROM coach_availability "
+                                        "WHERE coach_id = $1 AND is_blocked = true "
+                                        "AND specific_date IS NOT NULL "
+                                        "AND specific_date >= CURRENT_DATE - INTERVAL '7 days' "
+                                        "ORDER BY specific_date",
+                                        _gma_uuid,
+                                    )
+                                    for _br in _brows:
+                                        _blocks.append({
+                                            "id": str(_br["id"]),
+                                            "date": _br["specific_date"].isoformat(),
+                                            "start_time": _br["start_time"].strftime("%H:%M") if _br["start_time"] else "00:00",
+                                            "end_time": _br["end_time"].strftime("%H:%M") if _br["end_time"] else "23:59",
+                                        })
+                            await websocket.send(json.dumps({
+                                "type": "my_availability_loaded",
+                                "recurring": _recurring,
+                                "blocks": _blocks,
+                            }))
+                        except Exception as e:
+                            import traceback; traceback.print_exc()
+                            print(f">>> [ERROR] coach_get_my_availability: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === COACH: BLOCK TIME (vacation / specific date) ===
+            elif t == "coach_block_time":
+                if current_profile and current_profile.get("role") == "COACH":
+                    if not db_pool:
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                    else:
+                        try:
+                            _bt_hw = current_profile.get("hardware_id", "")
+                            _bt_dates = d.get("dates", [])  # list of "YYYY-MM-DD"
+                            _bt_reason = (d.get("reason") or "")[:200]
+                            if not _bt_dates:
+                                await websocket.send(json.dumps({"type": "error", "message": "No dates provided"}))
+                                continue
+                            async with db_pool.acquire() as _aconn:
+                                _bt_uuid = await _aconn.fetchval(
+                                    "SELECT id FROM users WHERE hardware_id = $1", _bt_hw
+                                )
+                                if not _bt_uuid:
+                                    await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
+                                    continue
+                                _bt_added = 0
+                                for _ds in _bt_dates:
+                                    try:
+                                        _dobj = datetime.date.fromisoformat(str(_ds)[:10])
+                                    except Exception:
+                                        continue
+                                    _exists = await _aconn.fetchval(
+                                        "SELECT id FROM coach_availability "
+                                        "WHERE coach_id = $1 AND specific_date = $2 AND is_blocked = true",
+                                        _bt_uuid, _dobj,
+                                    )
+                                    if _exists:
+                                        continue
+                                    _dow = _dobj.weekday()
+                                    await _aconn.execute(
+                                        "INSERT INTO coach_availability "
+                                        "(coach_id, day_of_week, start_time, end_time, "
+                                        " specific_date, is_blocked, is_available, recurring) "
+                                        "VALUES ($1, $2, '00:00:00', '23:59:00', $3, true, false, false)",
+                                        _bt_uuid, _dow, _dobj,
+                                    )
+                                    _bt_added += 1
+                            print(f">>> [BLOCK] Coach {_bt_hw} blocked {_bt_added} date(s) ({_bt_reason})")
+                            await websocket.send(json.dumps({
+                                "type": "time_blocked",
+                                "added": _bt_added,
+                                "status": "ok",
+                            }))
+                        except Exception as e:
+                            import traceback; traceback.print_exc()
+                            print(f">>> [ERROR] coach_block_time: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === COACH: UNBLOCK TIME ===
+            elif t == "coach_unblock_time":
+                if current_profile and current_profile.get("role") == "COACH":
+                    if not db_pool:
+                        await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                    else:
+                        try:
+                            _ub_hw = current_profile.get("hardware_id", "")
+                            _ub_date = d.get("date")
+                            _ub_id = d.get("block_id")
+                            async with db_pool.acquire() as _aconn:
+                                _ub_uuid = await _aconn.fetchval(
+                                    "SELECT id FROM users WHERE hardware_id = $1", _ub_hw
+                                )
+                                if not _ub_uuid:
+                                    await websocket.send(json.dumps({"type": "error", "message": "Coach not found"}))
+                                    continue
+                                if _ub_id:
+                                    _removed = await _aconn.execute(
+                                        "DELETE FROM coach_availability "
+                                        "WHERE id = $1::uuid AND coach_id = $2 AND is_blocked = true",
+                                        str(_ub_id), _ub_uuid,
+                                    )
+                                elif _ub_date:
+                                    try:
+                                        _dobj2 = datetime.date.fromisoformat(str(_ub_date)[:10])
+                                    except Exception:
+                                        await websocket.send(json.dumps({"type": "error", "message": "Bad date"}))
+                                        continue
+                                    _removed = await _aconn.execute(
+                                        "DELETE FROM coach_availability "
+                                        "WHERE coach_id = $1 AND specific_date = $2 AND is_blocked = true",
+                                        _ub_uuid, _dobj2,
+                                    )
+                                else:
+                                    await websocket.send(json.dumps({"type": "error", "message": "Need date or block_id"}))
+                                    continue
+                            await websocket.send(json.dumps({
+                                "type": "time_unblocked",
+                                "status": "ok",
+                            }))
+                        except Exception as e:
+                            import traceback; traceback.print_exc()
+                            print(f">>> [ERROR] coach_unblock_time: {e}")
+                            await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+
+            # === CLIENT: GET COACH MONTH OVERVIEW (recurring days + blocked dates) ===
+            elif t == "client_get_coach_month_overview":
+                if not db_pool:
+                    await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
+                else:
+                    try:
+                        _mo_coach = (d.get("coach_id") or "").strip()
+                        _mo_ym = (d.get("year_month") or "").strip()  # "YYYY-MM"
+                        if not _mo_coach or not _mo_ym or len(_mo_ym) < 7:
+                            await websocket.send(json.dumps({"type": "error", "message": "Need coach_id and year_month"}))
+                            continue
+                        try:
+                            _yr = int(_mo_ym[0:4]); _mo = int(_mo_ym[5:7])
+                            _first = datetime.date(_yr, _mo, 1)
+                            if _mo == 12:
+                                _last = datetime.date(_yr + 1, 1, 1) - datetime.timedelta(days=1)
+                            else:
+                                _last = datetime.date(_yr, _mo + 1, 1) - datetime.timedelta(days=1)
+                        except Exception:
+                            await websocket.send(json.dumps({"type": "error", "message": "Bad year_month"}))
+                            continue
+                        async with db_pool.acquire() as _aconn:
+                            _mo_uuid = await _aconn.fetchval(
+                                "SELECT id FROM users WHERE hardware_id = $1", _mo_coach
+                            )
+                            if not _mo_uuid:
+                                await websocket.send(json.dumps({
+                                    "type": "coach_month_overview",
+                                    "coach_id": _mo_coach,
+                                    "year_month": _mo_ym,
+                                    "recurring_days": [],
+                                    "blocked_dates": [],
+                                }))
+                                continue
+                            _rrows = await _aconn.fetch(
+                                "SELECT DISTINCT day_of_week FROM coach_availability "
+                                "WHERE coach_id = $1 AND specific_date IS NULL "
+                                "AND (is_blocked IS NULL OR is_blocked = false)",
+                                _mo_uuid,
+                            )
+                            _recurring_days = sorted(set(int(r["day_of_week"]) for r in _rrows))
+                            _brows = await _aconn.fetch(
+                                "SELECT DISTINCT specific_date FROM coach_availability "
+                                "WHERE coach_id = $1 AND is_blocked = true "
+                                "AND specific_date BETWEEN $2 AND $3",
+                                _mo_uuid, _first, _last,
+                            )
+                            _blocked_dates = [r["specific_date"].isoformat() for r in _brows if r["specific_date"]]
+                        await websocket.send(json.dumps({
+                            "type": "coach_month_overview",
+                            "coach_id": _mo_coach,
+                            "year_month": _mo_ym,
+                            "recurring_days": _recurring_days,
+                            "blocked_dates": _blocked_dates,
+                        }))
+                    except Exception as e:
+                        import traceback; traceback.print_exc()
+                        print(f">>> [ERROR] client_get_coach_month_overview: {e}")
                         await websocket.send(json.dumps({"type": "error", "message": "OPERATION_FAILED"}))
 
             # === COACH: SET FEE ===

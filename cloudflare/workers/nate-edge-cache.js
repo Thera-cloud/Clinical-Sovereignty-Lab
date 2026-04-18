@@ -159,7 +159,7 @@ export default {
     const path = url.pathname;
 
     if (request.method === "OPTIONS") {
-      return jsonResponse({}, 204);
+      return corsPreflight(request);
     }
     if (request.method === "POST") {
       const clientIP = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
@@ -634,14 +634,34 @@ function checkRateLimit(ip) {
   return entry.count <= RATE_LIMIT_MAX_POST;
 }
 
+const _ALLOWED_HEADERS = "Content-Type, Authorization, X-User-Id, X-Requested-With";
+const _ALLOWED_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
+
+function corsPreflight(request) {
+  const origin = request.headers.get("Origin") || "";
+  const headers = new Headers({
+    "Access-Control-Allow-Origin": _ALLOWED_ORIGINS.has(origin) ? origin : "",
+    "Access-Control-Allow-Methods": _ALLOWED_METHODS,
+    "Access-Control-Allow-Headers":
+      request.headers.get("Access-Control-Request-Headers") || _ALLOWED_HEADERS,
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin, Access-Control-Request-Headers",
+  });
+  if (_ALLOWED_ORIGINS.has(origin)) {
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+  return new Response(null, { status: 204, headers });
+}
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": _ALLOWED_ORIGINS.has(_edgeCacheOrigin) ? _edgeCacheOrigin : "",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": _ALLOWED_METHODS,
+      "Access-Control-Allow-Headers": _ALLOWED_HEADERS,
+      "Vary": "Origin",
     },
   });
 }

@@ -68,6 +68,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
   }
 
   int _reconnectAttempts = 0;
+  final StreamController<Map<String, dynamic>> _messageController = StreamController<Map<String, dynamic>>.broadcast();
 
   void _connectToBridge() {
     setState(() => _statusMessage = "Connecting to HQ...");
@@ -120,6 +121,9 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
   void _handleSocketMessage(dynamic message) {
     try {
       final data = jsonDecode(message);
+      if (data is Map<String, dynamic>) {
+        _messageController.add(data);
+      }
       
       switch (data['type']) {
         case 'login_success':
@@ -172,6 +176,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
 
   @override
   void dispose() {
+    _messageController.close();
     _socket?.sink.close();
     super.dispose();
   }
@@ -216,6 +221,7 @@ class _CoachPortalScreenState extends State<CoachPortalScreen> {
                 profile: widget.currentUserProfile,
                 socket: _socket,
                 onLogout: _logout,
+                messageStream: _messageController.stream,
               ),
             ));
           },

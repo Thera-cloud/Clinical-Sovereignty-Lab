@@ -372,10 +372,21 @@ class NateCheckInAgent:
     # ── Session Reminders ──────────────────────────────────────────────
 
     async def _send_session_reminders(self):
-        """Send 24h reminders for upcoming coaching sessions."""
+        """Send 24h and 72h reminders for upcoming coaching sessions."""
+        # Run two separate windows: 72h and 24h
+        await self._send_reminder_window(window_hours=72, action_type="session_reminder_72h",
+                                         lower_offset="71 hours", upper_offset="73 hours",
+                                         label_for_client="in 3 days", label_for_coach="in 3 days")
+        await self._send_reminder_window(window_hours=24, action_type="session_reminder_24h",
+                                         lower_offset="23 hours", upper_offset="25 hours",
+                                         label_for_client="tomorrow", label_for_coach="tomorrow")
+
+    async def _send_reminder_window(self, *, window_hours: int, action_type: str,
+                                    lower_offset: str, upper_offset: str,
+                                    label_for_client: str, label_for_coach: str):
         try:
             async with self.db_pool.acquire() as conn:
-                upcoming = await conn.fetch("""
+                upcoming = await conn.fetch(f"""
                     SELECT cs.session_id, cs.client_id, cs.coach_id, cs.scheduled_start,
                            u_client.username AS client_username,
                            u_client.profile_data AS client_profile,
@@ -385,13 +396,14 @@ class NateCheckInAgent:
                     JOIN users u_client ON u_client.hardware_id = cs.client_id
                     JOIN users u_coach ON u_coach.hardware_id = cs.coach_id
                     WHERE cs.status = 'scheduled'
-                      AND cs.scheduled_start BETWEEN NOW() + INTERVAL '23 hours'
-                                                 AND NOW() + INTERVAL '25 hours'
+                      AND cs.scheduled_start BETWEEN NOW() + INTERVAL '{lower_offset}'
+                                                 AND NOW() + INTERVAL '{upper_offset}'
                 """)
 
                 for row in upcoming:
                     session_id = str(row["session_id"])
-                    if await self._recent_checkin(conn, session_id, "session_reminder_24h", hours=24):
+                    # Dedup window matches the reminder window (avoid double-sending if loop overlaps)
+                    if await self._recent_checkin(conn, session_id, action_type, hours=window_hours):
                         continue
 
                     client_profile = row["client_profile"] or {}
@@ -420,27 +432,27 @@ class NateCheckInAgent:
                             client_email,
                             f"Session reminder: {start_str}",
                             f"Hi {client_name}, you have a coaching session with {coach_name} "
-                            f"tomorrow at {start_str}. See you there!",
+                            f"{label_for_client} ({start_str}). See you there!",
                             notification_type="session_reminder",
                         )
 
                     if coach_email and self.notification_system:
                         await self.notification_system._send_email(
                             coach_email,
-                            f"Session reminder: {client_name} tomorrow",
+                            f"Session reminder: {client_name} {label_for_coach}",
                             f"Hi {coach_name}, reminder that you have a session with "
-                            f"{client_name} tomorrow at {start_str}.",
+                            f"{client_name} {label_for_coach} at {start_str}.",
                             notification_type="session_reminder",
                         )
 
                     await self._record_checkin(
-                        conn, session_id, "SYSTEM", "session_reminder_24h",
-                        "email", f"Reminder for session {session_id}",
+                        conn, session_id, "SYSTEM", action_type,
+                        "email", f"{window_hours}h reminder for session {session_id}",
                         {"client": row["client_username"], "coach": row["coach_username"]},
                     )
-                    logger.info("24h reminder sent for session %s", session_id)
+                    logger.info("%dh reminder sent for session %s", window_hours, session_id)
         except Exception as e:
-            logger.warning("NateCheckInAgent: session reminder failed: %s", e)
+            logger.warning("NateCheckInAgent: %s reminder failed: %s", action_type, e)
 
     # ── DOJO-Aware AI Question Generator ──────────────────────────────
 

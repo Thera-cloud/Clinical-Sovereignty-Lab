@@ -148,7 +148,7 @@ class CoachNexusV2:
                 try:
                     if (ses.get("coach_id") or "") != hid:
                         continue
-                    if (ses.get("status") or "") not in ["scheduled", "active"]:
+                    if (ses.get("status") or "") not in ["scheduled", "active", "pending_approval"]:
                         continue
 
                     st = (ses.get("scheduled_start") or "").replace("Z", "+00:00")
@@ -175,7 +175,10 @@ class CoachNexusV2:
                         "family_id": ses.get("family_id") or "",
                         "date": st_dt.date().isoformat(),
                         "time": st_dt.strftime("%H:%M"),
+                        "scheduled_start": ses.get("scheduled_start") or "",
+                        "scheduled_end": ses.get("scheduled_end") or "",
                         "type": ses.get("session_type") or "COACH",
+                        "session_type": ses.get("session_type") or "COACH",
                         "duration_minutes": dur_min,
                         "platform": "Zoom",
                         "zoom_link": ses.get("zoom_link") or "",

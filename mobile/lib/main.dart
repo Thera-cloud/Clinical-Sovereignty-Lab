@@ -10206,6 +10206,12 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   bool _isLoading = true;
   bool _isBooking = false;
   String _coachId = '';
+
+  // ===== Coach calendar overview (client view) =====
+  DateTime _calMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  Set<int> _calRecurringDays = {}; // Mon=0..Sun=6
+  Set<String> _calBlockedDates = {}; // YYYY-MM-DD
+  bool _calLoadedOnce = false;
   
   Timer? _loadingTimeout;
 
@@ -10255,6 +10261,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
         _loadingTimeout?.cancel();
         if (_hasCoach) {
           _requestUpcomingSessions();
+          _requestMonthOverview();
         } else {
           _fetchCoachDirectory();
           _fetchRequestStatus();
@@ -10274,6 +10281,16 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           _availableSlots = List<Map<String, dynamic>>.from(
             (data['available_slots'] ?? []).map((s) => Map<String, dynamic>.from(s))
           );
+        });
+      } else if (type == 'coach_month_overview') {
+        setState(() {
+          _calRecurringDays = (data['recurring_days'] as List? ?? [])
+              .map((e) => (e as num).toInt())
+              .toSet();
+          _calBlockedDates = (data['blocked_dates'] as List? ?? [])
+              .map((e) => e.toString())
+              .toSet();
+          _calLoadedOnce = true;
         });
       } else if (type == 'session_booked') {
         setState(() => _isBooking = false);
@@ -10359,6 +10376,311 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       "coach_id": _coachId,
       "date": date,
     }));
+  }
+
+  void _requestMonthOverview() {
+    if (_coachId.isEmpty) return;
+    final ym =
+        '${_calMonth.year.toString().padLeft(4, '0')}-${_calMonth.month.toString().padLeft(2, '0')}';
+    _socket?.sink.add(jsonEncode({
+      "type": "client_get_coach_month_overview",
+      "coach_id": _coachId,
+      "year_month": ym,
+    }));
+  }
+
+  // Mon=0..Sun=6 (matches backend day_of_week convention)
+  int _dowMonZero(DateTime d) => (d.weekday - 1) % 7;
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  static const List<String> _monthNames = [
+    'January','February','March','April','May','June',
+    'July','August','September','October','November','December'
+  ];
+
+  Widget _buildClientCalendarGrid() {
+    final firstOfMonth = DateTime(_calMonth.year, _calMonth.month, 1);
+    final lastOfMonth =
+        DateTime(_calMonth.year, _calMonth.month + 1, 1).subtract(const Duration(days: 1));
+    final daysInMonth = lastOfMonth.day;
+    final leadingBlanks = (firstOfMonth.weekday) % 7; // Sun=0..Sat=6 columns
+    final today = DateTime.now();
+    final todayKey = _ymd(DateTime(today.year, today.month, today.day));
+
+    final cells = <Widget>[];
+    // Sun-Sat header
+    const dowHeader = ['S','M','T','W','T','F','S'];
+    for (final h in dowHeader) {
+      cells.add(Center(
+        child: Text(h,
+          style: const TextStyle(color: Color(0xFF8B7355), fontSize: 11, fontWeight: FontWeight.w600)),
+      ));
+    }
+    for (int i = 0; i < leadingBlanks; i++) {
+      cells.add(const SizedBox.shrink());
+    }
+    // Build a map of ISO date -> list of sessions (booked + pending)
+    final Map<String, List<Map<String, dynamic>>> sessionsByDate = {};
+    for (final raw in _upcomingSessions) {
+      final start = (raw['scheduled_start'] ?? raw['date'] ?? '').toString();
+      if (start.isEmpty) continue;
+      try {
+        final dt = DateTime.parse(start).toLocal();
+        final key = _ymd(DateTime(dt.year, dt.month, dt.day));
+        sessionsByDate.putIfAbsent(key, () => []).add(raw);
+      } catch (_) {}
+    }
+
+    for (int day = 1; day <= daysInMonth; day++) {
+      final d = DateTime(_calMonth.year, _calMonth.month, day);
+      final iso = _ymd(d);
+      final isPast = d.isBefore(DateTime(today.year, today.month, today.day));
+      final isToday = iso == todayKey;
+      final isBlocked = _calBlockedDates.contains(iso);
+      final hasRecurring = _calRecurringDays.contains(_dowMonZero(d));
+      final isAvailable = hasRecurring && !isBlocked && !isPast;
+      final isSelected = _selectedDate == iso;
+      final daySessions = sessionsByDate[iso] ?? const <Map<String, dynamic>>[];
+      final hasBooked = daySessions.any((s) => (s['status'] ?? '') == 'scheduled' || (s['status'] ?? '') == 'active');
+      final hasPending = daySessions.any((s) => (s['status'] ?? '') == 'pending_approval');
+
+      Color bg;
+      Color fg = Colors.white;
+      if (isPast) {
+        bg = const Color(0xFF1A1A1A);
+        fg = const Color(0xFF555555);
+      } else if (hasBooked) {
+        bg = const Color(0xFF1A2A3A);
+        fg = const Color(0xFFB6D5FF);
+      } else if (hasPending) {
+        bg = const Color(0xFF2A2410);
+        fg = const Color(0xFFE8D5A3);
+      } else if (isBlocked) {
+        bg = const Color(0xFF2A1A1A);
+        fg = const Color(0xFF888888);
+      } else if (isAvailable) {
+        bg = const Color(0xFF1A2A1A);
+        fg = const Color(0xFFB6E3B6);
+      } else {
+        bg = const Color(0xFF111111);
+        fg = const Color(0xFFAAAAAA);
+      }
+      if (isSelected) {
+        bg = const Color(0xFFC9A962);
+        fg = Colors.black;
+      }
+
+      // Build tooltip text for booked/pending days
+      String tooltipText = '';
+      if (daySessions.isNotEmpty) {
+        final lines = <String>[];
+        for (final s in daySessions) {
+          final coach = (s['coach_name'] ?? 'Coach').toString();
+          final tm = (s['time'] ?? '').toString();
+          String pretty = tm;
+          try {
+            final dtFull = DateTime.parse((s['scheduled_start'] ?? '').toString()).toLocal();
+            final h12 = dtFull.hour == 0 ? 12 : (dtFull.hour > 12 ? dtFull.hour - 12 : dtFull.hour);
+            final ap = dtFull.hour >= 12 ? 'PM' : 'AM';
+            pretty = '$h12:${dtFull.minute.toString().padLeft(2, '0')} $ap';
+          } catch (_) {}
+          final st = (s['status'] ?? '').toString();
+          final tag = st == 'pending_approval' ? ' (pending)' : '';
+          lines.add('$coach • $pretty$tag');
+        }
+        tooltipText = lines.join('\n');
+      }
+
+      Widget cell = Container(
+        margin: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          border: isToday
+              ? Border.all(color: const Color(0xFFC9A962), width: 1.5)
+              : Border.all(
+                  color: hasBooked
+                      ? const Color(0xFF4ECDC4).withOpacity(0.5)
+                      : (hasPending ? const Color(0xFFC9A962).withOpacity(0.5) : const Color(0xFF252525)),
+                  width: hasBooked || hasPending ? 1.0 : 0.5,
+                ),
+        ),
+        alignment: Alignment.center,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('$day',
+                    style: TextStyle(color: fg, fontSize: 13, fontWeight: FontWeight.w600)),
+                if (daySessions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Text(
+                      (() {
+                        final s = daySessions.first;
+                        final coach = (s['coach_name'] ?? 'Coach').toString();
+                        return coach.length > 7 ? coach.substring(0, 7) : coach;
+                      })(),
+                      style: TextStyle(
+                        color: hasBooked ? const Color(0xFF4ECDC4) : const Color(0xFFC9A962),
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+            ),
+            if (isAvailable && !isSelected && daySessions.isEmpty)
+              Positioned(
+                bottom: 4,
+                child: Container(
+                  width: 4, height: 4,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF4ADE80),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            if (isBlocked && daySessions.isEmpty)
+              Positioned(
+                bottom: 4,
+                child: Container(
+                  width: 4, height: 4,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEF4444),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            if (hasBooked)
+              Positioned(
+                top: 2,
+                right: 3,
+                child: Container(
+                  width: 5, height: 5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF4ECDC4),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            if (hasPending && !hasBooked)
+              Positioned(
+                top: 2,
+                right: 3,
+                child: Container(
+                  width: 5, height: 5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFC9A962),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+
+      if (tooltipText.isNotEmpty) {
+        cell = Tooltip(
+          message: tooltipText,
+          waitDuration: const Duration(milliseconds: 200),
+          child: cell,
+        );
+      }
+
+      cells.add(GestureDetector(
+        onTap: isPast || isBlocked
+            ? null
+            : () => _requestAvailability(iso),
+        child: cell,
+      ));
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF252525)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, color: Color(0xFFC9A962)),
+                onPressed: () {
+                  setState(() {
+                    _calMonth = DateTime(_calMonth.year, _calMonth.month - 1, 1);
+                  });
+                  _requestMonthOverview();
+                },
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    '${_monthNames[_calMonth.month - 1]} ${_calMonth.year}',
+                    style: const TextStyle(
+                        color: Color(0xFFC9A962),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, color: Color(0xFFC9A962)),
+                onPressed: () {
+                  setState(() {
+                    _calMonth = DateTime(_calMonth.year, _calMonth.month + 1, 1);
+                  });
+                  _requestMonthOverview();
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          GridView.count(
+            crossAxisCount: 7,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            childAspectRatio: 1.0,
+            children: cells,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: const [
+              _CalLegendDot(color: Color(0xFF4ADE80), label: 'Available'),
+              _CalLegendDot(color: Color(0xFF4ECDC4), label: 'Booked'),
+              _CalLegendDot(color: Color(0xFFC9A962), label: 'Pending'),
+              _CalLegendDot(color: Color(0xFFEF4444), label: 'Blocked'),
+            ],
+          ),
+          if (!_calLoadedOnce)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Loading coach availability...',
+                style: TextStyle(color: Colors.grey, fontSize: 11),
+              ),
+            )
+          else if (_calRecurringDays.isEmpty && _calBlockedDates.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Your coach has not published hours yet.',
+                style: TextStyle(color: Colors.grey, fontSize: 11),
+              ),
+            ),
+        ],
+      ),
+    );
   }
   
   void _bookSession(String start, String end) {
@@ -10502,7 +10824,19 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
       backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0A0A0A),
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Color(0xFFC9A962)), onPressed: () => Navigator.pop(context)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFFC9A962)),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const LobbyScreen()),
+              );
+            }
+          },
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -10528,11 +10862,43 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   }
   
   Widget _buildScheduleView() {
+    final coachName = (widget.currentUserProfile?['assigned_coach'] ?? widget.currentUserProfile?['assigned_coach_name'] ?? 'Your Coach').toString();
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 18),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111111),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: const Color(0xFF252525),
+                  child: Text(coachName.isNotEmpty ? coachName[0].toUpperCase() : 'C', style: const TextStyle(color: Color(0xFFC9A962), fontSize: 18)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('YOUR COACH', style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1.2)),
+                    const SizedBox(height: 2),
+                    Text(coachName, style: const TextStyle(color: Color(0xFFC9A962), fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                )),
+                TextButton(
+                  onPressed: () => _showCoachChangeRequestDialog(coachName),
+                  child: const Text('Change Coach', style: TextStyle(color: Color(0xFF4ECDC4), fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
           const Text('UPCOMING SESSIONS', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
           if (_upcomingSessions.isEmpty)
@@ -10550,7 +10916,18 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
           const SizedBox(height: 24),
           const Text('BOOK A SESSION', style: TextStyle(color: Colors.grey, fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.w600)),
           const SizedBox(height: 12),
-          _buildDatePicker(),
+          _buildClientCalendarGrid(),
+          if (_selectedDate != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.event_available, color: Color(0xFFC9A962), size: 18),
+                const SizedBox(width: 8),
+                Text('Selected: $_selectedDate',
+                    style: const TextStyle(color: Color(0xFFC9A962), fontSize: 13, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ],
           if (_availableSlots.isNotEmpty) ...[
             const SizedBox(height: 16),
             const Text('Available Time Slots', style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
@@ -10560,8 +10937,21 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: const Color(0xFF111111), borderRadius: BorderRadius.circular(8)),
-              child: const Text('No available slots for this date', style: TextStyle(color: Colors.grey)),
+              decoration: BoxDecoration(
+                color: const Color(0xFF111111),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF252525)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('No published hours for this date',
+                      style: TextStyle(color: Color(0xFFC9A962), fontSize: 14, fontWeight: FontWeight.w600)),
+                  SizedBox(height: 6),
+                  Text('Your coach has not published available hours yet. Check back soon or contact them directly.',
+                      style: TextStyle(color: Colors.grey, fontSize: 13)),
+                ],
+              ),
             ),
           ],
         ],
@@ -10661,6 +11051,65 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
                 : const Text('Request This Coach', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoachChangeRequestDialog(String currentCoachName) {
+    final reasonCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF111111),
+        title: const Text('Request Coach Change', style: TextStyle(color: Color(0xFFC9A962))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('You are currently assigned to $currentCoachName. To change coaches, submit a request — your current coach or admin will review it.',
+                style: const TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              maxLines: 3,
+              maxLength: 300,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Reason for change request (optional)...',
+                hintStyle: const TextStyle(color: Colors.grey),
+                filled: true,
+                fillColor: const Color(0xFF1A1A1A),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC9A962), foregroundColor: Colors.black),
+            onPressed: () {
+              _socket?.sink.add(jsonEncode({
+                "type": "coach_change_request",
+                "current_coach_id": _coachId,
+                "reason": reasonCtrl.text.trim(),
+              }));
+              Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Coach change request submitted. You will be notified when reviewed.'),
+                    backgroundColor: Color(0xFF4ECDC4),
+                  ),
+                );
+              }
+            },
+            child: const Text('Submit Request', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -10803,46 +11252,123 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
   }
 
   Widget _buildSessionCard(Map<String, dynamic> session) {
-    final start = session['scheduled_start'] ?? '';
-    final zoomLink = session['zoom_link'] ?? '';
-    final status = session['status'] ?? 'scheduled';
-    
-    String formattedTime = start;
+    final start = (session['scheduled_start'] ?? '').toString();
+    final zoomLink = (session['zoom_link'] ?? '').toString();
+    final status = (session['status'] ?? 'scheduled').toString();
+    final coachName = (session['coach_name'] ?? 'Coach').toString();
+    final notes = (session['notes'] ?? '').toString();
+    final sessionType = (session['session_type'] ?? 'COACH').toString();
+    final platform = (session['platform'] ?? 'Zoom').toString();
+    final durationMin = session['duration_minutes'] is int
+        ? session['duration_minutes'] as int
+        : int.tryParse('${session['duration_minutes'] ?? ''}') ?? 50;
+
+    String formattedDate = '';
+    String formattedTime = '';
     try {
-      final dt = DateTime.parse(start);
-      formattedTime = '${dt.month}/${dt.day}/${dt.year} at ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {}
-    
+      final dt = DateTime.parse(start).toLocal();
+      const months = ['', 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      formattedDate = '${weekdays[dt.weekday - 1]}, ${months[dt.month]} ${dt.day}, ${dt.year}';
+      final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      formattedTime = '$hour12:${dt.minute.toString().padLeft(2, '0')} $ampm';
+    } catch (_) {
+      formattedDate = start;
+    }
+
+    Color statusColor;
+    String statusLabel = status.toUpperCase();
+    switch (status) {
+      case 'pending_approval':
+        statusColor = const Color(0xFFC9A962);
+        statusLabel = 'PENDING';
+        break;
+      case 'scheduled':
+        statusColor = const Color(0xFF4ECDC4);
+        break;
+      case 'active':
+        statusColor = const Color(0xFF22C55E);
+        break;
+      case 'declined':
+      case 'cancelled':
+        statusColor = const Color(0xFFEF4444);
+        break;
+      default:
+        statusColor = Colors.grey;
+    }
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF252525)),
+        border: Border.all(color: statusColor.withOpacity(0.4), width: 1.2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.calendar_today, color: Color(0xFF4ECDC4), size: 18),
+              Icon(Icons.calendar_today, color: statusColor, size: 18),
               const SizedBox(width: 8),
-              Expanded(child: Text(formattedTime, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+              Expanded(
+                child: Text(
+                  coachName,
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: status == 'scheduled' ? const Color(0xFF4ECDC4).withOpacity(0.15) : Colors.grey.withOpacity(0.15),
+                  color: statusColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: statusColor.withOpacity(0.4)),
                 ),
-                child: Text(status.toUpperCase(), style: TextStyle(color: status == 'scheduled' ? const Color(0xFF4ECDC4) : Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                child: Text(statusLabel, style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Row(
             children: [
-              if (zoomLink.isNotEmpty)
+              const Icon(Icons.event, color: Color(0xFFC9A962), size: 14),
+              const SizedBox(width: 6),
+              Expanded(child: Text(formattedDate, style: const TextStyle(color: Colors.white70, fontSize: 12.5))),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(Icons.access_time, color: Color(0xFFC9A962), size: 14),
+              const SizedBox(width: 6),
+              Text('$formattedTime  •  $durationMin min  •  $sessionType  •  $platform',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12.5)),
+            ],
+          ),
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF050505),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.notes, color: Color(0xFF9D4EDD), size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(notes, style: const TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic))),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (zoomLink.isNotEmpty && status != 'pending_approval')
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.videocam, size: 16),
@@ -10850,7 +11376,7 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2D8CFF),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () async {
                       final uri = Uri.parse(zoomLink);
@@ -10860,7 +11386,22 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
                     },
                   ),
                 ),
-              if (zoomLink.isNotEmpty) const SizedBox(width: 8),
+              if (zoomLink.isNotEmpty && status != 'pending_approval') const SizedBox(width: 8),
+              if (status == 'pending_approval')
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC9A962).withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+                    ),
+                    child: const Text('Awaiting Coach Approval',
+                        style: TextStyle(color: Color(0xFFC9A962), fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              if (status == 'pending_approval') const SizedBox(width: 8),
               TextButton(
                 onPressed: () => _cancelSession(session['session_id'] ?? ''),
                 child: const Text('Cancel', style: TextStyle(color: Colors.red, fontSize: 12)),
@@ -10948,6 +11489,28 @@ class _ClientScheduleScreenState extends State<ClientScheduleScreen> {
               child: const Text('Book', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
             ),
       ),
+    );
+  }
+}
+
+class _CalLegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _CalLegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 4),
+        Text(label, style: const TextStyle(color: Color(0xFF8B7355), fontSize: 10)),
+      ],
     );
   }
 }

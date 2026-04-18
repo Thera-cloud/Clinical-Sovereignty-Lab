@@ -3235,7 +3235,8 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _timezoneCtrl.text = _profile['timezone'] ?? 'America/New_York';
     _specialtiesCtrl.text = (_profile['specialties'] ?? _profile['specialty'] ?? _profile['specializations'] ?? '').toString();
     _zoomLinkCtrl.text = _profile['zoom_link'] ?? '';
-    _coachingStyle = _profile['coaching_style'] ?? 'integrative';
+    final cs = (_profile['coaching_style'] ?? '').toString().trim();
+    _coachingStyle = cs.isEmpty ? 'integrative' : cs;
     _feeCtrl.text = (_profile['coaching_fee'] ?? '0').toString();
     _paymentMode = _profile['payment_mode'] ?? 'coach_handles';
     _notifNewClient = _profile['notif_new_client'] ?? true;
@@ -3245,6 +3246,35 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _preferredContact = _profile['preferred_contact'] ?? 'email';
     _loadBiometricState();
     _setupHierarchyListener();
+    _requestProfileRefresh();
+  }
+
+  void _requestProfileRefresh() {
+    try {
+      widget.socket?.sink.add(jsonEncode({"type": "get_profile"}));
+    } catch (_) {}
+  }
+
+  void _applyRefreshedProfile(Map<String, dynamic> p) {
+    if (!mounted) return;
+    setState(() {
+      _profile = Map<String, dynamic>.from(p);
+      _emailCtrl.text = (_profile['email'] ?? _emailCtrl.text).toString();
+      _phoneCtrl.text = (_profile['phone'] ?? _phoneCtrl.text).toString();
+      _emergencyCtrl.text = (_profile['emergency_contact'] ?? _emergencyCtrl.text).toString();
+      _timezoneCtrl.text = (_profile['timezone'] ?? _timezoneCtrl.text).toString();
+      _specialtiesCtrl.text = (_profile['specialties'] ?? _profile['specialty'] ?? _profile['specializations'] ?? _specialtiesCtrl.text).toString();
+      _zoomLinkCtrl.text = (_profile['zoom_link'] ?? _zoomLinkCtrl.text).toString();
+      final csR = (_profile['coaching_style'] ?? '').toString().trim();
+      _coachingStyle = csR.isEmpty ? _coachingStyle : csR;
+      _feeCtrl.text = (_profile['coaching_fee'] ?? _feeCtrl.text).toString();
+      _paymentMode = _profile['payment_mode'] ?? _paymentMode;
+      _notifNewClient = _profile['notif_new_client'] ?? _notifNewClient;
+      _notifSessionReminders = _profile['notif_session_reminders'] ?? _notifSessionReminders;
+      _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? _notifCrisisAlerts;
+      _notifNightSchool = _profile['notif_night_school'] ?? _notifNightSchool;
+      _preferredContact = _profile['preferred_contact'] ?? _preferredContact;
+    });
   }
 
   void _setupHierarchyListener() {
@@ -3252,6 +3282,10 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       if (!mounted) return;
       try {
         final type = (data['type'] ?? '').toString();
+        if (type == 'profile_loaded' && data['profile'] is Map) {
+          _applyRefreshedProfile(Map<String, dynamic>.from(data['profile']));
+          return;
+        }
         if (type == 'coach_hierarchy_assistants') {
           _assistants = List<Map<String, dynamic>>.from(data['assistants'] ?? []);
           _assistantsLoading = false;
@@ -4092,7 +4126,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                 ),
               ),
             ] else
-              _infoRow('Coaching Style', _coachingStyle[0].toUpperCase() + _coachingStyle.substring(1)),
+              _infoRow('Coaching Style', _coachingStyle.isEmpty ? '—' : (_coachingStyle[0].toUpperCase() + _coachingStyle.substring(1))),
             _editableRow('Zoom Link', _zoomLinkCtrl, _editingProfile),
             _editableRow('Emergency Contact', _emergencyCtrl, _editingProfile),
             _editableRow('Timezone', _timezoneCtrl, _editingProfile),

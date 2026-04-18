@@ -4147,6 +4147,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   Map<String, dynamic> _financialData = {};
   bool _financialsLoading = false;
   final TextEditingController _coachFeeController = TextEditingController();
+
+  // ===== AVAILABILITY / CALENDAR STATE (coach Schedule tab) =====
+  // Recurring availability: list of {day_of_week:int, start_time:"HH:MM", end_time:"HH:MM"}
+  List<Map<String, dynamic>> _myRecurring = [];
+  // Blocked specific dates: list of {block_id, date:"YYYY-MM-DD", reason}
+  List<Map<String, dynamic>> _myBlocks = [];
+  bool _myAvailabilityLoaded = false;
+  // Calendar navigation
+  DateTime _calMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  DateTime? _calSelectedDay;
   
   // Payout / Stripe Connect state
   Map<String, dynamic> _connectStatus = {};
@@ -4427,6 +4437,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
     _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
     _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
+    _socket?.sink.add(jsonEncode({"type": "coach_get_my_availability"}));
     _requestPendingBookings();
     _requestFinancials();
     _loadConnectStatus();
@@ -4434,6 +4445,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     // Classroom: Fetch sessions and progress for the Classroom tab
     _requestClassroomSessions();
     _requestClassroomProgress();
+  }
+
+  void _refreshMyAvailability() {
+    _socket?.sink.add(jsonEncode({"type": "coach_get_my_availability"}));
   }
 
   Map<String, String> _restHeaders({bool json = true}) {
@@ -5237,6 +5252,46 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           setState(() {
             _schedule = data['data']?['schedule'] ?? [];
           });
+        }
+      }
+      else if (data['type'] == 'availability_updated') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("✓ Published ${data['added'] ?? 0} availability slot(s)"),
+            backgroundColor: const Color(0xFF22C55E),
+          ));
+          _refreshMyAvailability();
+        }
+      }
+      else if (data['type'] == 'my_availability_loaded') {
+        if (mounted) {
+          setState(() {
+            _myRecurring = List<Map<String, dynamic>>.from(
+              (data['recurring'] as List? ?? []).map((e) => Map<String, dynamic>.from(e)),
+            );
+            _myBlocks = List<Map<String, dynamic>>.from(
+              (data['blocks'] as List? ?? []).map((e) => Map<String, dynamic>.from(e)),
+            );
+            _myAvailabilityLoaded = true;
+          });
+        }
+      }
+      else if (data['type'] == 'time_blocked') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text("✓ Blocked ${data['added'] ?? 0} date(s)"),
+            backgroundColor: const Color(0xFF8B5CF6),
+          ));
+          _refreshMyAvailability();
+        }
+      }
+      else if (data['type'] == 'time_unblocked') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("✓ Date unblocked"),
+            backgroundColor: Color(0xFF22C55E),
+          ));
+          _refreshMyAvailability();
         }
       }
       else if (data['type'] == 'presession_brief') {
@@ -6803,11 +6858,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   Widget _buildScheduleTab() {
     final bool hasPending = _pendingBookings.isNotEmpty;
-    final Widget content = (_schedule.isEmpty && !hasPending)
-        ? const Center(child: Text("No sessions scheduled", style: TextStyle(color: Colors.grey)))
-        : ListView(
+    final Widget content = ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // ===== AVAILABILITY SUMMARY + CALENDAR (always visible) =====
+              _buildAvailabilitySummaryCard(),
+              _buildCalendarGrid(),
+
               // ===== INBOUND COACH REQUESTS =====
               if (_inboundRequests.isNotEmpty) ...[
                 Container(
@@ -6927,9 +6984,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       ..._pendingBookings.map((booking) {
                         final bookingSessionId = (booking['session_id'] ?? '').toString();
                         final clientName = (booking['client_name'] ?? 'Client').toString();
-                        final date = (booking['date'] ?? '').toString();
-                        final time = (booking['time'] ?? '').toString();
-                        final duration = (booking['duration'] ?? 60).toString();
+                        final notes = (booking['notes'] ?? '').toString();
+                        final zoomLink = (booking['zoom_link'] ?? '').toString();
+                        final sessionType = (booking['session_type'] ?? 'COACH').toString();
+                        final platform = (booking['platform'] ?? 'Zoom').toString();
+                        final scheduledStart = (booking['scheduled_start'] ?? '').toString();
+                        String date = (booking['date'] ?? '').toString();
+                        String time = (booking['time'] ?? '').toString();
+                        try {
+                          if (scheduledStart.isNotEmpty) {
+                            final dt = DateTime.parse(scheduledStart).toLocal();
+                            const months = ['', 'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                            const weekdays = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+                            date = '${weekdays[dt.weekday - 1]}, ${months[dt.month]} ${dt.day}, ${dt.year}';
+                            final h12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+                            final ap = dt.hour >= 12 ? 'PM' : 'AM';
+                            time = '$h12:${dt.minute.toString().padLeft(2, '0')} $ap';
+                          }
+                        } catch (_) {}
+                        final duration = (booking['duration'] ?? booking['duration_minutes'] ?? 50).toString();
                         final coachFee = (booking['coach_fee'] is num) ? (booking['coach_fee'] as num).toDouble() : 0.0;
                         final platformFee = (booking['platform_fee'] is num) ? (booking['platform_fee'] as num).toDouble() : 0.0;
                         final coachNet = coachFee - platformFee;
@@ -6966,10 +7039,49 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              Text(
-                                [date, time].where((s) => s.trim().isNotEmpty).join(' at ') + ' ($duration min)',
-                                style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                              Row(
+                                children: [
+                                  const Icon(Icons.event, color: Color(0xFFC9A962), size: 14),
+                                  const SizedBox(width: 6),
+                                  Expanded(child: Text(date, style: TextStyle(color: Colors.grey[300], fontSize: 12.5, fontWeight: FontWeight.w600))),
+                                ],
                               ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  const Icon(Icons.access_time, color: Color(0xFFC9A962), size: 14),
+                                  const SizedBox(width: 6),
+                                  Expanded(child: Text('$time  •  $duration min  •  $sessionType  •  $platform', style: TextStyle(color: Colors.grey[400], fontSize: 12))),
+                                ],
+                              ),
+                              if (notes.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF111111),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(Icons.notes, color: Color(0xFF9D4EDD), size: 14),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text(notes, style: TextStyle(color: Colors.grey[300], fontSize: 12, fontStyle: FontStyle.italic))),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if (zoomLink.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.videocam, color: Color(0xFF2D8CFF), size: 13),
+                                    const SizedBox(width: 6),
+                                    Expanded(child: Text('Zoom link prepared', style: TextStyle(color: Colors.grey[500], fontSize: 11))),
+                                  ],
+                                ),
+                              ],
                               if (coachFee > 0) ...[
                                 const SizedBox(height: 10),
                                 Container(
@@ -7275,6 +7387,902 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             onPressed: _openCreateSessionDialog,
           ),
         ),
+        Positioned(
+          right: 16,
+          bottom: 80,
+          child: FloatingActionButton.extended(
+            backgroundColor: const Color(0xFFC9A962),
+            foregroundColor: Colors.black,
+            icon: const Icon(Icons.schedule),
+            label: const Text("Set My Hours"),
+            onPressed: _openAvailabilityDialog,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Helpers for availability/calendar ---
+  static const List<String> _dayShort = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  static const List<String> _dayLong = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+  TimeOfDay _parseHHMM(String s) {
+    final parts = s.split(':');
+    if (parts.length < 2) return const TimeOfDay(hour: 9, minute: 0);
+    return TimeOfDay(hour: int.tryParse(parts[0]) ?? 9, minute: int.tryParse(parts[1]) ?? 0);
+  }
+  String _fmtHHMM(TimeOfDay t) => "${t.hour.toString().padLeft(2,'0')}:${t.minute.toString().padLeft(2,'0')}";
+  String _fmt12(TimeOfDay t) {
+    final h = t.hourOfPeriod == 0 ? 12 : t.hourOfPeriod;
+    final ampm = t.period == DayPeriod.am ? 'AM' : 'PM';
+    return "$h:${t.minute.toString().padLeft(2,'0')} $ampm";
+  }
+  // Mon=0..Sun=6 from a DateTime (DateTime.weekday is Mon=1..Sun=7)
+  int _dowMonZero(DateTime d) => d.weekday - 1;
+  String _fmtDate(DateTime d) =>
+      "${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}";
+
+  bool _isDateBlocked(DateTime d) {
+    final s = _fmtDate(d);
+    return _myBlocks.any((b) => (b['date'] ?? '').toString() == s);
+  }
+  bool _hasRecurringForDay(int dow) =>
+      _myRecurring.any((r) => (r['day_of_week'] ?? -1) == dow);
+
+  // List of confirmed sessions on a given date (best-effort match against _schedule items)
+  List<Map<String, dynamic>> _sessionsOnDate(DateTime d) {
+    final iso = _fmtDate(d);
+    final out = <Map<String, dynamic>>[];
+    for (final raw in _schedule) {
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final ds = (m['date'] ?? '').toString();
+      if (ds.startsWith(iso)) out.add(m);
+    }
+    return out;
+  }
+
+  void _openAvailabilityDialog() {
+    // day_of_week (Mon=0..Sun=6) -> list of {start: TimeOfDay, end: TimeOfDay}
+    final Map<int, List<Map<String, TimeOfDay>>> dayBlocks = {
+      for (int i = 0; i < 7; i++) i: <Map<String, TimeOfDay>>[]
+    };
+    // Pre-populate from _myRecurring
+    for (final r in _myRecurring) {
+      final dow = (r['day_of_week'] is int) ? r['day_of_week'] as int : int.tryParse('${r['day_of_week']}');
+      if (dow == null || dow < 0 || dow > 6) continue;
+      dayBlocks[dow]!.add({
+        'start': _parseHHMM((r['start_time'] ?? '09:00').toString()),
+        'end': _parseHHMM((r['end_time'] ?? '17:00').toString()),
+      });
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            "SET AVAILABLE HOURS",
+            style: TextStyle(color: Color(0xFFC9A962), fontSize: 16, letterSpacing: 1.5),
+          ),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Toggle each day on/off and set time blocks. Use + to add a second block (e.g. morning + afternoon).",
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  ...List.generate(7, (i) {
+                    final blocks = dayBlocks[i]!;
+                    final enabled = blocks.isNotEmpty;
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF111111),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: enabled
+                              ? const Color(0xFFC9A962).withOpacity(0.35)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              SizedBox(
+                                width: 56,
+                                child: Text(
+                                  _dayShort[i],
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                enabled ? "On" : "Off",
+                                style: TextStyle(
+                                  color: enabled
+                                      ? const Color(0xFF22C55E)
+                                      : Colors.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Switch(
+                                value: enabled,
+                                activeColor: const Color(0xFFC9A962),
+                                onChanged: (v) {
+                                  setLocal(() {
+                                    if (v && blocks.isEmpty) {
+                                      blocks.add({
+                                        'start': const TimeOfDay(hour: 9, minute: 0),
+                                        'end': const TimeOfDay(hour: 17, minute: 0),
+                                      });
+                                    } else if (!v) {
+                                      blocks.clear();
+                                    }
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          if (enabled) ...[
+                            const SizedBox(height: 6),
+                            ...List.generate(blocks.length, (bi) {
+                              final blk = blocks[bi];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: () async {
+                                          final t = await showTimePicker(
+                                            context: ctx,
+                                            initialTime: blk['start']!,
+                                          );
+                                          if (t != null) {
+                                            setLocal(() => blk['start'] = t);
+                                          }
+                                        },
+                                        child: Text(
+                                          _fmt12(blk['start']!),
+                                          style: const TextStyle(color: Color(0xFFC9A962)),
+                                        ),
+                                      ),
+                                    ),
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 6),
+                                      child: Text("→", style: TextStyle(color: Colors.grey)),
+                                    ),
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: () async {
+                                          final t = await showTimePicker(
+                                            context: ctx,
+                                            initialTime: blk['end']!,
+                                          );
+                                          if (t != null) {
+                                            setLocal(() => blk['end'] = t);
+                                          }
+                                        },
+                                        child: Text(
+                                          _fmt12(blk['end']!),
+                                          style: const TextStyle(color: Color(0xFFC9A962)),
+                                        ),
+                                      ),
+                                    ),
+                                    if (blocks.length > 1)
+                                      IconButton(
+                                        tooltip: "Remove block",
+                                        icon: const Icon(Icons.remove_circle_outline,
+                                            color: Colors.redAccent, size: 20),
+                                        onPressed: () =>
+                                            setLocal(() => blocks.removeAt(bi)),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            }),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton.icon(
+                                icon: const Icon(Icons.add, size: 16, color: Color(0xFFC9A962)),
+                                label: const Text("Add Block",
+                                    style: TextStyle(color: Color(0xFFC9A962))),
+                                onPressed: () => setLocal(() {
+                                  blocks.add({
+                                    'start': const TimeOfDay(hour: 13, minute: 0),
+                                    'end': const TimeOfDay(hour: 17, minute: 0),
+                                  });
+                                }),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC9A962),
+                foregroundColor: Colors.black,
+              ),
+              onPressed: () {
+                final slots = <Map<String, dynamic>>[];
+                bool invalid = false;
+                for (int i = 0; i < 7; i++) {
+                  for (final blk in dayBlocks[i]!) {
+                    final s = blk['start']!;
+                    final e = blk['end']!;
+                    final sm = s.hour * 60 + s.minute;
+                    final em = e.hour * 60 + e.minute;
+                    if (em <= sm) {
+                      invalid = true;
+                      continue;
+                    }
+                    slots.add({
+                      "day_of_week": i,
+                      "start_time": _fmtHHMM(s),
+                      "end_time": _fmtHHMM(e),
+                    });
+                  }
+                }
+                if (invalid) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text("Each block's End must be after Start"),
+                    backgroundColor: Colors.redAccent,
+                  ));
+                  return;
+                }
+                // Send clean-slate update (replace_recurring=true)
+                _socket?.sink.add(jsonEncode({
+                  "type": "update_availability",
+                  "slots": slots,
+                  "replace_recurring": true,
+                }));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(slots.isEmpty
+                      ? "Cleared all recurring availability"
+                      : "Publishing ${slots.length} slot(s)..."),
+                  backgroundColor: const Color(0xFFC9A962),
+                ));
+              },
+              child: const Text("Publish"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===== BLOCK TIME / VACATION DIALOG =====
+  void _openBlockTimeDialog({DateTime? initialDate}) {
+    DateTime startDate = initialDate ?? DateTime.now();
+    DateTime endDate = initialDate ?? DateTime.now();
+    final reasonCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text(
+            "BLOCK TIME",
+            style: TextStyle(color: Color(0xFF8B5CF6), fontSize: 16, letterSpacing: 1.5),
+          ),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Block specific dates so clients cannot book sessions (vacation, sick day, etc).",
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: startDate,
+                          firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (picked != null) {
+                          setLocal(() {
+                            startDate = picked;
+                            if (endDate.isBefore(startDate)) endDate = startDate;
+                          });
+                        }
+                      },
+                      child: Text("From: ${_fmtDate(startDate)}",
+                          style: const TextStyle(color: Color(0xFF8B5CF6))),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: endDate,
+                          firstDate: startDate,
+                          lastDate: DateTime.now().add(const Duration(days: 365)),
+                        );
+                        if (picked != null) setLocal(() => endDate = picked);
+                      },
+                      child: Text("To: ${_fmtDate(endDate)}",
+                          style: const TextStyle(color: Color(0xFF8B5CF6))),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonCtrl,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: "Reason (optional)",
+                    labelStyle: TextStyle(color: Colors.grey),
+                    border: OutlineInputBorder(),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.white24),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: Color(0xFF8B5CF6)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8B5CF6),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                final dates = <String>[];
+                DateTime cursor = startDate;
+                while (!cursor.isAfter(endDate)) {
+                  dates.add(_fmtDate(cursor));
+                  cursor = cursor.add(const Duration(days: 1));
+                  if (dates.length > 366) break;
+                }
+                if (dates.isEmpty) {
+                  Navigator.pop(ctx);
+                  return;
+                }
+                _socket?.sink.add(jsonEncode({
+                  "type": "coach_block_time",
+                  "dates": dates,
+                  "reason": reasonCtrl.text.trim(),
+                }));
+                Navigator.pop(ctx);
+              },
+              child: const Text("Block"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _unblockDate(String dateIso) {
+    _socket?.sink.add(jsonEncode({
+      "type": "coach_unblock_time",
+      "date": dateIso,
+    }));
+  }
+
+  // ===== SUMMARY CARD: Your Available Hours =====
+  Widget _buildAvailabilitySummaryCard() {
+    // Group recurring rows by day_of_week
+    final Map<int, List<Map<String, dynamic>>> byDay = {
+      for (int i = 0; i < 7; i++) i: []
+    };
+    for (final r in _myRecurring) {
+      final dow = (r['day_of_week'] is int)
+          ? r['day_of_week'] as int
+          : int.tryParse('${r['day_of_week']}') ?? -1;
+      if (dow >= 0 && dow <= 6) byDay[dow]!.add(r);
+    }
+    final hasAny = byDay.values.any((l) => l.isNotEmpty);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0F0A),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.schedule, color: Color(0xFFC9A962), size: 18),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                "YOUR AVAILABLE HOURS",
+                style: TextStyle(
+                  color: Color(0xFFC9A962),
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Courier',
+                  fontSize: 13,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+            TextButton.icon(
+              icon: const Icon(Icons.edit, size: 14, color: Color(0xFFC9A962)),
+              label: const Text("Edit Hours",
+                  style: TextStyle(color: Color(0xFFC9A962), fontSize: 12)),
+              onPressed: _openAvailabilityDialog,
+            ),
+          ]),
+          const SizedBox(height: 6),
+          if (!_myAvailabilityLoaded)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text("Loading…", style: TextStyle(color: Colors.grey, fontSize: 12)),
+            )
+          else if (!hasAny)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                "No hours published yet. Tap Edit Hours to set your weekly schedule.",
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            )
+          else
+            ...List.generate(7, (i) {
+              final blocks = byDay[i]!;
+              final label = blocks.isEmpty
+                  ? "Not available"
+                  : blocks
+                      .map((b) =>
+                          "${_fmt12(_parseHHMM((b['start_time'] ?? '').toString()))} - ${_fmt12(_parseHHMM((b['end_time'] ?? '').toString()))}")
+                      .join(', ');
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 80,
+                      child: Text(_dayLong[i],
+                          style: const TextStyle(
+                              color: Colors.white70,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12)),
+                    ),
+                    Expanded(
+                      child: Text(label,
+                          style: TextStyle(
+                              color: blocks.isEmpty
+                                  ? Colors.grey
+                                  : const Color(0xFF22C55E),
+                              fontSize: 12)),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          if (_myBlocks.isNotEmpty) ...[
+            const Divider(color: Colors.white10, height: 20),
+            Row(children: [
+              const Icon(Icons.event_busy, color: Color(0xFF8B5CF6), size: 14),
+              const SizedBox(width: 6),
+              Text("Blocked Dates (${_myBlocks.length})",
+                  style: const TextStyle(
+                      color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.bold)),
+            ]),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _myBlocks.map((b) {
+                final ds = (b['date'] ?? '').toString();
+                return InputChip(
+                  label: Text(ds,
+                      style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  backgroundColor: const Color(0xFF1A1A2E),
+                  deleteIconColor: Colors.redAccent,
+                  onDeleted: () => _unblockDate(ds),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ===== MONTHLY CALENDAR GRID =====
+  Widget _buildCalendarGrid() {
+    final first = DateTime(_calMonth.year, _calMonth.month, 1);
+    final lastDay = DateTime(_calMonth.year, _calMonth.month + 1, 0).day;
+    // Mon=0..Sun=6
+    final leadingBlanks = first.weekday - 1;
+    final cells = <Widget>[];
+    final headerRow = ['M','T','W','T','F','S','S'];
+
+    final inboundCount = _inboundRequests.length;
+    final pendingCount = _pendingBookings.length;
+
+    Widget headerCell(String s) => Center(
+          child: Text(s,
+              style: const TextStyle(
+                  color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
+        );
+    cells.addAll(headerRow.map(headerCell));
+
+    for (int i = 0; i < leadingBlanks; i++) {
+      cells.add(const SizedBox.shrink());
+    }
+    for (int day = 1; day <= lastDay; day++) {
+      final d = DateTime(_calMonth.year, _calMonth.month, day);
+      final isToday = _fmtDate(d) == _fmtDate(DateTime.now());
+      final isSelected =
+          _calSelectedDay != null && _fmtDate(d) == _fmtDate(_calSelectedDay!);
+      final blocked = _isDateBlocked(d);
+      final available = _hasRecurringForDay(_dowMonZero(d)) && !blocked;
+      final daySessions = _sessionsOnDate(d);
+      final hasApproved = daySessions.any((s) => (s['status'] ?? '') == 'scheduled' || (s['status'] ?? '') == 'active');
+      final hasPending = daySessions.any((s) => (s['status'] ?? '') == 'pending_approval');
+      final hasSession = daySessions.isNotEmpty;
+
+      // Build tooltip text for the cell
+      String tooltipText = '';
+      if (hasSession) {
+        final lines = <String>[];
+        for (final s in daySessions) {
+          final clientNm = (s['client_name'] ?? 'Client').toString();
+          String pretty = (s['time'] ?? '').toString();
+          try {
+            final dtFull = DateTime.parse((s['scheduled_start'] ?? '').toString()).toLocal();
+            final h12 = dtFull.hour == 0 ? 12 : (dtFull.hour > 12 ? dtFull.hour - 12 : dtFull.hour);
+            final ap = dtFull.hour >= 12 ? 'PM' : 'AM';
+            pretty = '$h12:${dtFull.minute.toString().padLeft(2, '0')} $ap';
+          } catch (_) {}
+          final st = (s['status'] ?? '').toString();
+          final tag = st == 'pending_approval' ? ' (pending)' : '';
+          lines.add('$clientNm • $pretty$tag');
+        }
+        tooltipText = lines.join('\n');
+      }
+
+      Color bg;
+      if (blocked) {
+        bg = const Color(0xFF2A2A2A);
+      } else if (hasApproved) {
+        bg = const Color(0xFF4ECDC4).withOpacity(0.22);
+      } else if (hasPending) {
+        bg = const Color(0xFFC9A962).withOpacity(0.22);
+      } else if (available) {
+        bg = const Color(0xFF22C55E).withOpacity(0.18);
+      } else {
+        bg = const Color(0xFF111111);
+      }
+
+      Widget cellInner = Container(
+        margin: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFFC9A962)
+                : (isToday ? const Color(0xFF4ECDC4) : Colors.white10),
+            width: isSelected || isToday ? 1.5 : 0.5,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    "$day",
+                    style: TextStyle(
+                      color: blocked ? Colors.grey : Colors.white,
+                      fontSize: 12,
+                      fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  if (hasSession)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Text(
+                        (() {
+                          final s = daySessions.first;
+                          final nm = (s['client_name'] ?? 'Client').toString();
+                          return nm.length > 7 ? nm.substring(0, 7) : nm;
+                        })(),
+                        style: TextStyle(
+                          color: hasApproved ? const Color(0xFF4ECDC4) : const Color(0xFFC9A962),
+                          fontSize: 8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (hasApproved)
+              Positioned(
+                top: 2,
+                right: 3,
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF4ECDC4),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            if (hasPending && !hasApproved)
+              Positioned(
+                top: 2,
+                right: 3,
+                child: Container(
+                  width: 5,
+                  height: 5,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFC9A962),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+
+      if (tooltipText.isNotEmpty) {
+        cellInner = Tooltip(
+          message: tooltipText,
+          waitDuration: const Duration(milliseconds: 200),
+          child: cellInner,
+        );
+      }
+
+      cells.add(GestureDetector(
+        onTap: () => setState(() => _calSelectedDay = d),
+        child: cellInner,
+      ));
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0F),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left, color: Color(0xFFC9A962)),
+                onPressed: () => setState(() {
+                  _calMonth = DateTime(_calMonth.year, _calMonth.month - 1, 1);
+                }),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    "${_monthName(_calMonth.month)} ${_calMonth.year}",
+                    style: const TextStyle(
+                      color: Color(0xFFC9A962),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right, color: Color(0xFFC9A962)),
+                onPressed: () => setState(() {
+                  _calMonth = DateTime(_calMonth.year, _calMonth.month + 1, 1);
+                }),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          GridView.count(
+            crossAxisCount: 7,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            childAspectRatio: 1.1,
+            children: cells,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: [
+              _legendDot(const Color(0xFF22C55E), "Available"),
+              _legendDot(const Color(0xFFC9A962), "Booked"),
+              _legendDot(const Color(0xFF2A2A2A), "Blocked"),
+              if (inboundCount + pendingCount > 0)
+                _legendDot(Colors.redAccent,
+                    "Pending (${inboundCount + pendingCount})"),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.event_busy, size: 16, color: Color(0xFF8B5CF6)),
+                  label: const Text("Block Time",
+                      style: TextStyle(color: Color(0xFF8B5CF6))),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF8B5CF6)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => _openBlockTimeDialog(initialDate: _calSelectedDay),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.today, size: 16, color: Color(0xFF4ECDC4)),
+                  label: const Text("Today",
+                      style: TextStyle(color: Color(0xFF4ECDC4))),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF4ECDC4)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => setState(() {
+                    final now = DateTime.now();
+                    _calMonth = DateTime(now.year, now.month, 1);
+                    _calSelectedDay = now;
+                  }),
+                ),
+              ),
+            ],
+          ),
+          if (_calSelectedDay != null) ...[
+            const Divider(color: Colors.white10, height: 18),
+            _buildSelectedDayDetail(_calSelectedDay!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _legendDot(Color c, String label) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 8, height: 8, decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        ],
+      );
+
+  String _monthName(int m) => const [
+        'January','February','March','April','May','June',
+        'July','August','September','October','November','December'
+      ][m - 1];
+
+  Widget _buildSelectedDayDetail(DateTime d) {
+    final dow = _dowMonZero(d);
+    final blocked = _isDateBlocked(d);
+    final recur = _myRecurring.where((r) => (r['day_of_week'] ?? -1) == dow).toList();
+    final sessions = _sessionsOnDate(d);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "${_dayLong[dow]}, ${_monthName(d.month)} ${d.day}, ${d.year}",
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+        ),
+        const SizedBox(height: 6),
+        if (blocked)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF8B5CF6).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(children: [
+              const Icon(Icons.event_busy, color: Color(0xFF8B5CF6), size: 14),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text("Blocked (no client bookings)",
+                    style: TextStyle(color: Color(0xFF8B5CF6), fontSize: 12)),
+              ),
+              TextButton(
+                onPressed: () => _unblockDate(_fmtDate(d)),
+                child: const Text("Unblock",
+                    style: TextStyle(color: Colors.redAccent, fontSize: 12)),
+              ),
+            ]),
+          )
+        else if (recur.isEmpty)
+          const Text("No recurring availability",
+              style: TextStyle(color: Colors.grey, fontSize: 12))
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: recur.map((r) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF22C55E).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  "${_fmt12(_parseHHMM((r['start_time'] ?? '').toString()))} - ${_fmt12(_parseHHMM((r['end_time'] ?? '').toString()))}",
+                  style: const TextStyle(color: Color(0xFF22C55E), fontSize: 11),
+                ),
+              );
+            }).toList(),
+          ),
+        if (sessions.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Text("SESSIONS THIS DAY",
+              style: TextStyle(color: Colors.white54, fontSize: 11, letterSpacing: 1)),
+          const SizedBox(height: 4),
+          ...sessions.map((s) {
+            final cl = (s['client_name'] ?? s['client'] ?? 'Client').toString();
+            final tm = (s['time'] ?? '').toString();
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(children: [
+                const Icon(Icons.videocam, color: Color(0xFFC9A962), size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text("$cl${tm.isNotEmpty ? ' • $tm' : ''}",
+                        style: const TextStyle(color: Colors.white, fontSize: 12))),
+              ]),
+            );
+          }),
+        ],
       ],
     );
   }
@@ -10088,40 +11096,46 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
 
+  // Cache the Dojo URL once per session to prevent iframe reload flicker.
+  // Recomputing DateTime.now() in build() changed the URL on every rebuild,
+  // causing the HtmlElementView ValueKey to swap → constant iframe reload.
+  String? _cachedDojoUrl;
+  String? _cachedDojoUrlToken;
+
   Widget _buildDojoTab() {
     // =========================================================================
     // HYBRID DOJO - Night School Dojo page
     // - Mobile: Embedded WebView showing night_school_dojo.html
-    // - Web: Launch button to open night_school_dojo.html in new browser tab
-    // Changes to the HTML page automatically reflect - no Flutter rebuild needed
+    // - Web: Embedded iframe (URL cached once to prevent reload flicker)
     // =========================================================================
-    
-    // Build the Dojo URL with auth params (new tab won't share sessionStorage)
-    final String dojoUrl;
-    // Cache-buster to ensure latest HTML is always loaded
-    final cacheBuster = DateTime.now().millisecondsSinceEpoch.toString();
-    if (kIsWeb) {
-      // On web, use relative URL - browser will resolve against current origin
-      final params = Uri(queryParameters: {
-        'token': (_authToken ?? '').trim(),
-        'hw': (_coachHardwareId ?? '').trim(),
-        'ws': _serverUrl,
-        'v': cacheBuster,
-      }).query;
-      dojoUrl = '/night_school_dojo.html?$params';
-    } else {
-      // On mobile, build full URL for WebView
-      final baseUrl = _apiBaseUrl
-          .replaceAll(RegExp(r'/api/?$'), '')
-          .replaceAll(RegExp(r'/+$'), '')
-          .replaceFirst('api.sovereignsanctuary.net', 'app.sovereignsanctuary.net');
-      dojoUrl = Uri.parse('$baseUrl/night_school_dojo.html').replace(queryParameters: {
-        'token': (_authToken ?? '').trim(),
-        'hw': (_coachHardwareId ?? '').trim(),
-        'ws': _serverUrl,
-        'v': cacheBuster,
-      }).toString();
+
+    final tokenNow = (_authToken ?? '').trim();
+    // Rebuild URL only if token changes (login/relogin) or first access
+    if (_cachedDojoUrl == null || _cachedDojoUrlToken != tokenNow) {
+      final cacheBuster = DateTime.now().millisecondsSinceEpoch.toString();
+      if (kIsWeb) {
+        final params = Uri(queryParameters: {
+          'token': tokenNow,
+          'hw': (_coachHardwareId ?? '').trim(),
+          'ws': _serverUrl,
+          'v': cacheBuster,
+        }).query;
+        _cachedDojoUrl = '/night_school_dojo.html?$params';
+      } else {
+        final baseUrl = _apiBaseUrl
+            .replaceAll(RegExp(r'/api/?$'), '')
+            .replaceAll(RegExp(r'/+$'), '')
+            .replaceFirst('api.sovereignsanctuary.net', 'app.sovereignsanctuary.net');
+        _cachedDojoUrl = Uri.parse('$baseUrl/night_school_dojo.html').replace(queryParameters: {
+          'token': tokenNow,
+          'hw': (_coachHardwareId ?? '').trim(),
+          'ws': _serverUrl,
+          'v': cacheBuster,
+        }).toString();
+      }
+      _cachedDojoUrlToken = tokenNow;
     }
+    final dojoUrl = _cachedDojoUrl!;
     
     // -------------------------------------------------------------------------
     // WEB PLATFORM: Embed Dojo page inline as iframe
