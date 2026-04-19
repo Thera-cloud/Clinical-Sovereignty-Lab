@@ -12427,38 +12427,50 @@ async def handle_client(websocket, path=None):
                                         or "Coach"
                                     )
                         upcoming = []
+                        _seen_ids = set()
                         for s in sessions:
-                            if s.get("client_id") == client_id and s.get("status") in ["scheduled", "active", "pending_approval"]:
-                                _st_iso = (s.get("scheduled_start") or "")
-                                _en_iso = (s.get("scheduled_end") or "")
-                                _date_str, _time_str, _dur_min = "", "", 50
-                                try:
-                                    _st_dt = datetime.datetime.fromisoformat(_st_iso.replace("Z", "+00:00")) if _st_iso else None
-                                    _en_dt = datetime.datetime.fromisoformat(_en_iso.replace("Z", "+00:00")) if _en_iso else None
-                                    if _st_dt:
-                                        _date_str = _st_dt.date().isoformat()
-                                        _time_str = _st_dt.strftime("%H:%M")
-                                    if _st_dt and _en_dt and _en_dt > _st_dt:
-                                        _dur_min = max(5, int((_en_dt - _st_dt).total_seconds() / 60))
-                                except Exception:
-                                    pass
-                                _coach_id = s.get("coach_id", "") or ""
-                                upcoming.append({
-                                    "session_id": s.get("session_id"),
-                                    "coach_id": _coach_id,
-                                    "coach_name": _coach_lookup.get(_coach_id, "Coach"),
-                                    "scheduled_start": _st_iso,
-                                    "scheduled_end": _en_iso,
-                                    "date": _date_str,
-                                    "time": _time_str,
-                                    "duration_minutes": _dur_min,
-                                    "status": s.get("status"),
-                                    "zoom_link": s.get("zoom_link", ""),
-                                    "session_type": s.get("session_type", "COACH"),
-                                    "client_name": s.get("client_name", ""),
-                                    "notes": s.get("notes", ""),
-                                    "platform": s.get("platform", "Zoom"),
-                                })
+                            if s.get("client_id") != client_id:
+                                continue
+                            if s.get("status") not in ("scheduled", "active", "pending_approval", "confirmed"):
+                                continue
+                            # SOVEREIGN-VOICE: only real coach/zoom bookings — must have scheduled_start AND not be an AI chat session
+                            _st_iso = (s.get("scheduled_start") or "").strip()
+                            _stype = (s.get("session_type") or "").upper()
+                            if not _st_iso or _stype == "AI":
+                                continue
+                            _sid = s.get("session_id")
+                            if _sid in _seen_ids:
+                                continue
+                            _seen_ids.add(_sid)
+                            _en_iso = (s.get("scheduled_end") or "")
+                            _date_str, _time_str, _dur_min = "", "", 50
+                            try:
+                                _st_dt = datetime.datetime.fromisoformat(_st_iso.replace("Z", "+00:00")) if _st_iso else None
+                                _en_dt = datetime.datetime.fromisoformat(_en_iso.replace("Z", "+00:00")) if _en_iso else None
+                                if _st_dt:
+                                    _date_str = _st_dt.date().isoformat()
+                                    _time_str = _st_dt.strftime("%H:%M")
+                                if _st_dt and _en_dt and _en_dt > _st_dt:
+                                    _dur_min = max(5, int((_en_dt - _st_dt).total_seconds() / 60))
+                            except Exception:
+                                pass
+                            _coach_id = s.get("coach_id", "") or ""
+                            upcoming.append({
+                                "session_id": _sid,
+                                "coach_id": _coach_id,
+                                "coach_name": _coach_lookup.get(_coach_id, "Coach"),
+                                "scheduled_start": _st_iso,
+                                "scheduled_end": _en_iso,
+                                "date": _date_str,
+                                "time": _time_str,
+                                "duration_minutes": _dur_min,
+                                "status": s.get("status"),
+                                "zoom_link": s.get("zoom_link", ""),
+                                "session_type": s.get("session_type", "COACH"),
+                                "client_name": s.get("client_name", ""),
+                                "notes": s.get("notes", ""),
+                                "platform": s.get("platform", "Zoom"),
+                            })
                         upcoming.sort(key=lambda x: x.get("scheduled_start") or "")
                         await websocket.send(json.dumps({
                             "type": "client_upcoming_sessions",
