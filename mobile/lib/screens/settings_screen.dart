@@ -3237,16 +3237,23 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   void initState() {
     super.initState();
     _profile = Map<String, dynamic>.from(widget.profile);
-    _emailCtrl.text = _profile['email'] ?? '';
-    _phoneCtrl.text = _profile['phone'] ?? '';
-    _emergencyCtrl.text = _profile['emergency_contact'] ?? '';
-    _timezoneCtrl.text = _profile['timezone'] ?? 'America/New_York';
-    _specialtiesCtrl.text = (_profile['specialties'] ?? _profile['specialty'] ?? _profile['specializations'] ?? '').toString();
-    _zoomLinkCtrl.text = _profile['zoom_link'] ?? '';
-    final cs = (_profile['coaching_style'] ?? '').toString().trim();
+    // Defensive: every TextEditingController.text MUST be a String. Login
+    // envelope can deliver non-string values (numbers for phone/fee, maps for
+    // address). Passing a non-String crashes the paint phase with a
+    // `charCodeAt is not a function` error (dart2js TextPainter).
+    String _s(dynamic v, [String fallback = '']) =>
+        (v == null) ? fallback : v.toString();
+    _emailCtrl.text = _s(_profile['email']);
+    _phoneCtrl.text = _s(_profile['phone']);
+    _emergencyCtrl.text = _s(_profile['emergency_contact']);
+    _timezoneCtrl.text = _s(_profile['timezone'], 'America/New_York');
+    _specialtiesCtrl.text = _s(
+        _profile['specialties'] ?? _profile['specialty'] ?? _profile['specializations']);
+    _zoomLinkCtrl.text = _s(_profile['zoom_link']);
+    final cs = _s(_profile['coaching_style']).trim();
     _coachingStyle = cs.isEmpty ? 'integrative' : cs;
-    _feeCtrl.text = (_profile['coaching_fee'] ?? '0').toString();
-    _paymentMode = _profile['payment_mode'] ?? 'coach_handles';
+    _feeCtrl.text = _s(_profile['coaching_fee'], '0');
+    _paymentMode = _s(_profile['payment_mode'], 'coach_handles');
     _notifNewClient = _profile['notif_new_client'] ?? true;
     _notifSessionReminders = _profile['notif_session_reminders'] ?? true;
     _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? true;
@@ -3254,7 +3261,13 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     _preferredContact = _profile['preferred_contact'] ?? 'email';
     _loadBiometricState();
     _setupHierarchyListener();
-    _requestProfileRefresh();
+    // Defer get_profile to a post-frame callback so the broadcast-stream
+    // subscription in _setupHierarchyListener is fully attached before the
+    // bridge can reply with profile_loaded. Otherwise the response races the
+    // subscription and is silently dropped, leaving every field blank.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestProfileRefresh();
+    });
   }
 
   void _requestProfileRefresh() {
@@ -3276,12 +3289,14 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
       final csR = (_profile['coaching_style'] ?? '').toString().trim();
       _coachingStyle = csR.isEmpty ? _coachingStyle : csR;
       _feeCtrl.text = (_profile['coaching_fee'] ?? _feeCtrl.text).toString();
-      _paymentMode = _profile['payment_mode'] ?? _paymentMode;
-      _notifNewClient = _profile['notif_new_client'] ?? _notifNewClient;
-      _notifSessionReminders = _profile['notif_session_reminders'] ?? _notifSessionReminders;
-      _notifCrisisAlerts = _profile['notif_crisis_alerts'] ?? _notifCrisisAlerts;
-      _notifNightSchool = _profile['notif_night_school'] ?? _notifNightSchool;
-      _preferredContact = _profile['preferred_contact'] ?? _preferredContact;
+      // Defensive coercion: payment_mode / preferred_contact are typed String,
+      // notif_* are typed bool. Coerce to keep paint phase safe.
+      _paymentMode = (_profile['payment_mode'] ?? _paymentMode).toString();
+      _notifNewClient = _profile['notif_new_client'] == true;
+      _notifSessionReminders = _profile['notif_session_reminders'] == true;
+      _notifCrisisAlerts = _profile['notif_crisis_alerts'] == true;
+      _notifNightSchool = _profile['notif_night_school'] == true;
+      _preferredContact = (_profile['preferred_contact'] ?? _preferredContact).toString();
     });
   }
 
@@ -4081,10 +4096,53 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final name = _profile['name'] ?? _profile['username'] ?? 'Coach';
-    final tier = _profile['tier'] ?? _profile['subscription_plan'] ?? 'COACH';
-    final certStatus = _profile['certification_status'] ?? 'PENDING';
-    final consentVersion = _profile['consent_version'] ?? 'Unknown';
+    // While profile_loaded is in flight, _profile only contains the login
+    // envelope (username/role/token). Show a loading indicator until the
+    // bridge replies with the full profile, otherwise every field renders
+    // blank and looks broken to the coach.
+    // Tighter guard: an empty-string default in the login envelope must NOT
+    // count as "loaded". Wait for at least one substantive field before
+    // rendering the full body, otherwise empty rows render as blanks AND any
+    // type mismatch on a non-string field crashes paint.
+    bool _has(dynamic v) => v != null && v.toString().trim().isNotEmpty;
+    final bool _profileLoaded = _has(_profile['email']) ||
+        _has(_profile['phone']) ||
+        _has(_profile['coaching_fee']) ||
+        _has(_profile['specialties']) ||
+        _has(_profile['zoom_link']) ||
+        _has(_profile['certification_status']) ||
+        _has(_profile['timezone']);
+    if (!_profileLoaded) {
+      return Scaffold(
+        backgroundColor: _Design.bgVoid,
+        appBar: AppBar(
+          title: const Text('Coach Settings', style: TextStyle(fontFamily: 'Courier', color: _Design.gold, letterSpacing: 2)),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: _Design.gold),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: _Design.gold),
+              SizedBox(height: 16),
+              Text('Loading your settings...',
+                  style: TextStyle(color: _Design.textSecondary, fontSize: 13)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Defensive string coercion — every value passed to Text() must be a
+    // String. Login envelope can deliver Maps/ints/lists for some keys.
+    String _str(dynamic v, String fallback) =>
+        (v == null || v.toString().trim().isEmpty) ? fallback : v.toString();
+    final name = _str(_profile['name'] ?? _profile['username'], 'Coach');
+    final tier = _str(_profile['tier'] ?? _profile['subscription_plan'], 'COACH');
+    final certStatus = _str(_profile['certification_status'], 'PENDING');
+    final consentVersion = _str(_profile['consent_version'], 'Unknown');
     final w9Status = (_profile['w9_submitted'] == true) ? 'Filed' : 'Missing';
     final requires1099 = (_profile['requires_1099'] == true) ? 'Required' : 'Below threshold';
     final platformFee = _profile['platform_fee_pct'] ?? 30;

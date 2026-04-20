@@ -13625,7 +13625,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   Future<List<dynamic>> _fetchRecentTrainingSessions() async {
     try {
       final hwId = widget.currentUserProfile['hardware_id'] ?? '';
-      final url = '${_serverUrl.replaceFirst('ws', 'http').replaceAll(':8765', ':8000')}/api/coach/mesh/sessions/$hwId?limit=5';
+      final url = '${AppConfig.apiBaseUrl}/api/coach/mesh/sessions/$hwId?limit=5';
       final resp = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer ${widget.currentUserProfile['token']}'},
@@ -16449,7 +16449,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Single
 
   Future<Map<String, dynamic>> _fetchCoachingMetrics() async {
     try {
-      final url = '${_serverUrl.replaceFirst('ws', 'http').replaceAll(':8765', ':8000')}/api/coach/hierarchy/metrics';
+      final url = '${AppConfig.apiBaseUrl}/api/coach/hierarchy/metrics';
       final resp = await http.get(
         Uri.parse(url),
         headers: {'Authorization': 'Bearer ${widget.currentUserProfile['token']}'},
