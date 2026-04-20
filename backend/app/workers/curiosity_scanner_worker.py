@@ -269,7 +269,7 @@ class CuriosityScannerWorker:
                 rows = await conn.fetch(
                     """
                     SELECT h.entity_id, h.last_pulse_at,
-                           COALESCE(c.curiosity_level, 'none') AS curiosity_level
+                           COALESCE(c.level, 'none') AS curiosity_level
                     FROM hive_heartbeats h
                     LEFT JOIN hive_curiosity_state c
                         ON h.entity_id = c.entity_id

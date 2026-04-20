@@ -559,6 +559,13 @@ class NotificationObserver:
                     numeric_id = row["platform_handle"]
                     user_info = await resolve_fn(numeric_id)
                     if user_info and user_info.handle:
+                        # Delete any stale row already holding the @username
+                        # to avoid violating the unique constraint on
+                        # (platform, platform_handle) before promoting numeric_id.
+                        await conn.execute("""
+                            DELETE FROM skyeye_social_memory
+                            WHERE platform = 'x' AND platform_handle = $1
+                        """, user_info.handle)
                         await conn.execute("""
                             UPDATE skyeye_social_memory
                             SET platform_handle = $1
