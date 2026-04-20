@@ -127,7 +127,7 @@ _recoverAuth();
         function getWsUrl() {
             const h = location.hostname, proto = location.protocol === 'https:' ? 'wss' : 'ws';
             if (h.includes('sovereignsanctuary')) return `wss://${h}/ws`;
-            return `${proto}://${h}:8765`;
+            return `${proto}://${h}/ws`;
         }
         var SERVER_URL = getWsUrl();
         var socket = null;

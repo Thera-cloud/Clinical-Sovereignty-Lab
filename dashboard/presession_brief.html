@@ -452,7 +452,7 @@ _recoverAuth();
                 return `wss://${host}/ws`;
             }
             const proto = (location.protocol === "https:") ? "wss" : "ws";
-            return `${proto}://${host}:8765`;
+            return `${proto}://${host}/ws`;
         }
         let socket = null;
         let clientId = null;

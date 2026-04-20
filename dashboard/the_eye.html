@@ -385,7 +385,7 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
             var h = location.hostname;
             if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
             if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
-            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + "/ws";
         }
 
         function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }

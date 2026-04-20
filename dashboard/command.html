@@ -1702,7 +1702,7 @@
             }
             // Local dev fallback (on the LAN)
             const proto = (location.protocol === "https:") ? "wss" : "ws";
-            return `${proto}://${host}:8765`;
+            return `${proto}://${host}/ws`;
         }
         let socket = null;
         let profile = null;

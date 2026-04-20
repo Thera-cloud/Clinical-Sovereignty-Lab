@@ -142,7 +142,7 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                 return "wss://" + host + "/ws";
             }
             var proto = (location.protocol === "https:") ? "wss" : "ws";
-            return proto + "://" + host + ":8765";
+            return proto + "://" + host + "/ws";
         }
 
         function init() {

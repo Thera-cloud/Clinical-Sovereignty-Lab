@@ -127,7 +127,7 @@ _recoverAuth();
             if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
             var params = new URLSearchParams(window.location.search);
             if (params.get("ws")) return params.get("ws");
-            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + ":8765";
+            return (location.protocol === "https:" ? "wss" : "ws") + "://" + h + "/ws";
         }
 
         var ws = null, authenticated = false;
