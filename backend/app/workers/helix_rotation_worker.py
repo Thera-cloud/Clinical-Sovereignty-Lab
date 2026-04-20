@@ -214,7 +214,15 @@ class HelixRotationWorker:
         else:
             self._consecutive_entropy_failures += 1
             self._total_entropy_failures += 1
-            logger.warning(
+            # Per-rotation degradation is logged at debug to avoid log
+            # flooding. The escalated *** ENTROPY DEGRADATION *** message
+            # at MAX_ENTROPY_FAILURES is the operator-visible signal.
+            _entropy_log = (
+                logger.warning
+                if self._consecutive_entropy_failures >= MAX_ENTROPY_FAILURES
+                else logger.debug
+            )
+            _entropy_log(
                 ">>> [HELIX_WORKER] Entropy degraded — consecutive "
                 "failures: %d",
                 self._consecutive_entropy_failures,
@@ -322,7 +330,7 @@ class HelixRotationWorker:
                     or not r.get("hsm_healthy")
                 ]
                 if len(unhealthy) > len(recent) * 0.5:
-                    logger.warning(
+                    logger.debug(
                         ">>> [HELIX_WORKER] >50%% of recent rotations had "
                         "degraded entropy"
                     )
