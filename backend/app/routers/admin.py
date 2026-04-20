@@ -198,6 +198,62 @@ async def _load_transactions_pg(pool, limit: int = 10000) -> list:
             logger.warning("_load_transactions_pg: PG read failed: %s", e)
     return _load_transactions(limit)
 
+# Dashboard Overview (compact card-shape for Sovereign Command)
+@router.get("/overview")
+async def get_overview_stats(request: Request):
+    """Compact admin overview for the Sovereign Command top cards.
+
+    Returns the flat counts the dashboard JS expects:
+    total_users, active_today, live_sessions, coaches_online, crisis_alerts.
+    Falls back to zeros if the database is unreachable so the dashboard
+    renders numbers instead of dashes.
+    """
+    pool = getattr(request.app.state, "db_pool", None)
+    out = {
+        "total_users": 0,
+        "active_today": 0,
+        "live_sessions": 0,
+        "coaches_online": 0,
+        "crisis_alerts": 0,
+    }
+    if not pool:
+        return out
+    try:
+        async with pool.acquire() as conn:
+            now = datetime.now(timezone.utc)
+            day_ago = now - timedelta(hours=24)
+
+            out["total_users"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"
+            ) or 0
+            out["active_today"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL AND last_login >= $1",
+                day_ago,
+            ) or 0
+            out["live_sessions"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM sessions WHERE status = 'active'"
+            ) or 0
+            out["coaches_online"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL "
+                "AND role = 'COACH' AND last_login >= $1",
+                day_ago,
+            ) or 0
+            try:
+                out["crisis_alerts"] = await conn.fetchval(
+                    "SELECT COUNT(*) FROM crisis_events WHERE resolved = FALSE"
+                ) or 0
+            except Exception:
+                try:
+                    out["crisis_alerts"] = await conn.fetchval(
+                        "SELECT COUNT(*) FROM crisis_watchlist WHERE resolved = FALSE"
+                    ) or 0
+                except Exception:
+                    out["crisis_alerts"] = 0
+    except Exception as e:
+        logger.warning("get_overview_stats: PG read failed: %s", e)
+    return out
+
+
 # Dashboard Stats
 @router.get("/dashboard")
 async def get_dashboard_stats(request: Request):

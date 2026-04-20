@@ -481,7 +481,7 @@ class PipelineDrum:
                 _logger.debug("ZTA Bug trace error: %s", exc)
 
         if result["level"] >= 2:
-            _logger.warning(
+            _logger.debug(
                 "PIPELINE DRUM [%s]: score=%.2f, sensors=%s, resonance=%.1fx",
                 result["level_name"], result["final_score"],
                 result["active_sensors"], result["resonance_multiplier"],

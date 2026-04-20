@@ -111,6 +111,7 @@ class HelixRotationWorker:
         self._total_entropy_failures: int = 0
         self._last_rotation_time: Optional[datetime] = None
         self._last_persist_time: Optional[datetime] = None
+        self._last_degradation_log: Optional[datetime] = None
         self._started_at: Optional[datetime] = None
 
     # ─── Lifecycle ───────────────────────────────────────────────────────
@@ -341,11 +342,20 @@ class HelixRotationWorker:
 
         Fires a hive event and resets the failure counter.
         """
-        logger.critical(
-            ">>> [HELIX_WORKER] *** ENTROPY DEGRADATION *** — "
-            "%d consecutive failures",
-            self._consecutive_entropy_failures,
+        # Rate-limit the loud log line to once per 5 minutes per worker
+        # to prevent log flooding when entropy is sustained-degraded.
+        _now = datetime.utcnow()
+        _should_log = (
+            self._last_degradation_log is None
+            or (_now - self._last_degradation_log).total_seconds() > 300
         )
+        if _should_log:
+            logger.warning(
+                ">>> [HELIX_WORKER] *** ENTROPY DEGRADATION *** — "
+                "%d consecutive failures",
+                self._consecutive_entropy_failures,
+            )
+            self._last_degradation_log = _now
 
         if self._event_bus:
             try:

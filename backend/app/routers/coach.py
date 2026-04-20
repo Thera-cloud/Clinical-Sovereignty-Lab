@@ -91,6 +91,17 @@ def save_json(filepath: Path, data):
 
 # Endpoints
 
+@router.get("/clients")
+async def get_my_clients(request: Request, user_id: str = Depends(get_current_user_id)):
+    """Return clients assigned to the authenticated coach.
+
+    Convenience alias used by the Sovereign Command dashboard so the URL
+    does not need to know the coach's hardware_id. Reuses the canonical
+    /clients/{coach_id} logic with the caller's identity.
+    """
+    return await get_assigned_clients(user_id, request)
+
+
 @router.get("/clients/{coach_id}")
 async def get_assigned_clients(coach_id: str, request: Request):
     """Get all clients assigned to this coach"""
