@@ -182,23 +182,23 @@ class InsightAccumulator:
     async def _gather_nevedal_coherence(self) -> Dict:
         async with self.db_pool.acquire() as conn:
             metrics = await conn.fetch("""
-                SELECT metric_type, metric_value, metadata, created_at
+                SELECT c_emo, p_ent, t_tunnel, cee_window, recorded_at
                 FROM nevedal_metrics
-                WHERE created_at > NOW() - INTERVAL '24 hours'
-                ORDER BY created_at DESC
+                WHERE recorded_at > NOW() - INTERVAL '24 hours'
+                ORDER BY recorded_at DESC
                 LIMIT 50
             """)
 
-            cee_count = sum(1 for m in metrics if m.get("metric_type") == "cee_event")
+            cee_count = sum(1 for m in metrics if m.get("cee_window"))
 
-            avg_coherence = 0
             coherence_vals = [
-                m["metric_value"] for m in metrics
-                if m.get("metric_type") in ("coherence", "c_emo")
-                and m.get("metric_value") is not None
+                float(m["c_emo"]) for m in metrics
+                if m.get("c_emo") is not None
             ]
-            if coherence_vals:
-                avg_coherence = sum(coherence_vals) / len(coherence_vals)
+            avg_coherence = (
+                sum(coherence_vals) / len(coherence_vals)
+                if coherence_vals else 0
+            )
 
             return {
                 "total_measurements": len(metrics),
@@ -206,9 +206,10 @@ class InsightAccumulator:
                 "avg_coherence": round(avg_coherence, 3),
                 "sample_metrics": [
                     {
-                        "type": m["metric_type"],
-                        "value": m["metric_value"],
-                        "time": m["created_at"].isoformat(),
+                        "c_emo": float(m["c_emo"]) if m.get("c_emo") is not None else None,
+                        "p_ent": float(m["p_ent"]) if m.get("p_ent") is not None else None,
+                        "cee_window": m.get("cee_window"),
+                        "time": m["recorded_at"].isoformat(),
                     }
                     for m in metrics[:10]
                 ],
