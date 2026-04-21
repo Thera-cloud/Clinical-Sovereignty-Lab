@@ -167,6 +167,18 @@ class TokenRenewalAgent:
     # ── step 3: notify admin ─────────────────────────────────────────────
 
     async def _notify_admin(self, platform: str, now: datetime):
+        from app.config import settings as _settings
+
+        # Paused in ops — no “Token Renewal Required” email/SMS (activity log still
+        # records failures elsewhere; Token Guardian keeps trying refresh).
+        if not getattr(_settings, "SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED", True):
+            logger.debug(
+                "TokenRenewalAgent: outbound token alerts disabled "
+                "(SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED=false), skipping notify for %s",
+                platform,
+            )
+            return
+
         pending = self._pending_renewals.get(platform)
         if pending:
             last_notified = pending.get("notified_at")
@@ -174,7 +186,6 @@ class TokenRenewalAgent:
                 logger.debug("TokenRenewalAgent: %s cooldown active, skipping notification", platform)
                 return
 
-        from app.config import settings as _settings
         base_url = _settings.PUBLIC_BASE_URL or "https://api.sovereignsanctuary.net"
         oauth_url = f"{base_url}/api/skyeye/platforms/{platform}/connect"
 

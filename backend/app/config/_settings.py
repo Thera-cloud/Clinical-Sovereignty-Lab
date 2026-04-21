@@ -209,6 +209,11 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     SKYEYE_TOKEN_ENCRYPTION_KEY: str = ""
 
+    # When False, pauses SendGrid + SMS for social token issues: “Token Renewal
+    # Required” (TokenRenewalAgent) and proactive expiry warnings (TokenLifecycle
+    # Predictor). Activity still logs to skyeye_activity. Default True.
+    SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED: bool = True
+
     # -------------------------------------------------------------------------
     # SkyEye — Social Media Platform Credentials (all optional)
     # -------------------------------------------------------------------------

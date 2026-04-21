@@ -146,6 +146,17 @@ class TokenLifecyclePredictor:
 
         await self._log_activity(platform, "token_expiry_warning", msg, severity)
 
+        from app.config import settings as _settings
+
+        if not getattr(_settings, "SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED", True):
+            logger.debug(
+                "TokenLifecyclePredictor: outbound token alerts disabled "
+                "(SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED=false), skipping email/SMS for %s",
+                platform,
+            )
+            logger.info("TokenLifecyclePredictor: %s", msg)
+            return
+
         if severity in ("warning", "urgent") and self.notifications:
             if self.admin_email:
                 subject = f"{'URGENT: ' if severity == 'urgent' else ''}{platform} token expiry warning"
