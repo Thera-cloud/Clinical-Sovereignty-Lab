@@ -16,6 +16,14 @@ import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
+try:
+    from app.services.pii_cipher import decrypt_pii, is_encrypted
+except Exception:
+    def decrypt_pii(value):  # type: ignore
+        return value
+    def is_encrypted(value):  # type: ignore
+        return bool(value and str(value).startswith("gAAAAA"))
+
 # Secure logging with PII auto-redaction
 try:
     from app.secure_logger import get_secure_logger
@@ -9879,8 +9887,21 @@ except Exception as _loe_err:
 # Initialize conversation export system
 export_content_generator = ExportContentGenerator(hippocampus)
 
-night_school_curriculum = NightSchoolCurriculum(VAULT_ROOT) if NightSchoolCurriculum else None
-night_school_handler = NightSchoolHandler(VAULT_ROOT) if NightSchoolHandler else None
+try:
+    night_school_curriculum = NightSchoolCurriculum(VAULT_ROOT) if NightSchoolCurriculum else None
+except Exception as _nsc_err:
+    print(f"[INIT] NightSchoolCurriculum unavailable: {_nsc_err}")
+    night_school_curriculum = None
+
+# DEFENSIVE: Bridge MUST start even if Night School can't init (e.g., filesystem
+# permission errors on /app/data/Vaults/Admin/night_school/*). Bridge serves all
+# WebSocket traffic — chat, voice, coach portal, family sanctuary, SSE delivery —
+# and cannot crash because one subsystem fails.
+try:
+    night_school_handler = NightSchoolHandler(VAULT_ROOT) if NightSchoolHandler else None
+except Exception as _nsh_err:
+    print(f"[INIT] NightSchoolHandler unavailable (bridge will continue): {_nsh_err}")
+    night_school_handler = None
 
 # Avatar handler for Top Tier voice-driven interactions
 avatar_handler = create_avatar_handler(VAULT_ROOT) if create_avatar_handler else None
@@ -13715,6 +13736,50 @@ async def handle_client(websocket, path=None):
                 if current_profile and current_profile.get("role") == "ADMIN":
                     registry = load_registry()
                     users = []
+                    # Coach display names: resolve assigned_coach_id / assigned_coach (hw id or username)
+                    _coach_hw_to_name = {}
+                    _coach_user_to_name = {}
+                    for _rk, _rv in (registry or {}).items():
+                        _pp = (_rv.get("profile") or {})
+                        if (_pp.get("role") or "").upper() != "COACH":
+                            continue
+                        _disp = (_pp.get("name") or "").strip() or _rk
+                        _hw = (_pp.get("hardware_id") or "").strip()
+                        if _hw:
+                            _coach_hw_to_name[_hw] = _disp
+                        _coach_user_to_name[_rk] = _disp
+                        _cred_u = (_rv.get("credentials") or {}).get("username") or ""
+                        if _cred_u:
+                            _coach_user_to_name[_cred_u] = _disp
+
+                    if db_pool:
+                        try:
+                            async with db_pool.acquire() as _cprof:
+                                _crows = await _cprof.fetch(
+                                    "SELECT coach_user_id, display_name, username FROM coach_profiles"
+                                )
+                            for _cr in _crows:
+                                _cid = (_cr["coach_user_id"] or "").strip()
+                                if not _cid:
+                                    continue
+                                _dn = (_cr["display_name"] or "").strip()
+                                _un = (_cr["username"] or "").strip()
+                                _label = _dn or _un
+                                if _label:
+                                    _coach_hw_to_name[_cid] = _label
+                        except Exception as _cp_err:
+                            print(f">>> [ADMIN_USERS] coach_profiles enrichment error: {_cp_err}")
+
+                    def _admin_coach_display_name(_acid: str) -> str:
+                        if not (_acid or "").strip():
+                            return ""
+                        _a = _acid.strip()
+                        if _a in _coach_hw_to_name:
+                            return _coach_hw_to_name[_a]
+                        if _a in _coach_user_to_name:
+                            return _coach_user_to_name[_a]
+                        return ""
+
                     # Build set of online user IDs for status indicators
                     online_coach_ids = set(connected_coaches.keys())
                     online_client_ids = set(connected_clients.keys())
@@ -13727,12 +13792,64 @@ async def handle_client(websocket, path=None):
                         hid = p.get("hardware_id") or ""
                         cred_username = (v.get("credentials", {}).get("username") or k)
                         effective_plan = p.get("subscription_plan") or p.get("tier") or "TRIAL"
+
+                        # Nevedal metrics — same pipeline as coach_get_clients (parietal)
+                        _metrics_obj = {
+                            "coherence": 0,
+                            "gap_index": 0,
+                            "growth": 0,
+                            "risk_level": "UNKNOWN",
+                            "quantum_state": None,
+                            # users.html reads user.metrics.risk (not risk_level)
+                            "risk": "UNKNOWN",
+                        }
+                        try:
+                            _m = parietal.load_metrics(p)
+                            _ns = (_m.get("nevedal_state") or {}) if isinstance(_m, dict) else {}
+                            _hist = _m.get("history") or []
+                            if not isinstance(_hist, list):
+                                _hist = []
+                            _sess_ct = int(_ns.get("session_count") or 0)
+                            _has_metrics_data = (
+                                _sess_ct > 0
+                                or len(_hist) > 0
+                                or bool(str(_ns.get("last_risk_assessment") or "").strip())
+                            )
+                            _summary = parietal.get_metrics_summary(p)
+                            _c_emo = float(_summary.get("C_emo", 0.0))
+                            _gap = float(_summary.get("GAP", 0.0))
+                            _quantum = float(_summary.get("Quantum", 0.0))
+                            _risk = (_ns.get("risk_level") or _summary.get("risk_level") or "LOW")
+                            if _has_metrics_data:
+                                _metrics_obj["coherence"] = round(_c_emo, 2)
+                                _metrics_obj["gap_index"] = round(_gap, 2)
+                                _metrics_obj["growth"] = round(_quantum, 2)
+                                _metrics_obj["risk_level"] = _risk
+                                _metrics_obj["risk"] = _risk
+                                _metrics_obj["quantum_state"] = _quantum
+                            # else: keep zeros, UNKNOWN, quantum_state None
+                        except Exception as _admin_mx_err:
+                            print(f">>> [ADMIN_USERS] Metrics enrichment error for {k}: {_admin_mx_err}")
+
+                        _assigned_coach_ref = (
+                            p.get("assigned_coach_id") or p.get("assigned_coach") or ""
+                        )
+
+                        raw_email = p.get("email", "")
+                        if raw_email and is_encrypted(raw_email):
+                            try:
+                                display_email = decrypt_pii(raw_email)
+                            except Exception:
+                                display_email = "(encrypted)"
+                        else:
+                            display_email = raw_email
+
                         users.append({
                             "id": hid,
                             "name": p.get("name"),
                             "username": k,
                             "credentials_username": cred_username,
-                            "email": p.get("email"),
+                            "email": display_email,
                             "role": p.get("role"),
                             "tier": p.get("tier"),
                             "plan": effective_plan,
@@ -13741,7 +13858,8 @@ async def handle_client(websocket, path=None):
                             "coach_verified": p.get("coach_verified", False),
                             "master_coach_approved": p.get("master_coach_approved", False),
                             "master_coach_requested": p.get("master_coach_requested", False),
-                            "assigned_coach_id": p.get("assigned_coach_id") or p.get("assigned_coach") or "",
+                            "assigned_coach_id": _assigned_coach_ref,
+                            "assigned_coach_name": _admin_coach_display_name(_assigned_coach_ref),
                             "family_id": p.get("family_id") or "",
                             "family_role": p.get("family_role") or "",
                             "guardian_id": p.get("guardian_id") or "",
@@ -13754,6 +13872,7 @@ async def handle_client(websocket, path=None):
                             "last_login": p.get("last_login"),
                             "online": hid in online_ids,
                             "account_status": p.get("account_status", "ACTIVE"),
+                            "metrics": _metrics_obj,
                         })
 
                     # Enrich coaches with hierarchy type from coach_hierarchy table
