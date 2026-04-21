@@ -452,7 +452,7 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                 }
             }
             if (r === "CLIENT") {
-                html += "<div class='profile-field'><span class='field-label'>Assigned Coach</span><span class='field-value'>" + (user.assigned_coach_id || "None") + "</span></div>";
+                html += "<div class='profile-field'><span class='field-label'>Assigned Coach</span><span class='field-value'>" + (user.assigned_coach_name || user.assigned_coach_id || "None") + "</span></div>";
             }
             html += "<div class='profile-field'><span class='field-label'>Status</span><span class='field-value " + (user.online ? "green'>🟢 Online" : "'>⚫ Offline") + "</span></div>";
             html += "<div class='profile-field'><span class='field-label'>Last Login</span><span class='field-value'>" + (user.last_login ? String(user.last_login).slice(0, 16) : "Never") + "</span></div>";
