@@ -17,6 +17,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from './apiClient';
 import ThePulse from './components/ThePulse';
 import StrategicMemory from './components/StrategicMemory';
 import SwarmOperations from './components/SwarmOperations';
@@ -66,32 +67,8 @@ const colors = {
 };
 
 // =============================================================================
-// API HELPER
+// API — shared apiFetch from ./apiClient (Bearer auth)
 // =============================================================================
-
-const API_BASE = '';  // relative — same origin
-
-function _getAuthHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  const token = sessionStorage.getItem('token');
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  return h;
-}
-
-async function apiFetch(path, options = {}) {
-  try {
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: { ..._getAuthHeaders(), ...options.headers },
-      ...options,
-    });
-    if (res.status === 401) { window.location.href = 'index.html'; return null; }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn(`API ${path}:`, err);
-    return null;
-  }
-}
 
 function useApi(path, deps = []) {
   const [data, setData] = useState(null);
@@ -324,12 +301,30 @@ const DashboardScreen = () => {
   const activityFeed = (feedData && feedData.events) || [];
   const pendingApprovals = (coachData && coachData.coaches || []).filter(c => c.status === 'PENDING_VERIFICATION');
 
-  // Determine system status from health check
-  const [sysStatus, setSysStatus] = useState({ bridge: 'offline', azure: 'offline', nightSchool: 'offline' });
+  // Independent probes — do not infer Bridge/Azure/Night School from a single /health
+  const [sysStatus, setSysStatus] = useState({
+    api: 'offline',
+    nightSchool: 'offline',
+    azure: 'offline',
+    bridgeWs: 'offline',
+  });
   useEffect(() => {
-    apiFetch('/health').then(h => {
-      if (h && h.status === 'healthy') setSysStatus({ bridge: 'online', azure: 'online', nightSchool: 'online' });
-    });
+    let cancelled = false;
+    (async () => {
+      const [health, ns, flags] = await Promise.all([
+        apiFetch('/health'),
+        apiFetch('/api/admin/night-school/status'),
+        apiFetch('/api/admin/service-flags'),
+      ]);
+      if (cancelled) return;
+      setSysStatus({
+        api: health && health.status === 'healthy' ? 'online' : 'offline',
+        nightSchool: ns ? 'online' : 'offline',
+        azure: flags && flags.azure_openai_configured ? 'online' : 'warning',
+        bridgeWs: flags && flags.websocket_url_configured ? 'online' : 'warning',
+      });
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   return (
@@ -337,10 +332,11 @@ const DashboardScreen = () => {
       {/* System Status Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <h1 style={{ color: colors.gold, fontSize: 20, margin: 0 }}>System Dashboard</h1>
-        <div style={{ display: 'flex', gap: 16 }}>
-          <span><StatusDot status={sysStatus.bridge} />Bridge</span>
-          <span><StatusDot status={sysStatus.azure} />Azure</span>
-          <span><StatusDot status={sysStatus.nightSchool} />Night School</span>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 11 }}>
+          <span title="Little Nate API process"><StatusDot status={sysStatus.api} />Core API</span>
+          <span title="Night School files / admin status endpoint"><StatusDot status={sysStatus.nightSchool} />Night School</span>
+          <span title="AZURE_API_KEY present in server env"><StatusDot status={sysStatus.azure} />Azure OpenAI</span>
+          <span title="WS_URL configured (bridge client URL); does not open a live socket"><StatusDot status={sysStatus.bridgeWs} />Bridge WS URL</span>
           <Button style={{ padding: '4px 10px', fontSize: 10 }} onClick={refreshDash}>Refresh</Button>
         </div>
       </div>
@@ -1292,13 +1288,14 @@ const AuditLogScreen = () => {
 // SC_06: NATE FEATURES
 // =============================================================================
 
-const NateFeaturesScreen = () => {
+const NateFeaturesScreen = ({ onNavigateTab }) => {
   const { data: dashData } = useApi('/api/admin/dashboard');
   const { data: fibreData } = useApi('/api/fibres');
   const { data: meshData } = useApi('/api/mesh/health');
   const { data: crisisData } = useApi('/api/admin/crisis-watchlist');
   const { data: aiModesData } = useApi('/api/ai-modes/status');
   const { data: settingsData, refresh: refreshSettings } = useApi('/api/admin/settings');
+  const { data: deadmanData } = useApi('/api/admin/deadman-switch/status');
 
   const [silenceThreshold, setSilenceThreshold] = useState(3);
   const [retentionPolicy, setRetentionPolicy] = useState('forever');
@@ -1324,6 +1321,10 @@ const NateFeaturesScreen = () => {
   const fibres = (fibreData && fibreData.fibres) || [];
   const mesh = meshData || {};
   const aiModes = (aiModesData && aiModesData.modes) || ['Empathetic', 'Directive', 'Socratic', 'Crisis'];
+  const dm = deadmanData || {};
+  const dmActive = dm.monitor_active === true;
+  const dmLabel = dmActive ? 'ACTIVE' : (dm.engine_present === false ? 'UNKNOWN' : 'STOPPED');
+  const dmColor = dmActive ? colors.green : (dm.engine_present === false ? colors.orange : colors.red);
 
   return (
     <div style={{ padding: 24 }}>
@@ -1333,9 +1334,11 @@ const NateFeaturesScreen = () => {
         <Card>
           <SectionTitle>💀 Deadman Switch</SectionTitle>
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
-            <div style={{ fontSize: 48, marginBottom: 8 }}>🟢</div>
-            <div style={{ fontSize: 16, fontWeight: 'bold', color: colors.green }}>ACTIVE</div>
-            <div style={{ fontSize: 10, color: colors.textSecondary }}>Monitoring {totalUsers} users</div>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>{dmActive ? '🟢' : dm.engine_present === false ? '⚪' : '🔴'}</div>
+            <div style={{ fontSize: 16, fontWeight: 'bold', color: dmColor }}>{dmLabel}</div>
+            <div style={{ fontSize: 10, color: colors.textSecondary }}>
+              {dmActive ? `Monitoring ${totalUsers} users (background task)` : 'Monitor loop status from /api/admin/deadman-switch/status'}
+            </div>
           </div>
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
@@ -1367,7 +1370,7 @@ const NateFeaturesScreen = () => {
             <div style={{ fontSize: 24, fontWeight: 'bold', color: colors.purple }}>{fibres.length}</div>
             <div style={{ fontSize: 10, color: colors.textSecondary }}>Mesh messages: {mesh.total_messages || 0}</div>
           </div>
-          <Button style={{ width: '100%' }} onClick={() => window.location.hash = '#swarm-ops'}>View Swarm Matrix</Button>
+          <Button style={{ width: '100%' }} onClick={() => onNavigateTab && onNavigateTab('swarm-ops')}>View Swarm Matrix</Button>
         </Card>
         
         <Card>
@@ -1655,7 +1658,7 @@ export default function SovereignCommand() {
       case 'night-school': return <NightSchoolScreen />;
       case 'the-eye': return <TheEyeScreen />;
       case 'audit': return <AuditLogScreen />;
-      case 'nate': return <NateFeaturesScreen />;
+      case 'nate': return <NateFeaturesScreen onNavigateTab={setActiveScreen} />;
       case 'nevedal': return <NevedalLabScreen />;
       case 'the-pulse': return <ThePulse />;
       case 'strategic-memory': return <StrategicMemory />;

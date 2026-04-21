@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { authFetch } from '../apiClient';
 
 // =============================================================================
 // DESIGN SYSTEM
@@ -172,7 +173,7 @@ export default function ForesightDashboard() {
     setLoading((prev) => ({ ...prev, [key]: true }));
     setErrors((prev) => ({ ...prev, [key]: null }));
     try {
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setter(data);
@@ -195,9 +196,8 @@ export default function ForesightDashboard() {
     setForecastResult(null);
     setErrors((prev) => ({ ...prev, forecast: null }));
     try {
-      const res = await fetch('/api/foresight/forecast', {
+      const res = await authFetch('/api/foresight/forecast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

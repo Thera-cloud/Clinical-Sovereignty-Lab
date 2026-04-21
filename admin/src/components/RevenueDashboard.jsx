@@ -4,6 +4,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch, apiFetchWithStatus } from '../apiClient';
 
 // Design tokens — must match SovereignCommand.jsx
 const colors = {
@@ -20,21 +21,6 @@ const colors = {
   textSecondary: '#888888',
   border: '#252525',
 };
-
-const API = process.env.REACT_APP_API_BASE_URL || '';
-
-async function apiFetch(path) {
-  try {
-    const headers = {};
-    const token = sessionStorage.getItem('token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`${API}${path}`, { headers });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
 
 // =============================================================================
 // REVENUE DASHBOARD COMPONENT
@@ -83,22 +69,20 @@ const RevenueDashboard = () => {
   const handleOverridePlan = async () => {
     if (!selectedUser) return;
     try {
-      const res = await fetch(`${API}/api/admin/billing/override-plan`, {
+      const { ok, data } = await apiFetchWithStatus('/api/admin/billing/override-plan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: selectedUser.hardware_id || selectedUser.id,
           new_plan: overridePlan,
           admin_note: 'Manual override from Sovereign Command',
         }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (ok) {
         showMessage(`Plan overridden to ${overridePlan} for ${selectedUser.name || selectedUser.id}`);
         setShowOverrideModal(false);
         loadData();
       } else {
-        showMessage(data.detail || 'Override failed', true);
+        showMessage((data && data.detail) || 'Override failed', true);
       }
     } catch (e) {
       showMessage(`Error: ${e.message}`, true);
@@ -108,24 +92,22 @@ const RevenueDashboard = () => {
   const handleRefund = async () => {
     if (!selectedUser || !refundAmount) return;
     try {
-      const res = await fetch(`${API}/api/admin/billing/refund`, {
+      const { ok, data } = await apiFetchWithStatus('/api/admin/billing/refund', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: selectedUser.hardware_id || selectedUser.id,
           amount: parseFloat(refundAmount),
           reason: refundReason || 'Admin refund',
         }),
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (ok) {
         showMessage(`Refund of $${refundAmount} processed for ${selectedUser.name || selectedUser.id}`);
         setShowRefundModal(false);
         setRefundAmount('');
         setRefundReason('');
         loadData();
       } else {
-        showMessage(data.detail || 'Refund failed', true);
+        showMessage((data && data.detail) || 'Refund failed', true);
       }
     } catch (e) {
       showMessage(`Error: ${e.message}`, true);
@@ -134,12 +116,11 @@ const RevenueDashboard = () => {
 
   const handleRetryPayment = async (paymentId) => {
     try {
-      const res = await fetch(`${API}/api/admin/billing/retry-payment`, {
+      const { ok } = await apiFetchWithStatus('/api/admin/billing/retry-payment', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_id: paymentId }),
       });
-      if (res.ok) {
+      if (ok) {
         showMessage('Payment retry initiated');
         loadData();
       } else {
@@ -651,16 +632,15 @@ const AdminToolsTab = ({ couponCode, setCouponCode, couponDiscount, setCouponDis
   const createCoupon = async () => {
     if (!couponCode) return;
     try {
-      const res = await fetch(`${API}/api/admin/billing/coupon`, {
+      const { ok } = await apiFetchWithStatus('/api/admin/billing/coupon', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code: couponCode,
           discount: parseFloat(couponDiscount),
           type: couponType,
         }),
       });
-      if (res.ok) {
+      if (ok) {
         showMessage(`Coupon "${couponCode}" created`);
         setCouponCode('');
       } else {
@@ -785,11 +765,9 @@ const SpecialsTab = ({ showMessage }) => {
 
   const createSpecial = async () => {
     if (!name || !endsAt) return showMessage('Name and end date required', true);
-    const token = sessionStorage.getItem('token');
     try {
-      const res = await fetch(`${API}/api/admin/billing/special`, {
+      const { ok } = await apiFetchWithStatus('/api/admin/billing/special', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           name,
           discount_type: discountType,
@@ -800,7 +778,7 @@ const SpecialsTab = ({ showMessage }) => {
           promo_code: promoCode || null,
         }),
       });
-      if (res.ok) {
+      if (ok) {
         showMessage('Special created');
         setName(''); setEndsAt(''); setPromoCode(''); setMaxRedemptions('');
         loadSpecials();
@@ -811,11 +789,7 @@ const SpecialsTab = ({ showMessage }) => {
   };
 
   const deactivate = async (id) => {
-    const token = sessionStorage.getItem('token');
-    await fetch(`${API}/api/admin/billing/special/${id}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    await apiFetchWithStatus(`/api/admin/billing/special/${id}`, { method: 'DELETE' });
     loadSpecials();
   };
 
@@ -890,11 +864,9 @@ const SchoolCodesTab = ({ showMessage }) => {
 
   const createCode = async () => {
     if (!schoolName || !schoolCode) return showMessage('School name and code required', true);
-    const token = sessionStorage.getItem('token');
     try {
-      const res = await fetch(`${API}/api/admin/billing/school-codes`, {
+      const { ok, data } = await apiFetchWithStatus('/api/admin/billing/school-codes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           school_name: schoolName,
           school_code: schoolCode,
@@ -902,23 +874,18 @@ const SchoolCodesTab = ({ showMessage }) => {
           max_students: maxStudents ? parseInt(maxStudents) : null,
         }),
       });
-      if (res.ok) {
+      if (ok) {
         showMessage('School code created');
         setSchoolName(''); setSchoolCode(''); setMaxStudents('');
         loadCodes();
       } else {
-        const err = await res.json().catch(() => ({}));
-        showMessage(err.detail || 'Failed to create school code', true);
+        showMessage((data && data.detail) || 'Failed to create school code', true);
       }
     } catch { showMessage('Network error', true); }
   };
 
   const deactivate = async (id) => {
-    const token = sessionStorage.getItem('token');
-    await fetch(`${API}/api/admin/billing/school-code/${id}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    await apiFetchWithStatus(`/api/admin/billing/school-code/${id}`, { method: 'DELETE' });
     loadCodes();
   };
 
@@ -986,11 +953,9 @@ const CorporateSponsorsTab = ({ showMessage }) => {
 
   const createSponsor = async () => {
     if (!companyName || !sponsorCode) return showMessage('Company name and code required', true);
-    const token = sessionStorage.getItem('token');
     try {
-      const res = await fetch(`${API}/api/admin/billing/corporate-sponsors`, {
+      const { ok, data } = await apiFetchWithStatus('/api/admin/billing/corporate-sponsors', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           company_name: companyName,
           sponsor_code: sponsorCode,
@@ -1001,23 +966,18 @@ const CorporateSponsorsTab = ({ showMessage }) => {
           billing_contact_email: billingEmail || null,
         }),
       });
-      if (res.ok) {
+      if (ok) {
         showMessage('Corporate sponsor created');
         setCompanyName(''); setSponsorCode(''); setBillingEmail(''); setMaxEmployees('');
         loadSponsors();
       } else {
-        const err = await res.json().catch(() => ({}));
-        showMessage(err.detail || 'Failed to create sponsor', true);
+        showMessage((data && data.detail) || 'Failed to create sponsor', true);
       }
     } catch { showMessage('Network error', true); }
   };
 
   const deactivate = async (id) => {
-    const token = sessionStorage.getItem('token');
-    await fetch(`${API}/api/admin/billing/corporate-sponsor/${id}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    await apiFetchWithStatus(`/api/admin/billing/corporate-sponsor/${id}`, { method: 'DELETE' });
     loadSponsors();
   };
 

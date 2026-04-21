@@ -5,8 +5,8 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiFetch } from '../apiClient';
 
-const API_BASE = process.env.REACT_APP_API_BASE_URL || window.location.origin.replace(':3000', ':8000');
 const POLL_INTERVAL = 30000;
 
 /* ─── Design Tokens ─── */
@@ -124,9 +124,8 @@ export default function ThePulse() {
 
   const fetchPulse = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/coherence/pulse`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await apiFetch('/api/coherence/pulse');
+      if (!json) throw new Error('No data');
       setData(json);
       setError(null);
     } catch (err) {

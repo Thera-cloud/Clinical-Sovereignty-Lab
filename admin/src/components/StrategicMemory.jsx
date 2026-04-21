@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { authFetch } from '../apiClient';
 
 // =============================================================================
 // DESIGN SYSTEM
@@ -153,7 +154,7 @@ export default function StrategicMemory() {
     setLoading((prev) => ({ ...prev, [key]: true }));
     setErrors((prev) => ({ ...prev, [key]: null }));
     try {
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setter(Array.isArray(data) ? data : (data.items || data.data || data));
@@ -181,9 +182,8 @@ export default function StrategicMemory() {
     // Map UI priority labels to numeric values expected by the router (1-10)
     const priorityMap = { normal: 5, high: 8, critical: 10 };
     try {
-      await fetch('/api/strategic-memory/standing-orders', {
+      await authFetch('/api/strategic-memory/standing-orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: newOrderText.trim().substring(0, 256),
           directive: newOrderText.trim(),
@@ -201,7 +201,7 @@ export default function StrategicMemory() {
 
   const deactivateOrder = async (orderId) => {
     try {
-      await fetch(`/api/strategic-memory/standing-orders/${orderId}`, { method: 'DELETE' });
+      await authFetch(`/api/strategic-memory/standing-orders/${orderId}`, { method: 'DELETE' });
       fetchData('orders', '/api/strategic-memory/standing-orders', setStandingOrders);
     } catch (err) {
       setErrors((prev) => ({ ...prev, orders: err.message }));
@@ -210,9 +210,8 @@ export default function StrategicMemory() {
 
   const handleProposal = async (proposalId, action) => {
     try {
-      await fetch(`/api/strategic-memory/proposals/${proposalId}/status`, {
+      await authFetch(`/api/strategic-memory/proposals/${proposalId}/status`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: action,  // "approved" or "rejected"
           ...(action === 'approved' ? { approved_by: 'big_nate' } : {}),

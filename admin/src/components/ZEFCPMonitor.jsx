@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-
-const API_BASE = process.env.REACT_APP_API_BASE_URL || window.location.origin.replace(':3000', ':8000');
+import { authFetch } from '../apiClient';
 
 const colors = {
   bgDark: '#0A0A0A',
@@ -82,10 +81,10 @@ export default function ZEFCPMonitor() {
       setError(null);
       try {
         const [healthRes, endpointsRes, assembliesRes, metricsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/zefcp/health`),
-          fetch(`${API_BASE}/api/zefcp/endpoints`),
-          fetch(`${API_BASE}/api/zefcp/assemblies`),
-          fetch(`${API_BASE}/api/zefcp/metrics/all`),
+          authFetch('/api/zefcp/health'),
+          authFetch('/api/zefcp/endpoints'),
+          authFetch('/api/zefcp/assemblies'),
+          authFetch('/api/zefcp/metrics/all'),
         ]);
 
         if (cancelled) return;

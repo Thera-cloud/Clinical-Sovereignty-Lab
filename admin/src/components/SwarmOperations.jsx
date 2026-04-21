@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { authFetch } from '../apiClient';
 
 // =============================================================================
 // DESIGN SYSTEM
@@ -172,7 +173,7 @@ export default function SwarmOperations() {
     setLoading((prev) => ({ ...prev, [key]: true }));
     setErrors((prev) => ({ ...prev, [key]: null }));
     try {
-      const res = await fetch(url);
+      const res = await authFetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setter(data);
@@ -198,9 +199,8 @@ export default function SwarmOperations() {
     if (!selectedTemplate) return;
     setSpawning(true);
     try {
-      const res = await fetch('/api/fibres/spawn', {
+      const res = await authFetch('/api/fibres/spawn', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fibre_type: selectedTemplate,
           name: spawnName || selectedTemplate,

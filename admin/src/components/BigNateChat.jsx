@@ -12,8 +12,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-
-const API_BASE = process.env.REACT_APP_API_BASE_URL || window.location.origin.replace(':3000', ':8000');
+import { authFetch } from '../apiClient';
 
 const colors = {
   bgDark: '#0A0A0A',
@@ -270,7 +269,7 @@ export default function BigNateChat() {
   const loadHistory = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat?limit=500`);
+      const res = await authFetch('/api/skyeye/chat?limit=500');
       if (!res.ok) throw new Error('Failed to load history');
       const data = await res.json();
       if (data && data.length > 0) {
@@ -310,13 +309,12 @@ export default function BigNateChat() {
     setError(null);
 
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat`, {
+      const res = await authFetch('/api/skyeye/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: content, mode }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || 'Request failed');
 
       const reply = data.message || data.response || data.content || data.text || '';
@@ -357,12 +355,18 @@ export default function BigNateChat() {
   async function handleExecuteAction(actionId) {
     setExecutingAction(actionId);
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat/execute`, {
+      const res = await authFetch('/api/skyeye/chat/execute', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action_id: actionId }),
       });
-      const result = await res.json();
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessages((m) => [
+          ...m,
+          { role: 'assistant', error: true, content: result.detail || `Execute failed (${res.status})` },
+        ]);
+        return;
+      }
 
       setPendingActions((prev) => prev.filter((a) => a.action_id !== actionId));
       const verificationText = result.verification_message
@@ -398,8 +402,12 @@ export default function BigNateChat() {
     const label = archive ? 'archive to memory and clear' : 'permanently clear';
     if (!window.confirm(`Are you sure you want to ${label} all chat history?`)) return;
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat?archive=${archive}`, { method: 'DELETE' });
-      const data = await res.json();
+      const res = await authFetch(`/api/skyeye/chat?archive=${archive}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.detail || 'Failed to clear chat');
+        return;
+      }
       if (data.cleared) {
         setMessages([]);
         setPendingActions([]);
@@ -419,7 +427,7 @@ export default function BigNateChat() {
 
   const loadArchives = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat/archives`);
+      const res = await authFetch('/api/skyeye/chat/archives');
       if (res.ok) {
         const data = await res.json();
         setArchives(data || []);
@@ -429,7 +437,7 @@ export default function BigNateChat() {
 
   async function viewArchiveDetail(entryId) {
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat/archives/${entryId}`);
+      const res = await authFetch(`/api/skyeye/chat/archives/${entryId}`);
       const data = await res.json();
       setViewingArchive(data);
       setArchiveTranscript(data.transcript || '');
@@ -441,7 +449,7 @@ export default function BigNateChat() {
   async function restoreArchive(entryId) {
     if (!window.confirm('Restore this archived conversation into the active chat?')) return;
     try {
-      const res = await fetch(`${API_BASE}/api/skyeye/chat/archives/${entryId}/restore`, { method: 'POST' });
+      const res = await authFetch(`/api/skyeye/chat/archives/${entryId}/restore`, { method: 'POST' });
       const data = await res.json();
       alert(data.message || 'Restored.');
       setViewingArchive(null);

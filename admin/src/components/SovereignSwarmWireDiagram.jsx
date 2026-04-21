@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { apiFetch } from '../apiClient';
 
 const colors = {
   bgDark: '#0A0A0A',
@@ -26,17 +27,6 @@ const colors = {
   textPrimary: '#FFFFFF',
   textSecondary: '#888888',
 };
-
-async function apiFetch(path) {
-  try {
-    const headers = {};
-    const token = sessionStorage.getItem('token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(path, { headers });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
-}
 
 // Node definitions
 const NODES = [
@@ -118,16 +108,21 @@ export default function SovereignSwarmWireDiagram() {
 
   // Fetch health for key nodes + fibre list + mesh health
   useEffect(() => {
-    apiFetch('/api/fibres').then(d => setFibreData(d));
+    apiFetch('/api/fibres').then((d) => {
+      setFibreData(d);
+      const count = (d && d.fibres && d.fibres.length) || 0;
+      NODES.filter((n) => n.id.startsWith('fibre-')).forEach((n) => {
+        setNodeStatus((prev) => ({
+          ...prev,
+          [n.id]: count > 0 ? 'inventory' : 'unverified',
+        }));
+      });
+    });
     apiFetch('/api/mesh/health').then(d => setMeshData(d));
 
     Object.entries(NODE_ENDPOINTS).forEach(async ([nodeId, endpoint]) => {
       const data = await apiFetch(endpoint);
       setNodeStatus(prev => ({ ...prev, [nodeId]: data ? 'online' : 'offline' }));
-    });
-    // Fibres are always "online" if the system is running
-    NODES.filter(n => n.id.startsWith('fibre-')).forEach(n => {
-      setNodeStatus(prev => ({ ...prev, [n.id]: 'online' }));
     });
   }, []);
 
@@ -156,7 +151,11 @@ export default function SovereignSwarmWireDiagram() {
 
   const getStatusColor = (nodeId) => {
     const s = nodeStatus[nodeId];
-    return s === 'online' ? colors.green : s === 'offline' ? colors.red : colors.textSecondary;
+    if (s === 'online') return colors.green;
+    if (s === 'offline') return colors.red;
+    if (s === 'inventory') return colors.cyan;
+    if (s === 'unverified') return colors.orange;
+    return colors.textSecondary;
   };
 
   return (
@@ -236,10 +235,10 @@ export default function SovereignSwarmWireDiagram() {
               {nodeMap[selectedNode]?.label}
               <span style={{
                 marginLeft: 12, fontSize: 10, padding: '2px 8px', borderRadius: 4,
-                background: getStatusColor(selectedNode) === colors.green ? colors.greenDim : colors.redDim,
+                background: (nodeStatus[selectedNode] === 'online' || nodeStatus[selectedNode] === 'inventory') ? colors.greenDim : colors.redDim,
                 color: getStatusColor(selectedNode),
               }}>
-                {nodeStatus[selectedNode] || 'unknown'}
+                {nodeStatus[selectedNode] === 'inventory' ? 'inventory' : nodeStatus[selectedNode] === 'unverified' ? 'not verified' : (nodeStatus[selectedNode] || 'unknown')}
               </span>
             </div>
             <div style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 8 }}>

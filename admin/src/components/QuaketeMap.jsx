@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-
-const API_BASE = process.env.REACT_APP_API_BASE_URL || window.location.origin.replace(':3000', ':8000');
+import { authFetch } from '../apiClient';
 
 const colors = {
   bgDark: '#0A0A0A',
@@ -78,11 +77,11 @@ export default function QuaketeMap() {
       setError(null);
       try {
         const [ringsRes, trailRes, transfersRes, beamsRes, memorialsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/quakete/rings`),
-          fetch(`${API_BASE}/api/quakete/trail-map`),
-          fetch(`${API_BASE}/api/quakete/transfers`),
-          fetch(`${API_BASE}/api/quakete/beams`),
-          fetch(`${API_BASE}/api/quakete/memorials`),
+          authFetch('/api/quakete/rings'),
+          authFetch('/api/quakete/trail-map'),
+          authFetch('/api/quakete/transfers'),
+          authFetch('/api/quakete/beams'),
+          authFetch('/api/quakete/memorials'),
         ]);
 
         if (cancelled) return;
