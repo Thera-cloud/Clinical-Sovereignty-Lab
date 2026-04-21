@@ -6,7 +6,7 @@ Every subsystem raises from a common root so callers can catch at any granularit
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 
@@ -182,6 +182,38 @@ class ApprovalTimeoutException(StrategyException):
 class AutoExecuteBlockedException(StrategyException):
     """Auto-execute was blocked because risk is too high."""
     pass
+
+
+class ProposalValidationError(StrategyException):
+    """Proposal failed required-field validation and was not persisted.
+
+    Required fields enforced by ``StrategicMemoryService.create_proposal``:
+      * ``title`` (>= 10 characters, stripped)
+      * ``objective`` (1-2 sentences describing what will happen)
+      * ``reasoning`` (why this action is being proposed)
+      * ``action_steps`` (non-empty list of concrete steps)
+      * ``expected_impact`` (what changes after execution)
+      * ``rollback`` (what happens if this goes wrong)
+
+    Raised so the caller (Sovereign Mind, BigNate chat handler, etc.) can
+    surface a clear error to the operator instead of silently writing a
+    vague proposal into the deploy queue.
+    """
+
+    def __init__(self, reason: str = "", missing_fields: Optional[List[str]] = None,
+                 title: str = "", proposed_by: str = "", **kwargs):
+        self.reason = reason
+        self.missing_fields = missing_fields or []
+        super().__init__(
+            message=f"PROPOSAL_REJECTED: {reason}",
+            details={
+                "reason": reason,
+                "missing_fields": self.missing_fields,
+                "title": title[:80] if title else "",
+                "proposed_by": proposed_by,
+                **kwargs,
+            },
+        )
 
 
 # =============================================================================

@@ -330,22 +330,77 @@ class SovereignMind:
         rationale: str,
         domain_tags: Optional[List[str]] = None,
         human_approves_auto: bool = False,
+        title: Optional[str] = None,
+        action_steps: Optional[List[str]] = None,
+        expected_impact: Optional[str] = None,
+        rollback: Optional[str] = None,
+        deployment_window: Optional[str] = None,
+        data_sources: Optional[List[str]] = None,
+        token_cost_estimate: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a StrategyProposal in strategic memory. Auto-assess risk level.
         If low risk and human_approves_auto: auto-execute. Patent Claims 11, 21.
+
+        All structured fields (title, action_steps, expected_impact, rollback)
+        flow through to ``StrategicMemoryService.create_proposal``, which
+        rejects vague proposals so the operator never sees a one-word email.
+        Callers that only have ``objective`` + ``rationale`` get reasonable
+        synthesized defaults — but the title still needs >= 10 characters.
         """
         domain_tags = domain_tags or []
         risk = self._assess_proposal_risk(objective, domain_tags)
 
+        # ─── Synthesize defaults for any missing structured field ───
+        # The strict validator in create_proposal will still reject anything
+        # truly empty (e.g. blank objective), keeping the gate honest.
+        clean_objective = (objective or "").strip()
+        clean_rationale = (rationale or "").strip()
+
+        proposal_title = (title or "").strip() or clean_objective
+        # Pad short titles by prefixing the action so the >= 10-char rule is met
+        # without inventing meaning the caller didn't supply.
+        if len(proposal_title) < 10 and clean_objective:
+            proposal_title = f"Sovereign proposal: {proposal_title}"
+        proposal_title = proposal_title[:240]
+
+        if not action_steps:
+            action_steps = [
+                f"Review proposal context: {clean_objective[:200]}",
+                "Confirm alignment with active standing orders",
+                "Execute the proposed action and record the outcome",
+            ]
+
+        if not (expected_impact or "").strip():
+            expected_impact = (
+                "If executed, the swarm acts on the stated objective; if "
+                "rejected, the proposal is logged for audit and no action is "
+                "taken. Operator receives an outcome notification either way."
+            )
+
+        if not (rollback or "").strip():
+            rollback = (
+                "Read-only proposal entry — rejection or hold leaves no "
+                "side effects. If the action executes and proves undesired, "
+                "reply ROLLBACK to the auto-execute notification."
+            )
+
         proposal = await self.strategic_memory.create_proposal(
-            title=objective[:256],
-            description=rationale,
+            title=proposal_title,
+            description="",  # built from structured fields by create_proposal
             action_type=domain_tags[0] if domain_tags else "general",
             proposed_by="sovereign_mind",
             risk=risk,
-            execution_payload={"objective": objective, "rationale": rationale, "domains": domain_tags},
+            execution_payload={"objective": clean_objective, "rationale": clean_rationale, "domains": domain_tags},
             auto_execute_hours=2 if (risk == "low" and human_approves_auto) else None,
+            objective=clean_objective,
+            reasoning=clean_rationale,
+            action_steps=action_steps,
+            expected_impact=expected_impact,
+            rollback=rollback,
+            deployment_window=deployment_window,
+            data_sources=data_sources,
+            token_cost_estimate=token_cost_estimate,
         )
 
         if risk == "low" and human_approves_auto:

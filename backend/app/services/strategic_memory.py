@@ -18,7 +18,27 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from app.services.exceptions import StrategyException, ProposalNotFoundException
+from app.services.exceptions import (
+    ProposalNotFoundException,
+    ProposalValidationError,
+    StrategyException,
+)
+
+
+# ─── Proposal validation rules ───
+# Title must be descriptive enough that an admin reading it in an email can
+# tell what they're approving without opening another tool. "verify" fails;
+# "Verify client coherence metrics across all active users" passes.
+_PROPOSAL_TITLE_MIN_LEN = 10
+
+_PROPOSAL_REQUIRED_FIELDS = (
+    "title",          # >= _PROPOSAL_TITLE_MIN_LEN chars
+    "objective",      # WHAT will happen (1-2 sentences)
+    "reasoning",      # WHY this is being proposed
+    "action_steps",   # bullet list of concrete steps that execute
+    "expected_impact",  # what changes after execution
+    "rollback",       # what happens if this goes wrong
+)
 
 
 class StrategicMemoryService:
@@ -160,10 +180,92 @@ class StrategicMemoryService:
         rollback_payload: Optional[Dict] = None,
         auto_execute_hours: Optional[int] = None,
         metadata: Optional[Dict] = None,
+        # ─── Self-contained proposal fields (FIX 1 of proposal enrichment) ───
+        # Every proposal that lands in the deploy queue must answer these so
+        # the operator can approve from email/SMS without opening another tool.
+        objective: Optional[str] = None,
+        reasoning: Optional[str] = None,
+        action_steps: Optional[List[str]] = None,
+        expected_impact: Optional[str] = None,
+        rollback: Optional[str] = None,
+        deployment_window: Optional[str] = None,
+        data_sources: Optional[List[str]] = None,
+        token_cost_estimate: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """Insert a strategy proposal after validating it is self-contained.
+
+        Rejects (with ``ProposalValidationError``) any proposal where the
+        operator could not make an informed decision from the resulting
+        email alone — i.e. missing title (>= 10 chars), objective,
+        reasoning, action_steps, expected_impact, or rollback.
+        """
+        # ─── Validation ───
+        title_clean = (title or "").strip()
+        missing: List[str] = []
+        if len(title_clean) < _PROPOSAL_TITLE_MIN_LEN:
+            missing.append(f"title (got {len(title_clean)} chars, need >= {_PROPOSAL_TITLE_MIN_LEN})")
+        if not (objective or "").strip():
+            missing.append("objective")
+        if not (reasoning or "").strip():
+            missing.append("reasoning")
+        if not action_steps or not any(str(s).strip() for s in action_steps):
+            missing.append("action_steps")
+        if not (expected_impact or "").strip():
+            missing.append("expected_impact")
+        if not (rollback or "").strip():
+            missing.append("rollback")
+
+        if missing:
+            reason = "; ".join(missing)
+            print(
+                f">>> [PROPOSAL_REJECTED] proposed_by={proposed_by} "
+                f"title={title_clean[:60]!r} missing={missing}"
+            )
+            raise ProposalValidationError(
+                reason=reason,
+                missing_fields=missing,
+                title=title_clean,
+                proposed_by=proposed_by,
+            )
+
+        # ─── Auto-execute safeguard (FIX 4) ───
+        # Only LOW-risk proposals with a concrete objective may auto-execute.
+        # MEDIUM/HIGH/CRITICAL always require explicit approval.
         auto_exec = None
-        if auto_execute_hours and risk == "low":
+        if auto_execute_hours and risk == "low" and (objective or "").strip():
             auto_exec = datetime.utcnow() + timedelta(hours=auto_execute_hours)
+
+        # ─── Build description if caller passed only the structured fields ───
+        # Keeps the legacy `description` column populated as a single-paragraph
+        # human-readable summary; the rich detail lives in metadata.details.
+        clean_steps = [str(s).strip() for s in action_steps if str(s).strip()]
+        if not (description or "").strip():
+            description = (
+                f"{objective.strip()}\n\nReasoning: {reasoning.strip()}\n\n"
+                f"Steps:\n- " + "\n- ".join(clean_steps)
+            )
+
+        # ─── Stash structured fields in metadata.details for the email template ───
+        meta = dict(metadata or {})
+        meta["details"] = {
+            "objective": objective.strip(),
+            "reasoning": reasoning.strip(),
+            "action_steps": clean_steps,
+            "expected_impact": expected_impact.strip(),
+            "rollback": rollback.strip(),
+            "deployment_window": (deployment_window or "").strip() or None,
+            "data_sources": list(data_sources) if data_sources else [],
+            "token_cost_estimate": (token_cost_estimate or "").strip() or None,
+        }
+
+        # Mirror the rollback text into rollback_payload so legacy consumers
+        # (admin UI, audit log) see it without parsing metadata.details.
+        rb_payload: Optional[Dict[str, Any]]
+        if isinstance(rollback_payload, dict):
+            rb_payload = dict(rollback_payload)
+            rb_payload.setdefault("description", rollback.strip())
+        else:
+            rb_payload = {"description": rollback.strip()}
 
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow("""
@@ -172,10 +274,10 @@ class StrategicMemoryService:
                      execution_payload, rollback_payload, auto_execute_after, metadata)
                 VALUES ($1, $2, $3, $4, $5, 'pending_approval', $6, $7, $8, $9)
                 RETURNING *
-            """, title, description, action_type, proposed_by, risk,
+            """, title_clean, description, action_type, proposed_by, risk,
                  json.dumps(execution_payload or {}),
-                 json.dumps(rollback_payload) if rollback_payload else None,
-                 auto_exec, json.dumps(metadata or {}))
+                 json.dumps(rb_payload),
+                 auto_exec, json.dumps(meta))
             return dict(row)
 
     async def get_pending_proposals(self) -> List[Dict]:
@@ -463,23 +565,62 @@ class StrategicMemoryService:
 
         promoted = []
         for insight in insights:
-            proposal = await self.create_proposal(
-                title=f"[Auto] {insight['title']}",
-                description=(
-                    f"Auto-generated from high-confidence insight (confidence={insight['confidence']:.2f}).\n\n"
-                    f"{insight['body']}"
-                ),
-                action_type="insight_driven_strategy",
-                proposed_by="sovereign_mind_L2_L3",
-                risk="low",
-                execution_payload={"source_insight_id": str(insight["insight_id"])},
-                metadata={
-                    "cross_layer": "L2→L3",
-                    "source_confidence": float(insight["confidence"]),
-                    "source_tags": list(insight["tags"]) if insight.get("tags") else [],
-                },
-            )
-            promoted.append(proposal)
+            insight_title = (insight.get("title") or "").strip() or "Unnamed insight"
+            insight_body = (insight.get("body") or "").strip()
+            confidence = float(insight.get("confidence") or 0.0)
+            tags = list(insight.get("tags") or [])
+
+            # Pad short insight titles so the proposal title still meets the
+            # >= 10 char rule enforced by create_proposal validation.
+            base_title = f"Act on insight: {insight_title}"
+            try:
+                proposal = await self.create_proposal(
+                    title=base_title[:240],
+                    description="",  # auto-built from objective + reasoning + steps below
+                    action_type="insight_driven_strategy",
+                    proposed_by="sovereign_mind_L2_L3",
+                    risk="low",
+                    execution_payload={"source_insight_id": str(insight["insight_id"])},
+                    metadata={
+                        "cross_layer": "L2→L3",
+                        "source_confidence": confidence,
+                        "source_tags": tags,
+                    },
+                    objective=(
+                        f"Promote the L2 insight \"{insight_title}\" into a "
+                        f"reviewed strategy proposal so the swarm can act on it."
+                    ),
+                    reasoning=(
+                        f"Insight crossed the {confidence_threshold:.2f} confidence "
+                        f"threshold (recorded confidence={confidence:.2f}) within the "
+                        f"last 7 days, indicating a stable observation worth converting "
+                        f"into deliberate action.\n\nInsight body:\n{insight_body}"
+                    ),
+                    action_steps=[
+                        "Review the source insight and its supporting evidence",
+                        "Confirm the action aligns with active standing orders",
+                        "Mark the insight as promoted to prevent duplicate proposals",
+                    ],
+                    expected_impact=(
+                        "A high-confidence observation gets human review instead of "
+                        "decaying in the insight log; if approved, downstream Fibres "
+                        "receive a directive aligned with the insight."
+                    ),
+                    rollback=(
+                        "Read-only promotion — rejecting this proposal leaves the "
+                        "source insight untouched in the L2 log."
+                    ),
+                    data_sources=["insight_log"],
+                    token_cost_estimate="Minimal — under $0.01 (DB write only)",
+                )
+                promoted.append(proposal)
+            except ProposalValidationError as exc:
+                # Should not happen with the synthesized fields above, but log
+                # rather than abort the whole batch.
+                print(
+                    f">>> [L2→L3] Skipped insight {insight.get('insight_id')}: "
+                    f"{exc.message}"
+                )
 
         return promoted
 
