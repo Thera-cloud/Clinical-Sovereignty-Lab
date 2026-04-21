@@ -120,6 +120,37 @@ def get_sovereign_mind(request: Request) -> SovereignMind:
 # =============================================================================
 
 
+def _to_dict(value: Any) -> Dict[str, Any]:
+    """Normalize SovereignMind returns (Pydantic models, dataclasses, dicts)
+    into a plain ``Dict[str, Any]`` so they fit ``ChatResponse.content``."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    # Pydantic v2
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json")
+        except TypeError:
+            return dump()
+    # Pydantic v1
+    dump_v1 = getattr(value, "dict", None)
+    if callable(dump_v1):
+        try:
+            return dump_v1()
+        except Exception:
+            pass
+    # Dataclass / generic object
+    try:
+        from dataclasses import asdict, is_dataclass
+        if is_dataclass(value):
+            return asdict(value)
+    except Exception:
+        pass
+    return {"value": str(value)}
+
+
 async def _handle_briefing(
     sovereign_mind: SovereignMind,
     content: str,
@@ -136,7 +167,7 @@ async def _handle_briefing(
     return ChatResponse(
         mode="briefing",
         response_type="briefing",
-        content=result,
+        content=_to_dict(result),
         follow_up_suggestions=[
             "Expand on client risk signals",
             "Deep dive into coherence trends",
@@ -176,7 +207,7 @@ async def _handle_strategy(
     return ChatResponse(
         mode="strategy",
         response_type="proposal",
-        content=result,
+        content=_to_dict(result),
         follow_up_suggestions=[
             "Refine the objective",
             "Add domain tags",
@@ -191,16 +222,14 @@ async def _handle_command(
     context: Optional[Dict[str, Any]],
 ) -> ChatResponse:
     """Route to Command Mode: direct swarm directives."""
-    cmd_content = (
-        {"text": content, **(context or {})}
-        if context
-        else {"text": content}
+    result = await sovereign_mind.process_command(
+        command=content or "",
+        context=context or {},
     )
-    result = await sovereign_mind.process_command(content=cmd_content)
     return ChatResponse(
         mode="command",
         response_type="command_ack",
-        content=result,
+        content=_to_dict(result),
         follow_up_suggestions=[
             "Check command status",
             "View swarm overview",
@@ -215,15 +244,19 @@ async def _handle_inquiry(
     context: Optional[Dict[str, Any]],
 ) -> ChatResponse:
     """Route to Inquiry Mode: question-answer about swarm/client/patterns."""
-    inquiry_context = {"question": content, "context": context or {}}
+    inquiry_context = {
+        "question": content,
+        "intent": "inquiry",
+        **(context or {}),
+    }
     result = await sovereign_mind.process_command(
-        content={"text": content, "inquiry": True},
-        inquiry_context=inquiry_context,
+        command=content or "",
+        context=inquiry_context,
     )
     return ChatResponse(
         mode="inquiry",
         response_type="inquiry_response",
-        content=result,
+        content=_to_dict(result),
         follow_up_suggestions=[
             "Ask a related question",
             "Request briefing",
@@ -242,7 +275,7 @@ async def _handle_swarm(
     return ChatResponse(
         mode="swarm",
         response_type="swarm_overview",
-        content=result,
+        content=_to_dict(result),
         follow_up_suggestions=[
             "Drill into specific Fibre",
             "Issue directive",
