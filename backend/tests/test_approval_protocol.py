@@ -2,6 +2,8 @@
 Tests for ApprovalProtocolService — strategy proposal approval lifecycle.
 """
 
+from datetime import datetime
+
 import pytest
 from uuid import uuid4
 
@@ -117,3 +119,386 @@ class TestNotificationFormatting:
 
         result = ApprovalProtocolService.parse_reply("  HOLD  ")
         assert result["decision"] == "HOLD"
+
+
+# ─── Self-contained proposal email/SMS rendering ───
+
+def _enriched_proposal(**overrides):
+    """Build an in-memory proposal dict with the new structured fields."""
+    pid = uuid4()
+    base = {
+        "proposal_id": pid,
+        "title": "Verify client coherence metrics across active users",
+        "description": "Auto-generated summary",
+        "action_type": "verification_scan",
+        "proposed_by": "sovereign_mind",
+        "risk": "low",
+        "auto_execute_after": None,
+        "metadata": {
+            "details": {
+                "objective": (
+                    "Run a coherence verification scan across all 52 active "
+                    "users and flag any with GAP > 0.7 for coach review."
+                ),
+                "reasoning": (
+                    "3 users showed rapid GAP increase this week. Verification "
+                    "would catch others trending the same direction before "
+                    "crisis threshold."
+                ),
+                "action_steps": [
+                    "Query nevedal_metrics for all active users",
+                    "Flag users with GAP > 0.7",
+                    "Notify assigned coaches of flagged clients",
+                    "Generate summary report for admin",
+                ],
+                "expected_impact": "Coaches receive early warning for at-risk clients.",
+                "rollback": "Read-only scan + notifications.",
+                "data_sources": ["nevedal_metrics", "coach_assignments"],
+                "token_cost_estimate": "Minimal — under $0.01",
+            }
+        },
+        "rollback_payload": None,
+        "execution_result": None,
+    }
+    base.update(overrides)
+    return base
+
+
+class TestProposalEmailRendering:
+    def test_subject_includes_risk_emoji_and_title(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        subject, _ = svc._build_proposal_email(_enriched_proposal())
+        assert "🟢" in subject
+        assert "Sovereign Proposal" in subject
+        assert "Verify client coherence metrics" in subject
+
+    def test_body_contains_all_required_sections(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        _, body = svc._build_proposal_email(_enriched_proposal())
+        for section in (
+            "WHAT WILL HAPPEN:",
+            "WHY THIS IS BEING PROPOSED:",
+            "STEPS THAT WILL EXECUTE:",
+            "EXPECTED IMPACT:",
+            "IF SOMETHING GOES WRONG:",
+            "DATA INVOLVED:",
+            "ESTIMATED COST:",
+            "DEPLOYMENT WINDOW:",
+            "REPLY WITH:",
+            "Auto-execute:",
+        ):
+            assert section in body, f"Email missing required section: {section}"
+
+    def test_body_contains_objective_text(self, fake_pool):
+        """Body must contain the actual objective, not just a placeholder."""
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        _, body = svc._build_proposal_email(_enriched_proposal())
+        assert "Run a coherence verification scan across all 52 active users" in body
+        assert "GAP > 0.7" in body
+        # Action steps must be numbered or itemized
+        assert "Query nevedal_metrics" in body
+
+    def test_escalation_block_appears_when_escalated(self, fake_pool):
+        from datetime import datetime as _dt
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        proposal["metadata"]["escalated"] = True
+        proposal["metadata"]["escalation"] = {
+            "count": 2,
+            "reason": "no human response within the 8h approval window",
+            "days_elapsed": 1.5,
+            "original_sent_date": "2026-04-19T08:00 UTC",
+        }
+        subject, body = svc._build_proposal_email(proposal)
+        assert "[ESCALATED]" in subject
+        assert "ESCALATION REASON:" in body
+        assert "Days without response: 1.5" in body
+        assert "Escalation count: 2" in body
+
+    def test_auto_execute_line_includes_exact_utc_time(self, fake_pool):
+        from datetime import datetime as _dt, timedelta as _td
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal(
+            auto_execute_after=_dt.utcnow() + _td(hours=4),
+        )
+        _, body = svc._build_proposal_email(proposal)
+        assert "Auto-execute: Yes, at" in body
+        assert "UTC" in body
+        assert "from now" in body
+
+
+class TestProposalSmsRendering:
+    def test_sms_includes_objective_summary(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        body = svc._build_proposal_sms(_enriched_proposal())
+        assert "LN Proposal #" in body
+        assert "coherence verification scan" in body  # objective leaked through
+        assert "Risk: LOW" in body
+        assert "APPROVE" in body and "HOLD" in body and "REJECT" in body
+
+    def test_sms_within_two_segment_budget(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        body = svc._build_proposal_sms(_enriched_proposal())
+        assert len(body) <= 320, f"SMS too long: {len(body)} chars"
+
+    def test_sms_truncates_long_objective(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        long_proposal = _enriched_proposal()
+        long_proposal["metadata"]["details"]["objective"] = "x " * 300  # 600 chars
+        body = svc._build_proposal_sms(long_proposal)
+        assert "..." in body
+        assert len(body) <= 320
+
+    def test_sms_falls_back_to_title_for_legacy_proposal(self, fake_pool):
+        """Legacy proposals (no metadata.details) still get a usable SMS."""
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        legacy = {
+            "proposal_id": uuid4(),
+            "title": "Legacy proposal title without enrichment",
+            "risk": "medium",
+            "auto_execute_after": None,
+            "metadata": {},
+        }
+        body = svc._build_proposal_sms(legacy)
+        assert "Legacy proposal title" in body
+        assert "Risk: MEDIUM" in body
+
+
+# ─── FIX 4: subject [#shortid] + proposal-id extraction ────────────────────
+
+class TestProposalIdInSubject:
+    def test_subject_contains_short_id_token(self, fake_pool):
+        """Outbound subject must end with [#xxxxxxxx] so reply parsing works."""
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        subject, _ = svc._build_proposal_email(proposal)
+        short = str(proposal["proposal_id"])[:8]
+        assert f"[#{short}]" in subject
+
+    def test_subject_short_id_survives_re_prefix(self, fake_pool):
+        """Re: <subject> [#abc12345] must still expose the short id."""
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        subject, _ = svc._build_proposal_email(proposal)
+        reply_subject = f"Re: {subject}"
+        recovered = ApprovalProtocolService.extract_proposal_id_from_text(
+            reply_subject, body=""
+        )
+        assert recovered == str(proposal["proposal_id"])[:8]
+
+    def test_extract_proposal_id_from_body_label(self):
+        """'Proposal ID: <uuid>' literal in body must be recovered."""
+        pid = uuid4()
+        body = (
+            "APPROVE\n\n"
+            f"Some quoted email content\nProposal ID: {pid}\n"
+            "More quoted content."
+        )
+        recovered = ApprovalProtocolService.extract_proposal_id_from_text(
+            subject="Re: Sovereign Proposal: something",
+            body=body,
+        )
+        assert recovered == str(pid).replace("-", "")[:8]
+
+    def test_extract_proposal_id_from_body_full_uuid(self):
+        pid = uuid4()
+        recovered = ApprovalProtocolService.extract_proposal_id_from_text(
+            subject="",
+            body=f"APPROVE\n\nrelated to {pid} thanks",
+        )
+        assert recovered == str(pid).replace("-", "")[:8]
+
+    def test_extract_returns_none_when_nothing_matches(self):
+        recovered = ApprovalProtocolService.extract_proposal_id_from_text(
+            subject="Re: hello",
+            body="APPROVE",
+        )
+        assert recovered is None
+
+
+# ─── FIX 2: outbound email Reply-To header ─────────────────────────────────
+
+class _StubSendGrid:
+    """Captures the Mail object passed to sg.send() for assertions."""
+
+    def __init__(self):
+        self.sent: list = []
+
+    def send(self, message):
+        self.sent.append(message)
+        class _Resp:
+            headers = {"X-Message-Id": "stub-msg-id"}
+        return _Resp()
+
+
+class TestProposalEmailReplyTo:
+    @pytest.mark.asyncio
+    async def test_reply_to_set_to_approve_inbound_address(self, fake_pool, monkeypatch):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        stub = _StubSendGrid()
+        # Inject the stub directly so _get_sendgrid_client returns it.
+        svc._sendgrid_client = stub
+
+        await svc.send_email_notification(_enriched_proposal())
+
+        assert stub.sent, "Mail object was never handed to SendGrid"
+        message = stub.sent[0]
+        # SendGrid v3 Mail stores reply_to as a ReplyTo helper with .email
+        reply_to_obj = getattr(message, "reply_to", None)
+        assert reply_to_obj is not None, "Mail.reply_to was not set"
+        # The helper exposes either .email (string) or .get() depending on
+        # sendgrid lib version — accept both.
+        reply_addr = (
+            getattr(reply_to_obj, "email", None)
+            or (reply_to_obj.get("email") if hasattr(reply_to_obj, "get") else None)
+            or str(reply_to_obj)
+        )
+        assert "approve@reply.sovereignsanctuary.net" in str(reply_addr)
+
+
+# ─── FIX 3: post-decision confirmation email ───────────────────────────────
+
+class TestDecisionConfirmation:
+    def test_confirmation_email_includes_all_required_lines(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        subject, body = svc._build_decision_confirmation(
+            proposal=proposal, decision="APPROVE", channel="email",
+        )
+        assert subject.startswith("Confirmed: APPROVE")
+        assert proposal["title"] in subject
+        for line in (
+            "Action: APPROVE",
+            "Proposal ID:",
+            str(proposal["proposal_id"]),
+            "Recorded at:",
+            "Channel: email",
+            "Execution will begin",
+        ):
+            assert line in body, f"Confirmation email missing: {line}"
+
+    def test_confirmation_email_next_step_varies_by_decision(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        proposal = _enriched_proposal()
+        for decision, expected in (
+            ("HOLD",   "deferred"),
+            ("REJECT", "cancelled"),
+            ("MODIFY", "modifications"),
+        ):
+            _, body = svc._build_decision_confirmation(
+                proposal=proposal, decision=decision, channel="email",
+            )
+            assert expected in body.lower(), (
+                f"{decision} confirmation missing '{expected}': {body!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_send_decision_confirmation_skips_for_sms(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        svc._sendgrid_client = _StubSendGrid()
+        result = await svc.send_decision_confirmation(
+            proposal=_enriched_proposal(), decision="APPROVE",
+            channel="sms", recipient="+15555550000",
+        )
+        assert result is None
+        assert svc._sendgrid_client.sent == []
+
+    @pytest.mark.asyncio
+    async def test_send_decision_confirmation_routes_to_recipient(self, fake_pool):
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        stub = _StubSendGrid()
+        svc._sendgrid_client = stub
+        await svc.send_decision_confirmation(
+            proposal=_enriched_proposal(), decision="APPROVE",
+            channel="email", recipient="operator@example.com",
+        )
+        assert stub.sent, "Confirmation email was never sent"
+        # Mail.personalizations[0].tos[0] holds the To address
+        message = stub.sent[0]
+        tos = getattr(message, "personalizations", [None])[0]
+        # Best-effort introspection — sendgrid Mail stores 'tos' on personalization.
+        assert "operator@example.com" in str(message.get()) if hasattr(message, "get") else True
+
+
+# ─── FIX 5: escalation guard + clearing ────────────────────────────────────
+
+class TestEscalationGuards:
+    @pytest.mark.asyncio
+    async def test_handle_inbound_reply_clears_escalated_flag(
+        self, fake_pool, fake_conn,
+    ):
+        """After APPROVE, metadata patch must include escalated=false."""
+        pid = uuid4()
+        fake_conn._fetchrow_result = {
+            "proposal_id": pid,
+            "title": "verify",
+            "status": "pending_approval",
+            "risk": "low",
+            "metadata": {"escalated": True, "escalation": {"count": 1}},
+        }
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        await svc.handle_inbound_reply("APPROVE", channel="sms")
+
+        # Find the escalation-clear UPDATE — looks for metadata patch with escalated:false
+        clear_writes = [
+            args for query, args in fake_conn._executed
+            if "metadata = metadata ||" in query
+            and any('"escalated": false' in str(a) for a in args)
+        ]
+        assert clear_writes, (
+            "Expected an UPDATE setting metadata escalated=false after decision; "
+            f"saw: {[q for q, _ in fake_conn._executed]}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_escalation_skips_when_audit_row_exists(
+        self, fake_pool, fake_conn,
+    ):
+        """If approval_decisions_audit has any row for this proposal, skip."""
+        pid = uuid4()
+        fake_conn._fetch_results = [{
+            "proposal_id": pid,
+            "title": "held proposal",
+            "status": "pending_approval",
+            "risk": "low",
+            "metadata": {},
+            "created_at": datetime(2026, 1, 1),
+        }]
+        # fetchval is what the guard uses ("SELECT 1 FROM approval_decisions_audit")
+        fake_conn._fetchval_result = 1
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        result = await svc.check_escalation_timeouts()
+
+        assert result == [], (
+            "Escalation must be skipped when an audit row already exists "
+            f"for the proposal; got {result}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_escalation_proceeds_when_no_audit_row(
+        self, fake_pool, fake_conn, monkeypatch,
+    ):
+        """If no audit row exists, escalation flow runs (writes metadata)."""
+        pid = uuid4()
+        fake_conn._fetch_results = [{
+            "proposal_id": pid,
+            "title": "untouched proposal",
+            "status": "pending_approval",
+            "risk": "low",
+            "metadata": {},
+            "created_at": datetime(2026, 1, 1),
+        }]
+        fake_conn._fetchval_result = None  # No prior decision
+
+        svc = ApprovalProtocolService(db_pool=fake_pool)
+        # Stub email/SMS sends so we don't hit network.
+        async def _noop(*a, **kw): return None
+        svc.send_email_notification = _noop
+        svc.send_sms_notification = _noop
+
+        result = await svc.check_escalation_timeouts()
+
+        assert len(result) == 1
+        assert result[0]["proposal_id"] == str(pid)
+        assert result[0]["escalation_count"] == 1
