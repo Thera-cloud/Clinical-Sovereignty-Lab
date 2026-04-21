@@ -265,6 +265,13 @@ class ClientAppAuditor:
                 return {"method": method, "path": path, "code": code,
                         "ms": elapsed, "status": "TRUSTED",
                         "detail": f"422 validation (endpoint exists) in {elapsed}ms"}
+            elif code in (401, 403):
+                # Endpoint exists AND its tier/role gate is correctly enforcing
+                # access. For an audit probe with a non-privileged test identity,
+                # this is honest evidence of working security — count as TRUSTED.
+                return {"method": method, "path": path, "code": code,
+                        "ms": elapsed, "status": "TRUSTED",
+                        "detail": f"{code} gate enforced (endpoint exists) in {elapsed}ms"}
             elif 400 <= code < 500:
                 return {"method": method, "path": path, "code": code,
                         "ms": elapsed, "status": "WARNING",

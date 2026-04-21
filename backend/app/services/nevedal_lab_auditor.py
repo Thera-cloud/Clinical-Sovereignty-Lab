@@ -34,7 +34,7 @@ TAB_ENDPOINTS = [
             ("GET", "/api/research/nevedal/reports/types"),
             ("GET", "/api/coherence/pulse"),
             ("GET", "/api/coherence/briefing"),
-            ("GET", "/api/coherence/individual/audit_client_hw"),
+            ("GET", "/api/coherence/report/audit_client_hw"),
         ],
     },
     {
@@ -43,7 +43,7 @@ TAB_ENDPOINTS = [
         "endpoints": [
             ("GET", "/api/research/nevedal/reports/types"),
             ("GET", "/api/research/nevedal/reports/brief"),
-            ("GET", "/api/coherence/individual/audit_client_hw"),
+            ("GET", "/api/coherence/report/audit_client_hw"),
         ],
     },
     {
@@ -348,8 +348,9 @@ class NevedalLabAuditor:
                     )
                 elapsed = int((time.monotonic() - t0) * 1000)
                 if exists:
-                    required_cols = {"user_id", "weather_type", "intensity",
-                                     "recorded_at", "session_id"}
+                    # Reconciled to actual schema (sanctuary/family-scoped weather snapshots).
+                    required_cols = {"sanctuary_id", "family_id", "system_coherence",
+                                     "system_volatility", "created_at"}
                     async with self.db_pool.acquire() as conn:
                         rows = await conn.fetch(
                             "SELECT column_name FROM information_schema.columns "

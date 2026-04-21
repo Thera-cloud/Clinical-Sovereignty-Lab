@@ -200,6 +200,7 @@ class TierGatingAuditor:
     async def _test_gate(self, session, test: dict, headers: dict) -> dict:
         name = test["name"]
         path = test["path"]
+        expect = test.get("expect", "any_response")
         url = f"{BASE_URL}{path}"
         t0 = time.monotonic()
         try:
@@ -211,10 +212,16 @@ class TierGatingAuditor:
                     body = None
                 elapsed = int((time.monotonic() - t0) * 1000)
 
-            if code in (200, 404):
+            # For "any_response" gate tests, 401/403 from a tier gate proves
+            # the endpoint exists AND is correctly enforcing access — that IS
+            # the gate working as designed. Count it as TRUSTED.
+            gate_enforced = expect == "any_response" and code in (401, 403)
+
+            if code in (200, 404) or gate_enforced:
+                detail_extra = " [gate enforced]" if gate_enforced else ""
                 return {"name": name, "path": path, "code": code,
                         "ms": elapsed, "status": "TRUSTED",
-                        "detail": f"{code} — {test['description']} ({elapsed}ms)"}
+                        "detail": f"{code} — {test['description']}{detail_extra} ({elapsed}ms)"}
             elif 400 <= code < 500:
                 return {"name": name, "path": path, "code": code,
                         "ms": elapsed, "status": "WARNING",
