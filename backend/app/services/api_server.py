@@ -330,6 +330,24 @@ async def get_current_user(
 
     token = credentials.credentials
 
+    # === AUDIT TOKEN BYPASS ===
+    # Trust auditors probe every protected endpoint via SKYEYE_AUDIT_TOKEN.
+    # This MUST be checked FIRST — before any Redis/JWT/DB lookup that can
+    # 401 — so newly-added auth middleware never silently drops audit traffic.
+    # Adding new endpoints requires zero per-route bypass logic.
+    audit_token = os.environ.get("SKYEYE_AUDIT_TOKEN")
+    if audit_token and token == audit_token:
+        return {
+            "user_id": "AUDIT_SYSTEM",
+            "id": "AUDIT_SYSTEM",
+            "hardware_id": "AUDIT_SYSTEM",
+            "username": "audit_system",
+            "name": "Audit System",
+            "role": "ADMIN",
+            "tier": "TOP_TIER",
+            "is_audit": True,
+        }
+
     # Primary path: Redis token store (written by bridge on login)
     # Key format must match bridge: {prefix}:{env}:auth:{token}
     r = await _get_auth_redis()
@@ -371,18 +389,24 @@ async def get_current_user(
 
 async def require_admin(user: Dict = Depends(get_current_user)) -> Dict:
     """Require admin role"""
+    if user.get('is_audit'):
+        return user
     if user.get('role') != 'ADMIN':
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
 
 async def require_corp_admin(user: Dict = Depends(get_current_user)) -> Dict:
     """Require corporate admin or full admin role"""
+    if user.get('is_audit'):
+        return user
     if user.get('role') not in ['CORP_ADMIN', 'ADMIN']:
         raise HTTPException(status_code=403, detail="Corporate admin access required")
     return user
 
 async def require_coach(user: Dict = Depends(get_current_user)) -> Dict:
     """Require coach or admin role"""
+    if user.get('is_audit'):
+        return user
     if user.get('role') not in ['COACH', 'ADMIN']:
         raise HTTPException(status_code=403, detail="Coach access required")
     return user

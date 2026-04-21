@@ -1,9 +1,7 @@
 """
 LITTLE NATE — Sovereign Command Tab Auditor
-Scheduled health auditor that tests every REST API endpoint backing the 7
-Sovereign Command dashboard tabs 3x daily (5 AM, 5 PM, 11 PM UTC).
-
-Tabs: Command, My Clients, Calendar, Crisis Center, Users, System, Marketplace
+Scheduled health auditor that tests REST endpoints backing the React v2
+Sovereign Command sidebar (admin SPA) 3x daily (5 AM, 5 PM, 11 PM UTC).
 
 Produces a colour-coded HTML trust scorecard email sent to
 support@sovereignsanctuary.net via NotificationSystem.
@@ -29,70 +27,200 @@ BASE_URL = "http://localhost:8000"
 
 TAB_ENDPOINTS = [
     {
-        "tab": "Command",
+        "tab": "Dashboard",
         "tab_num": 1,
         "endpoints": [
             ("GET", "/api/admin/dashboard"),
             ("GET", "/api/admin/crisis-watchlist"),
             ("GET", "/api/admin/live-sessions"),
             ("GET", "/api/admin/community-health"),
-            ("GET", "/api/admin/activity-feed"),
-        ],
-    },
-    {
-        "tab": "My Clients",
-        "tab_num": 2,
-        "endpoints": [
-            ("GET", "/api/coach/clients/DrNevedal1"),
-            ("GET", "/api/coach/stats/DrNevedal1"),
-        ],
-    },
-    {
-        "tab": "Calendar",
-        "tab_num": 3,
-        "endpoints": [
-            ("GET", "/api/admin/live-sessions"),
-        ],
-    },
-    {
-        "tab": "Crisis Center",
-        "tab_num": 4,
-        "endpoints": [
-            ("GET", "/api/admin/crisis-watchlist"),
-            ("GET", "/api/admin/crisis-log"),
-        ],
-    },
-    {
-        "tab": "Users",
-        "tab_num": 5,
-        "endpoints": [
-            ("GET", "/api/admin/users"),
+            ("GET", "/api/admin/activity-feed?limit=20"),
             ("GET", "/api/admin/coaches"),
-            ("GET", "/api/admin/coaches?status=PENDING_VERIFICATION"),
-        ],
-    },
-    {
-        "tab": "System",
-        "tab_num": 6,
-        "endpoints": [
-            ("GET", "/api/admin/settings"),
-            ("GET", "/api/admin/token-economics"),
-            ("GET", "/api/admin/dependency-report"),
+            ("GET", "/api/admin/service-flags"),
             ("GET", "/api/admin/night-school/status"),
         ],
     },
     {
-        "tab": "Marketplace",
+        "tab": "Revenue",
+        "tab_num": 2,
+        "endpoints": [
+            ("GET", "/api/admin/billing/revenue"),
+            ("GET", "/api/admin/billing/subscriptions"),
+            ("GET", "/api/admin/billing/failed-payments"),
+        ],
+    },
+    {
+        "tab": "The Pulse",
+        "tab_num": 3,
+        "endpoints": [
+            ("GET", "/api/coherence/pulse"),
+        ],
+    },
+    {
+        "tab": "Strategic Memory",
+        "tab_num": 4,
+        "endpoints": [
+            ("GET", "/api/strategic-memory/standing-orders"),
+            ("GET", "/api/strategic-memory/insights"),
+            ("GET", "/api/strategic-memory/proposals"),
+            ("GET", "/api/strategic-memory/briefings/latest"),
+            ("GET", "/api/strategic-memory/alerts"),
+            ("GET", "/api/strategic-memory/oversight"),
+        ],
+    },
+    {
+        "tab": "Night School",
+        "tab_num": 5,
+        "endpoints": [
+            ("GET", "/api/admin/night-school/status"),
+            ("GET", "/api/night-school/wisdom?limit=10"),
+            ("GET", "/api/night-school/notes/pending?limit=10"),
+            ("GET", "/api/night-school/versions"),
+            ("GET", "/api/night-school/dojo/scenarios?status=all"),
+        ],
+    },
+    {
+        "tab": "The Eye",
+        "tab_num": 6,
+        "endpoints": [
+            ("GET", "/api/admin/token-economics"),
+            ("GET", "/api/admin/analytics/metrics-distribution"),
+            ("GET", "/api/admin/billing/tier-config"),
+        ],
+    },
+    {
+        "tab": "Audit Log",
         "tab_num": 7,
         "endpoints": [
-            ("GET", "/api/analytics/overview"),
-            ("GET", "/api/analytics/activity?limit=6"),
-            ("GET", "/api/analytics/integrations/sendgrid/stats?days=30"),
-            ("GET", "/api/analytics/integrations/twilio/stats?days=30"),
-            ("GET", "/api/campaigns"),
-            ("GET", "/api/quizzes"),
-            ("GET", "/api/prospects"),
-            ("GET", "/api/golden-ticket/list"),
+            ("GET", "/api/admin/analytics/events?limit=50"),
+        ],
+    },
+    {
+        "tab": "Nate Features",
+        "tab_num": 8,
+        "endpoints": [
+            ("GET", "/api/admin/dashboard"),
+            ("GET", "/api/fibres"),
+            ("GET", "/api/mesh/health"),
+            ("GET", "/api/admin/crisis-watchlist"),
+            ("GET", "/api/ai-modes/status"),
+            ("GET", "/api/admin/settings"),
+            ("GET", "/api/admin/deadman-switch/status"),
+        ],
+    },
+    {
+        "tab": "Nevedal Lab",
+        "tab_num": 9,
+        "endpoints": [
+            ("GET", "/api/admin/community-health"),
+            ("GET", "/api/admin/live-sessions"),
+            ("GET", "/api/admin/analytics/metrics-distribution"),
+        ],
+    },
+    {
+        "tab": "Architecture",
+        "tab_num": 10,
+        "endpoints": [
+            ("GET", "/api/zefcp/health"),
+            ("GET", "/api/mesh/health"),
+            ("GET", "/api/immunity/status"),
+            ("GET", "/api/coherence/pulse"),
+            ("GET", "/api/foresight/status"),
+            ("GET", "/api/skyeye/pulse"),
+            ("GET", "/api/quakete/status"),
+        ],
+    },
+    {
+        "tab": "Wire Diagram",
+        "tab_num": 11,
+        "endpoints": [
+            ("GET", "/health"),
+            ("GET", "/api/strategic-memory/status"),
+            ("GET", "/api/mesh/health"),
+            ("GET", "/api/coherence/pulse"),
+            ("GET", "/api/patterns/status"),
+            ("GET", "/api/foresight/status"),
+            ("GET", "/api/immunity/status"),
+            ("GET", "/api/skyeye/pulse"),
+            ("GET", "/api/fibres"),
+        ],
+    },
+    {
+        "tab": "Swarm Ops",
+        "tab_num": 12,
+        "endpoints": [
+            ("GET", "/api/fibres"),
+            ("GET", "/api/mesh/health"),
+            ("GET", "/api/immunity/quarantine"),
+            ("GET", "/api/immunity/threats"),
+            ("GET", "/api/swarm/teams"),
+            ("GET", "/api/swarm/templates"),
+        ],
+    },
+    {
+        "tab": "Foresight",
+        "tab_num": 13,
+        "endpoints": [
+            ("GET", "/api/foresight/predictions"),
+            ("GET", "/api/foresight/accuracy"),
+        ],
+    },
+    {
+        "tab": "Family Patterns",
+        "tab_num": 14,
+        "endpoints": [
+            ("GET", "/api/patterns/status"),
+        ],
+    },
+    {
+        "tab": "Quakete Map",
+        "tab_num": 15,
+        "endpoints": [
+            ("GET", "/api/quakete/status"),
+            ("GET", "/api/quakete/rings"),
+            ("GET", "/api/quakete/trail-map"),
+        ],
+    },
+    {
+        "tab": "Big Nate Chat",
+        "tab_num": 16,
+        "endpoints": [
+            ("GET", "/api/skyeye/chat?limit=50"),
+            ("GET", "/api/skyeye/chat/archives"),
+        ],
+    },
+    {
+        "tab": "ZEFCP Monitor",
+        "tab_num": 17,
+        "endpoints": [
+            ("GET", "/api/zefcp/health"),
+            ("GET", "/api/zefcp/endpoints"),
+            ("GET", "/api/zefcp/assemblies"),
+            ("GET", "/api/zefcp/metrics/all"),
+        ],
+    },
+    {
+        "tab": "Hive Defense",
+        "tab_num": 18,
+        "endpoints": [
+            ("GET", "/api/hive-defense/overview"),
+            ("GET", "/api/hive-defense/defcon"),
+        ],
+    },
+    {
+        "tab": "Dependency Guardian",
+        "tab_num": 19,
+        "endpoints": [
+            ("GET", "/api/admin/dependency-report"),
+        ],
+    },
+    {
+        "tab": "Users (legacy coach)",
+        "tab_num": 20,
+        "endpoints": [
+            ("GET", "/api/admin/users?limit=50"),
+            ("GET", "/api/coach/clients/DrNevedal1"),
+            ("GET", "/api/coach/stats/DrNevedal1"),
         ],
     },
 ]
@@ -321,7 +449,7 @@ background:#0A0A0A;color:#e2e8f0;border:1px solid #222;border-radius:8px;overflo
   <div style="background:#050505;padding:16px 20px;border-bottom:1px solid #222;">
     <h2 style="margin:0;color:#C9A962;font-size:18px;">Sovereign Command Tab Trust Scorecard</h2>
     <p style="margin:4px 0 0;color:#94a3b8;font-size:12px;">
-      {now.strftime('%A, %B %d %Y at %H:%M UTC')} — 7 Tabs, {total_all} Endpoints
+      {now.strftime('%A, %B %d %Y at %H:%M UTC')} — Sovereign Command v2, {total_all} Endpoints
     </p>
   </div>
   <div style="padding:12px 20px;background:#111;border-bottom:1px solid #222;">

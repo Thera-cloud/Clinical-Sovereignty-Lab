@@ -31,10 +31,10 @@ TAB_ENDPOINTS = [
         "tab": "Live Analysis",
         "tab_num": 1,
         "endpoints": [
-            ("GET", "/api/nevedal/status"),
+            ("GET", "/api/research/nevedal/reports/types"),
             ("GET", "/api/coherence/pulse"),
             ("GET", "/api/coherence/briefing"),
-            ("GET", "/api/nevedal/history/audit_client_hw"),
+            ("GET", "/api/coherence/individual/audit_client_hw"),
         ],
     },
     {
@@ -43,7 +43,7 @@ TAB_ENDPOINTS = [
         "endpoints": [
             ("GET", "/api/research/nevedal/reports/types"),
             ("GET", "/api/research/nevedal/reports/brief"),
-            ("GET", "/api/nevedal/history/audit_client_hw"),
+            ("GET", "/api/coherence/individual/audit_client_hw"),
         ],
     },
     {

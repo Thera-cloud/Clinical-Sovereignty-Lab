@@ -56,21 +56,21 @@ GATE_TESTS = [
     },
     {
         "name": "Vault Access",
-        "path": "/api/vault/list/audit_client_hw",
+        "path": "/api/v1/vault/folders?user_id=audit_client_hw",
         "expect": "any_response",
         "description": "Vault endpoint responds for test client",
     },
     {
         "name": "Me2Me Access",
-        "path": "/api/me2me/entries/audit_client_hw",
+        "path": "/api/me2me/crystal/audit_client_hw",
         "expect": "any_response",
         "description": "Me2Me endpoint responds for test client",
     },
     {
         "name": "AI Modes List",
-        "path": "/api/ai-modes/list",
+        "path": "/api/ai-modes/status",
         "expect": "any_response",
-        "description": "AI modes list endpoint is reachable",
+        "description": "AI modes status endpoint is reachable",
     },
     {
         "name": "Coaching Packs",

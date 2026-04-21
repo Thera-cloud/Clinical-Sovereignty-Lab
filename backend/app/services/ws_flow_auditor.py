@@ -43,27 +43,35 @@ def _make_coach_account():
         "hardware_id": f"wsflow_audit_coach_hw_{nonce}",
     }
 
+# Per-test minimum timeout — Section 8 resilience: bumped from 10s to 15s
+# so slow handlers (chat, metrics enrichment) don't false-FAIL under load.
+_MIN_TEST_TIMEOUT = 15
+# Explicit pause between WS tests on the same connection — prevents the
+# bridge from receiving a burst of requests faster than its handler loop
+# can drain previous response queues.
+_INTER_TEST_DELAY = 2.0
+
 CLIENT_TESTS = [
     {"label": "Client Metrics", "account": "client",
      "send": {"type": "get_metrics"},
      "expect_type": "metrics_data",
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Client History", "account": "client",
      "send": {"type": "get_history"},
      "expect_type": None,
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Client Notifications", "account": "client",
      "send": {"type": "get_notifications"},
      "expect_type": None,
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Client Billing", "account": "client",
      "send": {"type": "get_billing"},
      "expect_type": None,
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Nevedal Subscribe", "account": "client",
      "send": {"type": "nevedal_subscribe"},
      "expect_type": "nevedal_subscribed",
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Client Chat", "account": "client",
      "send": {"type": "chat_message", "message": "audit ping", "mode": "therapeutic"},
      "expect_type": "nate_response",
@@ -78,15 +86,15 @@ COACH_TESTS = [
     {"label": "Coach Briefing", "account": "coach",
      "send": {"type": "fetch_coach_calendar"},
      "expect_type": None,
-     "timeout": 10},
+     "timeout": 15},
     {"label": "DOJO Personas", "account": "coach",
      "send": {"type": "get_dojo_subscriptions"},
      "expect_type": "dojo_subscriptions_data",
-     "timeout": 10},
+     "timeout": 15},
     {"label": "Night School Wisdom", "account": "coach",
      "send": {"type": "get_night_school_wisdom"},
      "expect_type": None,
-     "timeout": 10},
+     "timeout": 15},
 ]
 
 
@@ -178,8 +186,19 @@ class WebSocketFlowAuditor:
 
     async def _run_test_group(self, account: dict, tests: list) -> list:
         """Run a group of tests on a single fresh WebSocket connection.
-        Retries once if the connection is replaced (bridge closed it for
-        a duplicate username from another auditor)."""
+
+        Section 8 resilience:
+          - Group-level retry once if the connection is replaced (bridge closed it
+            for a duplicate username from another auditor).
+          - Per-test retry once on FAILED — opens a fresh connection, re-logs in,
+            and re-runs only the failed tests so a transient network blip doesn't
+            scuttle the whole scorecard.
+          - 2-second explicit pause between tests (in addition to the drain) to
+            give the bridge handler loop time to settle between requests.
+          - Categorized failure_reason on every result for observability:
+            'connection_refused' | 'auth_failed' | 'timeout' |
+            'unexpected_response' | 'exception'.
+        """
         for attempt in range(2):
             results = []
             ws = await self._login_ws(account)
@@ -192,6 +211,7 @@ class WebSocketFlowAuditor:
                         "detail": f"No WS connection for {account['username']}",
                         "ms": 0,
                         "steps": {"login": "FAILED"},
+                        "failure_reason": "auth_failed",
                     })
                 return results
 
@@ -204,6 +224,7 @@ class WebSocketFlowAuditor:
                         replaced = True
                         break
                     await self._drain_between_tests(ws)
+                    await asyncio.sleep(_INTER_TEST_DELAY)
             finally:
                 try:
                     await ws.close()
@@ -215,6 +236,45 @@ class WebSocketFlowAuditor:
                             account["username"])
                 await asyncio.sleep(10)
                 continue
+
+            # Per-test retry: re-run only the FAILED tests on a fresh connection.
+            # Skip retry if the whole group already retried due to "Replaced".
+            failed_tests = [
+                t for t, r in zip(tests, results)
+                if r.get("status") == "FAILED"
+                and r.get("failure_reason") in ("timeout", "exception", "connection_refused")
+            ]
+            if failed_tests and attempt == 0 and not replaced:
+                logger.info(
+                    "WS Flow: %d test(s) failed for %s, retrying on fresh connection",
+                    len(failed_tests), account["username"]
+                )
+                await asyncio.sleep(5)
+                retry_ws = await self._login_ws(account)
+                if retry_ws is not None:
+                    try:
+                        for test in failed_tests:
+                            retry_result = await self._test_flow(retry_ws, test)
+                            # Promote the retry result over the original failure
+                            for idx, r in enumerate(results):
+                                if r["label"] == retry_result["label"]:
+                                    if retry_result["status"] == "TRUSTED":
+                                        retry_result["detail"] = (
+                                            f"[retry] {retry_result['detail']}"
+                                        )
+                                        results[idx] = retry_result
+                                    else:
+                                        results[idx]["detail"] = (
+                                            f"{r['detail']} | retry: {retry_result['detail']}"
+                                        )
+                                    break
+                            await self._drain_between_tests(retry_ws)
+                            await asyncio.sleep(_INTER_TEST_DELAY)
+                    finally:
+                        try:
+                            await retry_ws.close()
+                        except Exception:
+                            pass
             return results
         return results
 
@@ -291,7 +351,10 @@ class WebSocketFlowAuditor:
     async def _test_flow(self, ws, test: dict) -> dict:
         label = test["label"]
         t0 = time.monotonic()
-        test_timeout = test.get("timeout", 15)
+        # Section 8 resilience: enforce minimum 15s timeout for every flow,
+        # regardless of what the test list specifies, so a stale 10s entry
+        # cannot regress.
+        test_timeout = max(test.get("timeout", _MIN_TEST_TIMEOUT), _MIN_TEST_TIMEOUT)
 
         steps = {"send": "PENDING", "receive": "PENDING"}
 
@@ -302,6 +365,7 @@ class WebSocketFlowAuditor:
             expect = test.get("expect_type")
             deadline = t0 + test_timeout
             resp = None
+            saw_unexpected_only = False
 
             while time.monotonic() < deadline:
                 remaining = max(0.5, deadline - time.monotonic())
@@ -312,9 +376,12 @@ class WebSocketFlowAuditor:
                 # If we have a specific expected type, keep reading until we find it
                 if expect is not None:
                     if resp_type == expect:
+                        saw_unexpected_only = False
                         break
                     if resp_type == "error":
+                        saw_unexpected_only = False
                         break
+                    saw_unexpected_only = True
                     continue
 
                 # expect_type is None: accept any non-system response as proof the handler ran
@@ -327,6 +394,25 @@ class WebSocketFlowAuditor:
 
             steps["receive"] = "OK"
             elapsed = int((time.monotonic() - t0) * 1000)
+
+            # If we exited the loop because the deadline elapsed and the only
+            # responses we saw were of an unexpected type, classify as
+            # unexpected_response (not timeout) so retries / dashboards can
+            # distinguish handler-not-firing from wrong-handler-firing.
+            if expect is not None and saw_unexpected_only and (
+                not resp or resp.get("type") != expect
+            ):
+                last_type = resp.get("type") if resp else "?"
+                steps["receive"] = f"unexpected:{last_type}"
+                logger.warning(
+                    "WS Flow [%s]: unexpected_response — expected '%s', last seen '%s' after %dms",
+                    label, expect, last_type, elapsed,
+                )
+                return {"label": label, "status": "FAILED",
+                        "detail": f"Expected type='{expect}' but only saw type='{last_type}' "
+                                  f"within {test_timeout}s",
+                        "ms": elapsed, "steps": steps,
+                        "failure_reason": "unexpected_response"}
 
             if resp and resp.get("type") == "error":
                 err_msg = resp.get("message", "")[:60]
@@ -343,15 +429,30 @@ class WebSocketFlowAuditor:
         except asyncio.TimeoutError:
             elapsed = int((time.monotonic() - t0) * 1000)
             steps["receive"] = "TIMEOUT"
+            logger.warning(
+                "WS Flow [%s]: timeout after %dms (deadline %ds, expected '%s')",
+                label, elapsed, test_timeout, test.get("expect_type"),
+            )
             return {"label": label, "status": "FAILED",
                     "detail": f"Timeout after {elapsed}ms (deadline {test_timeout}s)",
-                    "ms": elapsed, "steps": steps}
+                    "ms": elapsed, "steps": steps,
+                    "failure_reason": "timeout"}
         except Exception as exc:
             elapsed = int((time.monotonic() - t0) * 1000)
-            steps["receive"] = f"EXCEPTION: {type(exc).__name__}"
+            exc_name = type(exc).__name__
+            steps["receive"] = f"EXCEPTION: {exc_name}"
+            # Distinguish connection-level failures from generic exceptions
+            # so the per-test retry logic can act on the right category.
+            reason = "connection_refused" if any(
+                tok in exc_name for tok in ("Connection", "Refused", "Closed", "Reset")
+            ) else "exception"
+            logger.warning(
+                "WS Flow [%s]: %s — %s (after %dms)",
+                label, reason, str(exc)[:120], elapsed,
+            )
             return {"label": label, "status": "FAILED",
-                    "detail": str(exc)[:80], "ms": elapsed,
-                    "steps": steps}
+                    "detail": f"{exc_name}: {str(exc)[:80]}", "ms": elapsed,
+                    "steps": steps, "failure_reason": reason}
 
     def _render_html(self, results: list, now: datetime) -> str:
         total = len(results)

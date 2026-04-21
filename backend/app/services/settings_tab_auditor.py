@@ -40,7 +40,7 @@ TAB_ENDPOINTS = [
         "tab_num": 2,
         "endpoints": [
             ("GET", f"/api/v1/vault/stats?user_id={FAKE_HW}"),
-            ("GET", f"/api/vault/list/{FAKE_HW}"),
+            ("GET", f"/api/v1/vault/folders?user_id={FAKE_HW}"),
         ],
     },
     {
@@ -70,7 +70,7 @@ TAB_ENDPOINTS = [
         "tab": "AI Modes & Community",
         "tab_num": 6,
         "endpoints": [
-            ("GET", "/api/ai-modes/list"),
+            ("GET", "/api/ai-modes/status"),
             ("GET", f"/api/community/attendance/{FAKE_HW}"),
         ],
     },

@@ -49,14 +49,14 @@ TAB_ENDPOINTS = [
         "tab_num": 3,
         "endpoints": [
             ("GET", "/api/coherence/pulse"),
-            ("GET", "/api/nevedal-reports/report/audit_client_hw"),
+            ("GET", "/api/research/nevedal/reports/brief"),
         ],
     },
     {
         "tab": "Vault",
         "tab_num": 4,
         "endpoints": [
-            ("GET", "/api/vault/list/audit_client_hw"),
+            ("GET", "/api/v1/vault/folders?user_id=audit_client_hw"),
         ],
     },
     {
@@ -78,14 +78,14 @@ TAB_ENDPOINTS = [
         "tab": "Me2Me",
         "tab_num": 7,
         "endpoints": [
-            ("GET", "/api/me2me/entries/audit_client_hw"),
+            ("GET", "/api/me2me/crystal/audit_client_hw"),
         ],
     },
     {
         "tab": "AI Modes",
         "tab_num": 8,
         "endpoints": [
-            ("GET", "/api/ai-modes/list"),
+            ("GET", "/api/ai-modes/status"),
         ],
     },
     {

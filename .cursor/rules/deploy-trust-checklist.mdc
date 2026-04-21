@@ -1,0 +1,137 @@
+---
+description: Mandatory post-deploy trust verification — keeps the trust score at or above 97% after every deploy.
+globs:
+alwaysApply: false
+---
+
+# Post-Deploy Trust Checklist
+
+After EVERY deploy to GREEN, before declaring done:
+
+1. Wait 5 minutes for all auditors to complete their cycle.
+2. Check trust score:
+
+   ```sql
+   SELECT parameter_key,
+          parameter_value->>'score'    AS score,
+          parameter_value->>'total'    AS total,
+          parameter_value->>'expected' AS expected,
+          parameter_value->>'trusted'  AS trusted
+   FROM trust_baseline
+   ORDER BY parameter_key;
+   ```
+
+3. If any auditor's actual count differs from `expected`:
+   `UPDATE trust_baseline` to match the new count in the SAME deploy.
+4. If any endpoints fail: investigate and fix before closing the deploy task.
+5. Target: **100% TRUSTED**, minimum **97%**.
+6. If below 97%: the deploy is **NOT** complete.
+
+## When Adding New Endpoints
+
+- Add the endpoint to the appropriate auditor's test list in the **same commit**.
+- Update `trust_baseline` expected count in the **same deploy**.
+- Never ship an endpoint without adding it to the auditor — it will be invisible
+  to monitoring and may quietly regress.
+
+## When Removing or Renaming Endpoints
+
+- Remove from the auditor's test list in the **same commit**.
+- Update `trust_baseline` expected count in the **same deploy**.
+- Never leave phantom endpoints in auditor lists — they generate
+  permanent `ENDPOINT_DOWN` enforcement actions.
+
+## When Adding New Auth Middleware
+
+- Confirm `get_current_user` in `backend/app/services/api_server.py`
+  still has the `SKYEYE_AUDIT_TOKEN` bypass at the top, before the new
+  middleware layer. Auditors send the token as a Bearer header on every
+  protected route — if the new middleware short-circuits 401 before
+  the bypass, every audited endpoint regresses to AUTH_FAILURE.
+- Confirm any new `require_<role>` dependency honors `is_audit`:
+
+  ```python
+  if user.get("is_audit"):
+      return user
+  ```
+
+## When Modifying Bridge Subsystems
+
+- Wrap any new top-level subsystem instantiation (`*_handler = X(...)`)
+  in `try/except` so a single subsystem init failure cannot crash the
+  whole bridge process. The bridge serves all WebSocket traffic — chat,
+  voice, coach portal, family sanctuary, SSE delivery, and trust auditors —
+  and must survive partial-init failures.
+- Verify all downstream call sites null-check the handler before invoking.
+
+## Trust Baselines (Authoritative as of 2026-04-20)
+
+| `parameter_key`                     | Expected | Source file                                              |
+|-------------------------------------|---------:|----------------------------------------------------------|
+| `command_endpoint_count`            |       78 | `backend/app/services/command_tab_auditor.py`            |
+| `eye_endpoint_count`                |       21 | `backend/app/services/the_eye_auditor.py`                |
+| `client_app_endpoint_count`         |       23 | `backend/app/services/client_app_auditor.py`             |
+| `coach_dojo_endpoint_count`         |       56 | `backend/app/services/coach_dojo_auditor.py`             |
+| `nevedal_lab_endpoint_count`        |       31 | `backend/app/services/nevedal_lab_auditor.py`            |
+| `dojo_session_endpoint_count`       |       29 | `backend/app/services/dojo_session_auditor.py`           |
+| `settings_tab_check_count`          |       15 | `backend/app/services/settings_tab_auditor.py`           |
+| `token_lab_check_count`             |       15 | `backend/app/services/token_lab_auditor.py`              |
+| `quickbooks_check_count`            |       10 | `backend/app/services/quickbooks_auditor.py`             |
+| `tier_gate_test_count`              |       12 | `backend/app/services/tier_gating_auditor.py`            |
+| `wisdom_pipeline_check_count`       |       12 | `backend/app/services/wisdom_pipeline_auditor.py`        |
+| `data_uniformity_check_count`       |       21 | `backend/app/services/data_uniformity_tracer.py`         |
+| `login_test_accounts`               |        2 | `backend/app/services/login_auditor.py`                  |
+| `ws_flow_test_count`                |       10 | `backend/app/services/ws_flow_auditor.py`                |
+
+If you change the count in a source file above, you MUST update the
+corresponding `trust_baseline` row in the same deploy.
+
+## Deploy Workflow (Trust-Safe)
+
+```bash
+# 1. Push code
+git add -A
+git commit -m "..."
+git push origin main
+
+# 2. Deploy
+ssh root@68.183.168.75 'cd /opt/clinical-sovereignty-lab && \
+  git pull origin main && \
+  docker compose -f docker-compose.prod.yml build backend bridge && \
+  docker compose -f docker-compose.prod.yml up -d backend bridge'
+
+# 3. Wait 5 minutes for auditor cycle
+sleep 300
+
+# 4. Verify
+ssh root@68.183.168.75 'docker exec nate_postgres psql -U nate_admin -d little_nate -c \
+  "SELECT parameter_key, parameter_value->>'\''score'\'' AS score, \
+          parameter_value->>'\''expected'\'' AS expected, \
+          parameter_value->>'\''trusted'\'' AS trusted \
+   FROM trust_baseline ORDER BY parameter_key;"'
+
+# 5. If any auditor < 97%, do not close the deploy task. Fix it.
+```
+
+## Audit Token Identity (Reference)
+
+The audit Bearer token is the value of `SKYEYE_AUDIT_TOKEN` in `.env`.
+It is registered in Redis at `nate:production:auth:{TOKEN_VALUE}` with payload:
+
+```json
+{
+  "user_id": "AUDIT_SYSTEM",
+  "id": "AUDIT_SYSTEM",
+  "hardware_id": "AUDIT_SYSTEM",
+  "username": "audit_system",
+  "name": "Audit System",
+  "role": "ADMIN",
+  "tier": "TOP_TIER",
+  "is_audit": true,
+  "is_audit_token": true
+}
+```
+
+The same token bypasses HTTP auth via `get_current_user` short-circuit
+in `backend/app/services/api_server.py`. Both the WebSocket bridge and the
+HTTP backend resolve the same audit identity.
