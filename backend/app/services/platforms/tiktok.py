@@ -8,7 +8,7 @@ Auth: OAuth 2.0 (Authorization Code Flow)
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import httpx
@@ -60,10 +60,15 @@ class TikTokAdapter(SocialPlatformAdapter):
         self._access_token = tokens["access_token"]
         self._open_id = tokens.get("account_id")
 
-        # Check if token is expired
-        if tokens.get("token_expiry") and tokens["token_expiry"] < datetime.utcnow():
-            logger.info("TikTok: Token expired, attempting refresh")
-            return await self.refresh_token()
+        # Check if token is expired (compare aware UTC — PG returns tz-aware timestamps)
+        exp = tokens.get("token_expiry")
+        now_utc = datetime.now(timezone.utc)
+        if exp:
+            if getattr(exp, "tzinfo", None) is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < now_utc:
+                logger.info("TikTok: Token expired, attempting refresh")
+                return await self.refresh_token()
 
         # Verify token by calling user info
         try:
@@ -112,7 +117,7 @@ class TikTokAdapter(SocialPlatformAdapter):
                 if resp.status_code == 200 and "access_token" in data:
                     self._access_token = data["access_token"]
                     self._open_id = data.get("open_id", self._open_id)
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 86400)
                     )
                     await self._save_tokens(
@@ -163,7 +168,7 @@ class TikTokAdapter(SocialPlatformAdapter):
                 data = resp.json()
 
                 if resp.status_code == 200 and "access_token" in data:
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 86400)
                     )
                     await self._save_tokens(

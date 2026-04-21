@@ -11,7 +11,7 @@ Primary use: create pins (image + text), manage boards.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 
 import httpx
@@ -61,8 +61,13 @@ class PinterestAdapter(SocialPlatformAdapter):
         self._access_token = tokens["access_token"]
         self._user_id = tokens.get("account_id")
 
-        if tokens.get("token_expiry") and tokens["token_expiry"] < datetime.utcnow():
-            return await self.refresh_token()
+        exp = tokens.get("token_expiry")
+        now_utc = datetime.now(timezone.utc)
+        if exp:
+            if getattr(exp, "tzinfo", None) is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < now_utc:
+                return await self.refresh_token()
 
         try:
             async with httpx.AsyncClient() as client:
@@ -114,7 +119,7 @@ class PinterestAdapter(SocialPlatformAdapter):
 
                 if "access_token" in data:
                     self._access_token = data["access_token"]
-                    expiry = datetime.utcnow() + timedelta(
+                    expiry = datetime.now(timezone.utc) + timedelta(
                         seconds=data.get("expires_in", 2592000)  # 30 days
                     )
                     await self._save_tokens(
@@ -178,7 +183,7 @@ class PinterestAdapter(SocialPlatformAdapter):
                 )
                 user_data = user_resp.json()
 
-                expiry = datetime.utcnow() + timedelta(
+                expiry = datetime.now(timezone.utc) + timedelta(
                     seconds=data.get("expires_in", 2592000)
                 )
                 await self._save_tokens(
