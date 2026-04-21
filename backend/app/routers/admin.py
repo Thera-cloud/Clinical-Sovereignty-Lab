@@ -2016,6 +2016,31 @@ async def get_night_school_status():
         "recent_learnings": learnings[-10:]
     }
 
+
+@router.get("/service-flags")
+async def admin_service_flags():
+    """Non-secret integration flags for Sovereign Command health strip (Azure / WS URL configured)."""
+    return {
+        "azure_openai_configured": bool((getattr(_settings, "AZURE_API_KEY", None) or "").strip()),
+        "websocket_url_configured": bool((getattr(_settings, "WS_URL", None) or "").strip()),
+    }
+
+
+@router.get("/deadman-switch/status")
+async def get_deadman_switch_status(request: Request):
+    """Whether Deadman monitoring task is running (best-effort, for admin UI)."""
+    task = getattr(request.app.state, "_deadman_switch_task", None)
+    alive = task is not None and not task.done()
+    hive = getattr(request.app.state, "hive_v4", None) or {}
+    engine = hive.get("deadman_switch") if isinstance(hive, dict) else None
+    status = "active" if alive else ("degraded" if engine is not None else "unknown")
+    return {
+        "monitor_active": bool(alive),
+        "engine_present": engine is not None,
+        "status": status,
+    }
+
+
 @router.post("/night-school/add-learning")
 async def add_learning(content: str, category: str = "admin", source: str = "ADMIN_MANUAL"):
     """Manually add a learning to Night School"""

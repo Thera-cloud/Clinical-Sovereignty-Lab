@@ -1,7 +1,7 @@
 """
 LITTLE NATE — SkyEye Tab Auditor
-Scheduled health auditor that tests every API endpoint backing the 20 SkyEye
-dashboard tabs 3x daily (5 AM, 5 PM, 11 PM UTC).
+Scheduled health auditor that tests every API endpoint backing the SkyEye
+dashboard tabs (plus OAuth connect probe) 3x daily (5 AM, 5 PM, 11 PM UTC).
 
 Produces a colour-coded HTML trust scorecard email sent to
 support@sovereignsanctuary.net via NotificationSystem.
@@ -211,6 +211,13 @@ TAB_ENDPOINTS = [
             ("GET", "/api/nate-agent/admin/crystal-network/status"),
             ("GET", "/api/nate-agent/admin/crystal-network/diagnostics"),
             ("POST", "/api/nate-agent/admin/crystal-network/control"),
+        ],
+    },
+    {
+        "tab": "OAuth Connect Probe",
+        "tab_num": 22,
+        "endpoints": [
+            ("POST", "/api/skyeye/platforms/test/connect"),
         ],
     },
 ]

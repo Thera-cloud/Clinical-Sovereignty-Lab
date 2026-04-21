@@ -1324,6 +1324,15 @@ async def initiate_platform_connect(platform: str, request: Request):
     If credentials are configured, returns the OAuth authorization URL.
     If not, returns the developer portal URL so admin can create an app first.
     """
+    # Synthetic probe for SkyEyeTabAuditor — verifies POST auth + router without real OAuth
+    if platform == "test":
+        return {
+            "probe": True,
+            "needs_setup": True,
+            "oauth_url": None,
+            "message": "OAuth connect route reachable (synthetic probe). Use a real platform id for OAuth.",
+        }
+
     # Developer portal URLs for each platform
     DEVELOPER_PORTALS = {
         "tiktok":    "https://developers.tiktok.com/apps/",
