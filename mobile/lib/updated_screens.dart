@@ -4160,7 +4160,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   DateTime? _calSelectedDay;
   CalendarView _calView = CalendarView.month;
   DateTime _calFocusedDate = DateTime.now();
-  
+
+  /// Correlates `coach_create_consultation` WebSocket replies with the open dialog.
+  Completer<Map<String, dynamic>>? _consultationCreateCompleter;
+  String? _consultationCreateRequestId;
+
   // Payout / Stripe Connect state
   Map<String, dynamic> _connectStatus = {};
   bool _connectLoading = false;
@@ -4726,6 +4730,87 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     }
   }
 
+  /// External consultee — WebSocket `coach_create_consultation` (bridge + Zoom + email).
+  Future<void> _submitConsultationFromDialog({
+    required BuildContext dialogContext,
+    required TextEditingController emailCtrl,
+    required TextEditingController nameCtrl,
+    required TextEditingController subjectCtrl,
+    required DateTime startLocal,
+    required int durationMinutes,
+    required bool disableRecording,
+  }) async {
+    if (_socket == null) {
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          const SnackBar(content: Text("Not connected — sign in again.")),
+        );
+      }
+      return;
+    }
+    final reqId = DateTime.now().millisecondsSinceEpoch.toString();
+    _consultationCreateRequestId = reqId;
+    _consultationCreateCompleter = Completer<Map<String, dynamic>>();
+
+    final stUtc = startLocal.toUtc();
+    _socket!.sink.add(jsonEncode({
+      "type": "coach_create_consultation",
+      "request_id": reqId,
+      "consultee_email": emailCtrl.text.trim(),
+      "consultee_name": nameCtrl.text.trim(),
+      "subject": subjectCtrl.text.trim(),
+      "scheduled_start": stUtc.toIso8601String(),
+      "duration_minutes": durationMinutes,
+      "disable_recording": disableRecording,
+    }));
+
+    try {
+      final data = await _consultationCreateCompleter!.future.timeout(
+        const Duration(seconds: 90),
+        onTimeout: () => throw TimeoutException("consultation"),
+      );
+      if (!dialogContext.mounted) return;
+      Navigator.of(dialogContext).pop();
+      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      if (!mounted) return;
+      final link = data["zoom_link"]?.toString() ?? "";
+      final host = data["zoom_host_url"]?.toString() ?? "";
+      final buf = StringBuffer("Consultation created.");
+      if (link.isNotEmpty) {
+        buf.write("\n\nGuest Zoom:\n$link");
+      }
+      if (host.isNotEmpty) {
+        buf.write("\n\nHost Zoom:\n$host");
+      }
+      buf.write("\n\nConfirmation emails are sent when the server is configured.");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1A1A2E),
+          duration: const Duration(seconds: 14),
+          content: Text(
+            buf.toString(),
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+      );
+    } on TimeoutException {
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          const SnackBar(content: Text("Consultation request timed out — check Schedule tab or try again.")),
+        );
+      }
+    } catch (e) {
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(content: Text("Consultation failed: $e")),
+        );
+      }
+    } finally {
+      _consultationCreateCompleter = null;
+      _consultationCreateRequestId = null;
+    }
+  }
+
   Future<void> _openCreateSessionDialog() async {
     final coachId = (widget.currentUserProfile["hardware_id"] ?? widget.currentUserProfile["coach_id"] ?? "").toString();
     if (coachId.trim().isEmpty) {
@@ -4768,13 +4853,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     // Active assistant coaches for COACH type
     final activeAssistants = _assistantMetrics.where((a) => a['status'] == 'active').toList();
 
+    // CONSULTATION sessions do not require roster clients or assistants.
     if (allClients.isEmpty && activeAssistants.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("No clients or assistants available to schedule")),
+          const SnackBar(
+            content: Text("No clients or assistants on file — you can still schedule a CONSULTATION."),
+            duration: Duration(seconds: 4),
+          ),
         );
       }
-      return;
     }
 
     String sessionType = "CLIENT";
@@ -4785,10 +4873,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     int durationMinutes = 50;
     String notes = "";
     bool disableRecording = false;
+    final consulteeEmailCtrl = TextEditingController();
+    final consulteeNameCtrl = TextEditingController();
+    final consulteeSubjectCtrl = TextEditingController();
+
+    bool consulteeEmailValid(String e) {
+      final t = e.trim();
+      if (t.isEmpty || !t.contains("@")) return false;
+      return RegExp(r'^[\w.+-]+@[\w.-]+\.\w{2,}$').hasMatch(t);
+    }
 
     // Returns the visible entries for the person/client dropdown based on current type + secondary filter
     List<Map<String, String>> _visibleEntries(String type, String secId) {
       switch (type) {
+        case "CONSULTATION":
+          return [];
         case "COACH":
           return activeAssistants.map((a) => {
             "id": (a["assistant_id"] ?? a["hardware_id"] ?? "").toString(),
@@ -4815,6 +4914,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           builder: (ctx, setLocal) {
             final visibleList = _visibleEntries(sessionType, selectedSecondaryId);
             final bool hasEntries = visibleList.isNotEmpty;
+            final consultationOk = sessionType == "CONSULTATION" &&
+                consulteeEmailValid(consulteeEmailCtrl.text) &&
+                consulteeNameCtrl.text.trim().length >= 2;
+            final bool canCreateSession = sessionType == "CONSULTATION" ? consultationOk : hasEntries;
             if (hasEntries && !visibleList.any((e) => e["id"] == selectedClientId)) {
               selectedClientId = visibleList.first["id"]!;
               selectedClientName = visibleList.first["name"]!;
@@ -4917,7 +5020,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               );
             }
 
-            final personLabel = sessionType == "COACH" ? "Assistant Coach" : "Client";
+            final personLabel =
+                sessionType == "COACH" ? "Assistant Coach" : sessionType == "CONSULTATION" ? "" : "Client";
 
             return AlertDialog(
               backgroundColor: const Color(0xFF0A0A0F),
@@ -4941,6 +5045,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                           DropdownMenuItem(value: "FAMILY", child: Text("FAMILY", style: TextStyle(color: Colors.white))),
                           DropdownMenuItem(value: "GROUP", child: Text("GROUP", style: TextStyle(color: Colors.white))),
                           DropdownMenuItem(value: "CORPORATE", child: Text("CORPORATE", style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(value: "CONSULTATION", child: Text("CONSULTATION", style: TextStyle(color: Colors.white))),
                         ],
                         onChanged: (v) => setLocal(() {
                           sessionType = v ?? "CLIENT";
@@ -4964,51 +5069,108 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                         const SizedBox(height: 12),
                       ],
 
-                      // Person dropdown (client or assistant coach)
-                      Text(personLabel, style: const TextStyle(color: Colors.white70)),
-                      const SizedBox(height: 6),
-                      if (!hasEntries)
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.04),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.orange.withOpacity(0.3)),
-                          ),
-                          child: Text(
-                            sessionType == "COACH"
-                                ? "No active assistant coaches found"
-                                : selectedSecondaryId.isNotEmpty
-                                    ? "No clients found for selected ${sessionType == 'FAMILY' ? 'family' : sessionType == 'GROUP' ? 'group' : 'company'}"
-                                    : "No clients available",
-                            style: const TextStyle(color: Colors.orange, fontSize: 13),
-                          ),
-                        )
-                      else
-                        DropdownButtonFormField<String>(
-                          value: visibleList.any((e) => e["id"] == selectedClientId) ? selectedClientId : visibleList.first["id"]!,
-                          dropdownColor: const Color(0xFF111118),
-                          items: visibleList
-                              .map((c) => DropdownMenuItem<String>(
-                                    value: c["id"]!,
-                                    child: Text(c["name"] ?? c["id"]!, style: const TextStyle(color: Colors.white)),
-                                  ))
-                              .toList(),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            final match = visibleList.firstWhere((c) => c["id"] == v, orElse: () => visibleList.first);
-                            setLocal(() {
-                              selectedClientId = match["id"]!;
-                              selectedClientName = match["name"] ?? match["id"]!;
-                            });
-                          },
+                      // CONSULTATION: external consultee fields — otherwise client / assistant dropdown
+                      if (sessionType == "CONSULTATION") ...[
+                        TextFormField(
+                          controller: consulteeEmailCtrl,
+                          keyboardType: TextInputType.emailAddress,
+                          style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
+                            labelText: "Consultee Email (required)",
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            errorText: consulteeEmailCtrl.text.isNotEmpty &&
+                                    !consulteeEmailValid(consulteeEmailCtrl.text)
+                                ? "Enter a valid email"
+                                : null,
                             filled: true,
                             fillColor: Colors.white.withOpacity(0.06),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
+                          onChanged: (_) => setLocal(() {}),
                         ),
-                      const SizedBox(height: 12),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: consulteeNameCtrl,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: "Consultee Name (required, min 2 characters)",
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            errorText: consulteeNameCtrl.text.isNotEmpty &&
+                                    consulteeNameCtrl.text.trim().length < 2
+                                ? "At least 2 characters"
+                                : null,
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.06),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onChanged: (_) => setLocal(() {}),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: consulteeSubjectCtrl,
+                          minLines: 1,
+                          maxLines: 3,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: "Subject / Reason (optional)",
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.06),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onChanged: (_) => setLocal(() {}),
+                        ),
+                        const SizedBox(height: 12),
+                      ] else ...[
+                        if (personLabel.isNotEmpty)
+                          Text(personLabel, style: const TextStyle(color: Colors.white70)),
+                        if (personLabel.isNotEmpty) const SizedBox(height: 6),
+                        if (!hasEntries)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              sessionType == "COACH"
+                                  ? "No active assistant coaches found"
+                                  : selectedSecondaryId.isNotEmpty
+                                      ? "No clients found for selected ${sessionType == 'FAMILY' ? 'family' : sessionType == 'GROUP' ? 'group' : 'company'}"
+                                      : "No clients available",
+                              style: const TextStyle(color: Colors.orange, fontSize: 13),
+                            ),
+                          )
+                        else
+                          DropdownButtonFormField<String>(
+                            value: visibleList.any((e) => e["id"] == selectedClientId)
+                                ? selectedClientId
+                                : visibleList.first["id"]!,
+                            dropdownColor: const Color(0xFF111118),
+                            items: visibleList
+                                .map((c) => DropdownMenuItem<String>(
+                                      value: c["id"]!,
+                                      child: Text(c["name"] ?? c["id"]!, style: const TextStyle(color: Colors.white)),
+                                    ))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v == null) return;
+                              final match =
+                                  visibleList.firstWhere((c) => c["id"] == v, orElse: () => visibleList.first);
+                              setLocal(() {
+                                selectedClientId = match["id"]!;
+                                selectedClientName = match["name"] ?? match["id"]!;
+                              });
+                            },
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.06),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        const SizedBox(height: 12),
+                      ],
 
                       // Date/time + duration row
                       Row(
@@ -5047,21 +5209,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       ),
                       const SizedBox(height: 12),
 
-                      // Notes
-                      TextFormField(
-                        minLines: 2,
-                        maxLines: 5,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          labelText: "Notes (optional)",
-                          labelStyle: const TextStyle(color: Colors.white70),
-                          filled: true,
-                          fillColor: Colors.white.withOpacity(0.06),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      // Notes (not used for CONSULTATION — subject field above)
+                      if (sessionType != "CONSULTATION")
+                        TextFormField(
+                          minLines: 2,
+                          maxLines: 5,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            labelText: "Notes (optional)",
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.06),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onChanged: (v) => notes = v,
                         ),
-                        onChanged: (v) => notes = v,
-                      ),
-                      const SizedBox(height: 12),
+                      if (sessionType != "CONSULTATION") const SizedBox(height: 12),
 
                       // Recording opt-out toggle
                       Container(
@@ -5103,9 +5266,21 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     backgroundColor: const Color(0xFFFFD700),
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: hasEntries
+                  onPressed: canCreateSession
                       ? () async {
                           if (durationMinutes < 5) durationMinutes = 5;
+                          if (sessionType == "CONSULTATION") {
+                            await _submitConsultationFromDialog(
+                              dialogContext: ctx,
+                              emailCtrl: consulteeEmailCtrl,
+                              nameCtrl: consulteeNameCtrl,
+                              subjectCtrl: consulteeSubjectCtrl,
+                              startLocal: startLocal,
+                              durationMinutes: durationMinutes,
+                              disableRecording: disableRecording,
+                            );
+                            return;
+                          }
                           String familyIdForPayload = "";
                           if (sessionType == "FAMILY") familyIdForPayload = selectedSecondaryId;
                           else if (sessionType == "GROUP") familyIdForPayload = selectedSecondaryId;
@@ -5131,7 +5306,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           },
         );
       },
-    );
+    ).then((_) {
+      consulteeEmailCtrl.dispose();
+      consulteeNameCtrl.dispose();
+      consulteeSubjectCtrl.dispose();
+    });
+  }
+
+  /// Coach-scheduled external consultee (non-roster); distinct from master free consultation.
+  bool _isCoachExternalConsultation(Map<String, dynamic> session) {
+    final st = (session['session_type'] ?? session['type'] ?? '').toString().toLowerCase();
+    if (st == 'consultation') return true;
+    if ((session['booked_by'] ?? '').toString() == 'COACH_CONSULTATION') return true;
+    final cid = (session['client_id'] ?? '').toString();
+    return cid.startsWith('consultation_');
   }
 
   void _fetchClientBrief(String clientId) {
@@ -5141,7 +5329,55 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     }));
   }
 
+  Future<void> _cancelConsultationSession(Map<String, dynamic> session) async {
+    final sessionId = (session['session_id'] ?? session['id'] ?? '').toString();
+    if (sessionId.isEmpty) return;
+    final consultee =
+        (session['consultation_name'] ?? session['client_name'] ?? 'the consultee').toString();
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: const Text('Cancel consultation?', style: TextStyle(color: Color(0xFFC9A962))),
+        content: Text(
+          'This will email $consultee, delete the Zoom meeting, and remove the session from your schedule.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Back', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cancel consultation'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _socket?.sink.add(jsonEncode({
+      'type': 'coach_cancel_consultation',
+      'session_id': sessionId,
+    }));
+  }
+
   void _startLiveSession(Map<String, dynamic> session) {
+    if (_isCoachExternalConsultation(session)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Live session workspace is for roster clients. Use Start Zoom for consultations.',
+            ),
+            backgroundColor: Color(0xFF8B7355),
+          ),
+        );
+      }
+      return;
+    }
     final sessionId = (session['id'] ?? session['session_id'] ?? '').toString();
     final clientId = (session['client_id'] ?? session['client'] ?? '').toString();
     final familyId = (session['family_id'] ?? '').toString();
@@ -5255,6 +5491,26 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           setState(() {
             _schedule = data['data']?['schedule'] ?? [];
           });
+        }
+      }
+      else if (data['type'] == 'consultation_created') {
+        final rid = data['request_id']?.toString();
+        if (rid != null &&
+            rid == _consultationCreateRequestId &&
+            _consultationCreateCompleter != null &&
+            !_consultationCreateCompleter!.isCompleted) {
+          _consultationCreateCompleter!.complete(Map<String, dynamic>.from(data));
+        }
+      }
+      else if (data['type'] == 'consultation_cancelled') {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Consultation cancelled. The consultee was notified and the Zoom meeting was removed.'),
+              backgroundColor: Color(0xFF22C55E),
+            ),
+          );
+          _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
         }
       }
       else if (data['type'] == 'availability_updated') {
@@ -5872,6 +6128,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         }
       }
       else if (data['type'] == 'error') {
+        final rid = data['request_id']?.toString();
+        if (rid != null &&
+            rid == _consultationCreateRequestId &&
+            _consultationCreateCompleter != null &&
+            !_consultationCreateCompleter!.isCompleted) {
+          _consultationCreateCompleter!.completeError(
+            Exception(data['message']?.toString() ?? 'Request failed'),
+          );
+        }
         if (mounted) {
           setState(() {
             _notesLoading = false;
@@ -7190,12 +7455,111 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                   final raw = entry.value;
                   final session = (raw is Map) ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
                   final sessionId = (session['id'] ?? session['session_id'] ?? 'idx_$index').toString();
-                  final clientLabel = (session['client_name'] ?? session['client'] ?? session['client_id'] ?? 'Session').toString();
+                  final isConsult = _isCoachExternalConsultation(session);
+                  final displayName = isConsult
+                      ? (session['consultation_name'] ?? session['client_name'] ?? session['client'] ?? 'Consultee').toString()
+                      : (session['client_name'] ?? session['client'] ?? session['client_id'] ?? 'Session').toString();
                   final date = (session['date'] ?? '').toString();
                   final time = (session['time'] ?? '').toString();
+                  final consultSubject = (session['consultation_subject'] ?? '').toString().trim();
                   final meetingUrl = (session['zoom_link'] ?? session['meeting_url'] ?? '').toString();
                   final zoomHostUrl = (session['zoom_host_url'] ?? '').toString();
                   final zoomMeetingId = (session['zoom_meeting_id'] ?? '').toString();
+                  const consultAccent = Color(0xFF9D4EDD);
+                  const consultBorder = Color(0xFF7C3AED);
+
+                  if (isConsult) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F1528),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: consultBorder.withValues(alpha: 0.65)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.person_search, color: consultAccent, size: 22),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: consultAccent.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: consultAccent.withValues(alpha: 0.5)),
+                                ),
+                                child: const Text(
+                                  'Consultation',
+                                  style: TextStyle(
+                                    color: consultAccent,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            displayName,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (consultSubject.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              consultSubject,
+                              style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          const SizedBox(height: 6),
+                          Text(
+                            [date, time].where((s) => s.trim().isNotEmpty).join(' at '),
+                            style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.videocam, size: 18),
+                                  label: const Text('Start Zoom'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: consultAccent.withValues(alpha: 0.22),
+                                    foregroundColor: consultAccent,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    side: const BorderSide(color: consultAccent, width: 0.8),
+                                  ),
+                                  onPressed: () => _launchZoomMeeting(zoomHostUrl, meetingUrl),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  icon: const Icon(Icons.event_busy, size: 18),
+                                  label: const Text('Cancel'),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Colors.redAccent),
+                                    foregroundColor: Colors.redAccent,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                  onPressed: () => _cancelConsultationSession(session),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
                   return Container(
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(14),
@@ -7213,7 +7577,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            clientLabel,
+                            displayName,
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -7473,21 +7837,32 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           ? m['duration_minutes'] as int
           : int.tryParse('${m['duration_minutes'] ?? ''}') ?? 60;
       end ??= start.add(Duration(minutes: dur));
-      final clientName = (m['client_name'] ?? 'Client').toString();
+      final isConsultMap = _isCoachExternalConsultation(m);
+      final displayTitle = isConsultMap
+          ? (m['consultation_name'] ?? m['client_name'] ?? 'Consultee').toString()
+          : (m['client_name'] ?? 'Client').toString();
       final status = (m['status'] ?? '').toString();
-      final color = pending
-          ? const Color(0xFFC9A962)
-          : (status == 'pending_approval'
-              ? const Color(0xFFC9A962)
-              : const Color(0xFF4ECDC4));
+      final Color color;
+      if (pending) {
+        color = const Color(0xFFC9A962);
+      } else if (isConsultMap) {
+        color = const Color(0xFF9D4EDD);
+      } else if (status == 'pending_approval') {
+        color = const Color(0xFFC9A962);
+      } else {
+        color = const Color(0xFF4ECDC4);
+      }
+      final subtitle =
+          isConsultMap ? 'Consultation' : (m['session_type'] ?? '').toString();
       out.add(CalendarEvent(
         id: (m['session_id'] ?? m['booking_id'] ?? '${start.millisecondsSinceEpoch}').toString(),
         start: start,
         end: end,
-        title: clientName,
-        subtitle: (m['session_type'] ?? '').toString(),
+        title: displayTitle,
+        subtitle: subtitle,
         color: color,
-        tooltip: '$clientName • ${m['time'] ?? ''}${pending ? ' (pending)' : ''}',
+        tooltip:
+            '${isConsultMap ? 'Consultation: ' : ''}$displayTitle • ${m['time'] ?? ''}${pending ? ' (pending)' : ''}',
         source: 'sanctuary',
         raw: m,
       ));
@@ -7505,13 +7880,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     final events = _buildCoachCalendarEvents();
     void onTap(CalendarEvent ev) {
       final raw = ev.raw is Map<String, dynamic> ? ev.raw as Map<String, dynamic> : <String, dynamic>{};
+      final isC = raw.isNotEmpty && _isCoachExternalConsultation(raw);
+      final subj = (raw['consultation_subject'] ?? '').toString().trim();
       showDialog(
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: const Color(0xFF111111),
-          title: Text(ev.title, style: const TextStyle(color: Color(0xFFC9A962))),
+          title: Text(ev.title, style: TextStyle(color: isC ? const Color(0xFF9D4EDD) : const Color(0xFFC9A962))),
           content: Text(
-            '${raw['date'] ?? ''} ${raw['time'] ?? ''}\n${raw['session_type'] ?? ''}\nStatus: ${raw['status'] ?? ''}',
+            '${isC ? 'Consultation\n' : ''}'
+            '${raw['date'] ?? ''} ${raw['time'] ?? ''}\n'
+            '${isC ? '' : '${raw['session_type'] ?? ''}\n'}'
+            '${subj.isNotEmpty ? 'Topic: $subj\n' : ''}'
+            'Status: ${raw['status'] ?? ''}',
             style: const TextStyle(color: Colors.white),
           ),
           actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
@@ -8372,16 +8753,27 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               style: TextStyle(color: Colors.white54, fontSize: 11, letterSpacing: 1)),
           const SizedBox(height: 4),
           ...sessions.map((s) {
-            final cl = (s['client_name'] ?? s['client'] ?? 'Client').toString();
-            final tm = (s['time'] ?? '').toString();
+            final sm = Map<String, dynamic>.from(s);
+            final isC = _isCoachExternalConsultation(sm);
+            final cl = isC
+                ? (sm['consultation_name'] ?? sm['client_name'] ?? sm['client'] ?? 'Consultee').toString()
+                : (sm['client_name'] ?? sm['client'] ?? 'Client').toString();
+            final tm = (sm['time'] ?? '').toString();
             return Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(children: [
-                const Icon(Icons.videocam, color: Color(0xFFC9A962), size: 14),
+                Icon(
+                  isC ? Icons.person_search : Icons.videocam,
+                  color: isC ? const Color(0xFF9D4EDD) : const Color(0xFFC9A962),
+                  size: 14,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
-                    child: Text("$cl${tm.isNotEmpty ? ' • $tm' : ''}",
-                        style: const TextStyle(color: Colors.white, fontSize: 12))),
+                  child: Text(
+                    "${isC ? 'Consultation · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}",
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
               ]),
             );
           }),
@@ -8391,6 +8783,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _openBriefingsForSession(Map<String, dynamic> session) {
+    if (_isCoachExternalConsultation(session)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Briefings are for assigned clients. Consultations stay on the Schedule tab.'),
+            backgroundColor: Color(0xFF8B7355),
+          ),
+        );
+      }
+      return;
+    }
     final familyId = (session['family_id'] ?? '').toString();
     final clientId = (session['client_id'] ?? '').toString();
     final folders = _buildFolderGroups();
