@@ -12622,6 +12622,199 @@ async def handle_client(websocket, path=None):
                             print(f">>> [ERROR] Approve failed: {e}")
                             await websocket.send(json.dumps({"type": "error", "message": "APPROVE_FAILED"}))
 
+            # === COACH: CREATE CONSULTATION (external consultee + Zoom + email + optional GCal) ===
+            elif t == "coach_create_consultation":
+                # Stateful: writes sessions, PG, sends email — NOT in _SENTINEL_SKIP.
+                if not (current_profile and current_profile.get("role") == "COACH"):
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "COACH_REQUIRED",
+                    }))
+                else:
+                    try:
+                        c_email = (d.get("consultation_email") or "").strip().lower()
+                        c_name = (d.get("consultation_name") or "").strip()
+                        c_subject = (d.get("consultation_subject") or "").strip() or "Consultation"
+                        scheduled_start = (d.get("scheduled_start") or "").strip()
+                        scheduled_end = (d.get("scheduled_end") or "").strip()
+                        tz_hint = (d.get("timezone") or "America/New_York").strip()
+                        if not c_email or "@" not in c_email or not c_name:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "message": "INVALID_CONSULTATION_FIELDS",
+                            }))
+                        elif not scheduled_start or not scheduled_end:
+                            await websocket.send(json.dumps({
+                                "type": "error",
+                                "message": "MISSING_SCHEDULE",
+                            }))
+                        else:
+                            _zoom_ok = os.environ.get("ENABLE_ZOOM", "").lower() in ("true", "1", "yes")
+                            if not _zoom_ok:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "ZOOM_DISABLED",
+                                }))
+                            else:
+                                coach_id = (current_profile.get("hardware_id") or "").strip()
+                                coach_name = (
+                                    current_profile.get("name")
+                                    or current_profile.get("username")
+                                    or "Coach"
+                                )
+                                coach_email = (
+                                    (current_profile.get("email") or "").strip()
+                                )
+                                dur_min = 50
+                                try:
+                                    _st = datetime.datetime.fromisoformat(
+                                        scheduled_start.replace("Z", "+00:00"))
+                                    _en = datetime.datetime.fromisoformat(
+                                        scheduled_end.replace("Z", "+00:00"))
+                                    if _en > _st:
+                                        dur_min = max(5, int((_en - _st).total_seconds() / 60))
+                                except Exception:
+                                    pass
+                                from app.services.zoom_client import ZoomClient
+                                zoom = ZoomClient.from_env()
+                                meeting = await zoom.create_meeting(
+                                    topic=f"{c_subject} — {c_name}",
+                                    start_time_iso=scheduled_start,
+                                    duration_minutes=dur_min,
+                                    agenda=c_subject,
+                                )
+                                if not meeting or not meeting.get("join_url"):
+                                    await websocket.send(json.dumps({
+                                        "type": "error",
+                                        "message": "ZOOM_CREATE_FAILED",
+                                    }))
+                                else:
+                                    zoom_link = str(meeting.get("join_url") or "")
+                                    zoom_mid = str(meeting.get("id") or "")
+                                    zoom_host = str(meeting.get("start_url") or "")
+                                    session_id = f"CS_{secrets.token_hex(8)}"
+                                    virtual_client_id = f"consultation_{secrets.token_hex(8)}"
+                                    _now_s = str(datetime.datetime.now(datetime.timezone.utc))
+                                    new_session = {
+                                        "session_id": session_id,
+                                        "client_id": virtual_client_id,
+                                        "coach_id": coach_id,
+                                        "family_id": "",
+                                        "client_name": c_name,
+                                        "consultation_email": c_email,
+                                        "consultation_name": c_name,
+                                        "consultation_subject": c_subject,
+                                        "session_type": "consultation",
+                                        "status": "scheduled",
+                                        "scheduled_start": scheduled_start,
+                                        "scheduled_end": scheduled_end,
+                                        "actual_start": None,
+                                        "actual_end": None,
+                                        "duration_minutes": dur_min,
+                                        "zoom_link": zoom_link,
+                                        "zoom_meeting_id": zoom_mid,
+                                        "zoom_host_url": zoom_host,
+                                        "notes": c_subject,
+                                        "coach_notes": "",
+                                        "topics_covered": [],
+                                        "homework_assigned": [],
+                                        "mood_at_start": "",
+                                        "mood_at_end": "",
+                                        "nate_summary": "",
+                                        "recording_url": "",
+                                        "payment_status": "pending",
+                                        "created_at": _now_s,
+                                        "booked_by": "COACH_CONSULTATION",
+                                        "coach_name": coach_name,
+                                        "timezone": tz_hint,
+                                    }
+                                    sessions = load_json_file(SESSIONS_FILE, [])
+                                    sessions.append(new_session)
+                                    save_json_file(SESSIONS_FILE, sessions)
+                                    if db_pool:
+                                        try:
+                                            from app.services.pg_data_helpers import upsert_session_pg
+                                            await upsert_session_pg(db_pool, new_session)
+                                        except Exception as _pg_e:
+                                            print(
+                                                f">>> [CONSULTATION] PG upsert failed (non-blocking): {_pg_e}"
+                                            )
+                                    # Readable time block for emails
+                                    try:
+                                        _sdt = datetime.datetime.fromisoformat(
+                                            scheduled_start.replace("Z", "+00:00"))
+                                        _edt = datetime.datetime.fromisoformat(
+                                            scheduled_end.replace("Z", "+00:00"))
+                                        _when = (
+                                            f"{_sdt.strftime('%A, %B %d, %Y %H:%M')} – "
+                                            f"{_edt.strftime('%H:%M')} ({tz_hint})"
+                                        )
+                                    except Exception:
+                                        _when = f"{scheduled_start} – {scheduled_end}"
+                                    _consult_html = (
+                                        f"<p>Hello {c_name},</p>"
+                                        f"<p><strong>{coach_name}</strong> has scheduled a consultation "
+                                        f"with you via Sovereign Sanctuary.</p>"
+                                        f"<p><strong>Topic:</strong> {c_subject}<br/>"
+                                        f"<strong>When:</strong> {_when}</p>"
+                                        f"<p><a href=\"{zoom_link}\">Join Zoom meeting</a></p>"
+                                        f"<p>If the link does not open, copy this URL:<br/>{zoom_link}</p>"
+                                    )
+                                    _coach_html = (
+                                        f"<p>Your consultation is confirmed.</p>"
+                                        f"<p><strong>Consultee:</strong> {c_name} &lt;{c_email}&gt;<br/>"
+                                        f"<strong>Topic:</strong> {c_subject}<br/>"
+                                        f"<strong>When:</strong> {_when}</p>"
+                                        f"<p><strong>Host (start) link:</strong> "
+                                        f"<a href=\"{zoom_host}\">Open Zoom as host</a></p>"
+                                        f"<p><strong>Guest join link:</strong> "
+                                        f"<a href=\"{zoom_link}\">{zoom_link}</a></p>"
+                                    )
+                                    try:
+                                        asyncio.create_task(notification_system._send_email(
+                                            c_email,
+                                            f"Consultation with {coach_name}: {c_subject}",
+                                            _consult_html,
+                                            notification_type="general",
+                                        ))
+                                    except Exception as _em:
+                                        print(f">>> [CONSULTATION] consultee email task failed: {_em}")
+                                    if coach_email:
+                                        try:
+                                            asyncio.create_task(notification_system._send_email(
+                                                coach_email,
+                                                f"Consultation scheduled: {c_name}",
+                                                _coach_html,
+                                                notification_type="general",
+                                            ))
+                                        except Exception as _em2:
+                                            print(f">>> [CONSULTATION] coach email task failed: {_em2}")
+                                    try:
+                                        from app.services.google_calendar_session_sync import (
+                                            sync_session_for_participants as _gcal_push,
+                                        )
+                                        if db_pool:
+                                            asyncio.create_task(_gcal_push(
+                                                db_pool, new_session, action="create"))
+                                    except Exception:
+                                        pass
+                                    await websocket.send(json.dumps({
+                                        "type": "consultation_created",
+                                        "success": True,
+                                        "session_id": session_id,
+                                        "zoom_link": zoom_link,
+                                        "zoom_host_url": zoom_host,
+                                        "session": new_session,
+                                    }))
+                    except Exception as e:
+                        print(f">>> [ERROR] coach_create_consultation failed: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "CONSULTATION_CREATE_FAILED",
+                        }))
+
             # === COACH: DECLINE BOOKING ===
             elif t == "coach_decline_booking":
                 if current_profile and current_profile.get("role") == "COACH":

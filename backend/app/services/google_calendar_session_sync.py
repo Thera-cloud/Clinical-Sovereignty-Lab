@@ -98,13 +98,26 @@ def _build_payload(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         f"Coach: {coach_name}",
         f"Client: {client_name}",
     ]
+    csubj = (session.get("consultation_subject") or "").strip()
+    if csubj:
+        description_parts.append(f"Topic: {csubj}")
     notes = session.get("notes") or session.get("description")
     if notes:
         description_parts.append(f"\nNotes: {notes}")
-    join_url = session.get("zoom_join_url") or session.get("join_url")
+    join_url = (
+        session.get("zoom_join_url")
+        or session.get("join_url")
+        or session.get("zoom_link")
+    )
     if join_url:
         description_parts.append(f"\nJoin: {join_url}")
     description = "\n".join(description_parts)
+    consultation_email = (session.get("consultation_email") or "").strip()
+    attendees = (
+        [consultation_email]
+        if consultation_email and "@" in consultation_email
+        else None
+    )
     payload = gcc._build_event_payload(
         summary=summary,
         description=description,
@@ -112,11 +125,18 @@ def _build_payload(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         end_iso=end,
         timezone_str=session.get("timezone") or "America/New_York",
         location=join_url or None,
-        attendees=None,
+        attendees=attendees,
         conference_link=None,
         source_session_id=session.get("session_id"),
     )
     return payload
+
+
+def _send_updates_for_payload(payload: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Notify attendees when the event includes guest emails (e.g. consultations)."""
+    if payload and payload.get("attendees"):
+        return "all"
+    return None
 
 
 async def _persist_sync_result(pool, session_id: str, *,
@@ -214,7 +234,10 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
                 ev = await gcc.update_event(access_token, calendar_id, event_id, payload, etag=etag)
                 if ev is None:
                     # etag stale or other failure — re-create
-                    ev = await gcc.create_event(access_token, calendar_id, payload)
+                    ev = await gcc.create_event(
+                        access_token, calendar_id, payload,
+                        send_updates=_send_updates_for_payload(payload),
+                    )
                     a = "create"
                 else:
                     a = "update"
@@ -231,7 +254,10 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
                 return {"status": "error"}
 
         # action == "create"
-        ev = await gcc.create_event(access_token, calendar_id, payload)
+        ev = await gcc.create_event(
+            access_token, calendar_id, payload,
+            send_updates=_send_updates_for_payload(payload),
+        )
         if not ev:
             await _persist_sync_result(pool, session_id,
                                         google_event_id=None,

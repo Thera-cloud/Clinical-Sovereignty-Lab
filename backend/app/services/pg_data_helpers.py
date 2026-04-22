@@ -191,7 +191,8 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                            zoom_meeting_id, zoom_host_url, notes, coach_notes,
                            topics_covered, homework_assigned, mood_at_start,
                            mood_at_end, nate_summary, recording_url, session_data,
-                           payment_status, created_at, updated_at
+                           payment_status, created_at, updated_at,
+                           consultation_email, consultation_name, consultation_subject
                     FROM coaching_sessions{where}
                     ORDER BY scheduled_start DESC NULLS LAST"""
 
@@ -225,6 +226,9 @@ async def load_sessions_pg(db_pool, **filters) -> List[Dict]:
                     "recording_url": r.get("recording_url") or "",
                     "payment_status": r.get("payment_status") or "pending",
                     "created_at": str(r["created_at"]) if r.get("created_at") else "",
+                    "consultation_email": r.get("consultation_email") or "",
+                    "consultation_name": r.get("consultation_name") or "",
+                    "consultation_subject": r.get("consultation_subject") or "",
                 }
                 extra = r.get("session_data")
                 if extra and isinstance(extra, dict):
@@ -251,6 +255,7 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
             "topics_covered", "homework_assigned", "mood_at_start", "mood_at_end",
             "nate_summary", "recording_url", "payment_status", "created_at",
             "intake_note",
+            "consultation_email", "consultation_name", "consultation_subject",
         }
         extra = {k: v for k, v in session.items() if k not in known_keys and k != "updated_at"}
         payment_status = str(session.get("payment_status") or "pending")[:32]
@@ -264,8 +269,9 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      zoom_meeting_id, zoom_host_url, notes, coach_notes,
                      topics_covered, homework_assigned, mood_at_start,
                      mood_at_end, nate_summary, recording_url, payment_status,
-                     intake_note, session_data, created_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+                     intake_note, session_data, created_at,
+                     consultation_email, consultation_name, consultation_subject)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
                    ON CONFLICT (session_id) DO UPDATE SET
                      client_id = EXCLUDED.client_id,
                      coach_id = EXCLUDED.coach_id,
@@ -291,7 +297,10 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      recording_url = EXCLUDED.recording_url,
                      payment_status = EXCLUDED.payment_status,
                      intake_note = EXCLUDED.intake_note,
-                     session_data = EXCLUDED.session_data""",
+                     session_data = EXCLUDED.session_data,
+                     consultation_email = EXCLUDED.consultation_email,
+                     consultation_name = EXCLUDED.consultation_name,
+                     consultation_subject = EXCLUDED.consultation_subject""",
                 session.get("session_id"),
                 session.get("client_id", ""),
                 session.get("coach_id", ""),
@@ -319,6 +328,9 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                 session.get("intake_note", ""),
                 json.dumps(extra),
                 _parse_ts(session.get("created_at")) or datetime.now(timezone.utc),
+                session.get("consultation_email") or "",
+                session.get("consultation_name") or "",
+                session.get("consultation_subject") or "",
             )
         return True
     except Exception as e:

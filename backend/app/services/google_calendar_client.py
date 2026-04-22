@@ -166,8 +166,15 @@ def _build_event_payload(*, summary: str, description: str,
 
 
 async def create_event(access_token: str, calendar_id: str,
-                       payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    url = f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}/events"
+                       payload: Dict[str, Any],
+                       send_updates: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Create a calendar event. ``send_updates`` e.g. ``all`` emails attendees."""
+    base = f"{GOOGLE_API_BASE}/calendars/{urllib.parse.quote(calendar_id)}/events"
+    url = (
+        f"{base}?sendUpdates={urllib.parse.quote(send_updates)}"
+        if send_updates
+        else base
+    )
     async with aiohttp.ClientSession() as session:
         async with session.post(
             url,
