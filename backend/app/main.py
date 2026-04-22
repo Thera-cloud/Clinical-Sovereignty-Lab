@@ -5,6 +5,7 @@ Clinical Sovereignty Lab
 
 import asyncio
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -69,6 +70,8 @@ import app.routers.trust_enforcer_api as trust_enforcer_api
 # =============================================================================
 # DATABASE CONNECTION POOL
 # =============================================================================
+
+logger = logging.getLogger(__name__)
 
 db_pool: asyncpg.Pool = None
 
