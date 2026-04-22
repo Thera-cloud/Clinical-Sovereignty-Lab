@@ -1091,6 +1091,8 @@ async def analytics_wellness(
                    FROM coaching_sessions cs
                    WHERE cs.client_id = ANY($1::text[])
                      AND cs.created_at > NOW() - INTERVAL '30 days'
+                     AND lower(coalesce(cs.session_type, '')) != 'consultation'
+                     AND cs.client_id NOT LIKE 'consultation_%'
                    GROUP BY cs.coach_id""",
                 hw_list,
             )

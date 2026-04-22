@@ -27,6 +27,18 @@ router = APIRouter(
 )
 
 
+def _is_external_coach_consultation_row(s: dict) -> bool:
+    """External consultee sessions — excluded from coach roster stats / billing views."""
+    if not isinstance(s, dict):
+        return False
+    st = str(s.get("session_type") or "").strip().lower()
+    if st == "consultation":
+        return True
+    if str(s.get("booked_by") or "").strip() == "COACH_CONSULTATION":
+        return True
+    return str(s.get("client_id") or "").startswith("consultation_")
+
+
 def _get_coach_shield(request: Request):
     """Retrieve CoachIntegrityShield from app state (non-blocking on failure)."""
     try:
@@ -624,6 +636,7 @@ async def get_coach_stats(coach_id: str, request: Request):
     if not coach_sessions:
         sessions = load_json(DATA_DIR / "sessions.json", [])
         coach_sessions = [s for s in sessions if s.get("coach_id") == coach_id]
+    coach_sessions = [s for s in coach_sessions if not _is_external_coach_consultation_row(s)]
     completed = [s for s in coach_sessions if s.get("status") == "completed"]
 
     month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0)

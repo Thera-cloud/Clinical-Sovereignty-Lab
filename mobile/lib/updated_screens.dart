@@ -4740,12 +4740,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     required int durationMinutes,
     required bool disableRecording,
   }) async {
+    void showCoachSnack(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+
     if (_socket == null) {
-      if (dialogContext.mounted) {
-        ScaffoldMessenger.of(dialogContext).showSnackBar(
-          const SnackBar(content: Text("Not connected — sign in again.")),
-        );
-      }
+      showCoachSnack("Not connected — sign in again.");
       return;
     }
     final reqId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -4794,17 +4795,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         ),
       );
     } on TimeoutException {
-      if (dialogContext.mounted) {
-        ScaffoldMessenger.of(dialogContext).showSnackBar(
-          const SnackBar(content: Text("Consultation request timed out — check Schedule tab or try again.")),
-        );
-      }
+      showCoachSnack("Consultation request timed out — check Schedule tab or try again.");
     } catch (e) {
-      if (dialogContext.mounted) {
-        ScaffoldMessenger.of(dialogContext).showSnackBar(
-          SnackBar(content: Text("Consultation failed: $e")),
-        );
-      }
+      showCoachSnack("Consultation failed: $e");
     } finally {
       _consultationCreateCompleter = null;
       _consultationCreateRequestId = null;
@@ -4873,6 +4866,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     int durationMinutes = 50;
     String notes = "";
     bool disableRecording = false;
+    bool consultationSubmitting = false;
     final consulteeEmailCtrl = TextEditingController();
     final consulteeNameCtrl = TextEditingController();
     final consulteeSubjectCtrl = TextEditingController();
@@ -4914,10 +4908,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           builder: (ctx, setLocal) {
             final visibleList = _visibleEntries(sessionType, selectedSecondaryId);
             final bool hasEntries = visibleList.isNotEmpty;
-            final consultationOk = sessionType == "CONSULTATION" &&
-                consulteeEmailValid(consulteeEmailCtrl.text) &&
-                consulteeNameCtrl.text.trim().length >= 2;
-            final bool canCreateSession = sessionType == "CONSULTATION" ? consultationOk : hasEntries;
+            // CONSULTATION: keep Create tappable; validate on submit (avoids web autofill / paste
+            // skipping onChanged so the button stays wrongly disabled).
+            final bool canCreateSession = sessionType == "CONSULTATION" ? true : hasEntries;
+            final bool createButtonEnabled = canCreateSession && !consultationSubmitting;
             if (hasEntries && !visibleList.any((e) => e["id"] == selectedClientId)) {
               selectedClientId = visibleList.first["id"]!;
               selectedClientName = visibleList.first["name"]!;
@@ -5028,7 +5022,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               title: const Text("Create Session", style: TextStyle(color: Color(0xFFFFD700), fontFamily: 'Courier')),
               content: SizedBox(
                 width: 520,
-                child: SingleChildScrollView(
+                child: Stack(
+                  children: [
+                    SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -5256,11 +5252,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       ),
                     ],
                   ),
+                    ),
+                    if (consultationSubmitting)
+                      Positioned.fill(
+                        child: AbsorbPointer(
+                          child: Container(
+                            alignment: Alignment.center,
+                            color: Colors.black.withOpacity(0.45),
+                            child: const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(color: Color(0xFFFFD700)),
+                                SizedBox(height: 12),
+                                Text("Creating…", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: consultationSubmitting ? null : () => Navigator.of(ctx).pop(),
                   child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
                 ),
                 ElevatedButton(
@@ -5268,19 +5283,42 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     backgroundColor: const Color(0xFFFFD700),
                     foregroundColor: Colors.black,
                   ),
-                  onPressed: canCreateSession
+                  onPressed: createButtonEnabled
                       ? () async {
                           if (durationMinutes < 5) durationMinutes = 5;
                           if (sessionType == "CONSULTATION") {
-                            await _submitConsultationFromDialog(
-                              dialogContext: ctx,
-                              emailCtrl: consulteeEmailCtrl,
-                              nameCtrl: consulteeNameCtrl,
-                              subjectCtrl: consulteeSubjectCtrl,
-                              startLocal: startLocal,
-                              durationMinutes: durationMinutes,
-                              disableRecording: disableRecording,
-                            );
+                            if (!consulteeEmailValid(consulteeEmailCtrl.text)) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("Enter a valid consultee email.")),
+                                );
+                              }
+                              return;
+                            }
+                            if (consulteeNameCtrl.text.trim().length < 2) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("Consultee name must be at least 2 characters.")),
+                                );
+                              }
+                              return;
+                            }
+                            setLocal(() => consultationSubmitting = true);
+                            try {
+                              await _submitConsultationFromDialog(
+                                dialogContext: ctx,
+                                emailCtrl: consulteeEmailCtrl,
+                                nameCtrl: consulteeNameCtrl,
+                                subjectCtrl: consulteeSubjectCtrl,
+                                startLocal: startLocal,
+                                durationMinutes: durationMinutes,
+                                disableRecording: disableRecording,
+                              );
+                            } finally {
+                              if (ctx.mounted) {
+                                setLocal(() => consultationSubmitting = false);
+                              }
+                            }
                             return;
                           }
                           String familyIdForPayload = "";
