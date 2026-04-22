@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -12569,20 +12570,33 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
         allowMultiple: false,
+        withData: kIsWeb,
       );
       
       if (result == null || result.files.isEmpty) return;
       final file = result.files.first;
-      if (file.path == null) return;
-      
+
+      Uint8List? bytes;
+      if (kIsWeb) {
+        bytes = file.bytes;
+        if (bytes == null || bytes.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not read file')),
+            );
+          }
+          return;
+        }
+      } else {
+        if (file.path == null) return;
+        bytes = await File(file.path!).readAsBytes();
+      }
+
       setState(() {
         _classroomUploading = true;
         _classroomUploadProgress = 0.0;
         _classroomUploadedVideoName = file.name;
       });
-      
-      // Read file bytes
-      final bytes = await File(file.path!).readAsBytes();
       
       // Upload via HTTP multipart
       final uri = Uri.parse('$_apiBaseUrl/api/classroom/upload-video');
@@ -15616,7 +15630,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         _coachUploadSuccess = false;
       });
 
-      final token = widget.currentUserProfile?['token'] ?? '';
+      final token = _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
       final baseUrl = AppConfig.apiBaseUrl;
       final uri = Uri.parse('$baseUrl/api/coach/folders/upload');
       final request = http.MultipartRequest('POST', uri);
@@ -15663,7 +15677,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _coachDeleteFile(String fileId) {
-    final token = widget.currentUserProfile?['token'] ?? '';
+    final token = _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
     if (token.isEmpty || _coachActiveFolderId == null) return;
     showDialog(
       context: context,
@@ -15696,7 +15710,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _coachFetchFolders() {
-    final token = widget.currentUserProfile?['token'] ?? '';
+    final token = _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
     if (token.isEmpty) return;
     setState(() => _coachFoldersLoading = true);
 
@@ -15722,7 +15736,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   void _coachFetchFolderFiles(String folderId) {
-    final token = widget.currentUserProfile?['token'] ?? '';
+    final token = _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
     if (token.isEmpty) return;
 
     final baseUrl = AppConfig.apiBaseUrl;
@@ -15766,7 +15780,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               Navigator.pop(ctx);
               final name = nameCtrl.text.trim();
               if (name.isEmpty) return;
-              final token = widget.currentUserProfile?['token'] ?? '';
+              final token = _authToken ?? widget.currentUserProfile?['token']?.toString() ?? '';
               if (token.isEmpty) return;
               final baseUrl = AppConfig.apiBaseUrl;
               final url = Uri.parse('$baseUrl/api/coach/folders/create');
