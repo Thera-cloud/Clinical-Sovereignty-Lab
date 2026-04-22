@@ -35,7 +35,7 @@ The `_Design` class in `settings_screen.dart` must include all color tokens from
 
 1. Edit `.dart` files
 2. Run `flutter build web --release` — must succeed
-3. **`rsync -avz mobile/build/web/ root@68.183.168.75:/var/www/sovereignsanctuary-web/`** (no `--delete`) — **required for `coach.sovereignsanctuary.net` and `app.sovereignsanctuary.net`** (nginx `root` on production).
-4. Optional: mirror to `/var/www/coach-portal/` or `/var/www/flutter-web/` only if a vhost still points there (most do not).
+3. **`rsync -av mobile/build/web/ root@68.183.168.75:/var/www/sovereignsanctuary-web/`** (no `--delete`) — **required for `coach.sovereignsanctuary.net` and `app.sovereignsanctuary.net`** (production nginx `root`). **Do not** deploy the coach/client Flutter web bundle to `/var/www/coach-portal/` for those hosts — that path is not what nginx uses for `coach.sovereignsanctuary.net`.
+4. Optional: mirror elsewhere only if a **specific** vhost still points there (verify with `grep root /etc/nginx/sites-enabled/*` first).
 5. Verify `curl -sL https://coach.sovereignsanctuary.net/version.json` shows the new `build_number`.
 6. Verify no-cache headers on service worker / `main.dart.js`.
