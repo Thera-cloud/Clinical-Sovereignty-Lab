@@ -18969,8 +18969,41 @@ If 'challenge', respectfully push the coach's thinking."""
                     coach_id = current_profile.get("hardware_id")
                     is_admin = current_profile.get("role") == "ADMIN"
                     
-                    # Load sessions that have transcripts
-                    all_sessions = load_sessions()
+                    # Load sessions that have archived transcripts from PostgreSQL.
+                    # Transcript fields are stored in session_data JSONB (see upsert_session_pg extras).
+                    all_sessions = []
+                    if db_pool:
+                        _coach_filter = "" if is_admin else " AND coach_id = $1"
+                        _sql = f"""
+                            SELECT session_id, coach_id, client_id, client_name,
+                                   session_type, scheduled_start, duration_minutes,
+                                   zoom_meeting_id, zoom_link, status,
+                                   consultation_name, consultation_email,
+                                   session_data->>'transcript_location' AS transcript_location,
+                                   session_data->>'transcript_archived_at' AS transcript_archived_at
+                            FROM coaching_sessions
+                            WHERE (
+                                COALESCE(session_data->>'transcript_location', '') <> ''
+                                OR COALESCE(session_data->>'transcript_archived_at', '') <> ''
+                            )
+                            {_coach_filter}
+                            ORDER BY scheduled_start DESC NULLS LAST
+                            LIMIT 50
+                        """
+                        async with db_pool.acquire() as conn:
+                            if is_admin:
+                                rows = await conn.fetch(_sql)
+                            else:
+                                rows = await conn.fetch(_sql, coach_id)
+                        for r in rows:
+                            s = dict(r)
+                            st = s.get("scheduled_start")
+                            if st is not None and hasattr(st, "isoformat"):
+                                s["scheduled_time"] = st.isoformat()
+                            else:
+                                s["scheduled_time"] = str(st) if st else ""
+                            all_sessions.append(s)
+
                     eligible_sessions = []
                     
                     for s in all_sessions:
