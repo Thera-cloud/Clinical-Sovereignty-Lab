@@ -5036,8 +5036,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       const SizedBox(height: 12),
 
                       // Session Type dropdown (full width)
+                      // menuMaxHeight: show all 6 types without hiding CONSULTATION below the fold (web + mobile).
                       DropdownButtonFormField<String>(
                         value: sessionType,
+                        menuMaxHeight: 360,
                         dropdownColor: const Color(0xFF111118),
                         items: const [
                           DropdownMenuItem(value: "CLIENT", child: Text("CLIENT", style: TextStyle(color: Colors.white))),
