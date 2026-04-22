@@ -165,3 +165,6 @@ mobile/lib/*.backup*
 mobile/lib/**/*.backup*
 backend/resources/therapeutic_library/imagery_guides/.wrangler/
 deploy-web.sh
+
+# Local agent heartbeat (machine-specific)
+data/mac_agent_alive.json
