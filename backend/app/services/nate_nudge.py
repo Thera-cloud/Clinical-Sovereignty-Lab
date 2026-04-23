@@ -109,15 +109,15 @@ class NateNudgeService:
                        cs.scheduled_at, u.name AS client_name,
                        coach.name AS coach_name
                 FROM coaching_sessions cs
-                JOIN users u ON cs.client_id = u.id
-                JOIN users coach ON cs.coach_id = coach.id
+                JOIN users u ON u.id::text = cs.client_id::text
+                JOIN users coach ON coach.id::text = cs.coach_id::text
                 WHERE cs.status = 'SCHEDULED'
                   AND cs.scheduled_at BETWEEN NOW() + INTERVAL '1 hour'
                                           AND NOW() + INTERVAL '3 hours'
                   AND NOT EXISTS (
                       SELECT 1 FROM nate_nudges nn
                       WHERE nn.nudge_type = 'session_prep'
-                        AND nn.user_id = cs.client_id
+                        AND nn.user_id::text = cs.client_id::text
                         AND nn.metadata->>'session_id' = cs.id::text
                   )
                 """

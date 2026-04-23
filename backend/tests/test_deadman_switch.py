@@ -140,8 +140,8 @@ class TestCheckAllClients:
             "risk_level": "LOW",
             "last_nate_message_at": old,
         }]
-        # fetchval: last_session=old, last_nudge=None, last_audit=None, recent_alert=None
-        conn._fetchval_results = [old, None, None, None]
+        # fetchval: last_session, last_nudge, last_audit, recent_alert, coach_key
+        conn._fetchval_results = [old, None, None, None, None]
 
         pool = DeadmanFakePool(conn)
         service = DeadmanSwitchService(db_pool=pool)
@@ -166,7 +166,7 @@ class TestCheckAllClients:
             "risk_level": "HIGH",
             "last_nate_message_at": old,
         }]
-        conn._fetchval_results = [old, None, None, None]
+        conn._fetchval_results = [old, None, None, None, None]
 
         pool = DeadmanFakePool(conn)
         service = DeadmanSwitchService(db_pool=pool)

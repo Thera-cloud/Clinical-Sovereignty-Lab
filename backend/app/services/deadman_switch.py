@@ -164,10 +164,20 @@ class DeadmanSwitchService:
                         )
 
                         # Route alert to assigned coach (PhD spec §SC_07)
-                        assigned_coach_id = await conn.fetchval(
-                            """SELECT assigned_coach FROM users WHERE id = $1""",
+                        coach_key = await conn.fetchval(
+                            """SELECT COALESCE(
+                                      NULLIF(TRIM(profile_data->>'assigned_coach_id'), ''),
+                                      NULLIF(TRIM(profile_data->>'coach_id'), '')
+                                  )
+                               FROM users WHERE id = $1""",
                             user_id,
                         )
+                        assigned_coach_id = None
+                        if coach_key:
+                            try:
+                                assigned_coach_id = UUID(str(coach_key).strip())
+                            except (ValueError, AttributeError):
+                                assigned_coach_id = None
                         if assigned_coach_id:
                             coach_title = f"[Deadman] {client['name'] or 'Client'} — {silence_hours}h silence"
                             coach_content = (
@@ -246,9 +256,14 @@ class DeadmanSwitchService:
                        COUNT(u_client.id)    AS assigned_count
                 FROM users u_coach
                 JOIN users u_client
-                  ON u_client.assigned_coach = u_coach.id
-                 AND u_client.role = 'CLIENT'
+                  ON u_client.role = 'CLIENT'
                  AND u_client.deleted_at IS NULL
+                 AND (
+                      NULLIF(TRIM(u_client.profile_data->>'assigned_coach_id'), '')
+                          = u_coach.id::text
+                   OR NULLIF(TRIM(u_client.profile_data->>'coach_id'), '')
+                          = u_coach.id::text
+                 )
                 WHERE u_coach.role = 'COACH'
                   AND u_coach.deleted_at IS NULL
                 GROUP BY u_coach.id, u_coach.name
@@ -266,7 +281,12 @@ class DeadmanSwitchService:
                     """
                     SELECT 1 FROM sessions s
                     JOIN users u_client ON u_client.id = s.user_id
-                    WHERE u_client.assigned_coach = $1
+                    WHERE (
+                        NULLIF(TRIM(u_client.profile_data->>'assigned_coach_id'), '')
+                            = $1::text
+                        OR NULLIF(TRIM(u_client.profile_data->>'coach_id'), '')
+                            = $1::text
+                    )
                       AND s.session_type = 'COACH'
                       AND s.started_at > $2
                     LIMIT 1

@@ -73,7 +73,7 @@ class SessionPaymentAgent:
                           u.profile_data->>'phone' as client_phone,
                           u.profile_data->>'stripe_customer_id' as stripe_customer_id
                    FROM coaching_sessions cs
-                   LEFT JOIN users u ON u.id = cs.client_id
+                   LEFT JOIN users u ON u.id::text = cs.client_id::text
                    WHERE cs.scheduled_at BETWEEN $1 AND $2
                    AND cs.payment_status = 'pending'
                    AND cs.payment_status != 'waived'
@@ -142,8 +142,8 @@ class SessionPaymentAgent:
                           cu.profile_data->>'name' as coach_name,
                           cu.profile_data->>'email' as coach_email
                    FROM coaching_sessions cs
-                   LEFT JOIN users u ON u.id = cs.client_id
-                   LEFT JOIN users cu ON cu.id = cs.coach_id AND cu.role = 'COACH'
+                   LEFT JOIN users u ON u.id::text = cs.client_id::text
+                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text AND cu.role = 'COACH'
                    WHERE cs.scheduled_at BETWEEN $1 AND $2
                    AND cs.status != 'CANCELLED'""",
                 reminder_48h_start, reminder_48h_end,
@@ -161,8 +161,8 @@ class SessionPaymentAgent:
                           cu.profile_data->>'email' as coach_email,
                           cu.profile_data->>'name' as coach_name
                    FROM coaching_sessions cs
-                   LEFT JOIN users u ON u.id = cs.client_id
-                   LEFT JOIN users cu ON cu.id = cs.coach_id AND cu.role = 'COACH'
+                   LEFT JOIN users u ON u.id::text = cs.client_id::text
+                   LEFT JOIN users cu ON cu.id::text = cs.coach_id::text AND cu.role = 'COACH'
                    WHERE cs.payment_status = 'paid'
                    AND cs.status != 'CANCELLED'
                    AND cs.scheduled_at > NOW()
