@@ -5,6 +5,7 @@ Uses the bridge's existing db_pool (no HTTP calls to backend).
 - recall: retrieves user-scoped + global crystals, logs recalls, reinforces
 - crystallize: extracts new user-scoped crystals from conversations
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -611,6 +612,39 @@ async def crystallize_coach_observation(
                 )
         except Exception as _vec_err:
             logger.debug("crystal_bridge: coach observation vectorize failed (non-fatal): %s", _vec_err)
+
+        ch = row.get("content_hash")
+        if ch:
+            try:
+                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                async def _coach_observation_wisdom() -> None:
+                    try:
+                        mgr = WisdomLifecycleManager(db_pool, None)
+                        await mgr.extract_wisdom(
+                            "coaching",
+                            text,
+                            user_id=str(user_uuid) if user_uuid else None,
+                            domain=domain,
+                            confidence=0.85,
+                        )
+                    except Exception as _w_err:
+                        logger.debug(
+                            "crystal_bridge: coach observation wisdom extract (non-fatal): %s",
+                            _w_err,
+                        )
+
+                try:
+                    asyncio.get_running_loop().create_task(_coach_observation_wisdom())
+                except RuntimeError:
+                    logger.debug(
+                        "crystallize_coach_observation: no running loop for wisdom extract",
+                    )
+            except Exception as _wl_err:
+                logger.debug(
+                    "crystal_bridge: coach observation wisdom schedule failed (non-fatal): %s",
+                    _wl_err,
+                )
 
         return row["content_hash"]
     except Exception as e:

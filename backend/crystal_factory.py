@@ -573,8 +573,8 @@ class CrystalDB:
                         INSERT INTO nate_intelligence_crystals
                         (crystal_text, domain, scope, topics, source_count,
                          generation, confidence, content_hash, context_start,
-                         context_end, face_path)
-                        VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10)
+                         context_end, face_path, origin_surface)
+                        VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, $9, $10, 'crystal_factory')
                         ON CONFLICT (content_hash) DO NOTHING
                     """,
                         c["crystal_text"], c["domain"], c["scope"],
