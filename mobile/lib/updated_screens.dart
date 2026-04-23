@@ -3,7 +3,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, debugPrint;
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart';
@@ -4120,6 +4120,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   final ValueNotifier<List<Map<String, dynamic>>> _liveObservations = ValueNotifier<List<Map<String, dynamic>>>([]);
   Map<String, dynamic>? _activeLiveSession;
   bool _liveSheetOpen = false;
+
+  // Live session note dictation (speech_to_text — same package/pattern as coach_portal Ask Nate tab)
+  final SpeechToText _liveNoteSpeech = SpeechToText();
+  bool _liveNoteSpeechInited = false;
+  bool _liveNoteSpeechAvailable = false;
+  bool _liveNoteDictationArmed = false;
+  bool _liveNoteListening = false;
+  bool _liveNoteSttRestartScheduled = false;
+  String _liveNoteDictationBase = '';
+  String _liveNoteDictationSession = '';
+  DateTime? _liveNoteSuppressUntil;
+  TextEditingController? _liveNoteSttBoundController;
+  VoidCallback? _liveSheetRebuild;
+
   String? _selectedFolderId; // "family:<id>" or "client:<id>"
   String? _selectedFamilyId;
   String? _selectedFolderLabel;
@@ -6741,6 +6755,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _dojoScrollController.dispose();
     _liveNotes.dispose();
     _liveObservations.dispose();
+    try {
+      _liveNoteSpeech.stop();
+    } catch (_) {}
+    try {
+      _liveNoteSpeech.cancel();
+    } catch (_) {}
     _assistantChatController.dispose();
     _assistantChatScrollController.dispose();
     _tabController.dispose();
@@ -11068,6 +11088,151 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
 
+  String _composeLiveNoteDictation(String base, String addition) {
+    final b = base;
+    final a = addition.trim();
+    if (b.trim().isEmpty) return a;
+    if (a.isEmpty) return b;
+    if (b.endsWith(' ') || b.endsWith('\n') || b.endsWith('\t')) return '$b$a';
+    return '$b $a';
+  }
+
+  Future<void> _ensureLiveNoteSpeechInitialized() async {
+    if (_liveNoteSpeechInited) return;
+    if (kIsWeb) {
+      _liveNoteSpeechInited = true;
+      _liveNoteSpeechAvailable = false;
+      return;
+    }
+    try {
+      _liveNoteSpeechAvailable = await _liveNoteSpeech.initialize(
+        onError: (err) {
+          if (kDebugMode) debugPrint('[Live session STT] $err');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Dictation needs microphone access. ${err.errorMsg.isNotEmpty ? err.errorMsg : 'Allow the microphone in Settings.'}',
+              ),
+              backgroundColor: const Color(0xFF8B7355),
+            ),
+          );
+        },
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            if (mounted) setState(() => _liveNoteListening = false);
+            _liveSheetRebuild?.call();
+            if (_liveNoteDictationArmed) _scheduleLiveNoteDictationRestart();
+          }
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Live session STT] init failed: $e');
+      _liveNoteSpeechAvailable = false;
+    }
+    _liveNoteSpeechInited = true;
+  }
+
+  Future<void> _suppressAndStopLiveNoteSpeech() async {
+    _liveNoteSuppressUntil = DateTime.now().add(const Duration(milliseconds: 800));
+    if (_liveNoteListening) {
+      try {
+        await _liveNoteSpeech.stop();
+      } catch (_) {}
+      try {
+        await _liveNoteSpeech.cancel();
+      } catch (_) {}
+      if (mounted) setState(() => _liveNoteListening = false);
+      _liveSheetRebuild?.call();
+    }
+  }
+
+  void _scheduleLiveNoteDictationRestart({int delayMs = 150}) {
+    if (_liveNoteSttRestartScheduled) return;
+    _liveNoteSttRestartScheduled = true;
+    Future.delayed(Duration(milliseconds: delayMs), () {
+      _liveNoteSttRestartScheduled = false;
+      if (!mounted) return;
+      final ctrl = _liveNoteSttBoundController;
+      if (_liveNoteDictationArmed && !_liveNoteListening && ctrl != null) {
+        _startLiveNoteListeningSession(ctrl);
+      }
+    });
+  }
+
+  Future<void> _startLiveNoteListeningSession(TextEditingController noteCtrl) async {
+    if (kIsWeb || !_liveNoteSpeechAvailable) return;
+    _liveNoteSttBoundController = noteCtrl;
+    _liveNoteDictationBase = noteCtrl.text;
+    _liveNoteDictationSession = '';
+    if (mounted) setState(() => _liveNoteListening = true);
+    _liveSheetRebuild?.call();
+    await _liveNoteSpeech.listen(
+      onResult: (result) {
+        final ctrl = _liveNoteSttBoundController;
+        if (ctrl == null) return;
+        if (!_liveNoteListening) return;
+
+        final until = _liveNoteSuppressUntil;
+        if (until != null && DateTime.now().isBefore(until)) return;
+
+        final raw = result.recognizedWords.trim();
+        if (raw.isEmpty) return;
+
+        if (!mounted) return;
+        if (result.finalResult) {
+          _liveNoteDictationBase = _composeLiveNoteDictation(_liveNoteDictationBase, raw);
+          _liveNoteDictationSession = '';
+          ctrl.text = _liveNoteDictationBase;
+        } else {
+          _liveNoteDictationSession = raw;
+          ctrl.text = _composeLiveNoteDictation(_liveNoteDictationBase, _liveNoteDictationSession);
+        }
+        _liveSheetRebuild?.call();
+        setState(() {});
+      },
+      listenFor: const Duration(seconds: 60),
+      pauseFor: const Duration(seconds: 6),
+      partialResults: true,
+      cancelOnError: true,
+      listenMode: ListenMode.dictation,
+    );
+  }
+
+  Future<void> _toggleLiveNoteDictation(TextEditingController noteCtrl) async {
+    if (kIsWeb) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Dictation available on mobile app only'),
+          backgroundColor: Color(0xFF1A1A2E),
+        ),
+      );
+      return;
+    }
+    await _ensureLiveNoteSpeechInitialized();
+    if (!_liveNoteSpeechAvailable) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Microphone access is required for dictation. Allow it when prompted, or enable it in your device settings.',
+          ),
+          backgroundColor: Color(0xFF8B7355),
+        ),
+      );
+      return;
+    }
+    if (_liveNoteDictationArmed) {
+      _liveNoteDictationArmed = false;
+      await _suppressAndStopLiveNoteSpeech();
+      _liveSheetRebuild?.call();
+      return;
+    }
+    _liveNoteDictationArmed = true;
+    await _startLiveNoteListeningSession(noteCtrl);
+  }
+
   void _showLiveSessionSheet({required String initialLabel, required String initialMeetingUrl, String initialHostUrl = ''}) {
     if (_liveSheetOpen) return;
     _liveSheetOpen = true;
@@ -11080,7 +11245,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       backgroundColor: const Color(0xFF0A0A0F),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocal) => DraggableScrollableSheet(
+        builder: (context, setLocal) {
+          _liveSheetRebuild = () => setLocal(() {});
+          return DraggableScrollableSheet(
           initialChildSize: 0.92,
           minChildSize: 0.65,
           maxChildSize: 0.97,
@@ -11247,17 +11414,46 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5, fontSize: 12),
                   ),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: noteCtrl,
-                    maxLines: 4,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      hintText: "Type quick notes (send often)…",
-                      hintStyle: TextStyle(color: Colors.grey),
-                      border: OutlineInputBorder(),
-                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
-                      focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFFFD700))),
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: noteCtrl,
+                          readOnly: _liveNoteListening,
+                          maxLines: 4,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: const InputDecoration(
+                            hintText: "Type quick notes (send often)…",
+                            hintStyle: TextStyle(color: Colors.grey),
+                            border: OutlineInputBorder(),
+                            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
+                            focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFFFD700))),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Column(
+                        children: [
+                          IconButton(
+                            tooltip: kIsWeb ? 'Dictation (mobile app)' : 'Dictate',
+                            onPressed: () => _toggleLiveNoteDictation(noteCtrl),
+                            icon: Icon(
+                              Icons.mic,
+                              color: _liveNoteListening ? Colors.redAccent : Colors.grey,
+                            ),
+                          ),
+                          if (_liveNoteListening)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: Text(
+                                'Recording...',
+                                style: TextStyle(color: Colors.redAccent, fontSize: 10),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 10),
                   Row(
@@ -11357,9 +11553,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ),
             );
           },
-        ),
+        );
+        },
       ),
-    ).whenComplete(() {
+    ).whenComplete(() async {
+      _liveNoteDictationArmed = false;
+      _liveNoteSttBoundController = null;
+      _liveSheetRebuild = null;
+      await _suppressAndStopLiveNoteSpeech();
       _liveSheetOpen = false;
       noteCtrl.dispose();
     });
