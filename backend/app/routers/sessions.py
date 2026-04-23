@@ -149,6 +149,53 @@ async def auto_analyze_transcript(
         traceback.print_exc()
 
 
+async def auto_analyze_classroom_video(
+    video_id: str,
+    coach_id: str,
+    client_id: str,
+    family_id: str,
+    description: str,
+):
+    """
+    Run Classroom video analysis after HTTP upload completes.
+    Fire-and-forget from upload handler so the API returns immediately.
+    """
+    if not _classroom_analyzer:
+        _logger.warning("[ClassroomVideo] Auto-analysis skipped: analyzer unavailable")
+        return
+    client_name = ""
+    fam = family_id or ""
+    try:
+        registry_path = DATA_DIR / "registry.json"
+        if registry_path.exists() and client_id:
+            with open(registry_path, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+            for _, v in registry.items():
+                p = v.get("profile") or {}
+                if p.get("hardware_id") == client_id:
+                    if not fam:
+                        fam = p.get("family_id", "") or ""
+                    client_name = p.get("name", "") or ""
+                    break
+    except Exception as e:
+        _logger.warning("[ClassroomVideo] Registry lookup error: %s", e)
+
+    try:
+        _logger.info("[ClassroomVideo] Starting auto-analysis for %s", video_id)
+        await _classroom_analyzer.analyze_video(
+            video_id=video_id,
+            coach_id=coach_id,
+            client_id=client_id or "",
+            coach_query=(description or "").strip(),
+            focus_area="general",
+            family_id=fam,
+            client_name=client_name,
+        )
+        _logger.info("[ClassroomVideo] Auto-analysis finished for %s", video_id)
+    except Exception as e:
+        _logger.exception("[ClassroomVideo] Auto-analysis failed for %s: %s", video_id, e)
+
+
 # Models
 class ScheduleSessionRequest(BaseModel):
     client_id: str
@@ -1358,12 +1405,23 @@ async def upload_classroom_video(
     
     sessions.append(video_session)
     save_json(classroom_sessions_file, sessions)
-    
+
+    # Option A: analyze in background so upload response returns immediately (same analyzer as WebSocket path)
+    asyncio.create_task(
+        auto_analyze_classroom_video(
+            video_id=video_id,
+            coach_id=coach_id,
+            client_id=client_id,
+            family_id=family_id or "",
+            description=description or "",
+        )
+    )
+
     return {
         "video_id": video_id,
         "filename": file.filename,
         "file_size": len(content),
-        "message": "Video uploaded successfully. Ready for analysis.",
+        "message": "Video uploaded successfully. Analysis running in the background.",
     }
 
 
