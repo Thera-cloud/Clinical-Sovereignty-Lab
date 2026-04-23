@@ -17539,7 +17539,6 @@ async def handle_client(websocket, path=None):
                         mission_reference_valid,
                         validate_merged,
                     )
-                    from datetime import datetime, timedelta, timezone
 
                     def _serialize_override_row(r):
                         if not r:
@@ -17632,7 +17631,7 @@ async def handle_client(websocket, path=None):
                                     "detail": "No override row to renew",
                                 }))
                                 continue
-                            now_rn = datetime.now(timezone.utc)
+                            now_rn = datetime.datetime.now(datetime.timezone.utc)
                             if renew_type == "pacing":
                                 pv = (row_rn["pacing"] or "normal").strip().lower()
                                 if pv == "normal" and row_rn["expires_at"] is None:
@@ -17670,10 +17669,10 @@ async def handle_client(websocket, path=None):
                                     if old_e is not None:
                                         oe = old_e
                                         if getattr(oe, "tzinfo", None) is None:
-                                            oe = oe.replace(tzinfo=timezone.utc)
+                                            oe = oe.replace(tzinfo=datetime.timezone.utc)
                                         if oe > base:
                                             base = oe
-                                    new_e = base + timedelta(days=30)
+                                    new_e = base + datetime.timedelta(days=30)
                                     prev_s = old_e.isoformat() if old_e and hasattr(old_e, "isoformat") else ""
                                     await conn.execute(
                                         """
@@ -17704,10 +17703,10 @@ async def handle_client(websocket, path=None):
                                     if old_f is not None:
                                         fe = old_f
                                         if getattr(fe, "tzinfo", None) is None:
-                                            fe = fe.replace(tzinfo=timezone.utc)
+                                            fe = fe.replace(tzinfo=datetime.timezone.utc)
                                         if fe > base_f:
                                             base_f = fe
-                                    new_f = base_f + timedelta(days=14)
+                                    new_f = base_f + datetime.timedelta(days=14)
                                     prev_fs = old_f.isoformat() if old_f and hasattr(old_f, "isoformat") else ""
                                     await conn.execute(
                                         """
