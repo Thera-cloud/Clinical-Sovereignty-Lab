@@ -18,6 +18,7 @@ from app.sse.adapters.world_story_bible import (
 )
 from app.sse.foundation import vault_integration as vault
 from app.sse.thera_world_engine import build_rich_panel_prompt
+from app.sse.adapters.clinical_translation import enrich_after_panel_generation
 
 logger = logging.getLogger(__name__)
 _BATCH, _COST_CAP = 10, 50.0
@@ -85,6 +86,7 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                             "WHERE user_id=$1 AND status='complete' LIMIT 1", uid)
                 except Exception:
                     pass
+                rich: dict = {}
                 try:
                     rich = await build_rich_panel_prompt(uid, db_pool)
                     prompt = rich["image_prompt"]
@@ -109,6 +111,30 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
                     await _log(c, sid, uid, "daily_panel", url, prompt, 1.0,
                                _IMG_COST, "success")
                     logger.info("[COST] daily_panel %s: $%.4f (grok)", uid, _IMG_COST)
+                    try:
+                        _lid = await c.fetchval(
+                            """SELECT log_id FROM sse_delivery_generation_log
+                               WHERE storyboard_id = $1 AND user_id = $2 AND generation_type = 'daily_panel'
+                               ORDER BY generated_at DESC LIMIT 1""",
+                            sid, uid,
+                        )
+                        _meta = {
+                            "generation_prompt": prompt,
+                            "narrative_text": rich.get("narrative_text", ""),
+                            "panel_tone": rich.get("panel_tone", ""),
+                            "biome": rich.get("biome", ""),
+                            "archetype_hint": arch_hint or "",
+                            "quest_context": "",
+                            "therapeutic_intent": style,
+                        }
+                        asyncio.create_task(
+                            enrich_after_panel_generation(
+                                db_pool, uid, None, _meta,
+                                str(_lid) if _lid else None,
+                            )
+                        )
+                    except Exception as _cte:
+                        logger.warning("daily_panel clinical translation schedule failed %s: %s", uid, _cte)
                     try: await vault.register_panel_in_vault(uid, url, phase, sid, "daily_panel", style, db_pool)
                     except Exception: logger.warning("Vault reg failed for %s/%s", sid, uid)
                     gen += 1; cost += _IMG_COST
