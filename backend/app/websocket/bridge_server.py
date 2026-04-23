@@ -10289,6 +10289,7 @@ async def handle_client(websocket, path=None):
                 "get_night_school_wisdom",
                 "add_wisdom_entry", "update_wisdom_entry", "delete_wisdom_entry",
                 "save_wisdom", "create_wisdom_snapshot",
+                "get_wisdom_snapshots", "get_wisdom_snapshot_content", "restore_wisdom_snapshot",
                 "get_curriculum_structure",
                 "get_curriculum_wisdom", "get_user_discipline",
                 "get_notifications", "get_checkout_url", "get_portal_url",
@@ -16770,6 +16771,94 @@ async def handle_client(websocket, path=None):
                             "group_number": client_profile.get("insurance_group_number", ""),
                         }
 
+                        crystal_memory: List[Dict[str, Any]] = []
+                        session_focus: Optional[str] = None
+                        recent_conversation_topics: List[Dict[str, Any]] = []
+
+                        try:
+                            for m in recent_memory[-3:]:
+                                u = (m.get("user") or "").strip()
+                                a = (m.get("ai") or "").strip()
+                                snippet = u if len(u) >= 12 else (u or a)[:240]
+                                if not snippet.strip():
+                                    continue
+                                st = m.get("timestamp", "")
+                                clipped = snippet[:400]
+                                if len(snippet) > 400:
+                                    clipped += "..."
+                                recent_conversation_topics.append({
+                                    "timestamp": st,
+                                    "topic_summary": clipped,
+                                })
+                        except Exception:
+                            recent_conversation_topics = []
+
+                        if db_pool:
+                            try:
+                                async with db_pool.acquire() as _brconn:
+                                    _chw = (client_id or "").strip()
+                                    _cun = (client_profile.get("username") or "").strip()
+                                    _coach_hw = (current_profile.get("hardware_id") or "").strip()
+                                    _is_admin = current_profile.get("role") == "ADMIN"
+                                    _cli_uuid = await _brconn.fetchval(
+                                        "SELECT id::text FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+                                        _chw,
+                                    )
+                                    _coach_uuid = None
+                                    if _coach_hw:
+                                        _coach_uuid = await _brconn.fetchval(
+                                            "SELECT id::text FROM users WHERE hardware_id = $1 LIMIT 1",
+                                            _coach_hw,
+                                        )
+
+                                    _cry_rows = await _brconn.fetch(
+                                        """
+                                        SELECT nic.domain,
+                                               LEFT(TRIM(nic.crystal_text), 400) AS content_summary,
+                                               nic.created_at
+                                        FROM nate_intelligence_crystals nic
+                                        INNER JOIN users u ON u.id = nic.user_id
+                                        WHERE (u.hardware_id = $1 OR ($2 <> '' AND u.username = $2) OR u.id::text = $1)
+                                          AND nic.confidence >= 0.30
+                                          AND COALESCE(nic.scope, 'global') NOT IN ('archived')
+                                          AND nic.superseded_by IS NULL
+                                        ORDER BY nic.created_at DESC
+                                        LIMIT 5
+                                        """,
+                                        _chw,
+                                        _cun,
+                                    )
+                                    for _cr in _cry_rows:
+                                        _ca = _cr["created_at"]
+                                        crystal_memory.append({
+                                            "domain": (_cr["domain"] or "general"),
+                                            "content_summary": (_cr["content_summary"] or "").strip(),
+                                            "created_at": _ca.isoformat() if _ca and hasattr(_ca, "isoformat") else str(_ca or ""),
+                                        })
+
+                                    _inrow = await _brconn.fetchrow(
+                                        """
+                                        SELECT intake_note, scheduled_start
+                                        FROM coaching_sessions
+                                        WHERE status = 'scheduled'
+                                          AND scheduled_start IS NOT NULL
+                                          AND scheduled_start > NOW()
+                                          AND (client_id = $1 OR ($2::text IS NOT NULL AND client_id = $2::text))
+                                          AND ($3 OR coach_id = $4 OR ($5::text IS NOT NULL AND coach_id = $5::text))
+                                        ORDER BY scheduled_start ASC
+                                        LIMIT 1
+                                        """,
+                                        _chw,
+                                        _cli_uuid,
+                                        _is_admin,
+                                        _coach_hw or "",
+                                        _coach_uuid,
+                                    )
+                                    if _inrow and (_inrow["intake_note"] or "").strip():
+                                        session_focus = (_inrow["intake_note"] or "").strip()
+                            except Exception as _br_err:
+                                logger.warning("get_presession_brief: crystal/intake enrichment failed: %s", _br_err)
+
                         brief = {
                             "client": {
                                 "name": client_profile.get("name"),
@@ -16782,6 +16871,8 @@ async def handle_client(websocket, path=None):
                             "recent_breakthroughs": breakthroughs[-5:],
                             "mood_history": metrics.get("nevedal_state", {}).get("mood_history", []),
                             "recent_conversations": recent_memory[-5:],
+                            "recent_conversation_topics": recent_conversation_topics,
+                            "crystal_memory": crystal_memory,
                             "family_id": client_profile.get("family_id"),
                             "zoom_sessions": zoom_summary,
                             "zoom_meeting_count": zoom_meeting_count,
@@ -16791,7 +16882,9 @@ async def handle_client(websocket, path=None):
                             "fcodes_nate_suggestions": fcodes_nate,
                             "fcode_family_correlations": fcode_family_corr,
                         }
-                        
+                        if session_focus:
+                            brief["session_focus"] = session_focus
+
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
 
             # === ADMIN/COACH: GET CLIENT CONVERSATION HISTORY ===
@@ -19130,23 +19223,44 @@ If 'challenge', respectfully push the coach's thinking."""
                         }))
                         continue
                     
-                    # Load session
-                    all_sessions = load_sessions()
+                    # Load session from PostgreSQL (same source as classroom_get_sessions)
                     session = None
-                    for s in all_sessions:
-                        if s.get("session_id") == session_id:
-                            session = s
-                            break
-                    
+                    if db_pool:
+                        async with db_pool.acquire() as _cls_conn:
+                            row = await _cls_conn.fetchrow(
+                                """
+                                SELECT session_id, coach_id, client_id,
+                                  session_type, scheduled_start,
+                                  session_data
+                                FROM coaching_sessions
+                                WHERE session_id = $1
+                                """,
+                                session_id,
+                            )
+                            if row:
+                                session = dict(row)
+                                sd = session.get("session_data") or {}
+                                if isinstance(sd, str):
+                                    sd = json.loads(sd)
+                                if isinstance(sd, dict):
+                                    session.update(sd)
+
                     if not session:
                         await websocket.send(json.dumps({
                             "type": "error",
                             "message": "Session not found"
                         }))
                         continue
-                    
-                    # Load transcript
+
                     transcript_location = session.get("transcript_location")
+                    if not transcript_location:
+                        await websocket.send(json.dumps({
+                            "type": "error",
+                            "message": "No archived transcript for this session. Archive the Zoom transcript from the Schedule tab first."
+                        }))
+                        continue
+
+                    # Load transcript
                     transcript_content = ""
                     
                     if transcript_location:
@@ -21130,6 +21244,116 @@ Coach Reflection on Session {session_id}:
                     "type": "snapshot_created",
                     "name": dest_name,
                     "wisdom_snapshot_created": dest_name,
+                }))
+
+            elif t == "get_wisdom_snapshots":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                wpath = night_school.wisdom_file
+                snap_root = wpath.parent / "little_nate_wisdom_snapshots"
+                snapshots_out: List[Dict[str, Any]] = []
+                try:
+                    if snap_root.is_dir():
+                        for p in sorted(
+                            snap_root.iterdir(),
+                            key=lambda x: x.stat().st_mtime if x.is_file() else 0,
+                            reverse=True,
+                        ):
+                            if not p.is_file() or not p.name.endswith(".json"):
+                                continue
+                            st = p.stat()
+                            snapshots_out.append({
+                                "name": p.name,
+                                "modified_at": datetime.datetime.fromtimestamp(
+                                    st.st_mtime, tz=datetime.timezone.utc
+                                ).isoformat(),
+                                "size_bytes": int(st.st_size),
+                            })
+                except Exception as _ls_err:
+                    logger.warning("get_wisdom_snapshots: %s", _ls_err)
+                await websocket.send(json.dumps({
+                    "type": "wisdom_snapshots_list",
+                    "snapshots": snapshots_out,
+                }))
+
+            elif t == "get_wisdom_snapshot_content":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                raw_name = (d.get("name") or "").strip()
+                safe_name = os.path.basename(raw_name)
+                if not safe_name or safe_name != raw_name or ".." in safe_name:
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid snapshot name"}))
+                    continue
+                if not re.match(r"^[\w\-.]+\.json$", safe_name):
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid snapshot name"}))
+                    continue
+                wpath = night_school.wisdom_file
+                snap_root = wpath.parent / "little_nate_wisdom_snapshots"
+                snap_path = snap_root / safe_name
+                try:
+                    resolved_root = snap_root.resolve()
+                    resolved_file = snap_path.resolve()
+                    if not resolved_file.is_file() or resolved_root != resolved_file.parent:
+                        await websocket.send(json.dumps({"type": "error", "message": "Snapshot not found"}))
+                        continue
+                except Exception:
+                    await websocket.send(json.dumps({"type": "error", "message": "Snapshot not found"}))
+                    continue
+                try:
+                    with open(snap_path, "r", encoding="utf-8") as _sf:
+                        content_obj = json.load(_sf)
+                except Exception as _read_err:
+                    await websocket.send(json.dumps({"type": "error", "message": f"Could not read snapshot: {_read_err}"}))
+                    continue
+                await websocket.send(json.dumps({
+                    "type": "wisdom_snapshot_content",
+                    "name": safe_name,
+                    "content": content_obj,
+                }, default=str))
+
+            elif t == "restore_wisdom_snapshot":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                raw_name = (d.get("name") or "").strip()
+                safe_name = os.path.basename(raw_name)
+                if not safe_name or safe_name != raw_name or ".." in safe_name:
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid snapshot name"}))
+                    continue
+                if not re.match(r"^[\w\-.]+\.json$", safe_name):
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid snapshot name"}))
+                    continue
+                wpath = night_school.wisdom_file
+                snap_root = wpath.parent / "little_nate_wisdom_snapshots"
+                snap_path = snap_root / safe_name
+                try:
+                    resolved_root = snap_root.resolve()
+                    resolved_file = snap_path.resolve()
+                    if not resolved_file.is_file() or resolved_root != resolved_file.parent:
+                        await websocket.send(json.dumps({"type": "error", "message": "Snapshot not found"}))
+                        continue
+                except Exception:
+                    await websocket.send(json.dumps({"type": "error", "message": "Snapshot not found"}))
+                    continue
+                try:
+                    snap_root.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    safety_name = f"auto_pre_restore_{ts}.json"
+                    safety_path = snap_root / safety_name
+                    safety_created = None
+                    if wpath.exists():
+                        shutil.copy2(wpath, safety_path)
+                        safety_created = safety_name
+                    shutil.copy2(snap_path, wpath)
+                except Exception as _rest_err:
+                    await websocket.send(json.dumps({"type": "error", "message": str(_rest_err)}))
+                    continue
+                await websocket.send(json.dumps({
+                    "type": "wisdom_restored",
+                    "name": safe_name,
+                    "safety_backup": safety_created,
                 }))
             
             # === NIGHT SCHOOL: ADD LEARNING (Coach contribution) ===
