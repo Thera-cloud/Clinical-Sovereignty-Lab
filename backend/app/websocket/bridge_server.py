@@ -20087,9 +20087,10 @@ If 'challenge', respectfully push the coach's thinking."""
                     coach_id = current_profile.get("hardware_id")
                     is_admin = current_profile.get("role") == "ADMIN"
                     
-                    # Load sessions that have archived transcripts from PostgreSQL.
-                    # Transcript fields are stored in session_data JSONB (see upsert_session_pg extras).
+                    # Load sessions that have archived transcripts (or Classroom uploads) from PostgreSQL.
+                    # Transcript fields live in session_data JSONB; device uploads set classroom_device_upload.
                     all_sessions = []
+                    seen_ids = set()
                     if db_pool:
                         _coach_filter = "" if is_admin else " AND coach_id = $1"
                         _sql = f"""
@@ -20103,6 +20104,7 @@ If 'challenge', respectfully push the coach's thinking."""
                             WHERE (
                                 COALESCE(session_data->>'transcript_location', '') <> ''
                                 OR COALESCE(session_data->>'transcript_archived_at', '') <> ''
+                                OR COALESCE(session_data->>'classroom_device_upload', '') = 'true'
                             )
                             {_coach_filter}
                             ORDER BY scheduled_start DESC NULLS LAST
@@ -20123,33 +20125,99 @@ If 'challenge', respectfully push the coach's thinking."""
                             all_sessions.append(s)
 
                     eligible_sessions = []
-                    
-                    for s in all_sessions:
-                        # Check if has archived transcript
-                        has_transcript = s.get("transcript_location") or s.get("transcript_archived_at")
-                        
-                        # Check ownership (admin can see all, coach only their own)
+
+                    def _classroom_analysis_flags(rec: Optional[Dict]) -> Tuple[bool, bool, Optional[float]]:
+                        """(has_completed_analysis, analysis_pending, presence_score) for UI."""
+                        if not rec:
+                            return False, False, None
+                        nested = rec.get("analysis") if isinstance(rec.get("analysis"), dict) else None
+                        tps = rec.get("therapeutic_presence_score")
+                        if tps is None and nested:
+                            tps = nested.get("therapeutic_presence_score")
+                        pending = bool(rec.get("ai_analysis_pending", False))
+                        st = rec.get("status") or (nested.get("status") if nested else None)
+                        if st == "uploaded":
+                            pending = True
+                        done = False
+                        if st == "analyzed":
+                            done = True
+                        elif tps is not None and not pending:
+                            done = True
+                        elif not pending and rec.get("strengths") is not None:
+                            done = True
+                        elif nested and nested.get("status") == "analyzed":
+                            done = True
+                        return done, pending, tps
+
+                    def _append_eligible(s: dict, session_kind: str = "zoom_pg"):
+                        sid = s.get("session_id")
+                        if not sid or sid in seen_ids:
+                            return
+                        has_transcript = (
+                            s.get("transcript_location")
+                            or s.get("transcript_archived_at")
+                            or session_kind == "uploaded_video"
+                        )
                         is_owned = is_admin or s.get("coach_id") == coach_id
-                        
-                        if has_transcript and is_owned:
-                            # Get analysis status if exists
-                            analysis = None
-                            if classroom_analyzer:
-                                analysis = classroom_analyzer.get_session_analysis(s.get("session_id", ""))
-                            
-                            eligible_sessions.append({
-                                "session_id": s.get("session_id"),
-                                "client_id": s.get("client_id"),
-                                "client_name": s.get("client_name", "Unknown"),
-                                "scheduled_time": s.get("scheduled_time"),
-                                "duration_minutes": s.get("duration_minutes", 50),
-                                "transcript_archived_at": s.get("transcript_archived_at"),
-                                "has_analysis": analysis is not None,
-                                "analysis_pending": analysis.get("ai_analysis_pending", False) if analysis else False,
-                                "therapeutic_presence_score": analysis.get("therapeutic_presence_score") if analysis else None,
-                            })
-                    
-                    # Sort by date, most recent first
+                        if not (has_transcript and is_owned):
+                            return
+                        seen_ids.add(sid)
+                        analysis = None
+                        if classroom_analyzer:
+                            analysis = classroom_analyzer.get_session_analysis(str(sid))
+                        done, pending, tps = _classroom_analysis_flags(analysis)
+                        eligible_sessions.append({
+                            "session_id": sid,
+                            "type": session_kind,
+                            "client_id": s.get("client_id"),
+                            "client_name": s.get("client_name", "Unknown"),
+                            "scheduled_time": s.get("scheduled_time", ""),
+                            "date": s.get("scheduled_time", ""),
+                            "duration_minutes": s.get("duration_minutes", 50),
+                            "transcript_archived_at": s.get("transcript_archived_at"),
+                            "filename": s.get("filename"),
+                            "upload_status": s.get("status"),
+                            "has_analysis": done,
+                            "analysis_pending": pending,
+                            "therapeutic_presence_score": tps,
+                        })
+
+                    for s in all_sessions:
+                        s = dict(s)
+                        s["coach_id"] = s.get("coach_id")
+                        _append_eligible(s, "zoom_pg")
+
+                    # Merge device-upload / JSON classroom sessions (same file ClassroomAnalyzer uses).
+                    try:
+                        _cf = DATA_DIR / "classroom_sessions.json"
+                        if _cf.exists():
+                            with open(_cf, "r", encoding="utf-8") as _jf:
+                                _uploaded = json.load(_jf)
+                            if isinstance(_uploaded, list):
+                                for rec in _uploaded:
+                                    if not isinstance(rec, dict):
+                                        continue
+                                    if not is_admin and rec.get("coach_id") != coach_id:
+                                        continue
+                                    sid = rec.get("session_id")
+                                    if not sid:
+                                        continue
+                                    st = rec.get("created_at") or rec.get("analyzed_at") or ""
+                                    _append_eligible({
+                                        "session_id": sid,
+                                        "coach_id": rec.get("coach_id"),
+                                        "client_id": rec.get("client_id"),
+                                        "client_name": rec.get("client_name") or rec.get("filename") or "Upload",
+                                        "scheduled_time": str(st),
+                                        "duration_minutes": 0,
+                                        "transcript_archived_at": rec.get("analyzed_at") if rec.get("status") == "analyzed" else None,
+                                        "transcript_location": "",
+                                        "filename": rec.get("filename"),
+                                        "status": rec.get("status"),
+                                    }, "uploaded_video")
+                    except Exception as _merge_err:
+                        print(f"[Classroom] merge classroom_sessions.json: {_merge_err}")
+
                     eligible_sessions.sort(key=lambda x: x.get("scheduled_time", ""), reverse=True)
                     
                     await websocket.send(json.dumps({
@@ -20561,7 +20629,11 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                     analysis = None
                     if classroom_analyzer:
                         analysis = classroom_analyzer.get_session_analysis(session_id)
-                    
+                    if analysis and isinstance(analysis.get("analysis"), dict):
+                        inner = analysis["analysis"]
+                        analysis = {**analysis, **inner}
+                        analysis.pop("analysis", None)
+
                     if analysis:
                         await websocket.send(json.dumps({
                             "type": "classroom_analysis",

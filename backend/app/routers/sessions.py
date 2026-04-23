@@ -182,7 +182,7 @@ async def auto_analyze_classroom_video(
 
     try:
         _logger.info("[ClassroomVideo] Starting auto-analysis for %s", video_id)
-        await _classroom_analyzer.analyze_video(
+        analysis = await _classroom_analyzer.analyze_video(
             video_id=video_id,
             coach_id=coach_id,
             client_id=client_id or "",
@@ -192,6 +192,36 @@ async def auto_analyze_classroom_video(
             client_name=client_name,
         )
         _logger.info("[ClassroomVideo] Auto-analysis finished for %s", video_id)
+
+        try:
+            from app.main import app as _app
+            from datetime import datetime, timezone
+
+            _pool = getattr(_app.state, "db_pool", None) if _app else None
+            if _pool and analysis and not analysis.get("error"):
+                from app.services.pg_data_helpers import upsert_session_pg
+
+                _now = datetime.now(timezone.utc)
+                _prev = (analysis.get("visual_insights") or "")[:12000]
+                await upsert_session_pg(
+                    _pool,
+                    {
+                        "session_id": video_id,
+                        "coach_id": coach_id,
+                        "client_id": client_id or "",
+                        "client_name": client_name or "",
+                        "session_type": "CLASSROOM",
+                        "status": "completed",
+                        "scheduled_start": _now,
+                        "duration_minutes": 0,
+                        "transcript_archived_at": analysis.get("analyzed_at") or _now.isoformat(),
+                        "transcript_location": f"classroom://video/{video_id}",
+                        "classroom_device_upload": True,
+                        "classroom_video_summary": _prev[:4000],
+                    },
+                )
+        except Exception as _pg_err:
+            _logger.warning("[ClassroomVideo] PG mirror for upload failed: %s", _pg_err)
     except Exception as e:
         _logger.exception("[ClassroomVideo] Auto-analysis failed for %s: %s", video_id, e)
 

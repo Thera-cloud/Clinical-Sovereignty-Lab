@@ -177,6 +177,15 @@ class DripScheduler:
             replace_existing=True
         )
 
+        # Zoom Classroom — poll PG sessions waiting on Zoom transcript processing
+        self.scheduler.add_job(
+            self.poll_zoom_pending_classroom_transcripts,
+            IntervalTrigger(minutes=15),
+            id="poll_zoom_pending_classroom_transcripts",
+            name="Zoom: archive pending transcripts for Classroom",
+            replace_existing=True
+        )
+
         # Trial management — sweep every hour for expired trials + nudges
         self.scheduler.add_job(
             self.sweep_trial_expirations,
@@ -196,7 +205,7 @@ class DripScheduler:
         )
 
         self.scheduler.start()
-        print(">>> [DRIP] Scheduler started with 14 jobs")
+        print(">>> [DRIP] Scheduler started with 15 jobs")
 
     def shutdown(self):
         """Gracefully shut down the scheduler."""
@@ -763,6 +772,16 @@ class DripScheduler:
                       f"from {result['clients_checked']} clients checked")
         except Exception as e:
             print(f">>> [DRIP] run_deadman_switch error: {e}")
+
+    async def poll_zoom_pending_classroom_transcripts(self):
+        """Poll coaching_sessions marked transcript_pending until Zoom transcript is ready."""
+        try:
+            from app.routers.zoom import poll_pending_zoom_classroom_transcripts
+            n = await poll_pending_zoom_classroom_transcripts(self.db_pool)
+            if n:
+                print(f">>> [DRIP] Zoom Classroom: auto-archived {n} pending transcript(s)")
+        except Exception as e:
+            print(f">>> [DRIP] poll_zoom_pending_classroom_transcripts error: {e}")
 
     # =========================================================================
     # JOB: Trial Expiration Sweep
