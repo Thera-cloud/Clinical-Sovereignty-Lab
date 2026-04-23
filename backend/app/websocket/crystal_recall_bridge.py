@@ -751,7 +751,7 @@ async def crystallize_from_conversation(
     domain: str = "clinical",
     min_score: int = _MIN_SCORE,
     origin_surface: str = "bridge_chat",
-) -> None:
+) -> Optional[str]:
     """
     Extract a user-scoped crystal from a conversation turn when the
     exchange contains enough therapeutic signal.
@@ -759,13 +759,15 @@ async def crystallize_from_conversation(
     Heuristic-only (no LLM call) so it adds zero latency.
     Low initial confidence (0.50) — the backend crystallizer can
     validate and promote later.  Deduplication via content_hash.
+
+    Returns content_hash when a new row is inserted, else None.
     """
     if not db_pool or not hardware_id:
-        return
+        return None
     is_voice = origin_surface == "voice_call"
     effective_min_len = _MIN_USER_LEN_VOICE if is_voice else _MIN_USER_LEN
     if len(user_text) < effective_min_len:
-        return
+        return None
 
     score = 0
     matched_domain = domain
@@ -787,7 +789,7 @@ async def crystallize_from_conversation(
 
     effective_min_score = _MIN_SCORE_VOICE if is_voice else min_score
     if score < effective_min_score:
-        return
+        return None
 
     # Build concise crystal text from user disclosure + Nate's reflection
     user_snippet = user_text[:300].strip()
@@ -822,7 +824,7 @@ async def crystallize_from_conversation(
             )
 
         if not ins_row:
-            return
+            return None
 
         logger.info(
             "crystal_bridge: forged crystal for %s (score=%d, domain=%s, surface=%s)",
@@ -846,7 +848,7 @@ async def crystallize_from_conversation(
 
         try:
             conf = float(ins_row["confidence"])
-            if conf >= 0.5:
+            if conf >= 0.5 and origin_surface != "classroom_video":
                 from app.services.wisdom_lifecycle_manager import (
                     schedule_wisdom_extraction_after_conversation,
                 )
@@ -862,8 +864,10 @@ async def crystallize_from_conversation(
                 )
         except Exception as _wl_err:
             logger.debug("crystal_bridge: wisdom lifecycle extract (non-fatal): %s", _wl_err)
+        return content_hash
     except Exception as e:
         logger.warning("crystallize_from_conversation: %s", e)
+        return None
 
 
 async def crystallize_session_summary(

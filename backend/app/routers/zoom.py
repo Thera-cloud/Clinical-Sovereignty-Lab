@@ -431,6 +431,275 @@ async def _process_meeting_lifecycle_event(
         })
 
 
+def _pick_transcript_from_recording_files(recording_files: List[Any]) -> tuple[Optional[str], Optional[str]]:
+    """Return (download_url, extension) for first completed transcript/CC file."""
+    for rf in recording_files or []:
+        if not isinstance(rf, dict):
+            continue
+        file_type = (rf.get("file_type") or "").upper()
+        file_ext = (rf.get("file_extension") or "").upper()
+        if file_type in ("TRANSCRIPT", "CC") or file_ext in ("VTT", "TXT"):
+            if (rf.get("status") or "").lower() == "completed":
+                url = (rf.get("download_url") or "").strip()
+                if url:
+                    ext = (rf.get("file_extension") or "vtt").strip().lower() or "vtt"
+                    return url, ext
+    return None, None
+
+
+def _recording_has_completed_files(recording_files: List[Any]) -> bool:
+    for rf in recording_files or []:
+        if isinstance(rf, dict) and (rf.get("status") or "").lower() == "completed":
+            return True
+    return False
+
+
+def _get_app_db_pool():
+    try:
+        from app.main import app
+        return getattr(app.state, "db_pool", None) if app else None
+    except Exception:
+        return None
+
+
+async def _patch_coaching_session_data(conn, session_id: str, patch: Dict[str, Any]) -> None:
+    if not session_id or not patch:
+        return
+    await conn.execute(
+        """
+        UPDATE coaching_sessions
+        SET session_data = COALESCE(session_data, '{}'::jsonb) || $2::jsonb,
+            updated_at = NOW()
+        WHERE session_id = $1
+        """,
+        session_id,
+        json.dumps(patch, default=str),
+    )
+
+
+async def _fetch_coaching_session_by_zoom(conn, meeting_id: str) -> Optional[Dict[str, Any]]:
+    if not meeting_id:
+        return None
+    row = await conn.fetchrow(
+        """
+        SELECT session_id, coach_id, client_id, client_name, zoom_meeting_id, session_data
+        FROM coaching_sessions
+        WHERE zoom_meeting_id = $1
+        ORDER BY scheduled_start DESC NULLS LAST
+        LIMIT 1
+        """,
+        str(meeting_id),
+    )
+    return dict(row) if row else None
+
+
+def _session_data_dict(pg_row: Dict[str, Any]) -> Dict[str, Any]:
+    sd = pg_row.get("session_data") or {}
+    if isinstance(sd, str):
+        try:
+            return json.loads(sd) if sd else {}
+        except Exception:
+            return {}
+    return sd if isinstance(sd, dict) else {}
+
+
+async def _archive_transcript_and_classroom_for_pg_session(
+    db_pool,
+    pg_row: Dict[str, Any],
+    vtt_bytes: bytes,
+    ext: str,
+    meeting_id: str,
+) -> None:
+    """
+    Upload transcript to blob/local storage, merge session_data on coaching_sessions,
+    run ClassroomAnalyzer (metrics + queued AI) for Little Nate learning.
+    """
+    session_id = (pg_row.get("session_id") or "").strip()
+    if not session_id or not vtt_bytes:
+        return
+    sd0 = _session_data_dict(pg_row)
+    if (sd0.get("transcript_location") or "").strip():
+        logger.info("[Zoom] PG session %s already has transcript; skipping re-archive", session_id)
+        return
+
+    from app.services.blob_storage import upload_bytes
+
+    rel_path = f"sessions/{session_id}/{meeting_id}/transcript.{ext}"
+    storage_kind, location = upload_bytes(
+        rel_path=rel_path,
+        content=vtt_bytes,
+        content_type="text/vtt" if ext == "vtt" else "text/plain",
+    )
+    now_iso = dt.datetime.utcnow().isoformat()
+    patch = {
+        "transcript_archived_at": now_iso,
+        "transcript_storage": storage_kind,
+        "transcript_location": location,
+        "transcript_file_extension": ext,
+        "recording_ready": False,
+        "transcript_pending": False,
+        "classroom_analysis_available": False,
+        "zoom_auto_archived_at": now_iso,
+    }
+    async with db_pool.acquire() as conn:
+        await _patch_coaching_session_data(conn, session_id, patch)
+
+    vtt_text = vtt_bytes.decode("utf-8", errors="ignore")
+    coach_id = str(pg_row.get("coach_id") or "")
+    client_id = str(pg_row.get("client_id") or "")
+    client_name = str(pg_row.get("client_name") or "")
+    family_id = ""
+
+    try:
+        from app.routers.sessions import CLASSROOM_AVAILABLE, _classroom_analyzer
+        from app.services.pg_data_helpers import find_user_pg
+    except Exception as _imp_err:
+        logger.warning("[Zoom] Classroom/PG import for auto-archive: %s", _imp_err)
+        return
+
+    if not CLASSROOM_AVAILABLE or not _classroom_analyzer:
+        logger.info("[Zoom] Classroom analyzer unavailable; transcript archived only for %s", session_id)
+        async with db_pool.acquire() as conn:
+            await _patch_coaching_session_data(conn, session_id, {"classroom_analysis_available": False})
+        return
+
+    coach_name = "Coach"
+    if db_pool and coach_id:
+        try:
+            cp = await find_user_pg(db_pool, hardware_id=coach_id)
+            if cp:
+                cpd = cp.get("profile_data") or {}
+                if isinstance(cpd, str):
+                    try:
+                        cpd = json.loads(cpd) if cpd else {}
+                    except Exception:
+                        cpd = {}
+                coach_name = cpd.get("name") or "Coach"
+            if not family_id and client_id:
+                clp = await find_user_pg(db_pool, hardware_id=client_id)
+                if clp:
+                    cld = clp.get("profile_data") or {}
+                    if isinstance(cld, str):
+                        try:
+                            cld = json.loads(cld) if cld else {}
+                        except Exception:
+                            cld = {}
+                    family_id = str(cld.get("family_id") or "")
+                    if not client_name:
+                        client_name = str(cld.get("name") or "")
+        except Exception as _lu_err:
+            logger.warning("[Zoom] find_user_pg during auto-archive: %s", _lu_err)
+
+    learning_ok = False
+    try:
+        _classroom_analyzer.analyze_transcript(
+            session_id=session_id,
+            coach_id=coach_id,
+            client_id=client_id,
+            coach_name=coach_name,
+            vtt_content=vtt_text,
+            focus_area="general therapeutic skills",
+            due_date=None,
+            family_id=family_id or None,
+            client_name=client_name or None,
+        )
+        _classroom_analyzer.queue_ai_analysis(
+            session_id=session_id,
+            coach_id=coach_id,
+            coach_name=coach_name,
+            vtt_content=vtt_text,
+            focus_area="general therapeutic skills",
+        )
+        learning_ok = True
+    except Exception as _ca_err:
+        logger.warning("[Zoom] Classroom analyze/queue for %s: %s", session_id, _ca_err)
+
+    async with db_pool.acquire() as conn:
+        await _patch_coaching_session_data(
+            conn,
+            session_id,
+            {
+                "nate_read_transcript_at": now_iso,
+                "nate_learning_queued_at": now_iso if learning_ok else "",
+                "classroom_analysis_available": learning_ok,
+            },
+        )
+    logger.info("[Zoom] Auto-archived + classroom pipeline for session %s", session_id)
+
+    if db_pool and coach_id and (vtt_text or "").strip():
+        async def _wisdom_followup():
+            try:
+                uid = None
+                async with db_pool.acquire() as c:
+                    uid = await c.fetchval(
+                        "SELECT id::text FROM users WHERE hardware_id = $1 LIMIT 1",
+                        coach_id,
+                    )
+                if not uid:
+                    return
+                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                mgr = WisdomLifecycleManager(db_pool, None)
+                await mgr.extract_wisdom(
+                    source="classroom_zoom",
+                    content=(vtt_text or "")[:20000],
+                    user_id=uid,
+                    domain="coaching",
+                    confidence=0.45,
+                )
+            except Exception as _w_err:
+                logger.debug("[Zoom] classroom wisdom follow-up: %s", _w_err)
+
+        try:
+            asyncio.create_task(_wisdom_followup())
+        except Exception:
+            pass
+
+
+async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
+    """
+    Drip-scheduler job: coaching_sessions with transcript_pending poll Zoom until
+    transcript files appear, then archive + classroom (same as webhook path).
+    """
+    if not db_pool or not getattr(settings, "ENABLE_ZOOM", False):
+        return 0
+    archived = 0
+    try:
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id, coach_id, client_id, client_name, zoom_meeting_id, session_data
+                FROM coaching_sessions
+                WHERE COALESCE(zoom_meeting_id, '') <> ''
+                  AND (session_data->>'transcript_pending') = 'true'
+                ORDER BY updated_at DESC NULLS LAST
+                LIMIT 25
+                """
+            )
+        zc = ZoomClient.from_env()
+        for row in rows:
+            r = dict(row)
+            mid = str(r.get("zoom_meeting_id") or "").strip()
+            if not mid:
+                continue
+            try:
+                rec = await zc.get_meeting_recordings(meeting_id=mid)
+                files = rec.get("recording_files") or []
+                t_url, t_ext = _pick_transcript_from_recording_files(files)
+                if not t_url:
+                    continue
+                vtt_bytes = await zc.download_recording_file(download_url=t_url)
+                await _archive_transcript_and_classroom_for_pg_session(
+                    db_pool, r, vtt_bytes, t_ext or "vtt", mid
+                )
+                archived += 1
+            except Exception as pe:
+                logger.warning("[Zoom] Pending transcript poll failed for %s: %s", mid, pe)
+    except Exception as e:
+        logger.warning("[Zoom] poll_pending_zoom_classroom_transcripts: %s", e)
+    return archived
+
+
 # =============================================================================
 # BACKGROUND: Process recording event → download transcript → ingest
 # =============================================================================
@@ -443,8 +712,18 @@ async def _process_recording_event(
     """
     Background task triggered by recording.completed / phone.recording_completed.
     Downloads the transcript VTT, parses it, matches to a client, and feeds
-    through the MetricsEngine pipeline.
+    through the MetricsEngine pipeline. Also auto-archives to coaching_sessions
+    and runs Classroom when a PG session matches zoom_meeting_id.
     """
+    db_pool = _get_app_db_pool()
+    pg_row: Optional[Dict[str, Any]] = None
+    try:
+        if db_pool and meeting_id:
+            async with db_pool.acquire() as conn:
+                pg_row = await _fetch_coaching_session_by_zoom(conn, meeting_id)
+    except Exception as e:
+        logger.warning("[Zoom] PG lookup for meeting %s: %s", meeting_id, e)
+
     try:
         from app.services.zoom_ingestion import ZoomIngestionService
         ingestion = ZoomIngestionService()
@@ -452,48 +731,50 @@ async def _process_recording_event(
         obj = (payload.get("payload") or {}).get("object") or {}
         recording_files = obj.get("recording_files") or []
         topic = obj.get("topic") or ""
-        participants = obj.get("participant_audio_files") or []
         start_time = obj.get("start_time") or ""
         duration = obj.get("duration") or 0
 
-        # Also extract participant emails from the meeting object
         participant_emails = []
         for p in (obj.get("participants") or obj.get("registrants") or []):
             email = p.get("email") or p.get("user_email") or ""
             if email:
                 participant_emails.append(email)
-        # Host email
         host_email = obj.get("host_email") or ""
         if host_email:
             participant_emails.append(host_email)
 
-        # Find transcript file (VTT or TRANSCRIPT type)
-        transcript_url = None
-        for rf in recording_files:
-            file_type = (rf.get("file_type") or "").upper()
-            file_ext = (rf.get("file_extension") or "").upper()
-            if file_type in ("TRANSCRIPT", "CC") or file_ext in ("VTT", "TXT"):
-                if rf.get("status") == "completed":
-                    transcript_url = rf.get("download_url")
-                    break
+        transcript_url, transcript_ext = _pick_transcript_from_recording_files(recording_files)
 
         if not transcript_url:
-            logger.warning(f"[Zoom] No transcript file found for meeting {meeting_id}")
+            logger.warning(f"[Zoom] No completed transcript file yet for meeting {meeting_id}")
+            if pg_row and db_pool and _recording_has_completed_files(recording_files):
+                try:
+                    async with db_pool.acquire() as conn:
+                        await _patch_coaching_session_data(
+                            conn,
+                            pg_row["session_id"],
+                            {
+                                "recording_ready": True,
+                                "transcript_pending": True,
+                                "zoom_recording_webhook_at": dt.datetime.utcnow().isoformat(),
+                            },
+                        )
+                    logger.info("[Zoom] Marked session %s transcript_pending", pg_row.get("session_id"))
+                except Exception as pe:
+                    logger.warning("[Zoom] Failed to set transcript_pending: %s", pe)
             _append_json_list(ZOOM_INGESTED_FILE, {
                 "timestamp": dt.datetime.utcnow().isoformat(),
                 "meeting_id": meeting_id,
-                "status": "no_transcript",
+                "status": "no_transcript_yet",
                 "topic": topic,
                 "session_source": session_source,
             })
             return
 
-        # Download transcript
         client = ZoomClient.from_env()
         vtt_bytes = await client.download_recording_file(download_url=transcript_url)
         vtt_text = vtt_bytes.decode("utf-8", errors="ignore")
 
-        # Parse transcript into conversation turns
         turns = ingestion.parse_transcript(vtt_text)
         if not turns:
             logger.warning(f"[Zoom] Transcript parsed but no turns found for meeting {meeting_id}")
@@ -506,13 +787,14 @@ async def _process_recording_event(
             })
             return
 
-        # Match to client using mapping (preferred) or participant emails
-        client_id = mapping.get("client_id") or ""
+        client_id = (mapping.get("client_id") or "").strip()
         if not client_id:
             client_id = await ingestion.match_client(
                 meeting_topic=topic,
                 participant_emails=participant_emails,
             )
+        if not client_id and pg_row:
+            client_id = str(pg_row.get("client_id") or "").strip()
 
         if not client_id:
             logger.warning(f"[Zoom] Could not match meeting {meeting_id} to a client")
@@ -525,9 +807,16 @@ async def _process_recording_event(
                 "session_source": session_source,
                 "turns_count": len(turns),
             })
+            if pg_row and db_pool:
+                try:
+                    ext = transcript_ext or "vtt"
+                    await _archive_transcript_and_classroom_for_pg_session(
+                        db_pool, pg_row, vtt_bytes, ext, str(meeting_id)
+                    )
+                except Exception as ae:
+                    logger.warning("[Zoom] Archive without metrics client failed: %s", ae)
             return
 
-        # Ingest through MetricsEngine
         result = await ingestion.ingest_session(
             client_id=client_id,
             transcript_turns=turns,
@@ -551,6 +840,18 @@ async def _process_recording_event(
             "duration": duration,
         })
         logger.info(f"[Zoom] Successfully ingested meeting {meeting_id} for client {client_id}")
+
+        if pg_row and db_pool:
+            try:
+                await _archive_transcript_and_classroom_for_pg_session(
+                    db_pool,
+                    pg_row,
+                    vtt_bytes,
+                    transcript_ext or "vtt",
+                    str(meeting_id),
+                )
+            except Exception as ae:
+                logger.error("[Zoom] Auto classroom archive after ingest failed: %s", ae, exc_info=True)
 
     except Exception as e:
         logger.error(f"[Zoom] Ingestion failed for meeting {meeting_id}: {e}", exc_info=True)

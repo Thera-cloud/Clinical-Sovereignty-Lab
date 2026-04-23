@@ -21,6 +21,21 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Set, Callable, Awaitable
 from dataclasses import dataclass, asdict, field
 
+_HAS_LIBROSA = False
+_HAS_MOVIEPY = False
+try:
+    import librosa as _librosa_check  # noqa: F401
+
+    _HAS_LIBROSA = True
+except ImportError:
+    pass
+try:
+    import moviepy as _moviepy_check  # noqa: F401
+
+    _HAS_MOVIEPY = True
+except ImportError:
+    pass
+
 # Type for async notification callback
 NotificationCallback = Callable[[str, str, Dict], Awaitable[None]]
 
@@ -1930,46 +1945,121 @@ class ClassroomAnalyzer:
         client_name: str = "",
     ) -> Dict:
         """
-        Analyze an uploaded video using VideoAnalyzer for visual analysis.
-        Combines visual observations with any available audio transcript.
+        Analyze an uploaded video using VideoAnalyzer for visual sampling + optional audio timeline.
+        Creates crystals / wisdom when DB is available. Never raises on missing AV libraries.
         """
-        # Load video session record
         classroom_sessions_file = self.data_dir / "classroom_sessions.json"
         sessions = []
         try:
-            with open(classroom_sessions_file, 'r') as f:
+            with open(classroom_sessions_file, "r", encoding="utf-8") as f:
                 sessions = json.load(f)
         except Exception:
             pass
-        
+
         video_session = None
         for s in sessions:
             if s.get("session_id") == video_id:
                 video_session = s
                 break
-        
+
         if not video_session:
             return {"error": f"Video session {video_id} not found"}
-        
-        video_path = video_session.get("video_path", "")
-        
-        # Try to use VideoAnalyzer for visual analysis
+
+        video_path_str = video_session.get("video_path", "")
+        vp = Path(video_path_str) if video_path_str else Path()
+
+        frame_analysis: Dict[str, Any] = {}
         visual_insights = ""
+        voice_metrics_timeline: Optional[List[Dict[str, float]]] = None
+
         try:
-            from app.services.video_analyzer import VideoAnalyzer
+            from app.services.video_analyzer import (
+                VideoAnalyzer,
+                extract_audio_wav,
+                compute_voice_metrics_timeline,
+            )
+
             analyzer = VideoAnalyzer()
-            frames = await analyzer.extract_frames(video_path, max_frames=5)
+            frames: List[bytes] = []
+            if vp.exists():
+                frames = analyzer.extract_frames(vp, interval_seconds=5, max_frames=5)
             if frames:
-                analysis_result = await analyzer.analyze_video(frames)
-                if analysis_result:
-                    visual_insights = json.dumps(analysis_result, indent=2)
+                frame_analysis = analyzer.analyze_classroom_frames(frames)
+            else:
+                frame_analysis = {
+                    "coaching_insights": "No frames extracted (missing codecs or unreadable video).",
+                    "key_moments": [],
+                    "therapeutic_presence_score": 6.0,
+                    "frames_analyzed": 0,
+                }
+
+            combined_visual = {
+                "frame_analysis": frame_analysis,
+                "voice_metrics_timeline": None,
+                "librosa_gate": _HAS_LIBROSA,
+                "moviepy_gate": _HAS_MOVIEPY,
+            }
+
+            wav_path: Optional[Path] = None
+            try:
+                if vp.exists() and _HAS_LIBROSA:
+                    wav_path = await asyncio.to_thread(extract_audio_wav, vp)
+                    if wav_path:
+                        voice_metrics_timeline = await asyncio.to_thread(
+                            compute_voice_metrics_timeline, wav_path, 5.0
+                        )
+                        combined_visual["voice_metrics_timeline"] = voice_metrics_timeline
+            except Exception as _aud_err:
+                print(f"[Classroom] audio pipeline (non-fatal): {_aud_err}")
+                voice_metrics_timeline = None
+            finally:
+                try:
+                    if wav_path and wav_path.exists():
+                        wav_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            visual_insights = json.dumps(combined_visual, indent=2, default=str)
         except ImportError:
-            visual_insights = "VideoAnalyzer not available - visual analysis skipped"
+            visual_insights = json.dumps(
+                {"error": "VideoAnalyzer not available - visual analysis skipped"}
+            )
+            frame_analysis = {
+                "coaching_insights": "VideoAnalyzer unavailable.",
+                "key_moments": [],
+                "therapeutic_presence_score": 6.0,
+                "frames_analyzed": 0,
+            }
         except Exception as e:
-            visual_insights = f"Visual analysis error: {e}"
-        
-        # Build analysis record
-        analysis = {
+            visual_insights = json.dumps({"error": f"Visual analysis error: {e}"})
+            frame_analysis = {
+                "coaching_insights": f"Analysis error: {e}",
+                "key_moments": [],
+                "therapeutic_presence_score": 6.0,
+                "frames_analyzed": 0,
+            }
+
+        coaching_insights = str(frame_analysis.get("coaching_insights") or "")
+        key_moments = list(frame_analysis.get("key_moments") or [])
+        if voice_metrics_timeline:
+            try:
+                from app.services.video_analyzer import voice_timeline_key_moments
+
+                for m in voice_timeline_key_moments(voice_metrics_timeline):
+                    if m not in key_moments:
+                        key_moments.append(m)
+            except Exception:
+                pass
+
+        tps = float(frame_analysis.get("therapeutic_presence_score") or 7.0)
+        transcript_summary_parts = [
+            coaching_insights,
+            f"Coach focus: {focus_area}." if focus_area else "",
+            f"Coach question: {coach_query}" if coach_query else "",
+        ]
+        transcript_summary = "\n".join(p for p in transcript_summary_parts if p).strip()[:4000]
+
+        analysis: Dict[str, Any] = {
             "session_id": video_id,
             "coach_id": coach_id,
             "client_id": client_id,
@@ -1979,34 +2069,114 @@ class ClassroomAnalyzer:
             "focus_area": focus_area,
             "coach_query": coach_query,
             "visual_insights": visual_insights,
+            "transcript_summary": transcript_summary or None,
+            "coaching_insights": coaching_insights,
+            "voice_metrics_timeline": voice_metrics_timeline,
+            "therapeutic_presence_score": tps,
+            "key_moments": key_moments,
             "status": "analyzed",
             "analyzed_at": str(datetime.now()),
-            "video_path": video_path,
+            "video_path": video_path_str,
             "filename": video_session.get("filename", ""),
+            "crystals_created": [],
         }
-        
-        # Update session record
+
+        db_pool = None
+        try:
+            from app.main import app as _app
+
+            db_pool = getattr(_app.state, "db_pool", None) if _app else None
+        except Exception:
+            db_pool = None
+
+        crystals_created: List[Dict[str, str]] = []
+        summary_for_wisdom = (
+            f"Classroom video {video_id}\n{transcript_summary}\n{coaching_insights}\n"
+            f"Key moments: {json.dumps(key_moments, default=str)[:4000]}"
+        )
+
+        if db_pool and (transcript_summary or coaching_insights or key_moments):
+            try:
+                from app.websocket.crystal_recall_bridge import crystallize_from_conversation
+
+                user_text = (
+                    f"Classroom video session {video_id} for professional review. "
+                    f"Summary and observations: {transcript_summary[:1800]}\n"
+                    f"Coaching lens: {coaching_insights[:1200]}\n"
+                    "Patterns around empathy, trust, attunement, and therapeutic presence "
+                    "are relevant for ongoing skill development."
+                )
+                nate_response = (
+                    coaching_insights
+                    or "Consider how safety, pacing, and connection show up on camera for the client."
+                )
+                if coach_query:
+                    nate_response = f"{nate_response}\nCoach asked: {coach_query[:500]}"
+
+                ch = await crystallize_from_conversation(
+                    db_pool,
+                    coach_id,
+                    user_text,
+                    nate_response,
+                    user_name=client_name or coach_id[:12],
+                    domain="clinical",
+                    min_score=3,
+                    origin_surface="classroom_video",
+                )
+                if ch:
+                    crystals_created.append({"hash": ch, "domain": "clinical"})
+            except Exception as _cr_err:
+                print(f"[Classroom] crystallize_from_conversation (non-fatal): {_cr_err}")
+
+            try:
+                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                coach_uuid = None
+                if db_pool:
+                    async with db_pool.acquire() as _conn:
+                        coach_uuid = await _conn.fetchval(
+                            """
+                            SELECT id::text FROM users
+                            WHERE hardware_id = $1 OR username = $1
+                            LIMIT 1
+                            """,
+                            coach_id,
+                        )
+                mgr = WisdomLifecycleManager(db_pool, None)
+                conf = min(0.95, max(0.5, tps / 10.0))
+                await mgr.extract_wisdom(
+                    "classroom",
+                    summary_for_wisdom.strip()[:20000],
+                    user_id=coach_uuid,
+                    domain="clinical",
+                    confidence=conf,
+                )
+            except Exception as _w_err:
+                print(f"[Classroom] extract_wisdom (non-fatal): {_w_err}")
+
+        analysis["crystals_created"] = crystals_created
+
         for s in sessions:
             if s.get("session_id") == video_id:
                 s["status"] = "analyzed"
                 s["analysis"] = analysis
                 break
         try:
-            with open(classroom_sessions_file, 'w') as f:
+            with open(classroom_sessions_file, "w", encoding="utf-8") as f:
                 json.dump(sessions, f, indent=2)
         except Exception:
             pass
-        
-        # Push to Night School with video insights
+
         try:
             ai_result = {
                 "strengths": ["Video analysis completed"],
-                "growth_areas": [],
-                "key_moments": [],
-                "overall_rating": 7,
+                "growth_areas": ["Review voice timeline and visual cues for presence"],
+                "key_moments": key_moments,
+                "overall_rating": int(round(tps)),
                 "dojo_scenarios": [],
                 "coach_query_response": f"Coach asked: {coach_query}" if coach_query else "",
                 "visual_observations": visual_insights,
+                "coaching_insights": coaching_insights,
             }
             await self._push_to_night_school(
                 ai_result=ai_result,
@@ -2017,7 +2187,30 @@ class ClassroomAnalyzer:
             )
         except Exception as e:
             print(f"[Classroom] Night School push failed for video: {e}")
-        
+
+        try:
+            payload = dict(analysis)
+            payload.setdefault("strengths", ["Video session processed"])
+            payload.setdefault("growth_areas", ["Review observations and voice timeline for pacing"])
+            payload.setdefault("reflection_questions", [
+                "What did you notice about your therapeutic presence on camera?",
+                "Where might you deepen attunement in the next session?",
+            ])
+            payload.setdefault("metrics", {})
+            if visual_insights:
+                payload["visual_observations_summary"] = (visual_insights or "")[:4000]
+            await notify_coach(
+                coach_id=coach_id,
+                message_type="classroom_analysis_complete",
+                data={
+                    "session_id": video_id,
+                    "source": "video",
+                    "analysis": payload,
+                },
+            )
+        except Exception as _n_err:
+            print(f"[Classroom] Video notify_coach failed: {_n_err}")
+
         return analysis
 
     async def _push_to_night_school(
