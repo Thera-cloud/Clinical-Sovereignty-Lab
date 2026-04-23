@@ -4490,6 +4490,23 @@ class MetricsEngine:
         except Exception as e:
             print(f">>> [METRICS] PG sync failed for {hw_id}: {e}")
 
+    # ═══════════════════════════════════════════
+    # NEVEDAL COHERENCE ENGINE — v1 (LEXICON)
+    # ═══════════════════════════════════════════
+    # C_emo, GAP, and Quantum are computed on every
+    # qualifying chat turn using fixed positive/negative
+    # word lists and keyword matching.
+    #
+    # v1 limitations:
+    # - Sentiment is lexicon-based, not contextual
+    # - Neutral language produces near-zero movement
+    # - No negation handling ("not happy" scores as positive)
+    #
+    # v2 upgrade path (when ready):
+    # - Replace lexicon with LLM-based sentiment analysis
+    # - Estimated cost: ~$0.001 per turn (GPT-4o-mini)
+    # - Would require async pipeline to avoid chat latency
+    # ═══════════════════════════════════════════
     def analyze_and_update(self, p: dict, user_text: str, ai_text: str):
         """Analyze conversation and update metrics"""
         current_metrics = self.load_metrics(p)
@@ -6613,6 +6630,59 @@ def _cohort_age_bucket(age: Optional[int]) -> str:
     if age < 51:
         return "36-50"
     return "51+"
+
+
+def _dyad_pearson_series(x: List[float], y: List[float]) -> Optional[float]:
+    """Pearson r for same-length sequences; None if undefined."""
+    n = len(x)
+    if n < 2 or len(y) != n:
+        return None
+    mx = sum(x) / n
+    my = sum(y) / n
+    num = sum((x[i] - mx) * (y[i] - my) for i in range(n))
+    dxe = sum((x[i] - mx) ** 2 for i in range(n)) ** 0.5
+    dye = sum((y[i] - my) ** 2 for i in range(n)) ** 0.5
+    if dxe < 1e-12 or dye < 1e-12:
+        return None
+    return num / (dxe * dye)
+
+
+def _dyad_aligned_slices(
+    a: List[float], b: List[float], lag: int
+) -> Tuple[Optional[List[float]], Optional[List[float]]]:
+    """Align series a, b with integer lag (positive: b delayed relative to a)."""
+    if lag > 0:
+        if len(a) <= lag:
+            return None, None
+        aa, bb = a[:-lag], b[lag:]
+    elif lag < 0:
+        lag_abs = -lag
+        if len(b) <= lag_abs:
+            return None, None
+        aa, bb = a[lag_abs:], b[:-lag_abs]
+    else:
+        aa, bb = a, b
+    m = min(len(aa), len(bb))
+    if m < 2:
+        return None, None
+    return aa[:m], bb[:m]
+
+
+def _dyad_crosscorr_peak_lag(a: List[float], b: List[float], max_lag: int) -> Optional[int]:
+    """Lag (in samples) at maximum |Pearson| over overlapping windows."""
+    best_r: Optional[float] = None
+    best_lag: Optional[int] = None
+    for L in range(-max_lag, max_lag + 1):
+        sa, sb = _dyad_aligned_slices(a, b, L)
+        if sa is None or sb is None:
+            continue
+        r = _dyad_pearson_series([float(sa[i]) for i in range(len(sa))], [float(sb[i]) for i in range(len(sb))])
+        if r is None:
+            continue
+        if best_r is None or abs(r) > abs(best_r):
+            best_r = r
+            best_lag = L
+    return best_lag
 
 
 async def _cohort_nevedal_first_last_c_emo(conn, user_ids: List, since: Optional[datetime.datetime]):
@@ -14646,12 +14716,29 @@ async def handle_client(websocket, path=None):
                     if client_id:
                         try:
                             cm = metrics_engine.load_metrics({"role": "CLIENT", "hardware_id": client_id})
+                            ns = cm.get("nevedal_state") or {}
+                            if isinstance(ns, str):
+                                try:
+                                    ns = json.loads(ns)
+                                except Exception:
+                                    ns = {}
+                            if not isinstance(ns, dict):
+                                ns = {}
+                            crisis_perception = ns.get("crisis_perception", {})
+                            shame_profile = ns.get("shame_profile", {})
+                            pmb = ns.get("pmb", {})
+                            if not isinstance(crisis_perception, dict):
+                                crisis_perception = {}
+                            if not isinstance(shame_profile, dict):
+                                shame_profile = {}
+                            if not isinstance(pmb, dict):
+                                pmb = {}
                             await websocket.send(json.dumps({
                                 "type": "client_metrics",
                                 "client_id": client_id,
-                                "crisis_perception": cm.get("crisis_perception", {}),
-                                "shame_profile": cm.get("shame_profile", {}),
-                                "pmb": cm.get("pmb", {}),
+                                "crisis_perception": crisis_perception,
+                                "shame_profile": shame_profile,
+                                "pmb": pmb,
                             }))
                         except Exception:
                             await websocket.send(json.dumps({"type": "client_metrics", "client_id": client_id, "crisis_perception": {}, "shame_profile": {}, "pmb": {}}))
@@ -19490,7 +19577,7 @@ If 'challenge', respectfully push the coach's thinking."""
             # === ADMIN: GET DYAD SYNC ===
             elif t == "admin_get_dyad_sync":
                 if current_profile and current_profile.get("role") == "ADMIN":
-                  _dyad_empty = {"type": "dyad_sync_data", "synchrony_score": 0, "grade": "AWAITING", "client_c_emo": 0, "coach_c_emo": 0, "client_timeline": [], "coach_timeline": [], "shared_cees": [], "correlation_coefficient": 0, "lag_time": 0}
+                  _dyad_empty = {"type": "dyad_sync_data", "synchrony_score": 0, "grade": "AWAITING", "client_c_emo": 0, "coach_c_emo": 0, "client_timeline": [], "coach_timeline": [], "shared_cees": [], "correlation_coefficient": None, "lag_time": None}
                   try:
                     client_id = d.get("client_id")
                     coach_id = d.get("coach_id")
@@ -19610,8 +19697,24 @@ If 'challenge', respectfully push the coach's thinking."""
                                         "coach_c_emo": round(co_cemo, 2)
                                     })
                             
-                            correlation_coefficient = synchrony_score * 0.9
-                            lag_time = -2.3 if coach_c_emo > client_c_emo else 1.8
+                            n_c = len(client_timeline)
+                            n_o = len(coach_timeline)
+                            n_pts = min(n_c, n_o)
+                            correlation_note = None
+                            correlation_coefficient = None
+                            lag_time = None
+                            if n_pts >= 5:
+                                cx = [float(client_timeline[i].get("c_emo", 0.5)) for i in range(n_pts)]
+                                cy = [float(coach_timeline[i].get("c_emo", 0.5)) for i in range(n_pts)]
+                                correlation_coefficient = _dyad_pearson_series(cx, cy)
+                                max_lag = max(1, min(15, n_pts - 2))
+                                lag_peak = _dyad_crosscorr_peak_lag(cx, cy, max_lag)
+                                if lag_peak is not None:
+                                    lag_time = float(lag_peak)
+                                if correlation_coefficient is None:
+                                    correlation_note = "Insufficient data for correlation"
+                            else:
+                                correlation_note = "Insufficient data for correlation"
                             
                             # Visual biometrics (Patent 4) - include if available
                             visual_biometrics = client_metrics.get("visual_biometrics") or None
@@ -19625,9 +19728,11 @@ If 'challenge', respectfully push the coach's thinking."""
                                 "client_timeline": client_timeline,
                                 "coach_timeline": coach_timeline,
                                 "shared_cees": shared_cees,
-                                "correlation_coefficient": round(correlation_coefficient, 2),
-                                "lag_time": round(lag_time, 1),
+                                "correlation_coefficient": round(correlation_coefficient, 4) if correlation_coefficient is not None else None,
+                                "lag_time": round(lag_time, 1) if lag_time is not None else None,
                             }
+                            if correlation_note:
+                                dyad_response["correlation_note"] = correlation_note
                             if visual_biometrics:
                                 dyad_response["visual_biometrics"] = visual_biometrics
                             
@@ -20893,9 +20998,25 @@ Coach Reflection on Session {session_id}:
                         "available": False,
                         "message": "OPERATION_FAILED"
                     }))
-            
-            # === CLASSROOM: ANALYZE LIVE SESSION ===
-            # Run real-time analysis on current recording
+
+            # ═══════════════════════════════════════════
+            # CLASSROOM LIVE ANALYSIS
+            # ═══════════════════════════════════════════
+            # Prerequisites for live analysis:
+            # 1. Session must have zoom_meeting_id (from booking)
+            # 2. Zoom cloud recording must be active or completed
+            # 3. Coach must select session in Classroom tab
+            # 4. ClassroomAnalyzer must be initialized
+            #
+            # The live session bottom sheet does NOT trigger
+            # classroom_analyze_live — it uses coach_live_note.
+            # Live analysis is triggered from the Classroom tab
+            # via _analyzeLiveSession in Flutter.
+            #
+            # Coach workflow:
+            # Schedule → Start Zoom → During/after session →
+            # Classroom tab → Select session → Analyze
+            # ═══════════════════════════════════════════
             elif t == "classroom_analyze_live":
                 if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
                     await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
