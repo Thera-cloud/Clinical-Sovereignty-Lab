@@ -392,14 +392,11 @@ function connectWebSocket(){
 }
 
 function convertFamilyMetrics(data){
-    var members=data.members||[];
-    var fakeData={type:"group_coherence_metrics",group_id:data.family_id,group_type:"family",members:members,
-        nate_node:{nate_coherence_per_member:{},nate_wellness_contribution:0,engagement_breakdown:{}},
-        with_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:{},network_bonds:[]},
-        without_nate:{wellness_index:data.family_wellness_index||0.5,coherence_matrix:data.coherence_matrix||{},network_bonds:[]},
-        decoherence_signals:{}};
-    members.forEach(function(m){fakeData.nate_node.nate_coherence_per_member[m.id]=0.5;});
-    lastData=fakeData;allMembers=members;buildMemberCheckboxes();renderAll(fakeData);
+    var el=document.getElementById("coherence-matrix");
+    if(el){
+        el.innerHTML='<div class="empty-state" style="padding:24px;text-align:center;">Waiting for group coherence data...</div>';
+    }
+    return null;
 }
 
 /* ======================== SELECTION HELPERS ======================== */

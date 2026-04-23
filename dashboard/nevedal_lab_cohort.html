@@ -252,14 +252,40 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
         var lastCohortData = null;
         var ageChart = null, crisisDistChart = null, shameDistChart = null, pmbDistChart = null;
 
+        var cohortFilters = {
+            age_groups: [],
+            diagnoses: [],
+            treatment_types: [],
+            time_range: "30d"
+        };
+
         function escapeHtml(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
+        function syncCohortFiltersFromDom() {
+            cohortFilters.age_groups = [];
+            document.querySelectorAll('input[data-filter="age"]:checked').forEach(function(cb) {
+                cohortFilters.age_groups.push(cb.dataset.val);
+            });
+            cohortFilters.diagnoses = [];
+            document.querySelectorAll('input[data-filter="dx"]:checked').forEach(function(cb) {
+                cohortFilters.diagnoses.push(cb.dataset.val);
+            });
+            cohortFilters.treatment_types = [];
+            document.querySelectorAll('input[data-filter="tx"]:checked').forEach(function(cb) {
+                cohortFilters.treatment_types.push(cb.dataset.val);
+            });
+            var tr = document.getElementById("time-range");
+            cohortFilters.time_range = tr ? tr.value : "30d";
+            return cohortFilters;
+        }
+
         function getFilters() {
-            var ages = [], dxs = [], txs = [];
-            document.querySelectorAll('input[data-filter="age"]:checked').forEach(function(cb) { ages.push(cb.dataset.val); });
-            document.querySelectorAll('input[data-filter="dx"]:checked').forEach(function(cb) { dxs.push(cb.dataset.val); });
-            document.querySelectorAll('input[data-filter="tx"]:checked').forEach(function(cb) { txs.push(cb.dataset.val); });
-            return { age_groups: ages, diagnoses: dxs, treatment_types: txs, time_range: document.getElementById("time-range").value };
+            return syncCohortFiltersFromDom();
+        }
+
+        function onCohortFilterChanged() {
+            syncCohortFiltersFromDom();
+            requestCohortStats();
         }
 
         function getWsUrl() {
@@ -346,8 +372,8 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
             var tr = document.getElementById("time-range").value;
             document.getElementById("stat-period").innerHTML = "<strong>" + (tr === "all" ? "All" : tr.replace("d", "")) + "</strong> day period";
 
-            // Age Group bar chart + bars
-            if (data.by_age_group) {
+            // Age Group bar chart + bars (from server by_age_group)
+            if (data.by_age_group && Object.keys(data.by_age_group).length > 0 && ageChart) {
                 var labels = Object.keys(data.by_age_group);
                 var values = labels.map(function(l) { return data.by_age_group[l].avg_c_emo || 0; });
                 ageChart.data.labels = labels;
@@ -358,16 +384,21 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                     var g = data.by_age_group[l];
                     var val = (g.avg_c_emo || 0);
                     var color = val >= 0.7 ? "var(--green)" : "var(--purple)";
-                    return '<div class="cohort-item"><div class="cohort-header"><span class="cohort-label">' + escapeHtml(l) + ' years</span>' +
+                    return '<div class="cohort-item"><div class="cohort-header"><span class="cohort-label">' + escapeHtml(l) + '</span>' +
                         '<span class="cohort-value" style="color:' + color + ';">C<sub>emo</sub>: ' + val.toFixed(2) + '</span></div>' +
                         '<div class="cohort-bar"><div class="cohort-fill" style="width:' + (val * 100) + '%;"></div></div>' +
                         '<div class="cohort-meta">n = ' + (g.count || 0) + ' participants &bull; ' + (g.sessions || 0) + ' sessions</div></div>';
-                }).join('');
+                }).join("");
+            } else if (ageChart) {
+                ageChart.data.labels = [];
+                ageChart.data.datasets = [];
+                ageChart.update("none");
+                document.getElementById("age-bars").innerHTML = '<div class="empty-state">No age-group data for current filters</div>';
             }
 
-            // Diagnosis Breakdown
+            // Diagnosis Breakdown (from server by_diagnosis)
             var dxEl = document.getElementById("diagnosis-body");
-            if (data.by_diagnosis) {
+            if (data.by_diagnosis && Object.keys(data.by_diagnosis).length > 0) {
                 dxEl.innerHTML = Object.entries(data.by_diagnosis).map(function(e) {
                     var name = e[0], g = e[1];
                     var val = g.avg_c_emo || 0;
@@ -381,13 +412,13 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
                 dxEl.innerHTML = '<div class="empty-state">No diagnosis data available</div>';
             }
 
-            // Treatment Modality (Patent 3 validation)
+            // Treatment Modality (from server by_treatment / by_treatment_type)
             var txEl = document.getElementById("treatment-body");
-            if (data.by_treatment_type || data.by_treatment) {
-                var btt = data.by_treatment_type || data.by_treatment;
+            var btt = data.by_treatment_type || data.by_treatment;
+            if (btt && Object.keys(btt).length > 0) {
                 var baseline = null;
                 var entries = Object.entries(btt);
-                if (entries.length > 0) baseline = entries[0][1].avg_c_emo || 0.5;
+                if (entries.length > 0) { baseline = entries[0][1].avg_c_emo || 0.5; }
                 txEl.innerHTML = entries.map(function(e) {
                     var name = e[0], g = e[1];
                     var val = g.avg_c_emo || 0;
@@ -495,12 +526,13 @@ if (!_ykVerified) { window.location.href = 'command.html'; }
 
         // ==================== FILTER HANDLERS ====================
         document.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
-            cb.addEventListener("change", requestCohortStats);
+            cb.addEventListener("change", onCohortFilterChanged);
         });
-        document.getElementById("time-range").addEventListener("change", requestCohortStats);
+        document.getElementById("time-range").addEventListener("change", onCohortFilterChanged);
 
         // ==================== INIT ====================
         initCharts();
+        syncCohortFiltersFromDom();
         connectWebSocket();
     </script>
 </body>
