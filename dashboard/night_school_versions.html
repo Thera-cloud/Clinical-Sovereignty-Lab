@@ -98,7 +98,8 @@
                 <div class="page-title">Time Travel & Rollback Control</div>
             </div>
         </div>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <span id="wsBadge" style="font-size:11px;color:var(--text-secondary);">…</span>
             <button class="btn btn-primary" onclick="createSnapshot()">📸 Create Snapshot</button>
             <a href="night_school.html" class="back-btn">← Back to Night School</a>
         </div>
@@ -112,11 +113,11 @@
             <div class="current-version">
                 <div class="current-icon">🧠</div>
                 <div class="current-info">
-                    <div class="current-label">Currently Deployed</div>
-                    <div class="current-name">Wisdom v16.4</div>
-                    <div class="current-meta">847 entries • Deployed 2 hours ago by Admin_Sovereign</div>
+                    <div class="current-label">Currently Deployed (little_nate_wisdom.json)</div>
+                    <div class="current-name" id="currentVersionTitle">Loading…</div>
+                    <div class="current-meta" id="currentVersionMeta">—</div>
                 </div>
-                <button class="btn btn-secondary" onclick="viewVersion('v16.4')">View Details</button>
+                <button class="btn btn-secondary" onclick="refreshAll()">↻ Refresh</button>
             </div>
             <div class="timeline" id="timeline">
                 <!-- Versions will be populated here -->
@@ -127,8 +128,22 @@
             <div id="detailsContent">
                 <div class="empty-details">
                     <div class="icon">👆</div>
-                    <p>Select a version to view details</p>
+                    <p>Select a snapshot to view details</p>
                 </div>
+            </div>
+            <div id="comparePanel" style="display:none;margin-top:20px;">
+                <div class="details-card-title">📊 Compare: current vs snapshot</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-height:70vh;">
+                    <div>
+                        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:6px;">Current canonical</div>
+                        <pre id="compareCurrent" style="margin:0;padding:12px;background:var(--bg-dark);border-radius:8px;font-size:10px;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word;border:1px solid var(--border);"></pre>
+                    </div>
+                    <div>
+                        <div style="font-size:10px;color:var(--text-secondary);margin-bottom:6px;"><span id="compareSnapshotLabel">Snapshot</span></div>
+                        <pre id="compareSnapshot" style="margin:0;padding:12px;background:var(--bg-dark);border-radius:8px;font-size:10px;overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-word;border:1px solid var(--border);"></pre>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary" style="margin-top:12px;" onclick="closeCompare()">Close compare</button>
             </div>
         </div>
     </div>
@@ -147,229 +162,212 @@ function _recoverAuth() {
   if (!sessionStorage.getItem('profile')) { var cp = _ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) { try { sessionStorage.setItem('profile', cp); } catch(e){} } }
 }
 _recoverAuth();
-        var versions = [
-            {
-                id: "v16.4",
-                name: "Wisdom v16.4",
-                status: "live",
-                date: "Jan 23, 2026 • 9:00 PM",
-                author: "Admin_Sovereign",
-                entries: 847,
-                changes: [
-                    { type: "add", text: "CBT boundary techniques from Coach Hope" },
-                    { type: "add", text: "Crisis de-escalation patterns" },
-                    { type: "add", text: "Sleep intervention protocols" },
-                    { type: "modify", text: "Updated empathy response templates" }
-                ],
-                notes: "Major update focusing on crisis intervention and boundary setting techniques."
-            },
-            {
-                id: "v16.3",
-                name: "Wisdom v16.3",
-                status: "stable",
-                date: "Jan 18, 2026",
-                author: "Admin_Sovereign",
-                entries: 834,
-                changes: [
-                    { type: "add", text: "Family dynamics analysis module" },
-                    { type: "add", text: "Workplace boundary module" },
-                    { type: "modify", text: "Refined anxiety response patterns" }
-                ],
-                notes: "Added family and workplace modules."
-            },
-            {
-                id: "v16.2",
-                name: "Wisdom v16.2",
-                status: "stable",
-                date: "Jan 15, 2026",
-                author: "Coach_Hope",
-                entries: 821,
-                changes: [
-                    { type: "add", text: "Workplace anxiety module" },
-                    { type: "modify", text: "Minor adjustments to empathy responses" }
-                ],
-                notes: "Workplace anxiety support added."
-            },
-            {
-                id: "v16.1",
-                name: "Wisdom v16.1",
-                status: "stable",
-                date: "Jan 10, 2026",
-                author: "Admin_Sovereign",
-                entries: 812,
-                changes: [
-                    { type: "add", text: "Grief processing techniques" },
-                    { type: "add", text: "Relationship communication patterns" }
-                ],
-                notes: "Grief and relationship support."
-            },
-            {
-                id: "v15.2",
-                name: "Wisdom v15.2",
-                status: "archived",
-                date: "Jan 5, 2026",
-                author: "Admin_Sovereign",
-                entries: 798,
-                changes: [
-                    { type: "remove", text: "Deprecated meditation scripts (replaced)" }
-                ],
-                notes: "⚠️ Known issue: Hallucination in trauma responses. Do not revert."
-            },
-            {
-                id: "v15.1",
-                name: "Wisdom v15.1",
-                status: "archived",
-                date: "Dec 28, 2025",
-                author: "System",
-                entries: 785,
-                changes: [
-                    { type: "add", text: "Initial trauma response protocols" }
-                ],
-                notes: "Legacy version."
-            }
-        ];
 
-        var selectedVersion = null;
+        var ws = null;
+        var profile = {};
+        try {
+            profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
+        } catch (e) { profile = {}; }
+
+        var snapshots = [];
+        var currentWisdom = null;
+        var selectedSnapshotName = null;
+
+        function getWsUrl() {
+            var h = location.hostname, proto = location.protocol === "https:" ? "wss" : "ws";
+            if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+            return proto + "://" + h + "/ws";
+        }
+
+        function setWsBadge(text, ok) {
+            var el = document.getElementById("wsBadge");
+            if (!el) return;
+            el.textContent = text;
+            el.style.color = ok ? "var(--green)" : "var(--text-secondary)";
+        }
+
+        function sendWs(obj) {
+            if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+        }
+
+        function refreshAll() {
+            sendWs({ type: "get_wisdom_snapshots" });
+            sendWs({ type: "get_night_school_wisdom" });
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(getWsUrl());
+            ws.onopen = function () {
+                setWsBadge("Connected", true);
+                ws.send(JSON.stringify({
+                    type: "auth",
+                    token: (sessionStorage.getItem("token") || localStorage.getItem("sc_token")),
+                    hardware_id: profile.hardware_id
+                }));
+                setTimeout(function () {
+                    sendWs({ type: "get_wisdom_snapshots" });
+                    sendWs({ type: "get_night_school_wisdom" });
+                }, 400);
+            };
+            ws.onmessage = function (event) {
+                handleMessage(JSON.parse(event.data));
+            };
+            ws.onclose = function () {
+                setWsBadge("Reconnecting…", false);
+                setTimeout(connectWebSocket, 3000);
+            };
+            ws.onerror = function () { setWsBadge("WS error", false); };
+        }
+
+        function handleMessage(data) {
+            switch (data.type) {
+                case "wisdom_snapshots_list":
+                    snapshots = data.snapshots || [];
+                    renderTimeline();
+                    break;
+                case "night_school_wisdom":
+                    currentWisdom = data.data || data;
+                    if (!currentWisdom.entries) currentWisdom.entries = [];
+                    updateCurrentHeader();
+                    break;
+                case "wisdom_snapshot_content":
+                    showComparePanel(data.name, data.content);
+                    break;
+                case "wisdom_restored":
+                    alert("Restored wisdom from snapshot: " + (data.name || "") + (data.safety_backup ? "\nSafety backup: " + data.safety_backup : ""));
+                    closeCompare();
+                    refreshAll();
+                    break;
+                case "snapshot_created":
+                    alert("Snapshot created: " + (data.name || ""));
+                    sendWs({ type: "get_wisdom_snapshots" });
+                    break;
+                case "error":
+                    alert(data.message || "Error");
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        function updateCurrentHeader() {
+            var n = (currentWisdom && currentWisdom.entries) ? currentWisdom.entries.length : 0;
+            document.getElementById("currentVersionTitle").textContent = n + " wisdom entries (live)";
+            document.getElementById("currentVersionMeta").textContent = "Canonical file on server • Use snapshots below to compare or restore";
+        }
+
+        function esc(s) {
+            return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+        }
+
+        function renderTimeline() {
+            var container = document.getElementById("timeline");
+            if (!snapshots.length) {
+                container.innerHTML = '<div class="version-item"><div class="version-meta">No snapshots yet. Create one from here or from the Wisdom Editor.</div></div>';
+                return;
+            }
+            var html = "";
+            for (var i = 0; i < snapshots.length; i++) {
+                var s = snapshots[i];
+                var name = s.name;
+                var isSel = selectedSnapshotName === name;
+                var sz = (s.size_bytes != null) ? (Math.round(s.size_bytes / 1024) + " KB") : "—";
+                html += '<div class="version-item' + (isSel ? " selected" : "") + '" data-snap="' + esc(name) + '" onclick="selectSnapshot(\'' + name.replace(/'/g, "\\'") + '\')">';
+                html += '<div class="version-header">';
+                html += '<span class="version-name">' + esc(name) + '</span>';
+                html += '<span class="version-badge archived">SNAPSHOT</span>';
+                html += '</div>';
+                html += '<div class="version-meta">' + esc(s.modified_at || "") + " • " + esc(sz) + '</div>';
+                html += '<div class="version-changes"><span class="modified">File in Admin/little_nate_wisdom_snapshots/</span></div>';
+                html += '<div class="version-actions">';
+                html += '<button class="version-btn compare" onclick="event.stopPropagation(); compareSnapshot(\'' + name.replace(/'/g, "\\'") + '\')">📊 Compare</button>';
+                html += '<button class="version-btn revert" onclick="event.stopPropagation(); restoreSnapshot(\'' + name.replace(/'/g, "\\'") + '\')">↩ Restore</button>';
+                html += '</div>';
+                html += '</div>';
+            }
+            container.innerHTML = html;
+        }
+
+        function selectSnapshot(name) {
+            selectedSnapshotName = name;
+            renderTimeline();
+            showDetails(name);
+        }
+
+        function findSnap(name) {
+            for (var i = 0; i < snapshots.length; i++) {
+                if (snapshots[i].name === name) return snapshots[i];
+            }
+            return null;
+        }
+
+        function showDetails(name) {
+            var s = findSnap(name);
+            if (!s) return;
+            var container = document.getElementById("detailsContent");
+            var html = '<div class="stat-grid">';
+            html += '<div class="stat-box"><div class="stat-value purple">' + esc(s.size_bytes) + '</div><div class="stat-label">Size (bytes)</div></div>';
+            html += '<div class="stat-box"><div class="stat-value cyan">' + esc((snapshots.indexOf(s) + 1)) + '</div><div class="stat-label">Index (newest first)</div></div>';
+            html += '</div>';
+            html += '<div class="details-card"><div class="details-card-title">Snapshot</div>';
+            html += '<div style="font-size:12px;line-height:1.8;"><strong>File:</strong> ' + esc(s.name) + '<br>';
+            html += '<strong>Modified (UTC):</strong> ' + esc(s.modified_at) + '<br></div></div>';
+            html += '<div style="display:flex;flex-direction:column;gap:10px;margin-top:16px;">';
+            html += '<button class="btn btn-secondary" onclick="compareSnapshot(\'' + name.replace(/'/g, "\\'") + '\')">📊 Compare with current</button>';
+            html += '<button class="btn btn-success" onclick="restoreSnapshot(\'' + name.replace(/'/g, "\\'") + '\')">↩ Restore this snapshot</button>';
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function compareSnapshot(name) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert("Not connected");
+                return;
+            }
+            selectSnapshot(name);
+            sendWs({ type: "get_wisdom_snapshot_content", name: name });
+        }
+
+        function showComparePanel(name, snapContent) {
+            var cur = currentWisdom || { note: "Load current wisdom (waiting for get_night_school_wisdom)" };
+            document.getElementById("compareCurrent").textContent = JSON.stringify(cur, null, 2);
+            document.getElementById("compareSnapshot").textContent = JSON.stringify(snapContent, null, 2);
+            document.getElementById("compareSnapshotLabel").textContent = "Snapshot: " + name;
+            document.getElementById("comparePanel").style.display = "block";
+            document.getElementById("comparePanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        function closeCompare() {
+            document.getElementById("comparePanel").style.display = "none";
+        }
+
+        function restoreSnapshot(name) {
+            if (!confirm("Restore wisdom from snapshot \"" + name + "\"?\n\nThe current little_nate_wisdom.json will be backed up automatically before replace.")) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert("Not connected");
+                return;
+            }
+            sendWs({ type: "restore_wisdom_snapshot", name: name });
+        }
+
+        function createSnapshot() {
+            var name = prompt("Snapshot name (saved under Admin/little_nate_wisdom_snapshots/):", "pre-edit-" + new Date().toISOString().slice(0, 10));
+            if (!name) return;
+            sendWs({ type: "create_wisdom_snapshot", name: name });
+        }
 
         function init() {
             if (!(sessionStorage.getItem("username") || localStorage.getItem("sc_username"))) {
                 window.location.href = "index.html";
                 return;
             }
-            renderTimeline();
-        }
-
-        function renderTimeline() {
-            var container = document.getElementById("timeline");
-            var html = "";
-            
-            for (var i = 0; i < versions.length; i++) {
-                var v = versions[i];
-                var isCurrent = v.status === "live";
-                var isSelected = selectedVersion === v.id;
-                
-                html += '<div class="version-item ' + (isCurrent ? 'current' : '') + (isSelected ? ' selected' : '') + '" onclick="selectVersion(\'' + v.id + '\')">';
-                html += '<div class="version-header">';
-                html += '<span class="version-name">' + v.name + '</span>';
-                html += '<span class="version-badge ' + v.status + '">' + v.status.toUpperCase() + '</span>';
-                html += '</div>';
-                html += '<div class="version-meta">' + v.date + ' • ' + v.entries + ' entries • By: ' + v.author + '</div>';
-                html += '<div class="version-changes">';
-                for (var j = 0; j < Math.min(v.changes.length, 3); j++) {
-                    var c = v.changes[j];
-                    var prefix = c.type === "add" ? "+" : c.type === "remove" ? "-" : "~";
-                    var colorClass = c.type === "add" ? "added" : c.type === "remove" ? "removed" : "modified";
-                    html += '<span class="' + colorClass + '">' + prefix + ' ' + c.text + '</span><br>';
-                }
-                if (v.changes.length > 3) {
-                    html += '<span style="color:var(--text-secondary)">...and ' + (v.changes.length - 3) + ' more</span>';
-                }
-                html += '</div>';
-                if (!isCurrent) {
-                    html += '<div class="version-actions">';
-                    html += '<button class="version-btn revert" onclick="event.stopPropagation(); revertToVersion(\'' + v.id + '\')">↩ Revert to This</button>';
-                    html += '<button class="version-btn compare" onclick="event.stopPropagation(); compareVersions(\'' + v.id + '\')">📊 Compare</button>';
-                    html += '<button class="version-btn view" onclick="event.stopPropagation(); selectVersion(\'' + v.id + '\')">👁️ View</button>';
-                    html += '</div>';
-                }
-                html += '</div>';
+            if (profile.role !== "ADMIN") {
+                alert("Admin access required");
+                window.location.href = "command.html";
+                return;
             }
-            
-            container.innerHTML = html;
-        }
-
-        function selectVersion(id) {
-            selectedVersion = id;
-            renderTimeline();
-            showDetails(id);
-        }
-
-        function showDetails(id) {
-            var v = versions.find(function(ver) { return ver.id === id; });
-            if (!v) return;
-            
-            var container = document.getElementById("detailsContent");
-            
-            var html = '<div class="stat-grid">';
-            html += '<div class="stat-box"><div class="stat-value purple">' + v.entries + '</div><div class="stat-label">Total Entries</div></div>';
-            html += '<div class="stat-box"><div class="stat-value cyan">' + v.changes.length + '</div><div class="stat-label">Changes</div></div>';
-            html += '</div>';
-            
-            html += '<div class="details-card">';
-            html += '<div class="details-card-title">Version Info</div>';
-            html += '<div style="font-size:12px;line-height:1.8;">';
-            html += '<strong>Version:</strong> ' + v.name + '<br>';
-            html += '<strong>Status:</strong> <span class="version-badge ' + v.status + '" style="vertical-align:middle;">' + v.status.toUpperCase() + '</span><br>';
-            html += '<strong>Date:</strong> ' + v.date + '<br>';
-            html += '<strong>Author:</strong> ' + v.author + '<br>';
-            html += '</div></div>';
-            
-            html += '<div class="details-card">';
-            html += '<div class="details-card-title">Changes in this Version</div>';
-            html += '<div class="change-list">';
-            for (var i = 0; i < v.changes.length; i++) {
-                var c = v.changes[i];
-                var icon = c.type === "add" ? "➕" : c.type === "remove" ? "➖" : "✏️";
-                html += '<div class="change-item">';
-                html += '<div class="change-icon ' + c.type + '">' + icon + '</div>';
-                html += '<span>' + c.text + '</span>';
-                html += '</div>';
-            }
-            html += '</div></div>';
-            
-            html += '<div class="details-card">';
-            html += '<div class="details-card-title">Notes</div>';
-            html += '<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">' + v.notes + '</div>';
-            html += '</div>';
-            
-            if (v.status !== "live") {
-                html += '<div style="display:flex;flex-direction:column;gap:10px;margin-top:20px;">';
-                html += '<button class="btn btn-success" onclick="revertToVersion(\'' + v.id + '\')">↩ Revert to ' + v.name + '</button>';
-                html += '<button class="btn btn-secondary" onclick="compareVersions(\'' + v.id + '\')">📊 Compare with Current</button>';
-                html += '</div>';
-            }
-            
-            container.innerHTML = html;
-        }
-
-        function createSnapshot() {
-            var name = prompt("Enter snapshot name:", "Wisdom v16.5");
-            if (name) {
-                alert("Snapshot '" + name + "' created successfully!\n\nThis will be saved as a restore point before making changes.");
-            }
-        }
-
-        function revertToVersion(id) {
-            var v = versions.find(function(ver) { return ver.id === id; });
-            if (!v) return;
-            
-            if (v.status === "archived" && v.notes.indexOf("⚠️") >= 0) {
-                if (!confirm("WARNING: This version has known issues:\n\n" + v.notes + "\n\nAre you sure you want to revert?")) {
-                    return;
-                }
-            }
-            
-            if (confirm("Revert to " + v.name + "?\n\nThis will replace the current wisdom with " + v.entries + " entries.\n\nA snapshot of the current version will be created automatically.")) {
-                alert("Reverting to " + v.name + "...\n\n✓ Snapshot created\n✓ Wisdom file replaced\n✓ Nate AI reloaded\n\nRevert complete!");
-                // In production, this would call the backend
-            }
-        }
-
-        function compareVersions(id) {
-            var v = versions.find(function(ver) { return ver.id === id; });
-            if (!v) return;
-            
-            var current = versions[0];
-            var diff = current.entries - v.entries;
-            var diffText = diff > 0 ? "+" + diff : diff.toString();
-            
-            alert("Comparing " + v.name + " with " + current.name + "\n\n" +
-                  "Entries: " + v.entries + " → " + current.entries + " (" + diffText + ")\n\n" +
-                  "In production, this would show a detailed diff view.");
-        }
-
-        function viewVersion(id) {
-            selectVersion(id);
+            document.getElementById("currentVersionTitle").textContent = "Connecting…";
+            connectWebSocket();
         }
 
         window.onload = init;
