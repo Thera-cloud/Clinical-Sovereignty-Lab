@@ -6042,6 +6042,7 @@ class NightSchool:
         self.root = root
         self.wisdom_file = root / "Admin" / "little_nate_wisdom.json"
         self.learnings_file = root / "Admin" / "learning_history.json"
+        self.db_pool = None  # set when bridge creates asyncpg pool
     
     def load_wisdom(self) -> str:
         if not self.wisdom_file.exists():
@@ -6108,15 +6109,18 @@ class NightSchool:
 
     def add_learning(self, content: str, source: str, filename: str = "", 
                     category: str = "general"):
-        """Add a new learning entry"""
+        """Append a raw learning to learning_history.json (deduped). Merged into
+        little_nate_wisdom.json + night_school_wisdom (PG) by _synthesize_learnings."""
         learnings = load_json_file(self.learnings_file, [])
-        
+        if not isinstance(learnings, list):
+            learnings = []
+
         # Check for duplicates
         content_hash = hashlib.md5(content.encode()).hexdigest()
         for entry in learnings:
             if entry.get("content_hash") == content_hash:
                 return  # Skip duplicate
-        
+
         entry = {
             "id": secrets.token_hex(8),
             "content": content,
@@ -6129,43 +6133,134 @@ class NightSchool:
             "effectiveness_score": 0.5,
             "deprecated": False
         }
-        
+
         learnings.append(entry)
         save_json_file(self.learnings_file, learnings[-1000:])  # Keep last 1000
 
     async def _synthesize_learnings(self):
-        """Synthesize learnings into accumulated wisdom"""
+        """Merge ingestion learnings into little_nate_wisdom.json (append-only; editor CRUD entries preserved)."""
         learnings = load_json_file(self.learnings_file, [])
-        
-        if not learnings:
+        if not isinstance(learnings, list) or not learnings:
             return
-        
-        # Get recent, non-deprecated learnings
+
         active_learnings = [l for l in learnings if not l.get("deprecated", False)]
-        recent = active_learnings[-50:]  # Last 50 entries
-        
-        # Create synthesis (in production, this would use AI)
-        synthesis_parts = []
-        
-        # Group by category
-        categories = {}
+        recent = active_learnings[-50:]
+
+        # Load existing wisdom from disk (same paths as editor CRUD) — never replace whole file blindly.
+        existing = self.get_wisdom_structured()
+        if not isinstance(existing, dict):
+            existing = {"accumulated_learnings": "", "entries": [], "last_synthesis": ""}
+        entries = existing.get("entries")
+        if not isinstance(entries, list):
+            entries = []
+
+        merged_learning_ids = set()
+        for e in entries:
+            if isinstance(e, dict) and e.get("ingestion_learning_id"):
+                merged_learning_ids.add(e["ingestion_learning_id"])
+
+        max_entry_id = 0
+        for e in entries:
+            if isinstance(e, dict):
+                try:
+                    max_entry_id = max(max_entry_id, int(e.get("id", 0)))
+                except (TypeError, ValueError):
+                    pass
+
+        new_rows_pg: List[Tuple[str, str, str, str, float]] = []
+        added_any = False
+
+        for l in recent:
+            lid = l.get("id")
+            if not lid or lid in merged_learning_ids:
+                continue
+            max_entry_id += 1
+            raw_content = (l.get("content") or "")[:2000]
+            src = str(l.get("source", "night_school"))[:200]
+            cat = (l.get("category", "general") or "general")[:128]
+            conf = float(l.get("effectiveness_score", 0.5) or 0.5)
+            ent = {
+                "id": max_entry_id,
+                "category": cat,
+                "source": src,
+                "content": raw_content,
+                "confidence": conf,
+                "approved": True,
+                "timestamp": l.get("timestamp") or str(datetime.datetime.now()),
+                "ingestion_learning_id": lid,
+            }
+            entries.append(ent)
+            merged_learning_ids.add(lid)
+            added_any = True
+            new_rows_pg.append((f"ns_{lid}", cat, raw_content, src, conf))
+
+        if not added_any:
+            return
+
+        categories: Dict[str, List[str]] = {}
         for l in recent:
             cat = l.get("category", "general")
             if cat not in categories:
                 categories[cat] = []
-            categories[cat].append(l["content"][:200])
-        
+            categories[cat].append((l.get("content") or "")[:200])
+
+        synthesis_parts = []
         for cat, contents in categories.items():
-            synthesis_parts.append(f"[{cat.upper()}]: {'; '.join(contents[:5])}")
-        
-        wisdom_data = {
-            "accumulated_learnings": "\n".join(synthesis_parts),
-            "entries_count": len(active_learnings),
-            "last_synthesis": str(datetime.datetime.now()),
-            "categories": list(categories.keys())
-        }
-        
-        save_json_file(self.wisdom_file, wisdom_data)
+            synthesis_parts.append(f"[{str(cat).upper()}]: {'; '.join(contents[:5])}")
+
+        synth_block = "\n".join(synthesis_parts)
+        ts = str(datetime.datetime.now())
+
+        if synth_block:
+            old_acc = (existing.get("accumulated_learnings") or "").strip()
+            marker = f"\n\n--- Night School synthesis {ts} ---\n"
+            existing["accumulated_learnings"] = (old_acc + marker + synth_block).strip()
+
+        existing["entries"] = entries
+        existing["last_synthesis"] = ts
+        existing["entries_count"] = len(entries)
+        cat_list = existing.get("categories")
+        if not isinstance(cat_list, list):
+            cat_list = []
+        for c in categories.keys():
+            if c not in cat_list:
+                cat_list.append(c)
+        existing["categories"] = cat_list
+
+        save_json_file(self.wisdom_file, existing)
+
+        pool = getattr(self, "db_pool", None)
+        if pool and new_rows_pg:
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS night_school_wisdom (
+                            id SERIAL PRIMARY KEY,
+                            entry_id VARCHAR UNIQUE,
+                            category VARCHAR,
+                            content TEXT,
+                            source_tag VARCHAR,
+                            confidence FLOAT DEFAULT 0.5,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                        """
+                    )
+                    for entry_id, cat, content, source_tag, confidence in new_rows_pg:
+                        await conn.execute(
+                            """
+                            INSERT INTO night_school_wisdom (entry_id, category, content, source_tag, confidence)
+                            VALUES ($1, $2, $3, $4, $5)
+                            ON CONFLICT (entry_id) DO NOTHING
+                            """,
+                            entry_id,
+                            cat,
+                            content,
+                            source_tag,
+                            confidence,
+                        )
+            except Exception as pg_err:
+                print(f">>> [NIGHT SCHOOL] night_school_wisdom PG write failed (non-fatal): {pg_err}")
 
     def get_coach_contribution(self, coach_id: str) -> dict:
         """Get learning contributions from a specific coach"""
@@ -6456,6 +6551,101 @@ class AnalyticsEngine:
         watchlist.sort(key=lambda x: risk_order.get(x["risk_level"], 3))
         
         return watchlist
+
+
+def _cohort_time_range_since(time_range: Optional[str]) -> Optional[datetime.datetime]:
+    tr = (time_range or "all").strip().lower()
+    if tr in ("30d", "30"):
+        return datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
+    if tr in ("90d", "90"):
+        return datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=90)
+    return None
+
+
+def _cohort_parse_dob_age(dob_raw) -> Optional[int]:
+    """Full years from DOB; None if missing or unparseable."""
+    if dob_raw is None:
+        return None
+    s = str(dob_raw).strip()
+    if not s:
+        return None
+    parsed_date = None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+        try:
+            parsed_date = datetime.datetime.strptime(s[:10], fmt).date()
+            break
+        except ValueError:
+            continue
+    if parsed_date is None:
+        try:
+            parsed_date = datetime.date.fromisoformat(s[:10])
+        except ValueError:
+            return None
+    today = datetime.date.today()
+    age = today.year - parsed_date.year - (
+        (today.month, today.day) < (parsed_date.month, parsed_date.day)
+    )
+    if age < 0 or age > 125:
+        return None
+    return age
+
+
+def _cohort_age_bucket(age: Optional[int]) -> str:
+    """Labels aligned with nevedal_lab_cohort.html checkboxes (plus Under 18 / Unknown)."""
+    if age is None:
+        return "Unknown"
+    if age < 18:
+        return "Under 18"
+    if age < 26:
+        return "18-25"
+    if age < 36:
+        return "26-35"
+    if age < 51:
+        return "36-50"
+    return "51+"
+
+
+async def _cohort_nevedal_first_last_c_emo(conn, user_ids: List, since: Optional[datetime.datetime]):
+    """First and last c_emo per user in nevedal_metrics (optionally since UTC). Keys: str(uuid)."""
+    first_map: Dict[str, float] = {}
+    last_map: Dict[str, float] = {}
+    if not user_ids:
+        return first_map, last_map
+    try:
+        rows_first = await conn.fetch(
+            """
+            SELECT DISTINCT ON (user_id) user_id::text AS uid, c_emo::float8 AS c_emo
+            FROM nevedal_metrics
+            WHERE user_id = ANY($1::uuid[])
+              AND c_emo IS NOT NULL
+              AND ($2::timestamptz IS NULL OR recorded_at >= $2)
+            ORDER BY user_id, recorded_at ASC
+            """,
+            user_ids,
+            since,
+        )
+        for r in rows_first:
+            if r["c_emo"] is not None:
+                first_map[r["uid"]] = float(r["c_emo"])
+        rows_last = await conn.fetch(
+            """
+            SELECT DISTINCT ON (user_id) user_id::text AS uid, c_emo::float8 AS c_emo
+            FROM nevedal_metrics
+            WHERE user_id = ANY($1::uuid[])
+              AND c_emo IS NOT NULL
+              AND ($2::timestamptz IS NULL OR recorded_at >= $2)
+            ORDER BY user_id, recorded_at DESC
+            """,
+            user_ids,
+            since,
+        )
+        for r in rows_last:
+            if r["c_emo"] is not None:
+                last_map[r["uid"]] = float(r["c_emo"])
+    except Exception as e:
+        logging.getLogger("bridge").warning("cohort nevedal first/last fetch failed: %s", e)
+    return first_map, last_map
+
 
 # ------------------------------------------------------------------------------
 # PART 9b: CHAT MEMORY PERSISTENCE + DEEP MEMORY SEARCH  # SOVEREIGN-VOICE
@@ -9937,15 +10127,83 @@ sanctuary_engine = FamilySanctuaryEngine(
     analytics_engine=analytics_engine
 )
 
+
+def _token_source_modality_bucket(source: str) -> str:
+    """Map token_transactions.source to a coarse modality bucket for admin UI (not provider truth)."""
+    s = (source or "unknown").lower()
+    if any(x in s for x in ("vision", "gpt4v", "biometric", "facial", "camera", "image")):
+        return "vision"
+    if any(x in s for x in ("voice", "whisper", "tts", "xtts", "speech")):
+        return "voice"
+    return "text"
+
+
+async def _augment_stats_for_admin_dashboard(base_stats: dict) -> dict:
+    """Token budget (env), optional PG ledger splits, and configured cost estimate for The Eye / admin UIs."""
+    out = dict(base_stats)
+    try:
+        out["token_monthly_budget"] = int(os.environ.get("TOKEN_MONTHLY_BUDGET", "500000"))
+    except (TypeError, ValueError):
+        out["token_monthly_budget"] = 500000
+    out["token_estimated_cost_per_token_usd"] = 0.00001
+    out["token_usage_by_source_month"] = {}
+    out["token_modality_month"] = {"voice": 0, "text": 0, "vision": 0}
+    out["token_modality_split_basis"] = "estimated"
+    pool = globals().get("db_pool")
+    if not pool:
+        return out
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT COALESCE(NULLIF(TRIM(source), ''), 'unknown') AS src,
+                       COALESCE(SUM(ABS(amount)), 0)::bigint AS tokens
+                FROM token_transactions
+                WHERE created_at >= date_trunc('month', timezone('UTC', now()))
+                  AND action IN ('deduct', 'usage')
+                GROUP BY 1
+                ORDER BY tokens DESC
+                """
+            )
+            by_src = {r["src"]: int(r["tokens"]) for r in rows}
+            out["token_usage_by_source_month"] = by_src
+            v_t = te = vi = 0
+            for src, tok in by_src.items():
+                b = _token_source_modality_bucket(src)
+                if b == "vision":
+                    vi += tok
+                elif b == "voice":
+                    v_t += tok
+                else:
+                    te += tok
+            out["token_modality_month"] = {"voice": v_t, "text": te, "vision": vi}
+            if v_t + te + vi > 0:
+                out["token_modality_split_basis"] = "ledger_mapped"
+            try:
+                crow = await conn.fetchrow(
+                    "SELECT cost_per_token::float8 AS cpt FROM token_cost_config "
+                    "ORDER BY effective_from DESC LIMIT 1"
+                )
+                if crow and crow.get("cpt") is not None:
+                    out["token_estimated_cost_per_token_usd"] = float(crow["cpt"])
+            except Exception:
+                pass
+    except Exception as e:
+        logging.getLogger("bridge").warning("admin stats token augmentation failed: %s", e)
+    return out
+
+
 async def _broadcast_admin_stats():
     """Push updated dashboard stats to all connected ADMIN users.
     Called on every login/disconnect so Sovereign Command stays real-time."""
     try:
         stats = analytics_engine.get_dashboard_stats()
         watchlist = analytics_engine.get_crisis_watchlist()
+        stats_out = await _augment_stats_for_admin_dashboard(stats)
+        stats_out["crisis_watchlist"] = watchlist
         payload = json.dumps({
             "type": "admin_stats",
-            "stats": stats,
+            "stats": stats_out,
             "crisis_watchlist": watchlist,
         })
         # connected_coaches includes ADMIN-role users (they share the same dict)
@@ -14130,9 +14388,13 @@ async def handle_client(websocket, path=None):
                 if current_profile and current_profile.get("role") == "ADMIN":
                     stats = analytics_engine.get_dashboard_stats()
                     watchlist = analytics_engine.get_crisis_watchlist()
+                    # Nest watchlist inside stats for Eye dashboards that read stats.crisis_watchlist.
+                    # Keep top-level crisis_watchlist for command.html / legacy clients.
+                    stats_out = await _augment_stats_for_admin_dashboard(stats)
+                    stats_out["crisis_watchlist"] = watchlist
                     await websocket.send(json.dumps({
                         "type": "admin_stats",
-                        "stats": stats,
+                        "stats": stats_out,
                         "crisis_watchlist": watchlist,
                         "online_coach_ids": list(connected_coaches.keys()),
                         "online_client_ids": list(connected_clients.keys()),
@@ -20776,14 +21038,28 @@ Coach Reflection on Session {session_id}:
             elif t == "admin_get_cohort_stats":
                 if current_profile and current_profile.get("role") == "ADMIN":
                   try:
-                    filters = d.get("filters", {})
-                    age_groups = filters.get("age_groups", ["18-25", "26-35", "36-50", "51+"])
-                    diagnoses = filters.get("diagnoses", ["anxiety", "depression", "ptsd", "none"])
-                    treatment_types = filters.get("treatment_types", ["ai_only", "ai_coach", "family"])
+                    filters = d.get("filters", {}) or {}
+                    time_range = filters.get("time_range") or "all"
+                    since = _cohort_time_range_since(time_range)
 
-                    by_age_group = {ag: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0} for ag in age_groups}
-                    by_diagnosis = {dx: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0, "improvement": "+0%"} for dx in diagnoses}
-                    by_treatment = {tx: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0, "effectiveness": "baseline"} for tx in treatment_types}
+                    age_groups = filters.get("age_groups")
+                    if not age_groups:
+                        age_groups = ["Under 18", "18-25", "26-35", "36-50", "51+", "Unknown"]
+                    diagnoses = filters.get("diagnoses")
+                    if not diagnoses:
+                        diagnoses = ["anxiety", "depression", "ptsd", "none"]
+                    treatment_types = filters.get("treatment_types")
+                    if not treatment_types:
+                        treatment_types = ["ai_only", "ai_coach", "family"]
+
+                    def _cohort_norm_dx(raw):
+                        d0 = (raw or "none").strip().lower()
+                        return d0 if d0 in diagnoses else "none"
+
+                    by_age_group = {ag: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0, "sessions": 0} for ag in age_groups}
+                    by_diagnosis = {dx: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0} for dx in diagnoses}
+                    by_treatment = {tx: {"avg_c_emo": 0, "count": 0, "total_c_emo": 0} for tx in treatment_types}
+                    dx_improvements = {dx: [] for dx in diagnoses}
 
                     total_c_emo = 0.0
                     count = 0
@@ -20796,12 +21072,14 @@ Coach Reflection on Session {session_id}:
                     shame_index_count = 0
 
                     _cohort_used_pg = False
+                    first_c_map: Dict[str, float] = {}
+                    last_c_map: Dict[str, float] = {}
 
                     if db_pool:
                         try:
                             async with db_pool.acquire() as _cconn:
                                 _crows = await _cconn.fetch("""
-                                    SELECT u.hardware_id, u.profile_data,
+                                    SELECT u.id, u.hardware_id, u.profile_data,
                                            cm.c_emo, cm.gap, cm.quantum,
                                            cm.anxiety_level, cm.stress_level, cm.engagement,
                                            cm.session_count, cm.breakthrough_count,
@@ -20811,16 +21089,38 @@ Coach Reflection on Session {session_id}:
                                     LEFT JOIN client_metrics cm ON cm.hardware_id = u.hardware_id
                                     WHERE u.role = 'CLIENT' AND u.deleted_at IS NULL
                                 """)
+                                _uids = [r["id"] for r in _crows if r.get("id")]
+                                first_c_map, last_c_map = await _cohort_nevedal_first_last_c_emo(_cconn, _uids, since)
 
                                 for _cr in _crows:
-                                    _has_cm = _cr["c_emo"] is not None
                                     hw_id = _cr["hardware_id"]
-
                                     _pd = _cr["profile_data"] or {}
                                     if isinstance(_pd, str):
-                                        try: _pd = json.loads(_pd)
-                                        except Exception: _pd = {}
+                                        try:
+                                            _pd = json.loads(_pd)
+                                        except Exception:
+                                            _pd = {}
 
+                                    dob = _pd.get("dob") or _pd.get("date_of_birth")
+                                    age = _cohort_parse_dob_age(dob)
+                                    age_group = _cohort_age_bucket(age)
+                                    if age_group not in age_groups:
+                                        continue
+
+                                    diagnosis = _cohort_norm_dx(_pd.get("diagnosis"))
+                                    if diagnosis not in diagnoses:
+                                        continue
+
+                                    if _pd.get("assigned_coach_id"):
+                                        tx_type = "ai_coach"
+                                    elif _pd.get("family_id"):
+                                        tx_type = "family"
+                                    else:
+                                        tx_type = "ai_only"
+                                    if tx_type not in treatment_types:
+                                        continue
+
+                                    _has_cm = _cr["c_emo"] is not None
                                     if _has_cm:
                                         c_emo_val = float(_cr["c_emo"] or 0)
                                         _cp_raw = _cr["crisis_perception"] or {}
@@ -20852,6 +21152,20 @@ Coach Reflection on Session {session_id}:
                                             c_emo_val = 0.5
                                             _cp_raw, _sp_raw, _pmb_raw, _ns_raw = {}, {}, {}, {}
 
+                                    uid = _cr.get("id")
+                                    uid_s = str(uid) if uid else ""
+                                    if uid_s and last_c_map.get(uid_s) is not None:
+                                        c_emo_val = float(last_c_map[uid_s])
+
+                                    imp = None
+                                    if uid_s:
+                                        fc = first_c_map.get(uid_s)
+                                        lc = last_c_map.get(uid_s)
+                                        if fc is not None and lc is not None and float(fc) > 1e-6:
+                                            imp = (float(lc) - float(fc)) / float(fc) * 100.0
+                                    if imp is not None:
+                                        dx_improvements[diagnosis].append(imp)
+
                                     total_c_emo += c_emo_val
                                     count += 1
 
@@ -20882,25 +21196,16 @@ Coach Reflection on Session {session_id}:
                                     else:
                                         confidence_tiers["LEARNING"] += 1
 
-                                    age_group = "26-35"
-                                    if age_group in by_age_group:
-                                        by_age_group[age_group]["total_c_emo"] += c_emo_val
-                                        by_age_group[age_group]["count"] += 1
+                                    by_age_group[age_group]["total_c_emo"] += c_emo_val
+                                    by_age_group[age_group]["count"] += 1
+                                    if _has_cm and _cr.get("session_count") is not None:
+                                        by_age_group[age_group]["sessions"] += int(_cr["session_count"] or 0)
 
-                                    diagnosis = _pd.get("diagnosis", "none")
-                                    if diagnosis in by_diagnosis:
-                                        by_diagnosis[diagnosis]["total_c_emo"] += c_emo_val
-                                        by_diagnosis[diagnosis]["count"] += 1
+                                    by_diagnosis[diagnosis]["total_c_emo"] += c_emo_val
+                                    by_diagnosis[diagnosis]["count"] += 1
 
-                                    if _pd.get("assigned_coach_id"):
-                                        tx_type = "ai_coach"
-                                    elif _pd.get("family_id"):
-                                        tx_type = "family"
-                                    else:
-                                        tx_type = "ai_only"
-                                    if tx_type in by_treatment:
-                                        by_treatment[tx_type]["total_c_emo"] += c_emo_val
-                                        by_treatment[tx_type]["count"] += 1
+                                    by_treatment[tx_type]["total_c_emo"] += c_emo_val
+                                    by_treatment[tx_type]["count"] += 1
 
                             _cohort_used_pg = True
                             print(f"[Cohort] PG pipeline: {count} clients from client_metrics")
@@ -20909,6 +21214,24 @@ Coach Reflection on Session {session_id}:
                             _cohort_used_pg = False
 
                     if not _cohort_used_pg:
+                        first_c_map, last_c_map = {}, {}
+                        hw_to_uuid: Dict[str, Any] = {}
+                        if db_pool:
+                            try:
+                                async with db_pool.acquire() as _vconn:
+                                    _urows = await _vconn.fetch(
+                                        "SELECT id, hardware_id FROM users WHERE role = 'CLIENT' AND deleted_at IS NULL"
+                                    )
+                                    for _ur in _urows:
+                                        _hid = _ur.get("hardware_id")
+                                        if _hid:
+                                            hw_to_uuid[str(_hid)] = _ur["id"]
+                                    _vuids = list({v for v in hw_to_uuid.values() if v})
+                                    first_c_map, last_c_map = await _cohort_nevedal_first_last_c_emo(_vconn, _vuids, since)
+                            except Exception as _vault_ne:
+                                logging.getLogger("bridge").warning("cohort vault nevedal lookup: %s", _vault_ne)
+                                first_c_map, last_c_map = {}, {}
+
                         registry = load_registry()
                         all_clients = []
                         for k, v in registry.items():
@@ -20918,9 +21241,45 @@ Coach Reflection on Session {session_id}:
 
                         for client in all_clients:
                             try:
+                                dob = client.get("dob") or client.get("date_of_birth")
+                                age = _cohort_parse_dob_age(dob)
+                                age_group = _cohort_age_bucket(age)
+                                if age_group not in age_groups:
+                                    continue
+
+                                diagnosis = _cohort_norm_dx(client.get("diagnosis"))
+                                if diagnosis not in diagnoses:
+                                    continue
+
+                                if client.get("assigned_coach_id"):
+                                    tx_type = "ai_coach"
+                                elif client.get("family_id"):
+                                    tx_type = "family"
+                                else:
+                                    tx_type = "ai_only"
+                                if tx_type not in treatment_types:
+                                    continue
+
                                 cm = metrics_engine.load_metrics({"role": "CLIENT", "hardware_id": client.get("hardware_id")})
                                 ns = cm.get("nevedal_state", {}) if isinstance(cm, dict) else {}
                                 c_emo_val = float(ns.get("C_emo", 0.5))
+
+                                _hw = client.get("hardware_id")
+                                uid_s = ""
+                                if _hw and hw_to_uuid:
+                                    uid_s = str(hw_to_uuid.get(str(_hw), ""))
+                                if uid_s and last_c_map.get(uid_s) is not None:
+                                    c_emo_val = float(last_c_map[uid_s])
+
+                                imp = None
+                                if uid_s:
+                                    fc = first_c_map.get(uid_s)
+                                    lc = last_c_map.get(uid_s)
+                                    if fc is not None and lc is not None and float(fc) > 1e-6:
+                                        imp = (float(lc) - float(fc)) / float(fc) * 100.0
+                                if imp is not None:
+                                    dx_improvements[diagnosis].append(imp)
+
                                 total_c_emo += c_emo_val
                                 count += 1
 
@@ -20953,23 +21312,19 @@ Coach Reflection on Session {session_id}:
                                 if isinstance(cee_list, list):
                                     total_cees_all += len(cee_list)
 
-                                age_group = "26-35"
-                                if age_group in by_age_group:
-                                    by_age_group[age_group]["total_c_emo"] += c_emo_val
-                                    by_age_group[age_group]["count"] += 1
-                                diagnosis = client.get("diagnosis", "none")
-                                if diagnosis in by_diagnosis:
-                                    by_diagnosis[diagnosis]["total_c_emo"] += c_emo_val
-                                    by_diagnosis[diagnosis]["count"] += 1
-                                if client.get("assigned_coach_id"):
-                                    tx_type = "ai_coach"
-                                elif client.get("family_id"):
-                                    tx_type = "family"
-                                else:
-                                    tx_type = "ai_only"
-                                if tx_type in by_treatment:
-                                    by_treatment[tx_type]["total_c_emo"] += c_emo_val
-                                    by_treatment[tx_type]["count"] += 1
+                                by_age_group[age_group]["total_c_emo"] += c_emo_val
+                                by_age_group[age_group]["count"] += 1
+                                try:
+                                    _sc = int(ns.get("session_count") or 0)
+                                except Exception:
+                                    _sc = 0
+                                by_age_group[age_group]["sessions"] += _sc
+
+                                by_diagnosis[diagnosis]["total_c_emo"] += c_emo_val
+                                by_diagnosis[diagnosis]["count"] += 1
+
+                                by_treatment[tx_type]["total_c_emo"] += c_emo_val
+                                by_treatment[tx_type]["count"] += 1
                             except Exception:
                                 pass
                         print(f"[Cohort] Vault fallback: {count} clients from JSON")
@@ -20982,24 +21337,21 @@ Coach Reflection on Session {session_id}:
                     for dx in by_diagnosis:
                         if by_diagnosis[dx]["count"] > 0:
                             by_diagnosis[dx]["avg_c_emo"] = round(by_diagnosis[dx]["total_c_emo"] / by_diagnosis[dx]["count"], 2)
-                            if dx == "anxiety": by_diagnosis[dx]["improvement"] = "+12%"
-                            elif dx == "depression": by_diagnosis[dx]["improvement"] = "+8%"
-                            elif dx == "ptsd": by_diagnosis[dx]["improvement"] = "+15%"
-                            else: by_diagnosis[dx]["improvement"] = "+5%"
+                        vals = dx_improvements.get(dx, [])
+                        if vals:
+                            by_diagnosis[dx]["change_pct"] = int(round(sum(vals) / len(vals)))
 
-                    baseline = 0.59
                     for tx in by_treatment:
                         if by_treatment[tx]["count"] > 0:
-                            avg = round(by_treatment[tx]["total_c_emo"] / by_treatment[tx]["count"], 2)
-                            by_treatment[tx]["avg_c_emo"] = avg
-                            if tx == "ai_only":
-                                by_treatment[tx]["effectiveness"] = "baseline"
-                                baseline = avg
-                            else:
-                                improvement = ((avg - baseline) / baseline) * 100 if baseline > 0 else 0
-                                by_treatment[tx]["effectiveness"] = f"+{int(improvement)}%"
+                            by_treatment[tx]["avg_c_emo"] = round(
+                                by_treatment[tx]["total_c_emo"] / by_treatment[tx]["count"], 2
+                            )
 
                     key_insights = []
+                    if count > 0 and not any(dx_improvements.get(dx) for dx in diagnoses):
+                        key_insights.append(
+                            "Diagnosis change vs baseline: insufficient longitudinal C_emo in nevedal_metrics for the selected time window."
+                        )
                     if by_age_group:
                         best_age = max(by_age_group.items(), key=lambda x: x[1].get("avg_c_emo", 0))
                         if best_age[1].get("avg_c_emo", 0) > 0:
@@ -27869,6 +28221,7 @@ async def main():
             parietal.db_pool = db_pool  # MetricsEngine → client_metrics PG table
             session_tracker.db_pool = db_pool  # SessionTracker → sessions PG table
             billing_system_internal.db_pool = db_pool  # BillingSystem → PG-backed reads
+            night_school.db_pool = db_pool  # Night School synthesis → night_school_wisdom PG table
             if _queens_guard:  # QUANTUM-CRYSTAL-ARCH — Layer 9
                 _queens_guard.db_pool = db_pool
             # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE engine
