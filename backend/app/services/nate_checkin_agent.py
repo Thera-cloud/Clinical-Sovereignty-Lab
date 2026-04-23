@@ -541,7 +541,7 @@ class NateCheckInAgent:
         parts = []
         async with self.db_pool.acquire() as conn:
             feedback = await conn.fetch("""
-                SELECT cm.content, cm.metadata, cm.created_at
+                SELECT cm.content, cm.score, cm.created_at
                 FROM coaching_mesh_messages cm
                 JOIN coaching_mesh_participants cp ON cp.session_id = cm.session_id
                 JOIN users u ON u.id::text = cp.user_id OR u.username = cp.user_id
@@ -553,33 +553,39 @@ class NateCheckInAgent:
             """, username)
 
             for row in feedback:
-                meta = row["metadata"] or {}
-                if isinstance(meta, str):
-                    try:
-                        meta = json.loads(meta)
-                    except Exception:
-                        meta = {}
-                score = meta.get("score", "")
-                dimensions = meta.get("rubric_scores", {})
+                score = row["score"]
                 snippet = (row["content"] or "")[:200]
-                dim_str = ", ".join(f"{k}: {v}" for k, v in dimensions.items()) if dimensions else ""
-                parts.append(f"- Feedback (score {score}): {snippet}")
-                if dim_str:
-                    parts.append(f"  Dimensions: {dim_str}")
+                if score is not None:
+                    parts.append(f"- Feedback (score {score}): {snippet}")
+                else:
+                    parts.append(f"- Feedback: {snippet}")
 
             mentor_obs = await conn.fetch("""
-                SELECT content, metadata, created_at
-                FROM dojo_mentor_interactions
-                WHERE coach_username = $1
-                  AND interaction_type = 'observation'
-                  AND created_at > NOW() - INTERVAL '30 days'
-                ORDER BY created_at DESC
+                SELECT di.content, di.dojo_lens, di.created_at
+                FROM dojo_mentor_interactions di
+                JOIN dojo_mentor_sessions dms ON dms.session_id = di.session_id
+                WHERE di.interaction_type = 'observation'
+                  AND di.created_at > NOW() - INTERVAL '30 days'
+                  AND (
+                      dms.coach_user_id = $1
+                      OR dms.coach_user_id = (
+                          SELECT u.hardware_id FROM users u WHERE u.username = $1 LIMIT 1
+                      )
+                      OR dms.coach_user_id = (
+                          SELECT u.id::text FROM users u WHERE u.username = $1 LIMIT 1
+                      )
+                  )
+                ORDER BY di.created_at DESC
                 LIMIT 3
             """, username)
 
             for row in mentor_obs:
                 snippet = (row["content"] or "")[:200]
-                parts.append(f"- Mentor observation: {snippet}")
+                lens = row["dojo_lens"] or ""
+                if lens:
+                    parts.append(f"- Mentor observation ({lens}): {snippet}")
+                else:
+                    parts.append(f"- Mentor observation: {snippet}")
 
         return "\n".join(parts) if parts else ""
 
