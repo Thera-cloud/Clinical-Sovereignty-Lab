@@ -81,6 +81,36 @@ _profile_cache: Dict[str, Tuple[float, Dict]] = {}
 _CACHE_TTL = 3600
 
 
+async def _enrich_profile_coaching_calibration(profile: dict, user_id: str, db_pool) -> None:
+    """Attach Coach-Story Bridge calibration for Thera-World narrative (additive)."""
+    if not db_pool:
+        profile["_coaching_calibration"] = {"has_coach": False, "overrides": {}}
+        return
+    try:
+        from app.sse.adapters.coach_story_bridge import CoachStoryBridge
+
+        bridge = CoachStoryBridge(db_pool)
+        profile["_coaching_calibration"] = await bridge.get_coaching_calibration(user_id)
+    except Exception as e:
+        logger.warning("TheraWorld: coaching calibration failed for %s: %s", user_id, e)
+        profile["_coaching_calibration"] = {"has_coach": False, "overrides": {}}
+
+
+async def _enrich_profile_assessment_calibration(profile: dict, user_id: str, db_pool) -> None:
+    """Attach Assessment Bridge calibration for Thera-World narrative (additive)."""
+    if not db_pool:
+        profile["_assessment_calibration"] = {"has_assessments": False}
+        return
+    try:
+        from app.sse.adapters.assessment_bridge import AssessmentBridge
+
+        ab = AssessmentBridge(db_pool)
+        profile["_assessment_calibration"] = await ab.get_assessment_calibration(user_id)
+    except Exception as e:
+        logger.warning("TheraWorld: assessment calibration failed for %s: %s", user_id, e)
+        profile["_assessment_calibration"] = {"has_assessments": False}
+
+
 async def get_or_create_journey(user_id: str, db_pool) -> dict:
     """Get existing journey or create one for a new user."""
     async with db_pool.acquire() as conn:
@@ -218,6 +248,8 @@ async def compose_journey_narrative(
     crystal_summaries = "; ".join(profile.get("recent_crystals", [])[:3]) or "beginning their journey"
     quest_goal = profile["active_quests"][0]["goal"] if profile.get("active_quests") else "none"
     mission_target = profile["active_missions"][0]["relationship_target"] if profile.get("active_missions") else "none"
+    quest_goal_eff = quest_goal
+    mission_target_eff = mission_target
     arc = journey.get("therapeutic_arc", "exploration")
     richness = profile.get("data_richness", "moderate")
 
@@ -298,6 +330,77 @@ async def compose_journey_narrative(
             age_gate_block = ("This is an ADOLESCENT user. Use coming-of-age themes. Mild challenge is okay. "
                               "No explicit trauma, abuse, or self-harm imagery.\n")
 
+    cal = profile.get("_coaching_calibration") or {}
+    coach_block = ""
+    panel_tone_hold_hint = ""
+    if cal.get("has_coach"):
+        rn = cal.get("recent_notes") or []
+        snippets = "; ".join(
+            (n.get("text") or "")[:120] for n in rn[:3] if (n.get("text") or "").strip()
+        )
+        if snippets:
+            coach_block += f"Coach clinical notes (recent): {snippets}\n"
+        focus = cal.get("coach_recommended_focus")
+        if focus:
+            coach_block += (
+                f"COACH PRIORITY DOMAIN: {focus} — weight narrative and imagery toward this therapeutic theme.\n"
+            )
+        pacing = (cal.get("coach_pacing_override") or "normal") or "normal"
+        if pacing == "slow":
+            coach_block += (
+                "COACH PACING: slow — soften urgency; no high-intensity action; contemplative, gradual unfolding.\n"
+            )
+        elif pacing == "fast":
+            coach_block += (
+                "COACH PACING: fast — allow clearer forward motion and momentum in the landscape (still therapeutic).\n"
+            )
+        if cal.get("coach_hold_active"):
+            coach_block += (
+                "CLINICAL HOLD (coach): Visual and narrative \"rest\" or soft fog — stillness, safety, no calls to "
+                "action. Do not frame quests, missions, or heroic tasks. Prefer gentle presence and recovery.\n"
+            )
+            quest_goal_eff = "none (clinical hold — no action-oriented missions)"
+            mission_target_eff = "none (clinical hold)"
+            panel_tone_hold_hint = (
+                " Clinical hold is ON: choose panel_tone meditative or restoration_sands only — not action_sequence.\n"
+            )
+
+    as_cal = profile.get("_assessment_calibration") or {}
+    assessment_block = ""
+    if as_cal.get("has_assessments"):
+        dp = as_cal.get("domain_priorities") or []
+        rq = as_cal.get("recommended_quest_types") or []
+        risks = as_cal.get("risk_areas") or []
+        if dp:
+            assessment_block += (
+                f"ASSESSMENT DOMAIN PRIORITIES (weight narrative toward these metaphors): {', '.join(dp)}.\n"
+            )
+        if rq:
+            assessment_block += (
+                f"Preferred quest / mission thematic keywords for this user: {', '.join(rq)}. "
+                "When referencing growth tasks, favor these tones over generic challenge.\n"
+            )
+        if risks:
+            avoid = []
+            if "acute_anxiety" in risks or "acute_shame" in risks:
+                avoid.append("intense threat, humiliation, or harsh judgment imagery")
+            if "severe_low_mood" in risks:
+                avoid.append("hopeless void or isolation without warmth or presence")
+            if "attachment_distress" in risks:
+                avoid.append("abandonment, rejection, or being left behind as the emotional punchline")
+            if "safety_concern_language" in risks:
+                avoid.append("any imagery of self-harm, suicide, or lethal hopelessness")
+            if avoid:
+                assessment_block += (
+                    "ASSESSMENT RISK FLAGS — soften or omit triggers: "
+                    + "; ".join(avoid)
+                    + ". Keep the scene containing, paced, and non-activating.\n"
+                )
+        if "acute_anxiety" in risks and not cal.get("coach_hold_active"):
+            panel_tone_hold_hint += (
+                " Assessment suggests high anxiety: prefer meditative or restoration_sands over action_sequence.\n"
+            )
+
     sys_prompt = (
         "You are a therapeutic narrative composer for the Sovereign Story Engine. "
         "Generate a short scene description (2-3 sentences) and a Grok Imagine image prompt "
@@ -306,8 +409,10 @@ async def compose_journey_narrative(
         f"User's current biome: {biome_name} — {biome_desc}\n"
         f"Core character present: {char_name}\n"
         f"{richness_guidance.get(richness, richness_guidance['moderate'])}"
-        f"Active quest: {quest_goal}\n"
-        f"Active mission: {mission_target}\n"
+        f"{coach_block}"
+        f"{assessment_block}"
+        f"Active quest: {quest_goal_eff}\n"
+        f"Active mission: {mission_target_eff}\n"
         f"Therapeutic arc: {arc}\n"
         f"{family_block}"
         f"{continuity_block}\n"
@@ -317,6 +422,7 @@ async def compose_journey_narrative(
         "- Feel like a chapter in an ongoing story, not a standalone image\n"
         "- Be hopeful without being dismissive of pain\n\n"
         "Return JSON only, no markdown:\n"
+        f"{panel_tone_hold_hint}"
         '{"narrative_text": "2-3 sentence scene description the user reads", '
         '"image_prompt": "detailed Grok Imagine prompt, painterly style, muted warm palette", '
         '"panel_tone": "one of: meditative, action_sequence, threshold_pathway, restoration_sands, revelation"}'
@@ -401,6 +507,9 @@ async def build_rich_panel_prompt(user_id: str, db_pool) -> dict:
         profile["_family_context"] = fctx
     except Exception as _fam_err:
         logger.warning("build_rich_panel_prompt family enrichment failed for %s: %s", user_id, _fam_err)
+
+    await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
+    await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
 
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
@@ -526,6 +635,9 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     except Exception as _fam_err:
         logger.warning("Phase 6 family enrichment failed for %s: %s", user_id, _fam_err)
 
+    await _enrich_profile_coaching_calibration(profile, user_id, db_pool)
+    await _enrich_profile_assessment_calibration(profile, user_id, db_pool)
+
     narrative = await compose_journey_narrative(
         profile, journey, biome, character, db_pool,
         last_panel_summary=last_summary, last_panel_npcs=last_npcs,
@@ -600,6 +712,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
     new_summary = (nar_text.split(".")[0] + ".") if nar_text and "." in nar_text else nar_text[:100]
 
     panel_id = str(uuid.uuid4())
+    _panel_saved = False
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -612,6 +725,7 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                 image_prompt[:500], current_biome_name, character[0],
                 nar_text, narrative.get("panel_tone", "meditative"),
                 json.dumps(profile.get("top_domains", [])))
+            _panel_saved = True
             await conn.execute(
                 "UPDATE sse_user_journeys SET last_panel_at = NOW(), "
                 "panels_generated = panels_generated + 1, dominant_character = $1, "
@@ -629,6 +743,31 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
                     "WHERE user_id = $2", json.dumps([r1, r2]), user_id)
     except Exception as e:
         logger.warning("generate_journey_panel DB write failed for %s: %s", user_id, e)
+
+    if _panel_saved and db_pool:
+        try:
+            _qctx = ""
+            if profile.get("active_quests"):
+                _qctx = str(profile["active_quests"][0].get("goal") or "")[:500]
+            from app.sse.adapters.clinical_translation import enrich_after_panel_generation
+
+            await enrich_after_panel_generation(
+                db_pool,
+                user_id,
+                panel_id,
+                {
+                    "generation_prompt": image_prompt,
+                    "narrative_text": nar_text,
+                    "panel_tone": narrative.get("panel_tone", "meditative"),
+                    "biome": current_biome_name,
+                    "archetype_hint": arch_hint or "",
+                    "quest_context": _qctx,
+                    "therapeutic_intent": journey.get("therapeutic_arc", "exploration"),
+                },
+                None,
+            )
+        except Exception as _ct_err:
+            logger.warning("generate_journey_panel clinical translation failed for %s: %s", user_id, _ct_err)
 
     return {"panel_id": panel_id, "r2_url": r2_url, "biome": current_biome_name,
             "character": character[0], "narrative": nar_text,
