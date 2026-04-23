@@ -300,7 +300,12 @@ class WisdomLifecycleManager:
 
     async def auto_absorb_high_confidence(self) -> int:
         """
-        Auto-absorb pending rows with confidence > 0.8 pending over 24h.
+        Auto-absorb pending extractions in two tiers (no change to extract_wisdom / absorb_wisdom).
+
+        Tier 1: confidence > 0.8 and age > 24h — high-confidence, treated as safe to absorb.
+        Tier 2: confidence >= 0.5, age > 72h, source in sanctuary/coaching/classroom/assessment —
+        therapeutic sources aged so implicit review window can pass; plain 'conversation'
+        at 0.5 is excluded and still needs manual review or higher confidence.
         """
         if not self.db:
             return 0
@@ -311,10 +316,16 @@ class WisdomLifecycleManager:
                     SELECT id::text AS id
                     FROM wisdom_extractions
                     WHERE status = 'pending'
-                      AND confidence > 0.8
-                      AND extracted_at < NOW() - INTERVAL '24 hours'
-                    ORDER BY extracted_at ASC
-                    LIMIT 50
+                      AND (
+                        (confidence > 0.8 AND extracted_at < NOW() - INTERVAL '24 hours')
+                        OR (
+                          confidence >= 0.5
+                          AND extracted_at < NOW() - INTERVAL '72 hours'
+                          AND source IN ('sanctuary', 'coaching', 'classroom', 'assessment')
+                        )
+                      )
+                    ORDER BY confidence DESC, extracted_at ASC
+                    LIMIT 20
                     """
                 )
             n = 0
