@@ -303,7 +303,9 @@
                 <div class="page-title">Adversarial Simulation Testing</div>
             </div>
         </div>
-        <div style="display: flex; gap: 10px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button class="back-btn" onclick="startDojoProtocol()">▶ Start DOJO</button>
+            <button class="back-btn" onclick="endDojoProtocol()">⏹ End DOJO</button>
             <button class="back-btn" onclick="clearChat()">🗑️ Clear Session</button>
             <!-- Back button: hidden by default; shown only when NOT in an iframe (standalone mode) -->
             <button id="backBtn" class="back-btn" onclick="handleBack()" style="display:none">← Back</button>
@@ -358,7 +360,7 @@
                 <div class="empty-chat">
                     <div class="icon">🥋</div>
                     <h3>Ready for Simulation</h3>
-                    <p>Select a persona and type a challenging message to test Nate's responses.</p>
+                    <p>Select a persona, click <strong>Start DOJO</strong>, then send a challenging message. The bridge runs the Night School adversarial scorer after each Nate reply.</p>
                 </div>
             </div>
             <div class="chat-input-area">
@@ -388,6 +390,13 @@
                 <div class="metric-row"><span>Harmful Content Blocked</span><span class="metric-value" id="harmfulBlocked">--</span></div>
                 <div class="metric-row"><span>Crisis Detection</span><span class="metric-value" id="crisisDetection">--</span></div>
                 <div class="metric-row"><span>Boundary Maintenance</span><span class="metric-value" id="boundaryMaintenance">--</span></div>
+            </div>
+            <!-- Night School adversarial protocol scoring (dojo_analysis / dojo_ended) — visible in all modes -->
+            <div class="analysis-card" id="dojoAdversarialCard">
+                <div class="analysis-card-title">⚔️ Night School adversarial scoring</div>
+                <div id="dojoScoringBody" style="font-size:11px;color:var(--text-secondary);line-height:1.55;">
+                    Click <strong>Start DOJO</strong>, then send a message. Each exchange is scored via the bridge (<code>dojo_test_message</code> → <code>dojo_analysis</code>).
+                </div>
             </div>
             <!-- Project PM Analysis -->
             <div class="analysis-card" id="analysisPM" style="display:none;">
@@ -691,6 +700,209 @@ _recoverAuth();
         var messages = [];
         var latencies = [];
         var messageStartTime = null;
+
+        /** Night School DOJO WebSocket protocol: bridge expects dojo_start, dojo_test_message (not dojo_message), dojo_end. */
+        var dojoSessionId = null;
+        var dojoSessionActive = false;
+        var _pendingDojoExchange = null;
+        var _lastDojoRoundHtml = "";
+        var _dojoStartPending = false;
+
+        function primaryPersonaForDojo() {
+            var p = (currentPersona || "HOSTILE").split(",")[0].trim();
+            return p || "HOSTILE";
+        }
+
+        function dojoModeToBackend() {
+            var m = (currentMode || "therapist").toLowerCase();
+            var map = {
+                therapist: "THERAPIST",
+                project_pm: "PROJECT_PM",
+                business: "BUSINESS",
+                cnc: "CNC",
+                mcat: "MCAT",
+                teacher: "TEACHER",
+                judge: "JUDGE"
+            };
+            return map[m] || "THERAPIST";
+        }
+
+        function startDojoProtocol() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("WebSocket not connected yet. Wait a moment and try again.");
+                return;
+            }
+            if (dojoSessionActive) {
+                alert("A DOJO session is already active. Click End DOJO first, or use Clear Session.");
+                return;
+            }
+            if (_dojoStartPending) {
+                alert("DOJO start already in flight. Wait for the session to open.");
+                return;
+            }
+            _dojoStartPending = true;
+            setTimeout(function() { _dojoStartPending = false; }, 12000);
+            socket.send(JSON.stringify({
+                type: "dojo_start",
+                persona: primaryPersonaForDojo(),
+                mode: dojoModeToBackend()
+            }));
+        }
+
+        function endDojoProtocol() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                dojoSessionActive = false;
+                dojoSessionId = null;
+                _pendingDojoExchange = null;
+                return;
+            }
+            if (!dojoSessionActive) {
+                alert("No active DOJO session to end.");
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: "dojo_end",
+                session_id: dojoSessionId || ""
+            }));
+        }
+
+        function addDojoPromptToChat(promptText) {
+            if (!promptText) return;
+            var container = document.getElementById("chatMessages");
+            var empty = document.querySelector(".empty-chat");
+            if (empty) empty.remove();
+            var notice = document.createElement("div");
+            notice.className = "system-message";
+            notice.style.cssText = "background:#0a1a14;border:1px solid var(--green);border-radius:8px;padding:10px 12px;margin:8px 0;font-size:11px;color:var(--text-secondary);";
+            notice.innerHTML = "🛡️ <strong>DOJO system prompt</strong><br><span style=\"color:var(--text-primary);white-space:pre-wrap;\">" + escapeHtml(promptText) + "</span>";
+            container.appendChild(notice);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function applyDojoAnalysis(analysis, messageCount) {
+            analysis = analysis || {};
+            var el = document.getElementById("dojoScoringBody");
+            if (!el) return;
+
+            var vcount = analysis.violation_count != null ? analysis.violation_count : (analysis.violations || []).length;
+            var safe = analysis.is_safe === true || (vcount === 0 && (analysis.violations || []).length === 0);
+            var scoreLabel = safe ? "PASS" : "NEEDS WORK";
+
+            var html = "<div style=\"margin-bottom:6px;\"><strong>Round result:</strong> <span style=\"color:" + (safe ? "var(--green)" : "var(--orange)") + ";\">" + scoreLabel + "</span>";
+            if (messageCount != null) html += " <span style=\"color:var(--text-secondary);\">· turns logged: " + messageCount + "</span>";
+            html += "</div>";
+            html += "<div><strong>Violation count:</strong> " + vcount + "</div>";
+            if (analysis.wisdom_applied) html += "<div style=\"color:var(--cyan);font-size:10px;\">Wisdom-informed analysis</div>";
+            if (analysis.mode) html += "<div><strong>Mode:</strong> " + escapeHtml(String(analysis.mode)) + "</div>";
+
+            html += "<div style=\"margin-top:8px;\"><strong>Feedback</strong></div><ul style=\"margin:4px 0 0 16px;padding:0;\">";
+            (analysis.violations || []).forEach(function(v) {
+                html += "<li style=\"color:var(--red);\">" + escapeHtml((v.severity || "") + (v.type ? " · " + v.type : "") + (v.description ? " — " + v.description : "")) + "</li>";
+            });
+            (analysis.flags || []).forEach(function(f) {
+                html += "<li style=\"color:var(--orange);\">" + escapeHtml((f.severity || "") + (f.type ? " · " + f.type : "") + (f.description ? " — " + f.description : "")) + "</li>";
+            });
+            if (!(analysis.violations || []).length && !(analysis.flags || []).length) {
+                html += "<li style=\"color:var(--green);\">No violations or flags this round.</li>";
+            }
+            html += "</ul>";
+
+            var mm = analysis.mode_metrics || {};
+            if (Object.keys(mm).length) {
+                html += "<div style=\"margin-top:8px;\"><strong>Mode metrics</strong></div><ul style=\"margin:4px 0 0 16px;\">";
+                for (var k in mm) {
+                    if (Object.prototype.hasOwnProperty.call(mm, k)) {
+                        html += "<li>" + escapeHtml(k) + ": <strong>" + escapeHtml(String(mm[k])) + "</strong></li>";
+                    }
+                }
+                html += "</ul>";
+            }
+
+            _lastDojoRoundHtml = html;
+            el.innerHTML = html;
+
+            if (mm.process_adherence != null) {
+                var a = document.getElementById("pmProcessAdherence");
+                if (a) { a.textContent = String(mm.process_adherence); a.className = "metric-value " + (mm.process_adherence >= 0.15 ? "good" : "warning"); }
+            }
+            if (mm.methodology_score != null) {
+                var b = document.getElementById("pmMethodology");
+                if (b) { b.textContent = String(mm.methodology_score); b.className = "metric-value " + (mm.methodology_score >= 0.15 ? "good" : "warning"); }
+            }
+            if (mm.strategic_thinking != null) {
+                var c = document.getElementById("bizStrategic");
+                if (c) { c.textContent = String(mm.strategic_thinking); c.className = "metric-value " + (mm.strategic_thinking >= 0.15 ? "good" : "warning"); }
+            }
+            if (mm.business_acumen != null) {
+                var d = document.getElementById("bizAcumen");
+                if (d) { d.textContent = String(mm.business_acumen); d.className = "metric-value " + (mm.business_acumen >= 0.15 ? "good" : "warning"); }
+            }
+            if (mm.technical_accuracy != null) {
+                var e = document.getElementById("cncTechnical");
+                if (e) { e.textContent = String(mm.technical_accuracy); e.className = "metric-value " + (mm.technical_accuracy >= 0.15 ? "good" : "warning"); }
+            }
+            if (mm.safety_compliance != null) {
+                var f = document.getElementById("cncSafety");
+                if (f) { f.textContent = String(mm.safety_compliance); f.className = "metric-value " + (mm.safety_compliance >= 0.7 ? "good" : "warning"); }
+            }
+            if (mm.content_accuracy != null) {
+                var g = document.getElementById("mcatBio");
+                if (g) g.textContent = String(mm.content_accuracy);
+            }
+            if (mm.teaching_clarity != null) {
+                var h = document.getElementById("mcatTeaching");
+                if (h) h.textContent = String(mm.teaching_clarity);
+            }
+            var teachMap = [
+                ["content_mastery", "teachContent"],
+                ["pedagogy", "teachPedagogy"],
+                ["classroom_mgmt", "teachClassroom"],
+                ["sel", "teachSEL"],
+                ["interdisciplinary", "teachInterdisc"],
+                ["tech_ai", "teachTech"],
+                ["communication", "teachComm"],
+                ["cultural", "teachCultural"]
+            ];
+            teachMap.forEach(function(pair) {
+                if (mm[pair[0]] != null) {
+                    var node = document.getElementById(pair[1]);
+                    if (node) node.textContent = String(mm[pair[0]]);
+                }
+            });
+
+            if (!safe) {
+                var hb = document.getElementById("harmfulBlocked");
+                if (hb) { hb.textContent = "⚠ Review"; hb.className = "metric-value warning"; }
+            }
+        }
+
+        function applyDojoEnded(analysis, passed) {
+            analysis = analysis || {};
+            var el = document.getElementById("dojoScoringBody");
+            var recs = analysis.recommendations || [];
+            var fin = "<div style=\"margin-top:12px;padding-top:12px;border-top:1px solid var(--border);\"><strong>Final scorecard</strong></div>";
+            fin += "<div>Passed: <strong style=\"color:" + (passed ? "var(--green)" : "var(--red)") + ";\">" + (passed ? "YES" : "NO") + "</strong></div>";
+            if (analysis.total_messages != null) fin += "<div>Total messages (session log): " + analysis.total_messages + "</div>";
+            if (analysis.total_violations != null) fin += "<div>Total violations: " + analysis.total_violations + "</div>";
+            if (analysis.high_severity_violations != null) fin += "<div>High-severity: " + analysis.high_severity_violations + "</div>";
+            if (analysis.duration_seconds != null) fin += "<div>Duration: " + Math.round(analysis.duration_seconds) + "s</div>";
+            if (recs.length) {
+                fin += "<div style=\"margin-top:8px;\"><strong>Areas for improvement</strong></div><ul style=\"margin:4px 0 0 16px;\">";
+                recs.forEach(function(r) { fin += "<li>" + escapeHtml(String(r)) + "</li>"; });
+                fin += "</ul>";
+            }
+            if (el) el.innerHTML = (_lastDojoRoundHtml || "") + fin;
+
+            var sum = document.getElementById("sessionSummary");
+            if (sum) {
+                sum.innerHTML = "<strong>DOJO ended.</strong> " + (passed ? "Session passed." : "Session did not pass — review adversarial panel.") +
+                    (analysis.total_violations != null ? "<br><strong>Total violations:</strong> " + analysis.total_violations : "");
+            }
+
+            dojoSessionActive = false;
+            dojoSessionId = null;
+            _pendingDojoExchange = null;
+        }
 
         // Mode-specific persona configurations
         var modePersonas = {
@@ -1100,6 +1312,32 @@ _recoverAuth();
                 _showExportStatus(data.message || "Export failed");
                 setTimeout(_hideExportStatus, 5000);
             }
+
+            // Night School DOJO: bridge uses dojo_start → dojo_started / dojo_prompt; dojo_test_message → dojo_analysis; dojo_end → dojo_ended
+            if (data.type === "dojo_started") {
+                _dojoStartPending = false;
+                dojoSessionId = data.session_id || null;
+                dojoSessionActive = true;
+                _lastDojoRoundHtml = "";
+                var dsb = document.getElementById("dojoScoringBody");
+                if (dsb) {
+                    dsb.innerHTML = "<div style=\"color:var(--green);\">DOJO session active.</div><div style=\"font-size:10px;margin-top:4px;\">Persona: " +
+                        escapeHtml(String(data.persona || "")) + " · Session: <code style=\"font-size:10px;\">" + escapeHtml(String(dojoSessionId || "")) + "</code></div>";
+                }
+                return;
+            }
+            if (data.type === "dojo_prompt") {
+                addDojoPromptToChat(data.prompt || "");
+                return;
+            }
+            if (data.type === "dojo_analysis") {
+                applyDojoAnalysis(data.analysis || {}, data.message_count);
+                return;
+            }
+            if (data.type === "dojo_ended") {
+                applyDojoEnded(data.analysis || {}, data.passed);
+                return;
+            }
             
             // Accept both login flows (admin/dev + token auth)
             if (data.type === "auth_success" || data.type === "login_success") {
@@ -1422,6 +1660,20 @@ _recoverAuth();
             messages.push({ role: "nate", text: text, time: new Date() });
             document.getElementById("messageCount").textContent = messages.length;
             updateAnalysis(text, latency);
+
+            if (_pendingDojoExchange && dojoSessionActive && socket && socket.readyState === WebSocket.OPEN) {
+                var u = _pendingDojoExchange.user;
+                _pendingDojoExchange = null;
+                var n = (text || "").trim();
+                socket.send(JSON.stringify({
+                    type: "dojo_test_message",
+                    user_message: u,
+                    nate_response: n,
+                    session_id: dojoSessionId || ""
+                }));
+            } else {
+                _pendingDojoExchange = null;
+            }
             
             currentNateMessage = null;
         }
@@ -1717,6 +1969,11 @@ _recoverAuth();
                 "100 question", "50 question", "20 question", "practice exam", "mock test",
                 "downloadable", "print out", "printable"];
             var wantsPdf = pdfKeywords.some(function(kw) { return lowerText.indexOf(kw) !== -1; });
+
+            if (!wantsPdf && !dojoSessionActive) {
+                alert("Click ▶ Start DOJO to begin the adversarial session, then send your message.");
+                return;
+            }
             
             if (wantsPdf) {
                 // Let Little Nate generate the REAL questions via AI
@@ -1739,11 +1996,13 @@ _recoverAuth();
                 
                 // Flag that this response should get a PDF download button
                 window._pendingPdfResponse = true;
+                _pendingDojoExchange = null;
                 return;
             }
             
             addMessage("user", text);
             input.value = "";
+            _pendingDojoExchange = { user: text };
             
             messageStartTime = Date.now();
             
@@ -2187,10 +2446,21 @@ _recoverAuth();
         }
 
         function clearChat() {
+            if (dojoSessionActive && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "dojo_end", session_id: dojoSessionId || "" }));
+            }
+            dojoSessionId = null;
+            dojoSessionActive = false;
+            _pendingDojoExchange = null;
+            _lastDojoRoundHtml = "";
+            var dsb = document.getElementById("dojoScoringBody");
+            if (dsb) {
+                dsb.innerHTML = "Click <strong>Start DOJO</strong>, then send a message. Each exchange is scored via the bridge (<code>dojo_test_message</code> → <code>dojo_analysis</code>).";
+            }
             messages = [];
             latencies = [];
             _loadedCaseText = "";
-            document.getElementById("chatMessages").innerHTML = '<div class="empty-chat"><div class="icon">🥋</div><h3>Ready for Simulation</h3><p>Select a persona and type a challenging message to test Nate\'s responses.</p></div>';
+            document.getElementById("chatMessages").innerHTML = '<div class="empty-chat"><div class="icon">🥋</div><h3>Ready for Simulation</h3><p>Select a persona, click <strong>Start DOJO</strong>, then send a challenging message. The bridge runs the Night School adversarial scorer after each Nate reply.</p></div>';
             document.getElementById("messageCount").textContent = "0";
             document.getElementById("avgLatency").textContent = "--";
             document.getElementById("sessionSummary").textContent = "Start a conversation to see analysis...";
