@@ -6,10 +6,12 @@ Uses the bridge's existing db_pool (no HTTP calls to backend).
 - crystallize: extracts new user-scoped crystals from conversations
 """
 import hashlib
+import json
 import logging
 import random as _rnd
 import re
 from datetime import datetime, timezone
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -524,6 +526,188 @@ async def retrieve_anticipatory_crystals(
         return ""
 
 
+async def crystallize_coach_observation(
+    db_pool,
+    coach_hardware_id: str,
+    client_hardware_id: str,
+    observation_text: str,
+    domain: str = "clinical",
+    observation_type: str = "coaching_note",
+) -> Optional[str]:
+    """
+    Convert a coach observation into a PROMOTED crystal.
+    Coach-sourced crystals get higher confidence (0.85)
+    than auto-generated crystals (0.50) because they are
+    human-validated clinical insight.
+    """
+    if not db_pool or not client_hardware_id:
+        return None
+    text = (observation_text or "").strip()
+    if len(text) < 2:
+        return None
+
+    crystal_text = f"Coach observation: {text}"
+    coach_hw = (coach_hardware_id or "").strip()
+
+    try:
+        async with db_pool.acquire() as conn:
+            user_uuid = await conn.fetchval(
+                "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+                client_hardware_id,
+            )
+            if not user_uuid:
+                logger.warning(
+                    "crystallize_coach_observation: no user for client_hw=%s",
+                    client_hardware_id[:16] if client_hardware_id else "",
+                )
+                return None
+
+            # Scope hash to client + type so identical text for different clients does not collide.
+            content_hash = hashlib.sha256(
+                f"{user_uuid}|{observation_type}|{crystal_text}".encode()
+            ).hexdigest()
+
+            meta = {
+                "observation_type": observation_type,
+                "coach_hardware_id": coach_hw,
+            }
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_intelligence_crystals
+                    (crystal_text, domain, scope, topics, source_count,
+                     generation, confidence, content_hash, user_id, origin_surface, metadata)
+                VALUES ($1, $2, 'user', '{}'::text[], 1, 1, 0.85, $3, $4, $5, $6::jsonb)
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING content_hash
+                """,
+                crystal_text,
+                domain,
+                content_hash,
+                user_uuid,
+                "coach_observation",
+                json.dumps(meta),
+            )
+
+        if not row:
+            return None
+
+        logger.info(
+            "crystal_bridge: coach observation crystal (surface=coach_observation, type=%s, client=%s)",
+            observation_type,
+            client_hardware_id[:12],
+        )
+
+        try:
+            from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(user_uuid),
+                    wisdom_id=f"crystal_{content_hash[:16]}",
+                    insight_type=f"crystal_{domain}_coach",
+                    content=crystal_text,
+                    source="coach_observation",
+                    domain=domain,
+                )
+        except Exception as _vec_err:
+            logger.debug("crystal_bridge: coach observation vectorize failed (non-fatal): %s", _vec_err)
+
+        return row["content_hash"]
+    except Exception as e:
+        logger.warning("crystallize_coach_observation: %s", e)
+        return None
+
+
+async def crystallize_wisdom_absorption(
+    db_pool,
+    user_ref: str,
+    crystal_text: str,
+    domain: str = "clinical",
+    extraction_id: str = "",
+    absorption_source: str = "wisdom_absorption",
+) -> Optional[str]:
+    """
+    Promote an absorbed wisdom extraction into nate_intelligence_crystals
+    (high confidence, dedicated origin_surface). Does not alter conversation heuristics.
+    """
+    if not db_pool or not (crystal_text or "").strip():
+        return None
+    text = (crystal_text or "").strip()
+    ext = (extraction_id or "").strip()
+    src = (absorption_source or "wisdom")[:120]
+
+    try:
+        async with db_pool.acquire() as conn:
+            user_uuid = None
+            ur = (user_ref or "").strip()
+            if ur:
+                user_uuid = await conn.fetchval(
+                    "SELECT id FROM users WHERE hardware_id = $1 OR username = $1 OR id::text = $1 LIMIT 1",
+                    ur,
+                )
+
+            if user_uuid:
+                content_hash = hashlib.sha256(
+                    f"{user_uuid}|wisdom_absorption|{ext}|{text}".encode()
+                ).hexdigest()
+            else:
+                content_hash = hashlib.sha256(
+                    f"global|wisdom_absorption|{ext}|{text}".encode()
+                ).hexdigest()
+
+            scope = "user" if user_uuid else "global"
+            meta = {
+                "absorption_source": src,
+                "wisdom_extraction_id": ext,
+            }
+            row = await conn.fetchrow(
+                """
+                INSERT INTO nate_intelligence_crystals
+                    (crystal_text, domain, scope, topics, source_count,
+                     generation, confidence, content_hash, user_id, origin_surface, metadata)
+                VALUES ($1, $2, $3, '{}'::text[], 1, 1, 0.92, $4, $5, $6, $7::jsonb)
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING content_hash
+                """,
+                text,
+                domain[:50] if domain else "clinical",
+                scope,
+                content_hash,
+                user_uuid,
+                "wisdom_absorption",
+                json.dumps(meta),
+            )
+
+        if not row:
+            return None
+
+        logger.info(
+            "crystal_bridge: wisdom absorption crystal (extraction_id=%s, scope=%s)",
+            ext[:16] if ext else "",
+            scope,
+        )
+
+        try:
+            from app.services.vectorize_service import index_wisdom, is_vectorize_configured
+
+            if is_vectorize_configured():
+                await index_wisdom(
+                    user_id=str(user_uuid) if user_uuid else "nate_crystal",
+                    wisdom_id=f"crystal_{content_hash[:16]}",
+                    insight_type=f"crystal_{domain}_wisdom_absorption",
+                    content=text,
+                    source="wisdom_absorption",
+                    domain=domain,
+                )
+        except Exception as _vec_err:
+            logger.debug("crystal_bridge: wisdom absorption vectorize failed (non-fatal): %s", _vec_err)
+
+        return row["content_hash"]
+    except Exception as e:
+        logger.warning("crystallize_wisdom_absorption: %s", e)
+        return None
+
+
 async def crystallize_from_conversation(
     db_pool,
     hardware_id: str,
@@ -591,20 +775,25 @@ async def crystallize_from_conversation(
                 hardware_id,
             )
 
-            await conn.execute(
+            ins_row = await conn.fetchrow(
                 """
                 INSERT INTO nate_intelligence_crystals
                     (crystal_text, domain, scope, topics, source_count,
                      generation, confidence, content_hash, user_id, origin_surface)
                 VALUES ($1, $2, 'user', '{}'::text[], 1, 0, 0.50, $3, $4, $5)
                 ON CONFLICT (content_hash) DO NOTHING
+                RETURNING confidence
                 """,
                 crystal_text, matched_domain, content_hash, user_uuid, origin_surface,
             )
-            logger.info(
-                "crystal_bridge: forged crystal for %s (score=%d, domain=%s, surface=%s)",
-                name_tag, score, matched_domain, origin_surface,
-            )
+
+        if not ins_row:
+            return
+
+        logger.info(
+            "crystal_bridge: forged crystal for %s (score=%d, domain=%s, surface=%s)",
+            name_tag, score, matched_domain, origin_surface,
+        )
 
         # QUANTUM-CRYSTAL-ARCH: Vectorize embedding so crystal is semantically searchable
         try:
@@ -620,6 +809,25 @@ async def crystallize_from_conversation(
                 )
         except Exception as _vec_err:
             logger.debug("crystal_bridge: vectorize failed (non-fatal): %s", _vec_err)
+
+        try:
+            conf = float(ins_row["confidence"])
+            if conf >= 0.5:
+                from app.services.wisdom_lifecycle_manager import (
+                    schedule_wisdom_extraction_after_conversation,
+                )
+
+                schedule_wisdom_extraction_after_conversation(
+                    db_pool,
+                    hardware_id,
+                    crystal_text,
+                    str(user_uuid) if user_uuid else None,
+                    matched_domain,
+                    origin_surface,
+                    conf,
+                )
+        except Exception as _wl_err:
+            logger.debug("crystal_bridge: wisdom lifecycle extract (non-fatal): %s", _wl_err)
     except Exception as e:
         logger.warning("crystallize_from_conversation: %s", e)
 

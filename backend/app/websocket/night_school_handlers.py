@@ -7,10 +7,19 @@ WebSocket message handlers for Night School Director integration.
 Add these handlers to bridge_server_hybrid.py.
 """
 
+import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+try:
+    from app.websocket.crystal_recall_bridge import crystallize_coach_observation
+except ImportError:
+    try:
+        from crystal_recall_bridge import crystallize_coach_observation
+    except ImportError:
+        crystallize_coach_observation = None  # type: ignore
 
 # Import from services (try multiple paths for different run contexts)
 try:
@@ -235,6 +244,58 @@ class NightSchoolHandler:
             use_redacted=use_redacted,
             category=category
         )
+
+        if (
+            success
+            and crystallize_coach_observation
+            and getattr(self.director, "db_pool", None)
+        ):
+            try:
+                n = self.director.get_note(note_id)
+                if n and n.client_id and n.coach_id:
+                    ct = n.redacted_content if n.redacted_content else n.content
+                    if self.director.pii_detector.has_pii(ct):
+                        ct = self.director.pii_detector.redact(ct)
+                    ct = (ct or "").strip()
+                    if ct:
+                        asyncio.create_task(
+                            crystallize_coach_observation(
+                                self.director.db_pool,
+                                n.coach_id,
+                                n.client_id,
+                                ct,
+                                observation_type="approved_note",
+                            )
+                        )
+
+                        async def _wisdom_coach_extract():
+                            try:
+                                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                                m = WisdomLifecycleManager(self.director.db_pool, None)
+                                uid = None
+                                async with self.director.db_pool.acquire() as conn:
+                                    uid = await conn.fetchval(
+                                        """
+                                        SELECT id::text FROM users
+                                        WHERE hardware_id = $1 OR username = $1
+                                        LIMIT 1
+                                        """,
+                                        n.client_id,
+                                    )
+                                await m.extract_wisdom(
+                                    "coaching",
+                                    ct,
+                                    user_id=uid,
+                                    domain="clinical",
+                                    confidence=0.85,
+                                )
+                            except Exception as _we:
+                                print(f">>> [NIGHT SCHOOL] wisdom extract after approve (non-fatal): {_we}")
+
+                        asyncio.create_task(_wisdom_coach_extract())
+            except Exception as _cry_err:
+                print(f">>> [NIGHT SCHOOL] coach crystal after approve (non-fatal): {_cry_err}")
         
         await websocket.send(json.dumps({
             "type": "night_school_note_approved",
