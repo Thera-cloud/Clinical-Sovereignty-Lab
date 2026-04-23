@@ -111,7 +111,7 @@ class DeadmanSwitchService:
                 )
                 last_audit = await conn.fetchval(
                     """SELECT MAX(logged_at) FROM audit_log
-                       WHERE admin_id = $1 OR target_id = $1::text""",
+                       WHERE admin_id = $1 OR target_id = $1""",
                     user_id,
                 )
                 last_nate_msg = client["last_nate_message_at"]
