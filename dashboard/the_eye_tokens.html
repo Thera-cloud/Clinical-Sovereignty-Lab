@@ -90,8 +90,11 @@
             <div class="card-body"><div id="budget-display"><div class="empty-state">Loading...</div></div></div>
         </div>
         <div class="card">
-            <div class="card-header"><div class="card-title">&#x1F4CA; Usage Breakdown by Modality</div><span style="font-size:10px;color:var(--text-secondary);">Patent 4: Vision includes biometric analysis tokens</span></div>
-            <div class="card-body"><div class="usage-grid" id="usage-grid"><div class="empty-state" style="grid-column:span 3;">Loading usage data...</div></div></div>
+            <div class="card-header">
+                <div class="card-title">&#x1F4CA; Usage Breakdown by Modality</div>
+                <span id="modality-subtitle" style="font-size:10px;color:var(--text-secondary);max-width:55%;text-align:right;">Loading...</span>
+            </div>
+            <div class="card-body"><div class="usage-grid" id="usage-grid"><div class="empty-state" style="grid-column:span 3;">Loading usage data...</div></div><div id="token-sources-footnote"></div></div>
         </div>
         <div class="card">
             <div class="card-header"><div class="card-title">&#x1F4C8; Platform Totals</div></div>
@@ -131,6 +134,12 @@ _recoverAuth();
         }
 
         var ws = null, authenticated = false;
+
+        function esc(s) {
+            var d = document.createElement("div");
+            d.textContent = s == null ? "" : String(s);
+            return d.innerHTML;
+        }
 
         function connect() {
             ws = new WebSocket(getWsUrl());
@@ -172,28 +181,66 @@ _recoverAuth();
         }
 
         function displayBudget(stats) {
-            var budget = 500000;
+            var budget = stats.token_monthly_budget != null ? Number(stats.token_monthly_budget) : 500000;
+            if (!isFinite(budget) || budget < 1) budget = 500000;
             var used = stats.tokens_used_month || 0;
             var pct = Math.min((used / budget) * 100, 100);
             var cls = pct < 70 ? "safe" : pct < 90 ? "warning" : "danger";
             document.getElementById("budget-display").innerHTML =
-                '<div class="budget-section"><div class="budget-header"><span style="font-weight:600;">Monthly Token Budget</span><span>' + used.toLocaleString() + ' / ' + budget.toLocaleString() + '</span></div><div class="budget-bar"><div class="budget-fill ' + cls + '" style="width:' + pct + '%;">' + pct.toFixed(1) + '%</div></div></div>';
+                '<div class="budget-section"><div class="budget-header"><span style="font-weight:600;">Monthly Token Budget</span><span>' + used.toLocaleString() + ' / ' + budget.toLocaleString() + '</span></div><div style="font-size:10px;color:var(--text-secondary);margin-bottom:8px;">Cap from <code>TOKEN_MONTHLY_BUDGET</code> (tokens). Usage from registry month rollup.</div><div class="budget-bar"><div class="budget-fill ' + cls + '" style="width:' + pct + '%;">' + pct.toFixed(1) + '%</div></div></div>';
         }
 
         function displayUsageBreakdown(stats) {
-            var totalTokens = stats.tokens_used_today || stats.today_tokens || 1;
-            // Estimate modality split (backend can provide exact splits when available)
-            var voiceTokens = Math.round(totalTokens * 0.45);
-            var textTokens = Math.round(totalTokens * 0.35);
-            var visionTokens = Math.round(totalTokens * 0.20);
-            var voiceCost = (voiceTokens * 0.00001).toFixed(2);
-            var textCost = (textTokens * 0.00001).toFixed(2);
-            var visionCost = (visionTokens * 0.00001).toFixed(2);
+            var basis = stats.token_modality_split_basis || "estimated";
+            var costPer = Number(stats.token_estimated_cost_per_token_usd);
+            if (!isFinite(costPer) || costPer <= 0) costPer = 0.00001;
+            var mm = stats.token_modality_month || {};
+            var voiceTokens, textTokens, visionTokens;
+            var ledgerSum = (mm.voice || 0) + (mm.text || 0) + (mm.vision || 0);
+            if (basis === "ledger_mapped" && ledgerSum > 0) {
+                voiceTokens = mm.voice || 0;
+                textTokens = mm.text || 0;
+                visionTokens = mm.vision || 0;
+            } else {
+                var base = stats.tokens_used_month || stats.tokens_used_today || stats.today_tokens || 0;
+                if (base < 1) base = 1;
+                voiceTokens = Math.round(base * 0.45);
+                textTokens = Math.round(base * 0.35);
+                visionTokens = Math.max(0, base - voiceTokens - textTokens);
+            }
+            var voiceCost = (voiceTokens * costPer).toFixed(2);
+            var textCost = (textTokens * costPer).toFixed(2);
+            var visionCost = (visionTokens * costPer).toFixed(2);
+
+            var sub = document.getElementById("modality-subtitle");
+            if (sub) {
+                if (basis === "ledger_mapped" && ledgerSum > 0) {
+                    sub.textContent = "Ledger (UTC month): sums from token_transactions by source, grouped into voice/text/vision (~). $ = tokens \u00d7 token_cost_config.";
+                } else {
+                    sub.textContent = "Estimated: 45/35/20 mix (no ledger usage this UTC month or DB offline). $ = tokens \u00d7 token_cost_config (or fallback).";
+                }
+            }
 
             document.getElementById("usage-grid").innerHTML =
-                '<div class="usage-card voice"><div class="usage-header"><div class="usage-icon voice">&#x1F399;&#xFE0F;</div><div><div class="usage-name">Voice (Whisper + TTS)</div><div class="usage-detail">Top Tier clients only</div></div></div><div class="usage-val" style="color:var(--purple);">$' + voiceCost + '</div><div class="usage-row"><span>Tokens</span><span>' + voiceTokens.toLocaleString() + '</span></div><div class="usage-row"><span>Whisper (STT)</span><span>~' + Math.round(voiceTokens * 0.6).toLocaleString() + '</span></div><div class="usage-row"><span>TTS (Generation)</span><span>~' + Math.round(voiceTokens * 0.4).toLocaleString() + '</span></div></div>' +
-                '<div class="usage-card text"><div class="usage-header"><div class="usage-icon text">&#x1F4AC;</div><div><div class="usage-name">Text (GPT-4o)</div><div class="usage-detail">All tiers</div></div></div><div class="usage-val" style="color:var(--cyan);">$' + textCost + '</div><div class="usage-row"><span>Tokens</span><span>' + textTokens.toLocaleString() + '</span></div><div class="usage-row"><span>Therapeutic Chat</span><span>~' + Math.round(textTokens * 0.7).toLocaleString() + '</span></div><div class="usage-row"><span>Night School / Analysis</span><span>~' + Math.round(textTokens * 0.3).toLocaleString() + '</span></div></div>' +
-                '<div class="usage-card vision"><div class="usage-header"><div class="usage-icon vision">&#x1F441;&#xFE0F;</div><div><div class="usage-name">Vision (GPT-4V)</div><div class="usage-detail">Patent 4: Biometric analysis</div></div></div><div class="usage-val" style="color:var(--gold);">$' + visionCost + '</div><div class="usage-row"><span>Tokens</span><span>' + visionTokens.toLocaleString() + '</span></div><div class="usage-row"><span>Facial Affect Analysis</span><span>~' + Math.round(visionTokens * 0.4).toLocaleString() + '</span></div><div class="usage-row"><span>Gaze / Body Tracking</span><span>~' + Math.round(visionTokens * 0.3).toLocaleString() + '</span></div><div class="usage-row"><span>Engagement Scoring</span><span>~' + Math.round(visionTokens * 0.2).toLocaleString() + '</span></div><div class="usage-row"><span>Clinical Supervision</span><span>~' + Math.round(visionTokens * 0.1).toLocaleString() + '</span></div></div>';
+                '<div class="usage-card voice"><div class="usage-header"><div class="usage-icon voice">&#x1F399;&#xFE0F;</div><div><div class="usage-name">Voice (incl. voice-tagged sources)</div><div class="usage-detail">Mapped from ledger <code>source</code> when available</div></div></div><div class="usage-val" style="color:var(--purple);">~$' + voiceCost + ' <span style="font-size:10px;font-weight:500;color:var(--text-secondary);">est.</span></div><div class="usage-row"><span>Tokens</span><span>' + voiceTokens.toLocaleString() + '</span></div>' +
+                ((basis !== "ledger_mapped" || ledgerSum <= 0) ? '<div class="usage-row"><span>Whisper (STT)</span><span>~' + Math.round(voiceTokens * 0.6).toLocaleString() + '</span></div><div class="usage-row"><span>TTS</span><span>~' + Math.round(voiceTokens * 0.4).toLocaleString() + '</span></div>' : '<div class="usage-row"><span>Basis</span><span>ledger / voice-tagged</span></div>') + '</div>' +
+                '<div class="usage-card text"><div class="usage-header"><div class="usage-icon text">&#x1F4AC;</div><div><div class="usage-name">Text (default bucket)</div><div class="usage-detail">Sources not tagged voice/vision</div></div></div><div class="usage-val" style="color:var(--cyan);">~$' + textCost + ' <span style="font-size:10px;font-weight:500;color:var(--text-secondary);">est.</span></div><div class="usage-row"><span>Tokens</span><span>' + textTokens.toLocaleString() + '</span></div>' +
+                ((basis !== "ledger_mapped" || ledgerSum <= 0) ? '<div class="usage-row"><span>Therapeutic Chat</span><span>~' + Math.round(textTokens * 0.7).toLocaleString() + '</span></div><div class="usage-row"><span>Night School / Analysis</span><span>~' + Math.round(textTokens * 0.3).toLocaleString() + '</span></div>' : '<div class="usage-row"><span>Basis</span><span>ledger / text bucket</span></div>') + '</div>' +
+                '<div class="usage-card vision"><div class="usage-header"><div class="usage-icon vision">&#x1F441;&#xFE0F;</div><div><div class="usage-name">Vision / biometric-tagged</div><div class="usage-detail">Mapped from ledger <code>source</code></div></div></div><div class="usage-val" style="color:var(--gold);">~$' + visionCost + ' <span style="font-size:10px;font-weight:500;color:var(--text-secondary);">est.</span></div><div class="usage-row"><span>Tokens</span><span>' + visionTokens.toLocaleString() + '</span></div>' +
+                ((basis !== "ledger_mapped" || ledgerSum <= 0) ? '<div class="usage-row"><span>Facial / gaze (illustr.)</span><span>~' + Math.round(visionTokens * 0.4).toLocaleString() + '</span></div><div class="usage-row"><span>Other (illustr.)</span><span>~' + Math.round(visionTokens * 0.6).toLocaleString() + '</span></div>' : '<div class="usage-row"><span>Basis</span><span>ledger / vision-tagged</span></div>') + '</div>';
+
+            var foot = document.getElementById("token-sources-footnote");
+            var bySrc = stats.token_usage_by_source_month || {};
+            var keys = Object.keys(bySrc).sort(function(a, b) { return bySrc[b] - bySrc[a]; });
+            if (foot) {
+                if (keys.length === 0) {
+                    foot.innerHTML = "";
+                } else {
+                    foot.innerHTML = '<div style="font-size:10px;color:var(--text-secondary);margin-top:14px;line-height:1.5;">Recorded sources (UTC month): ' +
+                        keys.slice(0, 8).map(function(k) { return "<strong>" + esc(k) + "</strong> " + bySrc[k].toLocaleString(); }).join(" · ") +
+                        (keys.length > 8 ? " …" : "") + "</div>";
+                }
+            }
         }
 
         function displayPlatformUsage(stats) {

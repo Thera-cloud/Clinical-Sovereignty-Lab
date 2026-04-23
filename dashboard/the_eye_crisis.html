@@ -95,7 +95,12 @@
                 <div class="card-title">&#x1F6A8; Active Crisis Alerts</div>
                 <span class="alert-count" id="alert-count">0 active alerts</span>
             </div>
-            <div class="card-body"><div id="crisis-list"><div class="empty-state">Loading crisis alerts...</div></div></div>
+            <div class="card-body">
+                <div class="protocol-title" style="margin-bottom:10px;">Live metrics watchlist</div>
+                <div id="watchlist-panel"><div class="empty-state">Loading watchlist...</div></div>
+                <div class="protocol-title" style="margin:20px 0 10px;">Crisis log</div>
+                <div id="crisis-list"><div class="empty-state">Loading crisis alerts...</div></div>
+            </div>
         </div>
         <!-- Right Panel: Protocol + Stats -->
         <div>
@@ -194,6 +199,22 @@ _recoverAuth();
             return "P3";
         }
 
+        function crisisEventTrigger(ev) {
+            if (ev.keywords && ev.keywords.length) return 'Keywords: "' + ev.keywords.join('", "') + '"';
+            if (ev.reason) return String(ev.reason);
+            if (ev.trigger_keyword) return "Trigger: " + String(ev.trigger_keyword);
+            if (ev.context) return String(ev.context);
+            return "Alert triggered";
+        }
+
+        function watchlistRiskClass(risk) {
+            var r = (risk || "").toUpperCase();
+            if (r === "CRITICAL") return "p0";
+            if (r === "HIGH") return "p1";
+            if (r === "MEDIUM") return "p2";
+            return "p3";
+        }
+
         function displayCrisis(events) {
             var list = document.getElementById("crisis-list");
             var unresolved = events.filter(function(e) { return !e.resolved; });
@@ -219,7 +240,7 @@ _recoverAuth();
                 html += '<div class="crisis-info">';
                 html += '<span class="crisis-severity-badge ' + cls + '">' + lvl + ' ' + (lvl === "P0" ? "CRITICAL" : lvl === "P1" ? "HIGH" : lvl === "P2" ? "ELEVATED" : "MONITORING") + '</span>';
                 html += '<div class="crisis-user">' + esc(ev.user_name || ev.user_id || "Unknown") + '</div>';
-                html += '<div class="crisis-trigger">\u26A0\uFE0F ' + esc(ev.keywords ? 'Keywords: "' + ev.keywords.join('", "') + '"' : ev.reason || "Alert triggered") + '</div>';
+                html += '<div class="crisis-trigger">\u26A0\uFE0F ' + esc(crisisEventTrigger(ev)) + '</div>';
                 html += '<div class="crisis-time">' + (ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "") + ' \u2022 ' + esc(ev.session_id || "No session") + '</div>';
                 // PMB / Shame / Discrepancy tags
                 html += '<div class="crisis-details">';
@@ -253,8 +274,32 @@ _recoverAuth();
         }
 
         function displayWatchlist(wl) {
-            // Merge watchlist items as P2/P3 if not already in crisis log
-            // This provides real-time watchlist from admin_get_stats
+            var panel = document.getElementById("watchlist-panel");
+            if (!panel) return;
+            if (!wl || wl.length === 0) {
+                panel.innerHTML = '<div class="empty-state">\u2705 No clients on live metrics watchlist</div>';
+                return;
+            }
+            var html = '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:10px;">MEDIUM+ risk from Nevedal client metrics (distinct from historical crisis log)</div>';
+            wl.forEach(function(w) {
+                var name = w.name || w.user_name || w.user_id || "Unknown";
+                var risk = (w.risk_level || "MONITORING").toUpperCase();
+                var cls = watchlistRiskClass(risk);
+                var triggerParts = [];
+                if (w.anxiety_level != null && w.anxiety_level !== "") triggerParts.push("anxiety " + w.anxiety_level);
+                if (w.depression_indicators != null && w.depression_indicators !== "") triggerParts.push("depression indicators " + w.depression_indicators);
+                var trigger = triggerParts.length ? "Signals: " + triggerParts.join(", ") : "Elevated risk from live metrics";
+                var ts = w.last_assessment || w.timestamp || "";
+                var tsLabel = ts ? (String(ts).indexOf("T") >= 0 || String(ts).indexOf("-") >= 0 ? new Date(ts).toLocaleString() : String(ts)) : "\u2014";
+                html += '<div class="crisis-item ' + cls + '">';
+                html += '<div class="crisis-info">';
+                html += '<span class="crisis-severity-badge ' + cls + '">' + esc(risk) + '</span>';
+                html += '<div class="crisis-user">' + esc(name) + '</div>';
+                html += '<div class="crisis-trigger">' + esc(trigger) + '</div>';
+                html += '<div class="crisis-time">' + esc(tsLabel) + ' \u2022 ' + esc(w.user_id || "") + (w.assigned_coach ? " \u2022 Coach: " + esc(w.assigned_coach) : "") + '</div>';
+                html += '</div></div>';
+            });
+            panel.innerHTML = html;
         }
 
         function displayStats(p0, p1, p2, p3, resolved) {
