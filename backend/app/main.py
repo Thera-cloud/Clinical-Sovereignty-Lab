@@ -3454,6 +3454,7 @@ async def health_check():
 app.include_router(auth)
 app.include_router(users)
 app.include_router(sessions_api.router)
+app.include_router(sessions_api.classroom_router)
 app.include_router(admin_api.router)
 app.include_router(admin_api.sse_router)
 app.include_router(admin_api.sse_client_router)

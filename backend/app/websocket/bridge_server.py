@@ -20187,9 +20187,9 @@ If 'challenge', respectfully push the coach's thinking."""
                         s["coach_id"] = s.get("coach_id")
                         _append_eligible(s, "zoom_pg")
 
-                    # Merge device-upload / JSON classroom sessions (same file ClassroomAnalyzer uses).
+                    # Merge device-upload JSON from backend data dir (API writes there; bridge /app/data is different).
                     try:
-                        _cf = DATA_DIR / "classroom_sessions.json"
+                        _cf = BACKEND_DATA_DIR / "classroom_sessions.json"
                         if _cf.exists():
                             with open(_cf, "r", encoding="utf-8") as _jf:
                                 _uploaded = json.load(_jf)
@@ -20216,7 +20216,7 @@ If 'challenge', respectfully push the coach's thinking."""
                                         "status": rec.get("status"),
                                     }, "uploaded_video")
                     except Exception as _merge_err:
-                        print(f"[Classroom] merge classroom_sessions.json: {_merge_err}")
+                        print(f"[Classroom] merge backend_data/classroom_sessions.json: {_merge_err}")
 
                     eligible_sessions.sort(key=lambda x: x.get("scheduled_time", ""), reverse=True)
                     
@@ -20629,6 +20629,19 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                     analysis = None
                     if classroom_analyzer:
                         analysis = classroom_analyzer.get_session_analysis(session_id)
+                    if not analysis:
+                        _bcf = BACKEND_DATA_DIR / "classroom_sessions.json"
+                        if _bcf.exists():
+                            try:
+                                with open(_bcf, "r", encoding="utf-8") as _bf:
+                                    _blist = json.load(_bf)
+                                if isinstance(_blist, list):
+                                    for _row in _blist:
+                                        if isinstance(_row, dict) and _row.get("session_id") == session_id:
+                                            analysis = _row
+                                            break
+                            except Exception as _be:
+                                print(f"[Classroom] load analysis from backend_data JSON: {_be}")
                     if analysis and isinstance(analysis.get("analysis"), dict):
                         inner = analysis["analysis"]
                         analysis = {**analysis, **inner}

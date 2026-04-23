@@ -39,6 +39,13 @@ except ImportError:
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"], dependencies=[Depends(_require_auth)])
 
+# Mounted at /api/classroom/* so Flutter can POST /api/classroom/upload-video (not under /api/sessions).
+classroom_router = APIRouter(
+    prefix="/api/classroom",
+    tags=["classroom"],
+    dependencies=[Depends(_require_auth)],
+)
+
 from app.config import settings as _settings
 DATA_DIR = Path(_settings.DATA_DIR)
 WORKBOOKS_DIR = Path(_settings.WORKBOOKS_DIR)
@@ -1378,8 +1385,9 @@ ALLOWED_VIDEO_TYPES = {
 MAX_VIDEO_SIZE = 500 * 1024 * 1024  # 500MB
 
 
-@router.post("/api/classroom/upload-video")
+@classroom_router.post("/upload-video")
 async def upload_classroom_video(
+    request: Request,
     file: UploadFile = File(...),
     coach_id: str = Form(...),
     client_id: str = Form(...),
@@ -1436,6 +1444,29 @@ async def upload_classroom_video(
     sessions.append(video_session)
     save_json(classroom_sessions_file, sessions)
 
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if db_pool:
+        try:
+            await upsert_session_pg(
+                db_pool,
+                {
+                    "session_id": video_id,
+                    "coach_id": coach_id,
+                    "client_id": client_id,
+                    "client_name": "",
+                    "family_id": family_id or "",
+                    "session_type": "classroom_upload",
+                    "status": "uploaded",
+                    "scheduled_start": datetime.now(timezone.utc).isoformat(),
+                    "duration_minutes": 0,
+                    "classroom_device_upload": "true",
+                    "filename": video_session["filename"],
+                    "video_path": str(video_path),
+                },
+            )
+        except Exception as _pg_exc:
+            _logger.warning("classroom upload: coaching_sessions upsert failed: %s", _pg_exc)
+
     # Option A: analyze in background so upload response returns immediately (same analyzer as WebSocket path)
     asyncio.create_task(
         auto_analyze_classroom_video(
@@ -1455,7 +1486,7 @@ async def upload_classroom_video(
     }
 
 
-@router.post("/api/classroom/auto-upload")
+@classroom_router.post("/auto-upload")
 async def auto_upload_recording(
     request: Request,
     session_id: str = Form(""),
@@ -1502,7 +1533,7 @@ async def auto_upload_recording(
     return {"video_id": video_id, "status": "processing"}
 
 
-@router.get("/api/classroom/session/{session_id}/dojo-feedback")
+@classroom_router.get("/session/{session_id}/dojo-feedback")
 async def get_dojo_feedback(session_id: str, request: Request):
     """Get DOJO-specific feedback for a classroom session recording."""
     db = getattr(request.app.state, "db_pool", None)
