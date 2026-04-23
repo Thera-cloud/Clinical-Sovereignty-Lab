@@ -4256,6 +4256,24 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   final ScrollController _insightsChatScrollController = ScrollController();
   Map<String, dynamic>? _lastNevedalReport;
 
+  // Coach override protocol (Thera-World calibration) — Insights tab
+  String _coachOverrideClientId = '';
+  Map<String, dynamic> _coachOverrideRow = {};
+  List<Map<String, dynamic>> _coachOverrideHistory = [];
+  List<String> _coachOverrideAllowedDomains = const [
+    'clinical',
+    'coaching',
+    'family_systems',
+    'crisis',
+    'mindfulness',
+    'boundaries',
+    'trauma_informed',
+    'attachment',
+    'general',
+    'cbt_techniques',
+    'motivational',
+  ];
+
   // Assistant Coaches tab state
   List<Map<String, dynamic>> _assistantMetrics = [];
   bool _assistantsTabLoading = false;
@@ -5384,6 +5402,374 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     }));
   }
 
+  void _refreshCoachOverridePanel() {
+    final id = _coachOverrideClientId.trim();
+    if (id.isEmpty || _socket == null) return;
+    _socket!.sink.add(jsonEncode({"type": "coach_get_client_override", "client_user_id": id}));
+    _socket!.sink.add(jsonEncode({"type": "coach_get_override_history", "client_user_id": id}));
+  }
+
+  void _showCoachOverrideModal() {
+    final clientId = _coachOverrideClientId.trim();
+    if (clientId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a client first'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+    final cur = _coachOverrideRow;
+    String pacing = (cur['pacing'] ?? 'normal').toString();
+    String? focus = cur['focus_domain']?.toString();
+    if (focus != null && focus.isEmpty) focus = null;
+    bool hold = cur['clinical_hold'] == true || cur['clinical_hold'] == 'true';
+    final missionCtrl = TextEditingController(text: (cur['mission_priority'] ?? '').toString());
+    final notesCtrl = TextEditingController(text: (cur['notes'] ?? '').toString());
+    final reasonCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF0A0A0F),
+            title: const Text('Set clinical override', style: TextStyle(color: Color(0xFFFFD700))),
+            content: SizedBox(
+              width: 420,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Client: $clientId', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: pacing,
+                      dropdownColor: const Color(0xFF111118),
+                      decoration: _coachOvInputDeco('Pacing'),
+                      items: const [
+                        DropdownMenuItem(value: 'slow', child: Text('slow', style: TextStyle(color: Colors.white))),
+                        DropdownMenuItem(value: 'normal', child: Text('normal', style: TextStyle(color: Colors.white))),
+                        DropdownMenuItem(value: 'fast', child: Text('fast', style: TextStyle(color: Colors.white))),
+                      ],
+                      onChanged: (v) => setLocal(() => pacing = v ?? 'normal'),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String?>(
+                      value: focus,
+                      hint: const Text('Focus domain (optional)', style: TextStyle(color: Colors.white38)),
+                      dropdownColor: const Color(0xFF111118),
+                      decoration: _coachOvInputDeco('Focus domain'),
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('— none —', style: TextStyle(color: Colors.white54)),
+                        ),
+                        ..._coachOverrideAllowedDomains.map(
+                          (d) => DropdownMenuItem<String?>(value: d, child: Text(d, style: const TextStyle(color: Colors.white))),
+                        ),
+                      ],
+                      onChanged: (v) => setLocal(() => focus = v),
+                    ),
+                    const SizedBox(height: 10),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Clinical hold', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                      value: hold,
+                      activeColor: const Color(0xFFFFD700),
+                      onChanged: (v) => setLocal(() => hold = v),
+                    ),
+                    TextField(
+                      controller: missionCtrl,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _coachOvInputDeco('Mission / quest id (UUID)'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: notesCtrl,
+                      maxLines: 2,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _coachOvInputDeco('Notes (optional)'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: reasonCtrl,
+                      maxLines: 3,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _coachOvInputDeco('Reason (required)'),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Slow → fast pacing requires ≥ 20 characters in reason.',
+                      style: TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  missionCtrl.dispose();
+                  notesCtrl.dispose();
+                  reasonCtrl.dispose();
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFD700),
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () {
+                  final r = reasonCtrl.text.trim();
+                  if (r.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Reason is required')),
+                    );
+                    return;
+                  }
+                  _socket?.sink.add(jsonEncode({
+                    'type': 'coach_set_client_override',
+                    'client_user_id': clientId,
+                    'pacing': pacing,
+                    'focus_domain': focus,
+                    'clinical_hold': hold,
+                    'mission_priority': missionCtrl.text.trim().isEmpty ? null : missionCtrl.text.trim(),
+                    'notes': notesCtrl.text.trim().isEmpty ? null : notesCtrl.text.trim(),
+                    'override_reason': r,
+                  }));
+                  missionCtrl.dispose();
+                  notesCtrl.dispose();
+                  reasonCtrl.dispose();
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Override submitted'), backgroundColor: Color(0xFF22C55E)),
+                  );
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  InputDecoration _coachOvInputDeco(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.white54),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.06),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+    );
+  }
+
+  Future<void> _promptOverrideReasonThen(
+    String title,
+    void Function(String reason) onOk,
+  ) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0A0A0F),
+        title: Text(title, style: const TextStyle(color: Color(0xFFFFD700), fontSize: 16)),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 3,
+          style: const TextStyle(color: Colors.white),
+          decoration: _coachOvInputDeco('Reason (required)'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFFD700), foregroundColor: Colors.black),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    final reason = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok == true && reason.isNotEmpty) onOk(reason);
+  }
+
+  Widget _buildCoachOverrideInsightsSection() {
+    final clients = _getFilteredClients();
+    if (clients.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final ids = clients
+        .map((c) => (c['hardware_id'] ?? c['id'] ?? '').toString())
+        .where((x) => x.isNotEmpty)
+        .toList();
+    final ddVal = (_coachOverrideClientId.isNotEmpty && ids.contains(_coachOverrideClientId))
+        ? _coachOverrideClientId
+        : (ids.isNotEmpty ? ids.first : '');
+    if (ddVal.isNotEmpty && ddVal != _coachOverrideClientId) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (ddVal != _coachOverrideClientId) {
+          setState(() => _coachOverrideClientId = ddVal);
+          _refreshCoachOverridePanel();
+        }
+      });
+    }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.gavel, color: Color(0xFFC9A962), size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'THERAPEUTIC OVERRIDES',
+                style: TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.bold, letterSpacing: 1.2, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            value: ddVal.isEmpty ? null : ddVal,
+            dropdownColor: const Color(0xFF111118),
+            decoration: _coachOvInputDeco('Client'),
+            items: clients.map((c) {
+              final id = (c['hardware_id'] ?? c['id'] ?? '').toString();
+              final name = (c['name'] ?? id).toString();
+              return DropdownMenuItem(value: id, child: Text('$name ($id)', style: const TextStyle(color: Colors.white, fontSize: 12)));
+            }).toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              setState(() => _coachOverrideClientId = v);
+              _refreshCoachOverridePanel();
+            },
+          ),
+          const SizedBox(height: 12),
+          if (_coachOverrideRow.isNotEmpty) ...[
+            _coachOvRow('Pacing', '${_coachOverrideRow['pacing'] ?? '—'}'),
+            _coachOvRow('Focus', '${_coachOverrideRow['focus_domain'] ?? '—'}'),
+            _coachOvRow('Clinical hold', '${_coachOverrideRow['clinical_hold'] == true || _coachOverrideRow['clinical_hold'] == 'true'}'),
+            _coachOvRow('Mission priority', '${_coachOverrideRow['mission_priority'] ?? '—'}'),
+            _coachOvRow('Pacing expires', '${_coachOverrideRow['expires_at'] ?? '—'}'),
+            _coachOvRow('Focus expires', '${_coachOverrideRow['focus_domain_expires_at'] ?? '—'}'),
+            _coachOvRow('Updated', '${_coachOverrideRow['updated_at'] ?? '—'}'),
+          ] else
+            const Text('No override row for this dyad yet.', style: TextStyle(color: Colors.white38, fontSize: 12)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: _showCoachOverrideModal,
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('Set override'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFC9A962).withOpacity(0.25),
+                  foregroundColor: const Color(0xFFC9A962),
+                ),
+              ),
+              OutlinedButton(
+                onPressed: _coachOverrideRow.isEmpty
+                    ? null
+                    : () => _promptOverrideReasonThen('Renew pacing TTL', (reason) {
+                          _socket?.sink.add(jsonEncode({
+                            'type': 'coach_renew_override',
+                            'client_user_id': _coachOverrideClientId,
+                            'renew_type': 'pacing',
+                            'override_reason': reason,
+                          }));
+                        }),
+                child: const Text('Renew pacing'),
+              ),
+              OutlinedButton(
+                onPressed: _coachOverrideRow.isEmpty
+                    ? null
+                    : () => _promptOverrideReasonThen('Renew focus domain TTL', (reason) {
+                          _socket?.sink.add(jsonEncode({
+                            'type': 'coach_renew_override',
+                            'client_user_id': _coachOverrideClientId,
+                            'renew_type': 'focus_domain',
+                            'override_reason': reason,
+                          }));
+                        }),
+                child: const Text('Renew focus'),
+              ),
+              OutlinedButton(
+                onPressed: _coachOverrideRow.isEmpty
+                    ? null
+                    : () => _promptOverrideReasonThen('Clear all overrides', (reason) {
+                          _socket?.sink.add(jsonEncode({
+                            'type': 'coach_clear_client_override',
+                            'client_user_id': _coachOverrideClientId,
+                            'override_reason': reason,
+                          }));
+                        }),
+                style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+          if (_coachOverrideHistory.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('History', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            ..._coachOverrideHistory.take(20).map((e) {
+              final t = (e['override_type'] ?? '').toString();
+              final at = (e['created_at'] ?? '').toString();
+              final pv = (e['previous_value'] ?? '').toString();
+              final nv = (e['new_value'] ?? '').toString();
+              final rs = (e['reason'] ?? '').toString();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.circle, size: 6, color: Color(0xFF6B7280)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$at · $t\n  $pv → $nv${rs.isNotEmpty ? '\n  reason: $rs' : ''}',
+                        style: const TextStyle(color: Colors.white60, fontSize: 11, height: 1.25),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _coachOvRow(String k, String v) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(k, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          ),
+          Expanded(child: Text(v, style: const TextStyle(color: Colors.white, fontSize: 12))),
+        ],
+      ),
+    );
+  }
+
   Future<void> _cancelConsultationSession(Map<String, dynamic> session) async {
     final sessionId = (session['session_id'] ?? session['id'] ?? '').toString();
     if (sessionId.isEmpty) return;
@@ -5538,8 +5924,51 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           setState(() {
             _clients = data['clients'] ?? [];
             _isLoading = false;
+            if (_coachOverrideClientId.isEmpty && _clients.isNotEmpty) {
+              final c0 = _clients.first;
+              if (c0 is Map) {
+                final m = Map<String, dynamic>.from(c0);
+                _coachOverrideClientId =
+                    (m['hardware_id'] ?? m['client_id'] ?? m['id'] ?? '').toString();
+              }
+            }
+          });
+          _refreshCoachOverridePanel();
+        }
+      }
+      else if (data['type'] == 'coach_client_override' ||
+          data['type'] == 'coach_client_override_saved' ||
+          data['type'] == 'coach_override_renewed') {
+        if (mounted) {
+          setState(() {
+            final o = data['override'];
+            _coachOverrideRow = o is Map ? Map<String, dynamic>.from(o) : {};
+            final ad = data['allowed_focus_domains'];
+            if (ad is List && ad.isNotEmpty) {
+              _coachOverrideAllowedDomains = ad.map((e) => e.toString()).toList();
+            }
           });
         }
+      }
+      else if (data['type'] == 'coach_override_history') {
+        if (mounted) {
+          setState(() {
+            _coachOverrideHistory = List<Map<String, dynamic>>.from(
+              (data['entries'] as List? ?? []).map((e) {
+                if (e is Map) return Map<String, dynamic>.from(e);
+                return <String, dynamic>{};
+              }),
+            );
+          });
+        }
+      }
+      else if (data['type'] == 'coach_client_override_cleared') {
+        if (mounted) {
+          setState(() {
+            _coachOverrideRow = {};
+          });
+        }
+        _refreshCoachOverridePanel();
       }
       else if (data['type'] == 'coach_calendar_data') {
         if (mounted) {
@@ -9915,6 +10344,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           
           // Search and filter
           _buildClientSearchAndFilter(),
+
+          _buildCoachOverrideInsightsSection(),
           
           const Text(
             "CLIENT OVERVIEW",
