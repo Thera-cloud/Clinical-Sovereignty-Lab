@@ -69,6 +69,14 @@ class NateCheckInAgent:
         await self._escalate_stale_requests()
         await self._send_session_reminders()
 
+        try:
+            from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+            _wlm = WisdomLifecycleManager(self.db_pool, None)
+            await _wlm.auto_absorb_high_confidence()
+        except Exception as _wlc_err:
+            logger.debug("wisdom lifecycle auto-absorb (non-fatal): %s", _wlc_err)
+
         async with self.db_pool.acquire() as conn:
             users = await conn.fetch("""
                 SELECT username, role, hardware_id, profile_data
