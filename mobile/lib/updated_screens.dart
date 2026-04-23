@@ -4153,6 +4153,16 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   String? _classroomUploadedVideoName;
   double _classroomUploadProgress = 0.0;
   bool _classroomUploading = false;
+  Timer? _classroomVideoPollTimer;
+  bool _classroomVideoPipelineActive = false;
+  int _classroomVideoStageIndex = 0;
+  static const List<String> _classroomVideoStages = [
+    "Extracting audio...",
+    "Transcribing session...",
+    "Analyzing voice patterns...",
+    "Detecting key moments...",
+    "Generating insights...",
+  ];
   final TextEditingController _classroomCoachQueryController = TextEditingController();
   
   // Inbound coach requests from clients
@@ -6345,10 +6355,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       }
       else if (data['type'] == 'classroom_analysis_complete') {
         if (mounted) {
-          final analysis = (data['analysis'] is Map) 
-              ? Map<String, dynamic>.from(data['analysis']) 
+          _cancelClassroomVideoPoll();
+          Map<String, dynamic>? analysis = (data['analysis'] is Map)
+              ? Map<String, dynamic>.from(data['analysis'] as Map)
               : null;
+          analysis = _flattenClassroomAnalysis(analysis);
           setState(() {
+            _classroomVideoPipelineActive = false;
             _classroomAnalyzing = false;
             _classroomAnalysis = analysis;
             if (analysis != null) {
@@ -6363,9 +6376,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             }
           });
           if (analysis != null) {
+            final tps = (analysis['therapeutic_presence_score'] is num)
+                ? (analysis['therapeutic_presence_score'] as num).toDouble()
+                : 0.0;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text("Analysis complete! Therapeutic presence: ${(analysis['therapeutic_presence_score'] ?? 0).toStringAsFixed(1)}/10"),
+                content: Text("Analysis complete! Therapeutic presence: ${tps.toStringAsFixed(1)}/10"),
                 backgroundColor: const Color(0xFF4ECDC4),
                 duration: const Duration(seconds: 4),
               ),
@@ -6375,12 +6391,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       }
       else if (data['type'] == 'classroom_analysis') {
         if (mounted) {
-          final analysis = (data['analysis'] is Map) 
-              ? Map<String, dynamic>.from(data['analysis']) 
+          Map<String, dynamic>? analysis = (data['analysis'] is Map)
+              ? Map<String, dynamic>.from(data['analysis'] as Map)
               : null;
+          analysis = _flattenClassroomAnalysis(analysis);
+          if (analysis != null && analysis.isNotEmpty) {
+            _cancelClassroomVideoPoll();
+          }
           setState(() {
             _classroomAnalysis = analysis;
-            if (analysis != null) {
+            if (analysis != null && analysis.isNotEmpty) {
+              _classroomVideoPipelineActive = false;
+              _classroomAnalyzing = false;
               _classroomReflectionControllers = {};
               final questions = List<String>.from(analysis['reflection_questions'] ?? []);
               for (int i = 0; i < questions.length; i++) {
@@ -7179,6 +7201,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   @override
   void dispose() {
+    _cancelClassroomVideoPoll();
     _messageRelay.close();
     _dojoResponseController.dispose();
     _dojoScrollController.dispose();
@@ -13095,21 +13118,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                   items: _classroomSessions.map((session) {
                     final id = (session['session_id'] ?? session['id'] ?? '').toString();
                     final clientName = (session['client_name'] ?? session['client'] ?? 'Unknown Client').toString();
-                    final date = (session['date'] ?? '').toString();
+                    final date = (session['scheduled_time'] ?? session['date'] ?? '').toString();
                     final hasAnalysis = session['has_analysis'] == true;
+                    final pending = session['analysis_pending'] == true;
+                    final isUpload = (session['type'] ?? '').toString() == 'uploaded_video';
+                    final prefix = isUpload ? '[Upload] ' : '';
                     return DropdownMenuItem<String>(
                       value: id,
                       child: Row(
                         children: [
                           Icon(
-                            hasAnalysis ? Icons.check_circle : Icons.videocam,
-                            color: hasAnalysis ? const Color(0xFF4ECDC4) : Colors.grey,
+                            pending
+                                ? Icons.hourglass_top
+                                : (hasAnalysis ? Icons.check_circle : Icons.videocam),
+                            color: pending
+                                ? const Color(0xFFFFD700)
+                                : (hasAnalysis ? const Color(0xFF4ECDC4) : Colors.grey),
                             size: 18,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              "$clientName - $date",
+                              "$prefix$clientName — $date",
                               style: const TextStyle(color: Colors.white),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -13245,13 +13275,29 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       
       final response = await request.send();
       final responseBody = await response.stream.bytesToString();
-      final data = jsonDecode(responseBody);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}: $responseBody');
+      }
+      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      final vid = data['video_id']?.toString();
       
       setState(() {
         _classroomUploading = false;
         _classroomUploadProgress = 1.0;
-        _classroomUploadedVideoId = data['video_id'];
+        _classroomUploadedVideoId = vid;
       });
+      if (vid != null && vid.isNotEmpty) {
+        _startClassroomVideoAnalysisPoll(vid);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Upload complete. Running Classroom analysis…'),
+              backgroundColor: Color(0xFF4ECDC4),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
     } catch (e) {
       setState(() {
         _classroomUploading = false;
@@ -13540,6 +13586,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   
   Widget _buildAnalyzingState() {
+    final stage = _classroomVideoPipelineActive && _classroomVideoStages.isNotEmpty
+        ? _classroomVideoStages[_classroomVideoStageIndex.clamp(0, _classroomVideoStages.length - 1)]
+        : null;
     return Container(
       padding: const EdgeInsets.all(40),
       decoration: BoxDecoration(
@@ -13551,16 +13600,50 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         children: [
           const CircularProgressIndicator(color: Color(0xFF9D4EDD)),
           const SizedBox(height: 20),
-          const Text(
-            "Little Nate is reviewing your session...",
-            style: TextStyle(color: Colors.white, fontSize: 16),
+          Text(
+            stage ?? "Little Nate is reviewing your session...",
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white, fontSize: 16),
           ),
           const SizedBox(height: 8),
           Text(
-            "Analyzing therapeutic techniques, talk-time ratios, and generating personalized feedback",
+            stage != null
+                ? "You can leave this tab open; results appear when processing finishes."
+                : "Analyzing therapeutic techniques, talk-time ratios, and generating personalized feedback",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey[500], fontSize: 12),
           ),
+          if (_classroomVideoPipelineActive) ...[
+            const SizedBox(height: 20),
+            ..._classroomVideoStages.asMap().entries.map((e) {
+              final i = e.key;
+              final label = e.value;
+              final active = i == _classroomVideoStageIndex;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      active ? Icons.radio_button_checked : Icons.radio_button_off,
+                      size: 16,
+                      color: active ? const Color(0xFF9D4EDD) : Colors.grey[700]!,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: active ? Colors.white : Colors.grey[600],
+                          fontSize: 12,
+                          fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
@@ -13568,11 +13651,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   
   Widget _buildAnalysisResults() {
     final analysis = _classroomAnalysis!;
-    final metrics = (analysis['metrics'] ?? {}) as Map<String, dynamic>;
+    final metrics = (analysis['metrics'] is Map)
+        ? Map<String, dynamic>.from(analysis['metrics'] as Map)
+        : <String, dynamic>{};
     final strengths = List<String>.from(analysis['strengths'] ?? []);
     final growthAreas = List<String>.from(analysis['growth_areas'] ?? []);
     final keyMoments = List<Map<String, dynamic>>.from((analysis['key_moments'] ?? []).map((e) => Map<String, dynamic>.from(e as Map)));
-    final presenceScore = (analysis['therapeutic_presence_score'] ?? 0.0) as double;
+    final presenceScore = (analysis['therapeutic_presence_score'] is num)
+        ? (analysis['therapeutic_presence_score'] as num).toDouble()
+        : 0.0;
+    final transcriptSummary = (analysis['transcript_summary'] ?? '').toString().trim();
+    final visualObs = (analysis['visual_observations_summary'] ?? '').toString().trim();
+    final voiceSeriesRaw = analysis['voice_stress_timeline'] ?? analysis['voice_metrics_timeline'] ?? analysis['stress_over_time'];
+    final crystalRaw = analysis['crystal_entries'] ?? analysis['crystal_memory'] ?? analysis['crystals_created'];
     final focusFeedback = (analysis['focus_specific_feedback'] ?? '').toString();
     final reflectionQuestions = List<String>.from(analysis['reflection_questions'] ?? []);
     final dojoScenarios = List<Map<String, dynamic>>.from((analysis['dojo_scenarios'] ?? []).map((e) => Map<String, dynamic>.from(e as Map)));
@@ -13727,6 +13818,23 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           _buildKeyMomentsSection(keyMoments),
           const SizedBox(height: 16),
         ],
+
+        if (transcriptSummary.isNotEmpty) ...[
+          _buildClassroomTextCard("Transcript summary", transcriptSummary, Icons.subject),
+          const SizedBox(height: 16),
+        ],
+        if (visualObs.isNotEmpty) ...[
+          _buildClassroomTextCard("Visual observations", visualObs, Icons.videocam_outlined),
+          const SizedBox(height: 16),
+        ],
+        if (voiceSeriesRaw is List && voiceSeriesRaw.isNotEmpty) ...[
+          _buildVoiceTimelineSection(List<dynamic>.from(voiceSeriesRaw)),
+          const SizedBox(height: 16),
+        ],
+        if (crystalRaw is List && crystalRaw.isNotEmpty) ...[
+          _buildCrystalEntriesSection(List<dynamic>.from(crystalRaw)),
+          const SizedBox(height: 16),
+        ],
         
         // Assignments Section
         _buildAssignmentsSection(reflectionQuestions, dojoScenarios, workbookRecs, reflectionSubmitted),
@@ -13841,6 +13949,147 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ],
             ),
           )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClassroomTextCard(String title, String body, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: const Color(0xFF9D4EDD), size: 20),
+              const SizedBox(width: 8),
+              Text(title, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(body, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.45)),
+        ],
+      ),
+    );
+  }
+
+  /// Stress / engagement samples: list of maps with keys like stress, engagement, t, time, score (0–1).
+  Widget _buildVoiceTimelineSection(List<dynamic> series) {
+    final values = <double>[];
+    for (final e in series) {
+      if (e is Map) {
+        final m = Map<String, dynamic>.from(e);
+        final v = m['stress'] ?? m['engagement'] ?? m['score'] ?? m['arousal'];
+        if (v is num) values.add(v.toDouble().clamp(0.0, 1.0));
+      } else if (e is num) {
+        values.add(e.toDouble().clamp(0.0, 1.0));
+      }
+    }
+    if (values.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.graphic_eq, color: Color(0xFF4ECDC4), size: 20),
+              SizedBox(width: 8),
+              Text(
+                "Voice / engagement (over time)",
+                style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 72,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: values.take(48).map((v) {
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: Container(
+                      height: 8 + v * 56,
+                      decoration: BoxDecoration(
+                        color: Color.lerp(
+                          const Color(0xFF4ECDC4),
+                          const Color(0xFFFF6B6B),
+                          v,
+                        ),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "${values.length} samples · low → high intensity",
+            style: TextStyle(color: Colors.grey[600], fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCrystalEntriesSection(List<dynamic> entries) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0F),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.auto_awesome, color: Color(0xFFFFD700), size: 20),
+              SizedBox(width: 8),
+              Text(
+                "Crystal memory (this session)",
+                style: TextStyle(color: Color(0xFFFFD700), fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...entries.take(8).map((e) {
+            String line = e.toString();
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              line = (m['text'] ?? m['content'] ?? m['summary'] ?? m['title'] ?? jsonEncode(m)).toString();
+            }
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("◇ ", style: TextStyle(color: Color(0xFFFFD700), fontSize: 12)),
+                  Expanded(
+                    child: Text(line, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35)),
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );
@@ -14060,6 +14309,66 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   
   // Classroom helper methods
+
+  void _cancelClassroomVideoPoll() {
+    _classroomVideoPollTimer?.cancel();
+    _classroomVideoPollTimer = null;
+  }
+
+  /// Merge nested `analysis` (device-upload records) into one map for the results UI.
+  Map<String, dynamic>? _flattenClassroomAnalysis(Map<String, dynamic>? raw) {
+    if (raw == null) return null;
+    final inner = raw['analysis'];
+    if (inner is Map) {
+      final merged = Map<String, dynamic>.from(inner as Map);
+      raw.forEach((k, v) {
+        if (k == 'analysis') return;
+        merged[k] = v;
+      });
+      return merged;
+    }
+    return raw;
+  }
+
+  void _startClassroomVideoAnalysisPoll(String videoSessionId) {
+    _cancelClassroomVideoPoll();
+    if (!mounted) return;
+    setState(() {
+      _classroomVideoPipelineActive = true;
+      _classroomVideoStageIndex = 0;
+      _classroomAnalyzing = true;
+      _classroomSelectedSessionId = videoSessionId;
+      _classroomAnalysis = null;
+    });
+    _requestClassroomSessions();
+    var ticks = 0;
+    _classroomVideoPollTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      ticks += 1;
+      if (ticks * 5 > 120) {
+        _cancelClassroomVideoPoll();
+        setState(() {
+          _classroomVideoPipelineActive = false;
+          _classroomAnalyzing = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Analysis is still running. Pull to refresh or check back shortly.'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _classroomVideoStageIndex = ticks % _classroomVideoStages.length;
+      });
+      _loadSessionAnalysis(videoSessionId);
+    });
+    _loadSessionAnalysis(videoSessionId);
+  }
   
   void _requestClassroomSessions() {
     _socket?.sink.add(jsonEncode({
