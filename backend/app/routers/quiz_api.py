@@ -401,6 +401,19 @@ async def submit_quiz(request: Request, quiz_id: str, body: QuizSubmitBody):
         except Exception:
             pass
 
+    try:
+        from app.services.assessment_result_hooks import schedule_assessment_completion_side_effects
+
+        await schedule_assessment_completion_side_effects(
+            pool,
+            body.user_id,
+            f"quiz:{quiz_id}:{quiz.get('title', '')}",
+            dim_averages,
+            insights_text,
+        )
+    except Exception as _ase:
+        _log.warning("assessment bridge hook: %s", _ase)
+
     return {
         "status": "submitted",
         "score": overall_score,

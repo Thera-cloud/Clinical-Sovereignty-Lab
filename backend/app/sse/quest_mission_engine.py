@@ -72,13 +72,21 @@ TEMPLATE_NPCS: Dict[str, Dict[str, str]] = {
 }
 
 
-async def analyze_crystal_depth(user_id: str, goal_or_target: str, db_pool) -> dict:
+async def analyze_crystal_depth(
+    user_id: str,
+    goal_or_target: str,
+    db_pool,
+    priority_goal_keys: Optional[List[str]] = None,
+) -> dict:
     """Mine crystal history for patterns related to the quest/mission topic."""
     domains: set = set()
-    goal_lower = goal_or_target.lower()
+    goal_lower = (goal_or_target or "").lower()
     for keyword, domain_list in GOAL_TO_DOMAINS.items():
         if keyword in goal_lower:
             domains.update(domain_list)
+    for pk in priority_goal_keys or []:
+        if pk in GOAL_TO_DOMAINS:
+            domains.update(GOAL_TO_DOMAINS[pk])
     if not domains:
         domains = {w for w in goal_lower.split() if len(w) > 3}
 
@@ -145,8 +153,24 @@ async def generate_npcs_from_crystals(clusters: list) -> list:
 
 async def create_quest(user_id: str, goal: str, db_pool, crystal_analysis: dict = None) -> dict:
     """Create a quest from user's stated goal, enriched with crystal depth."""
+    priority_keys: List[str] = []
+    try:
+        from app.sse.adapters.assessment_bridge import AssessmentBridge
+
+        ab = AssessmentBridge(db_pool)
+        acal = await ab.get_assessment_calibration(user_id)
+        if acal.get("has_assessments"):
+            priority_keys = ab.quest_goal_keywords_for_priorities(acal.get("domain_priorities") or [])
+    except Exception as _ab_err:
+        logger.debug("create_quest assessment weighting skipped: %s", _ab_err)
+
     if not crystal_analysis:
-        crystal_analysis = await analyze_crystal_depth(user_id, goal, db_pool)
+        goal_for_depth = goal
+        if priority_keys:
+            goal_for_depth = f"{goal} {' '.join(priority_keys)}".strip()
+        crystal_analysis = await analyze_crystal_depth(
+            user_id, goal_for_depth, db_pool, priority_goal_keys=priority_keys or None,
+        )
     npcs = await generate_npcs_from_crystals(crystal_analysis.get("clusters", []))
     quest_id = str(uuid.uuid4())
     progress = [{"timestamp": datetime.now(timezone.utc).isoformat(), "event": "quest_created",
@@ -171,8 +195,24 @@ async def create_quest(user_id: str, goal: str, db_pool, crystal_analysis: dict 
 async def create_mission(user_id: str, relationship_target: str, relationship_type: str,
                          db_pool, crystal_analysis: dict = None) -> dict:
     """Create a mission for relational work, enriched with crystal depth."""
+    priority_keys: List[str] = []
+    try:
+        from app.sse.adapters.assessment_bridge import AssessmentBridge
+
+        ab = AssessmentBridge(db_pool)
+        acal = await ab.get_assessment_calibration(user_id)
+        if acal.get("has_assessments"):
+            priority_keys = ab.quest_goal_keywords_for_priorities(acal.get("domain_priorities") or [])
+    except Exception as _ab_err:
+        logger.debug("create_mission assessment weighting skipped: %s", _ab_err)
+
     if not crystal_analysis:
-        crystal_analysis = await analyze_crystal_depth(user_id, relationship_target, db_pool)
+        tgt = relationship_target
+        if priority_keys:
+            tgt = f"{relationship_target} {' '.join(priority_keys)}".strip()
+        crystal_analysis = await analyze_crystal_depth(
+            user_id, tgt, db_pool, priority_goal_keys=priority_keys or None,
+        )
     npcs = await generate_npcs_from_crystals(crystal_analysis.get("clusters", []))
     mission_id = str(uuid.uuid4())
     progress = [{"timestamp": datetime.now(timezone.utc).isoformat(), "event": "mission_created",
