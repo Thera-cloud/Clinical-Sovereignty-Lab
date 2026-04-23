@@ -37,7 +37,12 @@ except Exception:
 # - In local dev, it is sometimes run directly (`python bridge_server.py`)
 # So we support both import styles.
 try:
-    from .crystal_recall_bridge import recall_crystals_for_context, crystallize_from_conversation, crystallize_session_summary
+    from .crystal_recall_bridge import (
+        recall_crystals_for_context,
+        crystallize_from_conversation,
+        crystallize_session_summary,
+        crystallize_coach_observation,
+    )
     from .nevedal_handlers import NevedalHandler
     from .sanctuary_engine import FamilySanctuaryEngine
     from .bridge_handlers_v2 import CoachNexusV2
@@ -52,7 +57,12 @@ try:
         detect_suspicious_activity,
     )
 except Exception:
-    from crystal_recall_bridge import recall_crystals_for_context, crystallize_from_conversation, crystallize_session_summary
+    from crystal_recall_bridge import (
+        recall_crystals_for_context,
+        crystallize_from_conversation,
+        crystallize_session_summary,
+        crystallize_coach_observation,
+    )
     from nevedal_handlers import NevedalHandler
     from sanctuary_engine import FamilySanctuaryEngine
     from bridge_handlers_v2 import CoachNexusV2
@@ -10540,6 +10550,7 @@ async def handle_client(websocket, path=None):
                 "admin_get_coach_document", "admin_get_company_clients",
                 "admin_get_match_suggestions", "admin_get_zoom_sessions",
                 "admin_get_live_sessions", "admin_get_user_devices",
+                "admin_get_wisdom_extractions", "admin_absorb_wisdom", "admin_reject_wisdom",
                 # --- Client / generic data-fetch ---
                 "get_metrics", "get_history", "get_sessions", "get_billing",
                 "get_dojo_subscriptions", "get_pending_nudges",
@@ -10561,6 +10572,8 @@ async def handle_client(websocket, path=None):
                 "coach_get_clients", "fetch_coach_calendar", "fetch_coach_sessions",
                 "coach_request_briefing", "coach_get_briefing",
                 "coach_get_client_briefing",
+                "coach_get_client_panel_insights",
+                "coach_get_override_history",
                 "coach_get_pending_bookings", "coach_get_financials", "update_availability",
                 "coach_get_my_availability", "coach_block_time", "coach_unblock_time",
                 "get_profile",
@@ -17034,6 +17047,7 @@ async def handle_client(websocket, path=None):
                         }
 
                         crystal_memory: List[Dict[str, Any]] = []
+                        recent_panel_insights: List[Dict[str, Any]] = []
                         session_focus: Optional[str] = None
                         recent_conversation_topics: List[Dict[str, Any]] = []
 
@@ -17118,6 +17132,43 @@ async def handle_client(websocket, path=None):
                                     )
                                     if _inrow and (_inrow["intake_note"] or "").strip():
                                         session_focus = (_inrow["intake_note"] or "").strip()
+
+                                    try:
+                                        _insights_rows = await _brconn.fetch(
+                                            """
+                                            SELECT clinical_translation, generated_at, source
+                                            FROM (
+                                                SELECT clinical_translation, generated_at,
+                                                       'delivery' AS source
+                                                FROM sse_delivery_generation_log
+                                                WHERE clinical_translation IS NOT NULL
+                                                  AND (user_id = $1 OR ($2 <> '' AND user_id = $2))
+                                                UNION ALL
+                                                SELECT clinical_translation, generated_at,
+                                                       'panel_log' AS source
+                                                FROM sse_panel_log
+                                                WHERE clinical_translation IS NOT NULL
+                                                  AND (user_id = $1 OR ($2 <> '' AND user_id = $2))
+                                            ) x
+                                            ORDER BY generated_at DESC
+                                            LIMIT 3
+                                            """,
+                                            _chw,
+                                            _cun,
+                                        )
+                                        for _ir in _insights_rows:
+                                            _iga = _ir["generated_at"]
+                                            recent_panel_insights.append({
+                                                "source": _ir.get("source"),
+                                                "generated_at": (
+                                                    _iga.isoformat()
+                                                    if _iga and hasattr(_iga, "isoformat")
+                                                    else str(_iga or "")
+                                                ),
+                                                "clinical_translation": _ir["clinical_translation"],
+                                            })
+                                    except Exception as _pi_err:
+                                        logger.warning("get_presession_brief: panel insights: %s", _pi_err)
                             except Exception as _br_err:
                                 logger.warning("get_presession_brief: crystal/intake enrichment failed: %s", _br_err)
 
@@ -17135,6 +17186,7 @@ async def handle_client(websocket, path=None):
                             "recent_conversations": recent_memory[-5:],
                             "recent_conversation_topics": recent_conversation_topics,
                             "crystal_memory": crystal_memory,
+                            "recent_panel_insights": recent_panel_insights,
                             "family_id": client_profile.get("family_id"),
                             "zoom_sessions": zoom_summary,
                             "zoom_meeting_count": zoom_meeting_count,
@@ -17148,6 +17200,70 @@ async def handle_client(websocket, path=None):
                             brief["session_focus"] = session_focus
 
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
+
+            elif t == "coach_get_client_panel_insights":
+                if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
+                    await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
+                    continue
+                if not db_pool:
+                    await websocket.send(json.dumps({"type": "error", "message": "DATABASE_UNAVAILABLE"}))
+                    continue
+                _cpi_client = (d.get("client_id") or d.get("client_user_id") or "").strip()
+                if not _cpi_client:
+                    await websocket.send(json.dumps({"type": "error", "message": "Missing client_id"}))
+                    continue
+                _cpi_coach = (current_profile.get("hardware_id") or "").strip()
+                _cpi_admin = current_profile.get("role") == "ADMIN"
+                try:
+                    async with db_pool.acquire() as _cpi_conn:
+                        if not _cpi_admin:
+                            _cpi_ok = await _cpi_conn.fetchval(
+                                """SELECT 1 FROM coach_assignments
+                                   WHERE coach_id = $1 AND entity_type = 'client' AND entity_id = $2 LIMIT 1""",
+                                _cpi_coach,
+                                _cpi_client,
+                            )
+                            if not _cpi_ok:
+                                await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
+                                continue
+                        _cpi_rows = await _cpi_conn.fetch(
+                            """
+                            SELECT panel_id, narrative_text, clinical_translation, generated_at,
+                                   panel_type, r2_url, biome, panel_tone
+                            FROM sse_panel_log
+                            WHERE user_id = $1
+                            ORDER BY generated_at DESC
+                            LIMIT 10
+                            """,
+                            _cpi_client,
+                        )
+                        _panels_out = []
+                        for _pr in _cpi_rows:
+                            _g = _pr["generated_at"]
+                            _panels_out.append({
+                                "panel_id": str(_pr["panel_id"]),
+                                "narrative_text": _pr["narrative_text"],
+                                "clinical_translation": _pr["clinical_translation"],
+                                "generated_at": (
+                                    _g.isoformat() if _g and hasattr(_g, "isoformat") else str(_g or "")
+                                ),
+                                "panel_type": _pr["panel_type"],
+                                "r2_url": _pr["r2_url"],
+                                "biome": _pr["biome"],
+                                "panel_tone": _pr["panel_tone"],
+                            })
+                    await websocket.send(json.dumps({
+                        "type": "coach_client_panel_insights",
+                        "client_id": _cpi_client,
+                        "panels": _panels_out,
+                    }))
+                except Exception as _cpi_err:
+                    logger.warning("coach_get_client_panel_insights: %s", _cpi_err)
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "PANEL_INSIGHTS_FAILED",
+                        "detail": str(_cpi_err),
+                    }))
 
             # === ADMIN/COACH: GET CLIENT CONVERSATION HISTORY ===
             elif t == "admin_get_client_history":
@@ -17245,6 +17361,22 @@ async def handle_client(websocket, path=None):
 
                     save_json_file(COACH_SESSION_NOTES_FILE, store)
 
+                    try:
+                        _cn_client = (client_id or "").strip()
+                        _cn_coach = (current_profile.get("hardware_id") or "").strip()
+                        if db_pool and _cn_client and note_text:
+                            asyncio.create_task(
+                                crystallize_coach_observation(
+                                    db_pool,
+                                    _cn_coach,
+                                    _cn_client,
+                                    note_text,
+                                    observation_type="coaching_note",
+                                )
+                            )
+                    except Exception:
+                        pass
+
                     # Optional: enqueue learning for admin approval (or auto-approve if explicitly enabled)
                     try:
                         if entry.get("share_with_nate"):
@@ -17289,6 +17421,419 @@ async def handle_client(websocket, path=None):
                         "type": "coach_session_notes",
                         "folder_id": key,
                         "notes": store.get(key, [])[-200:],
+                    }))
+
+            # === COACH: CLIENT STORY OVERRIDES (Thera-World / SSE calibration) ===
+            elif t in (
+                "coach_set_client_override",
+                "coach_get_client_override",
+                "coach_clear_client_override",
+                "coach_get_override_history",
+                "coach_renew_override",
+            ):
+                if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
+                    await websocket.send(json.dumps({"type": "error", "message": "COACH_ONLY"}))
+                    continue
+                if not db_pool:
+                    await websocket.send(json.dumps({"type": "error", "message": "DATABASE_UNAVAILABLE"}))
+                    continue
+                coach_hw = (current_profile.get("hardware_id") or "").strip()
+                client_hw = (d.get("client_user_id") or d.get("client_id") or "").strip()
+                if not client_hw:
+                    await websocket.send(json.dumps({"type": "error", "message": "Missing client_user_id"}))
+                    continue
+                try:
+                    from app.services.coach_override_protocol import (
+                        ALLOWED_FOCUS_DOMAINS,
+                        compute_expiry_columns,
+                        insert_audit_rows,
+                        insert_clear_audit,
+                        merge_override_payload,
+                        mission_reference_valid,
+                        validate_merged,
+                    )
+                    from datetime import datetime, timedelta, timezone
+
+                    def _serialize_override_row(r):
+                        if not r:
+                            return {}
+                        o = dict(r)
+                        for k, v in list(o.items()):
+                            if hasattr(v, "isoformat"):
+                                o[k] = v.isoformat()
+                        return o
+
+                    async with db_pool.acquire() as conn:
+                        is_admin = current_profile.get("role") == "ADMIN"
+                        if not is_admin:
+                            assigned = await conn.fetchval(
+                                """SELECT 1 FROM coach_assignments
+                                   WHERE coach_id = $1 AND entity_type = 'client' AND entity_id = $2 LIMIT 1""",
+                                coach_hw, client_hw,
+                            )
+                            if not assigned:
+                                await websocket.send(json.dumps({"type": "error", "message": "NOT_ASSIGNED_COACH"}))
+                                continue
+                            effective_coach = coach_hw
+                        else:
+                            effective_coach = (d.get("coach_user_id") or "").strip()
+                            if not effective_coach:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "Admin must pass coach_user_id for override operations",
+                                }))
+                                continue
+
+                        role_ov = current_profile.get("role") or "COACH"
+
+                        if t == "coach_get_override_history":
+                            hist = await conn.fetch(
+                                """
+                                SELECT id, override_type, previous_value, new_value, reason, created_at
+                                FROM coach_override_audit
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                ORDER BY created_at DESC
+                                LIMIT 20
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            items = []
+                            for h in hist:
+                                hd = dict(h)
+                                ts = hd.get("created_at")
+                                if ts and hasattr(ts, "isoformat"):
+                                    hd["created_at"] = ts.isoformat()
+                                items.append(hd)
+                            await websocket.send(json.dumps({
+                                "type": "coach_override_history",
+                                "client_user_id": client_hw,
+                                "coach_user_id": effective_coach,
+                                "entries": items,
+                            }))
+
+                        elif t == "coach_renew_override":
+                            reason_rn = (d.get("override_reason") or d.get("reason") or "").strip()
+                            if not reason_rn:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "override_reason is required",
+                                }))
+                                continue
+                            renew_type = (d.get("renew_type") or "").strip().lower()
+                            if renew_type not in ("pacing", "focus_domain"):
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "renew_type must be pacing or focus_domain",
+                                }))
+                                continue
+                            row_rn = await conn.fetchrow(
+                                """
+                                SELECT expires_at, focus_domain_expires_at, pacing, focus_domain
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            if not row_rn:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "No override row to renew",
+                                }))
+                                continue
+                            now_rn = datetime.now(timezone.utc)
+                            if renew_type == "pacing":
+                                pv = (row_rn["pacing"] or "normal").strip().lower()
+                                if pv == "normal" and row_rn["expires_at"] is None:
+                                    await websocket.send(json.dumps({
+                                        "type": "error",
+                                        "message": "OVERRIDE_VALIDATION_FAILED",
+                                        "detail": "No active non-default pacing override to renew",
+                                    }))
+                                    continue
+                            else:
+                                if not (row_rn["focus_domain"] or "").strip():
+                                    await websocket.send(json.dumps({
+                                        "type": "error",
+                                        "message": "OVERRIDE_VALIDATION_FAILED",
+                                        "detail": "No focus_domain override to renew",
+                                    }))
+                                    continue
+                            _renew_aborted = False
+                            async with conn.transaction():
+                                row_lock = await conn.fetchrow(
+                                    """
+                                    SELECT expires_at, focus_domain_expires_at, pacing, focus_domain
+                                    FROM coach_client_overrides
+                                    WHERE coach_user_id = $1 AND client_user_id = $2
+                                    FOR UPDATE
+                                    """,
+                                    effective_coach,
+                                    client_hw,
+                                )
+                                if not row_lock:
+                                    _renew_aborted = True
+                                elif renew_type == "pacing":
+                                    old_e = row_lock["expires_at"]
+                                    base = now_rn
+                                    if old_e is not None:
+                                        oe = old_e
+                                        if getattr(oe, "tzinfo", None) is None:
+                                            oe = oe.replace(tzinfo=timezone.utc)
+                                        if oe > base:
+                                            base = oe
+                                    new_e = base + timedelta(days=30)
+                                    prev_s = old_e.isoformat() if old_e and hasattr(old_e, "isoformat") else ""
+                                    await conn.execute(
+                                        """
+                                        UPDATE coach_client_overrides
+                                        SET expires_at = $3, updated_at = NOW()
+                                        WHERE coach_user_id = $1 AND client_user_id = $2
+                                        """,
+                                        effective_coach,
+                                        client_hw,
+                                        new_e,
+                                    )
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO coach_override_audit (
+                                            coach_user_id, client_user_id, override_type,
+                                            previous_value, new_value, reason
+                                        ) VALUES ($1, $2, 'renew_pacing', $3, $4, $5)
+                                        """,
+                                        effective_coach,
+                                        client_hw,
+                                        prev_s,
+                                        new_e.isoformat(),
+                                        reason_rn[:8000],
+                                    )
+                                else:
+                                    old_f = row_lock["focus_domain_expires_at"]
+                                    base_f = now_rn
+                                    if old_f is not None:
+                                        fe = old_f
+                                        if getattr(fe, "tzinfo", None) is None:
+                                            fe = fe.replace(tzinfo=timezone.utc)
+                                        if fe > base_f:
+                                            base_f = fe
+                                    new_f = base_f + timedelta(days=14)
+                                    prev_fs = old_f.isoformat() if old_f and hasattr(old_f, "isoformat") else ""
+                                    await conn.execute(
+                                        """
+                                        UPDATE coach_client_overrides
+                                        SET focus_domain_expires_at = $3, updated_at = NOW()
+                                        WHERE coach_user_id = $1 AND client_user_id = $2
+                                        """,
+                                        effective_coach,
+                                        client_hw,
+                                        new_f,
+                                    )
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO coach_override_audit (
+                                            coach_user_id, client_user_id, override_type,
+                                            previous_value, new_value, reason
+                                        ) VALUES ($1, $2, 'renew_focus_domain', $3, $4, $5)
+                                        """,
+                                        effective_coach,
+                                        client_hw,
+                                        prev_fs,
+                                        new_f.isoformat(),
+                                        reason_rn[:8000],
+                                    )
+                            if _renew_aborted:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "No override row to renew",
+                                }))
+                                continue
+                            row_out = await conn.fetchrow(
+                                """
+                                SELECT coach_user_id, client_user_id, focus_domain, pacing,
+                                       clinical_hold, mission_priority, notes, updated_at,
+                                       expires_at, focus_domain_expires_at
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "coach_override_renewed",
+                                "client_user_id": client_hw,
+                                "coach_user_id": effective_coach,
+                                "renew_type": renew_type,
+                                "override": _serialize_override_row(row_out),
+                            }))
+
+                        elif t == "coach_set_client_override":
+                            reason_ov = (d.get("override_reason") or d.get("reason") or "").strip()
+                            prev_row = await conn.fetchrow(
+                                """
+                                SELECT focus_domain, pacing, clinical_hold, mission_priority, notes,
+                                       expires_at, focus_domain_expires_at
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            prev_dict = dict(prev_row) if prev_row else {}
+                            merged = merge_override_payload(prev_dict, d)
+                            err = validate_merged(role_ov, prev_dict, merged, reason_ov)
+                            if err:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": err,
+                                    "allowed_focus_domains": sorted(ALLOWED_FOCUS_DOMAINS),
+                                }))
+                                continue
+                            mp = merged.get("mission_priority")
+                            if mp and not await mission_reference_valid(conn, client_hw, mp):
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "mission_priority must reference an active quest or mission for this client",
+                                    "allowed_focus_domains": sorted(ALLOWED_FOCUS_DOMAINS),
+                                }))
+                                continue
+                            pacing_exp, focus_exp = compute_expiry_columns(
+                                prev_dict,
+                                merged,
+                                prev_dict.get("expires_at"),
+                                prev_dict.get("focus_domain_expires_at"),
+                            )
+                            notes_ov = merged.get("notes")
+                            if notes_ov is not None:
+                                notes_ov = (str(notes_ov)[:8000]) if notes_ov else None
+                            async with conn.transaction():
+                                await conn.execute(
+                                    """
+                                    INSERT INTO coach_client_overrides (
+                                        coach_user_id, client_user_id, focus_domain, pacing,
+                                        clinical_hold, mission_priority, notes, updated_at,
+                                        expires_at, focus_domain_expires_at
+                                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
+                                    ON CONFLICT (coach_user_id, client_user_id) DO UPDATE SET
+                                        focus_domain = EXCLUDED.focus_domain,
+                                        pacing = EXCLUDED.pacing,
+                                        clinical_hold = EXCLUDED.clinical_hold,
+                                        mission_priority = EXCLUDED.mission_priority,
+                                        notes = EXCLUDED.notes,
+                                        expires_at = EXCLUDED.expires_at,
+                                        focus_domain_expires_at = EXCLUDED.focus_domain_expires_at,
+                                        updated_at = NOW()
+                                    """,
+                                    effective_coach,
+                                    client_hw,
+                                    merged.get("focus_domain"),
+                                    merged.get("pacing"),
+                                    merged.get("clinical_hold"),
+                                    merged.get("mission_priority"),
+                                    notes_ov,
+                                    pacing_exp,
+                                    focus_exp,
+                                )
+                                await insert_audit_rows(
+                                    conn, effective_coach, client_hw, prev_dict, merged, reason_ov,
+                                )
+                            row = await conn.fetchrow(
+                                """
+                                SELECT coach_user_id, client_user_id, focus_domain, pacing,
+                                       clinical_hold, mission_priority, notes, updated_at,
+                                       expires_at, focus_domain_expires_at
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "coach_client_override_saved",
+                                "client_user_id": client_hw,
+                                "coach_user_id": effective_coach,
+                                "override": _serialize_override_row(row),
+                                "allowed_focus_domains": sorted(ALLOWED_FOCUS_DOMAINS),
+                            }))
+
+                        elif t == "coach_get_client_override":
+                            row = await conn.fetchrow(
+                                """
+                                SELECT coach_user_id, client_user_id, focus_domain, pacing,
+                                       clinical_hold, mission_priority, notes, updated_at,
+                                       expires_at, focus_domain_expires_at
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            await websocket.send(json.dumps({
+                                "type": "coach_client_override",
+                                "client_user_id": client_hw,
+                                "coach_user_id": effective_coach,
+                                "override": _serialize_override_row(row),
+                                "allowed_focus_domains": sorted(ALLOWED_FOCUS_DOMAINS),
+                            }))
+
+                        elif t == "coach_clear_client_override":
+                            reason_clr = (d.get("override_reason") or d.get("reason") or "").strip()
+                            if not reason_clr:
+                                await websocket.send(json.dumps({
+                                    "type": "error",
+                                    "message": "OVERRIDE_VALIDATION_FAILED",
+                                    "detail": "override_reason is required to clear overrides",
+                                }))
+                                continue
+                            prev_clr = await conn.fetchrow(
+                                """
+                                SELECT coach_user_id, client_user_id, focus_domain, pacing,
+                                       clinical_hold, mission_priority, notes, updated_at,
+                                       expires_at, focus_domain_expires_at
+                                FROM coach_client_overrides
+                                WHERE coach_user_id = $1 AND client_user_id = $2
+                                """,
+                                effective_coach,
+                                client_hw,
+                            )
+                            if not prev_clr:
+                                await websocket.send(json.dumps({
+                                    "type": "coach_client_override_cleared",
+                                    "client_user_id": client_hw,
+                                    "coach_user_id": effective_coach,
+                                    "noop": True,
+                                }))
+                                continue
+                            snap = _serialize_override_row(prev_clr)
+                            async with conn.transaction():
+                                await insert_clear_audit(
+                                    conn, effective_coach, client_hw, snap, reason_clr,
+                                )
+                                await conn.execute(
+                                    """
+                                    DELETE FROM coach_client_overrides
+                                    WHERE coach_user_id = $1 AND client_user_id = $2
+                                    """,
+                                    effective_coach,
+                                    client_hw,
+                                )
+                            await websocket.send(json.dumps({
+                                "type": "coach_client_override_cleared",
+                                "client_user_id": client_hw,
+                                "coach_user_id": effective_coach,
+                            }))
+                except Exception as _ov_err:
+                    print(f">>> [COACH_OVERRIDE] {_ov_err}")
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "OVERRIDE_OPERATION_FAILED",
+                        "detail": str(_ov_err),
                     }))
 
             # === COACH: SESSION ASSISTANT AI POP-UP (Phase 4) ===
@@ -17621,6 +18166,23 @@ If 'challenge', respectfully push the coach's thinking."""
                     live_store[live_id] = sess
                     live_store = compact_live_store(live_store)
                     save_json_file(COACH_LIVE_SESSIONS_FILE, live_store)
+
+                    try:
+                        _live_client = (sess.get("client_id") or "").strip()
+                        _live_coach_hw = (current_profile.get("hardware_id") or "").strip()
+                        if db_pool and _live_client and text:
+                            asyncio.create_task(
+                                crystallize_coach_observation(
+                                    db_pool,
+                                    _live_coach_hw,
+                                    _live_client,
+                                    text,
+                                    observation_type="coaching_note",
+                                )
+                            )
+                    except Exception:
+                        pass
+
                     await websocket.send(json.dumps({
                         "type": "coach_live_note_ack",
                         "live_session_id": live_id,
@@ -18209,6 +18771,64 @@ If 'challenge', respectfully push the coach's thinking."""
                         }))
                     else:
                         await websocket.send(json.dumps({"type": "error", "message": "Queue item not found"}))
+
+            # === ADMIN: WISDOM EXTRACTIONS (lifecycle queue) ===
+            elif t in ("admin_get_wisdom_extractions", "admin_absorb_wisdom", "admin_reject_wisdom"):
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                if not db_pool:
+                    await websocket.send(json.dumps({"type": "error", "message": "DATABASE_UNAVAILABLE"}))
+                    continue
+                try:
+                    from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                    _wlm = WisdomLifecycleManager(db_pool, night_school)
+                except Exception as _wlm_err:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": f"WISDOM_LIFECYCLE_UNAVAILABLE: {_wlm_err}",
+                    }))
+                    continue
+
+                if t == "admin_get_wisdom_extractions":
+                    st = d.get("status") or "pending"
+                    items = await _wlm.get_extraction_queue(status=st)
+                    await websocket.send(json.dumps({
+                        "type": "admin_wisdom_extractions",
+                        "status": st,
+                        "items": items,
+                    }))
+                elif t == "admin_absorb_wisdom":
+                    eid = (d.get("extraction_id") or d.get("id") or "").strip()
+                    if not eid:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing extraction_id"}))
+                        continue
+                    ok = await _wlm.absorb_wisdom(
+                        eid,
+                        absorbed_by=current_profile.get("username", "admin"),
+                    )
+                    await websocket.send(json.dumps({
+                        "type": "admin_wisdom_absorbed",
+                        "extraction_id": eid,
+                        "success": ok,
+                    }))
+                else:
+                    eid = (d.get("extraction_id") or d.get("id") or "").strip()
+                    reason = (d.get("reason") or "").strip() or "No reason provided"
+                    if not eid:
+                        await websocket.send(json.dumps({"type": "error", "message": "Missing extraction_id"}))
+                        continue
+                    ok = await _wlm.reject_wisdom(
+                        eid,
+                        rejected_by=current_profile.get("username", "admin"),
+                        reason=reason,
+                    )
+                    await websocket.send(json.dumps({
+                        "type": "admin_wisdom_rejected",
+                        "extraction_id": eid,
+                        "success": ok,
+                    }))
             
             # === COACH: GET CALENDAR ===
             elif t == "fetch_coach_calendar":
@@ -19720,6 +20340,37 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                                 filename=f"classroom_{session_id}.txt",
                                 category="coach_development"
                             )
+
+                        if db_pool and insight_content.strip():
+                            async def _classroom_wisdom_extract():
+                                try:
+                                    from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
+
+                                    _mgr = WisdomLifecycleManager(db_pool, night_school)
+                                    uid = None
+                                    if client_id:
+                                        async with db_pool.acquire() as _wc:
+                                            uid = await _wc.fetchval(
+                                                """
+                                                SELECT id::text FROM users
+                                                WHERE hardware_id = $1 OR username = $1
+                                                LIMIT 1
+                                                """,
+                                                client_id,
+                                            )
+                                    tps = float(ai_result.get("therapeutic_presence_score", 7.0) or 7.0)
+                                    conf = min(0.95, max(0.5, tps / 10.0))
+                                    await _mgr.extract_wisdom(
+                                        "classroom",
+                                        insight_content[:8000],
+                                        user_id=uid,
+                                        domain="clinical",
+                                        confidence=conf,
+                                    )
+                                except Exception as _wce:
+                                    print(f"[Classroom] wisdom extract (non-fatal): {_wce}")
+
+                            asyncio.create_task(_classroom_wisdom_extract())
                         
                     except Exception as e:
                         print(f"[Classroom] AI analysis error: {e}")
@@ -28222,6 +28873,8 @@ async def main():
             session_tracker.db_pool = db_pool  # SessionTracker → sessions PG table
             billing_system_internal.db_pool = db_pool  # BillingSystem → PG-backed reads
             night_school.db_pool = db_pool  # Night School synthesis → night_school_wisdom PG table
+            if night_school_handler and getattr(night_school_handler, "director", None):
+                night_school_handler.director.db_pool = db_pool  # coach note approval → crystals
             if _queens_guard:  # QUANTUM-CRYSTAL-ARCH — Layer 9
                 _queens_guard.db_pool = db_pool
             # QUANTUM-CRYSTAL-ARCH — LIMINAL RESOLVE engine
