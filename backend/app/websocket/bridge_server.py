@@ -10286,7 +10286,10 @@ async def handle_client(websocket, path=None):
                 "get_metrics", "get_history", "get_sessions", "get_billing",
                 "get_dojo_subscriptions", "get_pending_nudges",
                 "get_presession_brief", "get_sanctuaries",
-                "get_night_school_wisdom", "get_curriculum_structure",
+                "get_night_school_wisdom",
+                "add_wisdom_entry", "update_wisdom_entry", "delete_wisdom_entry",
+                "save_wisdom", "create_wisdom_snapshot",
+                "get_curriculum_structure",
                 "get_curriculum_wisdom", "get_user_discipline",
                 "get_notifications", "get_checkout_url", "get_portal_url",
                 "get_my_devices", "get_coherence_report",
@@ -18058,6 +18061,42 @@ If 'challenge', respectfully push the coach's thinking."""
                     else:
                         await websocket.send(json.dumps({"type": "error", "message": "Dojo module not available"}))
             
+            # === NIGHT SCHOOL: coach notes audit queue (dashboard short names + night_school_* aliases) ===
+            elif t in ("get_pending_notes", "night_school_get_pending_notes"):
+                if night_school_handler:
+                    await night_school_handler.handle_get_pending_notes(websocket, d, current_profile)
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Night School handler unavailable"}))
+            elif t in ("approve_note", "night_school_approve_note"):
+                if night_school_handler:
+                    await night_school_handler.handle_approve_note(websocket, d, current_profile)
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Night School handler unavailable"}))
+            elif t in ("reject_note", "night_school_reject_note"):
+                if night_school_handler:
+                    await night_school_handler.handle_reject_note(websocket, d, current_profile)
+                else:
+                    await websocket.send(json.dumps({"type": "error", "message": "Night School handler unavailable"}))
+            elif t in ("redact_note", "night_school_redact_note"):
+                if not night_school_handler or not getattr(night_school_handler, "director", None):
+                    await websocket.send(json.dumps({"type": "error", "message": "Night School handler unavailable"}))
+                elif not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "Admin access required"}))
+                else:
+                    _nid = d.get("note_id")
+                    _ncontent = d.get("content", "")
+                    _note = night_school_handler.director.get_note(_nid)
+                    if not _note:
+                        await websocket.send(json.dumps({"type": "error", "message": "Note not found"}))
+                    else:
+                        _span = (0, len(_note.content), _ncontent)
+                        night_school_handler.director.redact_note(_nid, [_span])
+                        await websocket.send(json.dumps({
+                            "type": "note_redacted",
+                            "note_id": _nid,
+                            "content": _ncontent,
+                        }))
+            
             # === DOJO: GENERATE GANTT CHART (Project PM & Business only) ===
             elif t == "dojo_generate_gantt":
                 if not current_profile or current_profile.get("role") not in ("COACH", "ADMIN"):
@@ -20923,6 +20962,175 @@ Coach Reflection on Session {session_id}:
                         "type": "night_school_wisdom",
                         "data": wisdom
                     }))
+
+            # === NIGHT SCHOOL: WISDOM EDITOR (mutations on night_school.wisdom_file = Admin/little_nate_wisdom.json) ===
+            # Canonical for this editor matches get_night_school_wisdom. NightSchoolDirector uses Admin/night_school/wisdom.json separately.
+            elif t == "add_wisdom_entry":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                wpath = night_school.wisdom_file
+                wisdom_data = night_school.get_wisdom_structured()
+                if not isinstance(wisdom_data, dict):
+                    wisdom_data = {"accumulated_learnings": "", "entries": [], "last_synthesis": ""}
+                entries = wisdom_data.get("entries")
+                if not isinstance(entries, list):
+                    entries = []
+                payload = d.get("entry") if isinstance(d.get("entry"), dict) else {}
+                max_id = 0
+                for e in entries:
+                    if isinstance(e, dict):
+                        try:
+                            max_id = max(max_id, int(e.get("id", 0)))
+                        except (TypeError, ValueError):
+                            pass
+                new_id = max_id + 1
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                new_entry = {
+                    "id": new_id,
+                    "category": str(payload.get("category", "general")),
+                    "source": str(payload.get("source", "admin_manual_entry")),
+                    "content": str(payload.get("content", "")),
+                    "confidence": float(payload.get("confidence", 0.85)),
+                    "approved": bool(payload.get("approved", True)),
+                    "timestamp": now_iso,
+                }
+                entries.insert(0, new_entry)
+                wisdom_data["entries"] = entries
+                if not save_json_file(wpath, wisdom_data):
+                    await websocket.send(json.dumps({"type": "error", "message": "Failed to save wisdom"}))
+                    continue
+                await websocket.send(json.dumps({"type": "wisdom_entry_added", "entry_id": new_id, "entry": new_entry}))
+
+            elif t == "update_wisdom_entry":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                eid = d.get("entry_id")
+                if eid is None:
+                    await websocket.send(json.dumps({"type": "error", "message": "Missing entry_id"}))
+                    continue
+                wpath = night_school.wisdom_file
+                wisdom_data = night_school.get_wisdom_structured()
+                if not isinstance(wisdom_data, dict):
+                    wisdom_data = {"accumulated_learnings": "", "entries": [], "last_synthesis": ""}
+                entries = wisdom_data.get("entries")
+                if not isinstance(entries, list):
+                    entries = []
+                found = None
+                for e in entries:
+                    if not isinstance(e, dict):
+                        continue
+                    try:
+                        match = int(e.get("id")) == int(eid)
+                    except (TypeError, ValueError):
+                        match = str(e.get("id")) == str(eid)
+                    if match:
+                        found = e
+                        break
+                if not found:
+                    await websocket.send(json.dumps({"type": "error", "message": "Entry not found"}))
+                    continue
+                if "content" in d:
+                    found["content"] = d.get("content", "")
+                if "confidence" in d:
+                    try:
+                        found["confidence"] = float(d.get("confidence"))
+                    except (TypeError, ValueError):
+                        pass
+                found["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                wisdom_data["entries"] = entries
+                if not save_json_file(wpath, wisdom_data):
+                    await websocket.send(json.dumps({"type": "error", "message": "Failed to save wisdom"}))
+                    continue
+                await websocket.send(json.dumps({"type": "wisdom_entry_updated", "entry_id": eid, "entry": found}))
+
+            elif t == "delete_wisdom_entry":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                eid = d.get("entry_id")
+                if eid is None:
+                    await websocket.send(json.dumps({"type": "error", "message": "Missing entry_id"}))
+                    continue
+                wisdom_data = night_school.get_wisdom_structured()
+                if not isinstance(wisdom_data, dict):
+                    wisdom_data = {"accumulated_learnings": "", "entries": [], "last_synthesis": ""}
+                entries = wisdom_data.get("entries")
+                if not isinstance(entries, list):
+                    entries = []
+                new_entries = []
+                removed = False
+                for e in entries:
+                    if not isinstance(e, dict):
+                        new_entries.append(e)
+                        continue
+                    try:
+                        match = int(e.get("id")) == int(eid)
+                    except (TypeError, ValueError):
+                        match = str(e.get("id")) == str(eid)
+                    if match:
+                        removed = True
+                        continue
+                    new_entries.append(e)
+                if not removed:
+                    await websocket.send(json.dumps({"type": "error", "message": "Entry not found"}))
+                    continue
+                wisdom_data["entries"] = new_entries
+                wpath = night_school.wisdom_file
+                if not save_json_file(wpath, wisdom_data):
+                    await websocket.send(json.dumps({"type": "error", "message": "Failed to save wisdom"}))
+                    continue
+                await websocket.send(json.dumps({"type": "wisdom_entry_deleted", "entry_id": eid}))
+
+            elif t == "save_wisdom":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                full = d.get("wisdom")
+                if not isinstance(full, dict):
+                    await websocket.send(json.dumps({"type": "error", "message": "Invalid wisdom payload"}))
+                    continue
+                ent = full.get("entries")
+                if ent is None:
+                    full["entries"] = []
+                elif not isinstance(ent, list):
+                    await websocket.send(json.dumps({"type": "error", "message": "wisdom.entries must be a list"}))
+                    continue
+                wpath = night_school.wisdom_file
+                if not save_json_file(wpath, full):
+                    await websocket.send(json.dumps({"type": "error", "message": "Failed to save wisdom"}))
+                    continue
+                await websocket.send(json.dumps({"type": "wisdom_saved"}))
+
+            elif t == "create_wisdom_snapshot":
+                if not current_profile or current_profile.get("role") != "ADMIN":
+                    await websocket.send(json.dumps({"type": "error", "message": "ADMIN_ONLY"}))
+                    continue
+                wpath = night_school.wisdom_file
+                if not wpath.exists():
+                    seed = night_school.get_wisdom_structured()
+                    if not save_json_file(wpath, seed):
+                        await websocket.send(json.dumps({"type": "error", "message": "Could not create wisdom file"}))
+                        continue
+                snap_root = wpath.parent / "little_nate_wisdom_snapshots"
+                snap_root.mkdir(parents=True, exist_ok=True)
+                raw_name = d.get("name") or "snapshot"
+                safe_base = re.sub(r"[^\w\-.]+", "_", str(raw_name).strip())[:120] or "snapshot"
+                ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                dest_name = f"{safe_base}_{ts}.json"
+                dest = snap_root / dest_name
+                try:
+                    shutil.copy2(wpath, dest)
+                except Exception as snap_err:
+                    await websocket.send(json.dumps({"type": "error", "message": str(snap_err)}))
+                    continue
+                # Primary type matches dashboard/night_school_wisdom.html (also alias for API clarity).
+                await websocket.send(json.dumps({
+                    "type": "snapshot_created",
+                    "name": dest_name,
+                    "wisdom_snapshot_created": dest_name,
+                }))
             
             # === NIGHT SCHOOL: ADD LEARNING (Coach contribution) ===
             elif t == "add_coach_learning":

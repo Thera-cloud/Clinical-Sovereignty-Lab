@@ -298,17 +298,20 @@ _recoverAuth();
             switch (data.type) {
                 case "pending_notes":
                 case "coach_notes_list":
-                    notes = data.notes || [];
+                case "night_school_pending_notes":
+                    notes = data.notes || data.data || [];
                     renderNotes();
                     updateCounts();
                     break;
                     
                 case "note_approved":
+                case "night_school_note_approved":
                     updateNoteStatus(data.note_id, "approved");
                     showToast("Note ingested into Nate's wisdom!", "success");
                     break;
                     
                 case "note_rejected":
+                case "night_school_note_rejected":
                     updateNoteStatus(data.note_id, "rejected");
                     showToast("Note rejected", "info");
                     break;
