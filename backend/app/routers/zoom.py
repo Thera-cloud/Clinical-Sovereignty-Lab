@@ -16,7 +16,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -447,6 +447,41 @@ def _pick_transcript_from_recording_files(recording_files: List[Any]) -> tuple[O
     return None, None
 
 
+async def _try_whisper_audio_fallback(
+    recording_files: List[Any],
+    zc: "ZoomClient",
+    meeting_id: str,
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """
+    If no transcript file is available, attempt to synthesize one from the
+    Zoom audio (M4A) via Whisper. Returns (vtt_bytes, "vtt") on success or
+    (None, None) on failure / when fallback is disabled / unconfigured.
+    """
+    try:
+        from app.services.zoom_audio_fallback import (
+            is_fallback_enabled, pick_audio_file, transcribe_zoom_audio_to_vtt,
+        )
+    except Exception as e:
+        logger.warning("[Zoom] whisper fallback module import failed: %s", e)
+        return None, None
+    if not is_fallback_enabled():
+        return None, None
+    audio_url, _audio_ext = pick_audio_file(recording_files)
+    if not audio_url:
+        return None, None
+    try:
+        audio_bytes = await zc.download_recording_file(download_url=audio_url)
+    except Exception as e:
+        logger.warning("[Zoom] whisper fallback: audio download failed for %s: %s", meeting_id, e)
+        return None, None
+    vtt_bytes = await transcribe_zoom_audio_to_vtt(audio_bytes)
+    if not vtt_bytes:
+        logger.warning("[Zoom] whisper fallback produced no transcript for %s", meeting_id)
+        return None, None
+    logger.info("[Zoom] whisper fallback synthesized %d-byte VTT for meeting %s", len(vtt_bytes), meeting_id)
+    return vtt_bytes, "vtt"
+
+
 def _recording_has_completed_files(recording_files: List[Any]) -> bool:
     for rf in recording_files or []:
         if isinstance(rf, dict) and (rf.get("status") or "").lower() == "completed":
@@ -509,6 +544,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
     vtt_bytes: bytes,
     ext: str,
     meeting_id: str,
+    transcript_source: str = "zoom_native",
 ) -> None:
     """
     Upload transcript to blob/local storage, merge session_data on coaching_sessions,
@@ -536,6 +572,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
         "transcript_storage": storage_kind,
         "transcript_location": location,
         "transcript_file_extension": ext,
+        "transcript_source": transcript_source,
         "recording_ready": False,
         "transcript_pending": False,
         "classroom_analysis_available": False,
@@ -793,11 +830,17 @@ async def poll_pending_zoom_classroom_transcripts(db_pool) -> int:
                 rec = await zc.get_meeting_recordings(meeting_id=mid)
                 files = rec.get("recording_files") or []
                 t_url, t_ext = _pick_transcript_from_recording_files(files)
-                if not t_url:
-                    continue
-                vtt_bytes = await zc.download_recording_file(download_url=t_url)
+                if t_url:
+                    vtt_bytes = await zc.download_recording_file(download_url=t_url)
+                    transcript_source = "zoom_native"
+                else:
+                    vtt_bytes, t_ext = await _try_whisper_audio_fallback(files, zc, mid)
+                    if not vtt_bytes:
+                        continue
+                    transcript_source = "whisper_fallback"
                 await _archive_transcript_and_classroom_for_pg_session(
-                    db_pool, r, vtt_bytes, t_ext or "vtt", mid
+                    db_pool, r, vtt_bytes, t_ext or "vtt", mid,
+                    transcript_source=transcript_source,
                 )
                 archived += 1
             except Exception as pe:
