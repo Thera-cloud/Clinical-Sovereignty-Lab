@@ -550,6 +550,43 @@ async def _archive_transcript_and_classroom_for_pg_session(
     client_name = str(pg_row.get("client_name") or "")
     family_id = ""
 
+    zoom_ai_summary: Optional[Dict[str, Any]] = None
+    zoom_ai_summary_text: str = ""
+    try:
+        _zc = ZoomClient.from_env()
+        zoom_ai_summary = await _zc.get_meeting_summary(meeting_id=str(meeting_id))
+        if zoom_ai_summary:
+            _det = ((zoom_ai_summary.get("summary") or {}).get("summary_details")) if isinstance(zoom_ai_summary.get("summary"), dict) else None
+            zoom_ai_summary_text = (
+                _det
+                or zoom_ai_summary.get("summary_details")
+                or zoom_ai_summary.get("summary_overview")
+                or ""
+            )
+            zoom_ai_summary_text = str(zoom_ai_summary_text or "").strip()
+            try:
+                async with db_pool.acquire() as conn:
+                    await _patch_coaching_session_data(
+                        conn,
+                        session_id,
+                        {
+                            "zoom_ai_summary": zoom_ai_summary,
+                            "zoom_ai_summary_text": zoom_ai_summary_text or None,
+                            "zoom_ai_summary_fetched_at": dt.datetime.utcnow().isoformat(),
+                        },
+                    )
+                logger.info(
+                    "[Zoom] AI summary archived for session %s (chars=%d)",
+                    session_id,
+                    len(zoom_ai_summary_text),
+                )
+            except Exception as _se:
+                logger.warning("[Zoom] AI summary patch for %s: %s", session_id, _se)
+        else:
+            logger.info("[Zoom] No AI Companion summary available for meeting %s", meeting_id)
+    except Exception as _zse:
+        logger.warning("[Zoom] AI summary fetch for meeting %s: %s", meeting_id, _zse)
+
     try:
         from app.routers.sessions import CLASSROOM_AVAILABLE, _classroom_analyzer
         from app.services.pg_data_helpers import find_user_pg
@@ -590,6 +627,16 @@ async def _archive_transcript_and_classroom_for_pg_session(
         except Exception as _lu_err:
             logger.warning("[Zoom] find_user_pg during auto-archive: %s", _lu_err)
 
+    if zoom_ai_summary_text:
+        analyzer_input = (
+            "[ZOOM AI SUMMARY]\n"
+            f"{zoom_ai_summary_text}\n\n"
+            "[TRANSCRIPT]\n"
+            f"{vtt_text}"
+        )
+    else:
+        analyzer_input = vtt_text
+
     learning_ok = False
     try:
         _classroom_analyzer.analyze_transcript(
@@ -597,7 +644,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
             coach_id=coach_id,
             client_id=client_id,
             coach_name=coach_name,
-            vtt_content=vtt_text,
+            vtt_content=analyzer_input,
             focus_area="general therapeutic skills",
             due_date=None,
             family_id=family_id or None,
@@ -607,12 +654,71 @@ async def _archive_transcript_and_classroom_for_pg_session(
             session_id=session_id,
             coach_id=coach_id,
             coach_name=coach_name,
-            vtt_content=vtt_text,
+            vtt_content=analyzer_input,
             focus_area="general therapeutic skills",
         )
         learning_ok = True
     except Exception as _ca_err:
         logger.warning("[Zoom] Classroom analyze/queue for %s: %s", session_id, _ca_err)
+
+    if learning_ok and zoom_ai_summary_text and (vtt_text or "").strip() and client_id:
+        async def _cross_ref_crystal():
+            try:
+                from app.websocket.crystal_recall_bridge import (
+                    crystallize_from_conversation,
+                )
+
+                nate_summary = ""
+                try:
+                    _ana = _classroom_analyzer.get_session_analysis(session_id)
+                    if isinstance(_ana, dict):
+                        for _k in (
+                            "summary",
+                            "transcript_summary",
+                            "session_summary",
+                            "phd_summary",
+                        ):
+                            _v = _ana.get(_k)
+                            if isinstance(_v, str) and _v.strip():
+                                nate_summary = _v.strip()
+                                break
+                        if not nate_summary:
+                            _nested = _ana.get("analysis") if isinstance(_ana.get("analysis"), dict) else None
+                            if _nested:
+                                for _k in ("summary", "transcript_summary"):
+                                    _v = _nested.get(_k)
+                                    if isinstance(_v, str) and _v.strip():
+                                        nate_summary = _v.strip()
+                                        break
+                except Exception:
+                    nate_summary = ""
+
+                if not nate_summary:
+                    nate_summary = (vtt_text or "").strip()[:500]
+
+                cross_ref = (
+                    f"Zoom AI observed: {zoom_ai_summary_text[:500]}\n"
+                    f"Little Nate observed: {nate_summary[:500]}"
+                )
+                await crystallize_from_conversation(
+                    db_pool,
+                    client_id,
+                    cross_ref,
+                    "Cross-modal session intelligence",
+                    user_name=client_name or "",
+                    domain="clinical",
+                    origin_surface="zoom_cross_reference",
+                )
+                logger.info(
+                    "[Zoom] Cross-reference crystal queued for session %s", session_id
+                )
+            except Exception as _xrr:
+                logger.debug("[Zoom] Cross-reference crystal failed: %s", _xrr)
+
+        try:
+            asyncio.create_task(_cross_ref_crystal())
+        except Exception:
+            pass
 
     async with db_pool.acquire() as conn:
         await _patch_coaching_session_data(

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -199,6 +200,47 @@ class ZoomClient:
             resp = await client.delete(url, params={"action": "delete"}, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code not in (200, 204):
                 resp.raise_for_status()
+
+    async def get_meeting_summary(self, *, meeting_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch Zoom AI Companion meeting summary.
+        Requires meeting:read:summary:admin scope and AI Companion enabled.
+
+        Returns the parsed JSON body on 200, None on 404 / not generated yet,
+        and None (with a debug log) on any other non-200. Never raises.
+        """
+        mid = (meeting_id or "").strip()
+        if not mid:
+            return None
+        try:
+            token = await self._get_access_token()
+        except Exception as e:
+            logger = logging.getLogger("zoom_client")
+            logger.debug("get_meeting_summary token error for %s: %s", mid, e)
+            return None
+        url = f"https://api.zoom.us/v2/meetings/{mid}/meeting_summary"
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except Exception:
+                    return None
+            if resp.status_code == 404:
+                return None
+            logger = logging.getLogger("zoom_client")
+            logger.debug(
+                "Zoom meeting_summary %s for %s: %s",
+                resp.status_code,
+                mid,
+                (resp.text or "")[:200],
+            )
+            return None
+        except Exception as e:
+            logger = logging.getLogger("zoom_client")
+            logger.debug("Zoom meeting_summary fetch failed for %s: %s", mid, e)
+            return None
 
     async def download_recording_file(self, *, download_url: str) -> bytes:
         """

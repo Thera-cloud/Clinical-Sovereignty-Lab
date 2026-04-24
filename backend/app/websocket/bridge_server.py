@@ -17137,6 +17137,7 @@ async def handle_client(websocket, path=None):
                         recent_panel_insights: List[Dict[str, Any]] = []
                         session_focus: Optional[str] = None
                         recent_conversation_topics: List[Dict[str, Any]] = []
+                        zoom_ai_insight: Optional[Dict[str, Any]] = None
 
                         try:
                             for m in recent_memory[-3:]:
@@ -17256,6 +17257,34 @@ async def handle_client(websocket, path=None):
                                             })
                                     except Exception as _pi_err:
                                         logger.warning("get_presession_brief: panel insights: %s", _pi_err)
+
+                                    try:
+                                        _zai_row = await _brconn.fetchrow(
+                                            """
+                                            SELECT session_id, scheduled_start,
+                                                   session_data->>'zoom_ai_summary_text' AS zoom_ai_summary_text,
+                                                   session_data->>'zoom_ai_summary_fetched_at' AS zoom_ai_summary_fetched_at
+                                            FROM coaching_sessions
+                                            WHERE (client_id = $1 OR ($2::text IS NOT NULL AND client_id = $2::text))
+                                              AND session_data->>'zoom_ai_summary_text' IS NOT NULL
+                                              AND COALESCE(session_data->>'zoom_ai_summary_text', '') <> ''
+                                            ORDER BY scheduled_start DESC NULLS LAST
+                                            LIMIT 1
+                                            """,
+                                            _chw,
+                                            _cli_uuid,
+                                        )
+                                        if _zai_row and (_zai_row.get("zoom_ai_summary_text") or "").strip():
+                                            zoom_ai_insight = {
+                                                "session_id": _zai_row.get("session_id"),
+                                                "summary_text": (_zai_row.get("zoom_ai_summary_text") or "").strip(),
+                                                "fetched_at": _zai_row.get("zoom_ai_summary_fetched_at"),
+                                            }
+                                        else:
+                                            zoom_ai_insight = None
+                                    except Exception as _zai_err:
+                                        zoom_ai_insight = None
+                                        logger.warning("get_presession_brief: zoom_ai_insight: %s", _zai_err)
                             except Exception as _br_err:
                                 logger.warning("get_presession_brief: crystal/intake enrichment failed: %s", _br_err)
 
@@ -17285,6 +17314,8 @@ async def handle_client(websocket, path=None):
                         }
                         if session_focus:
                             brief["session_focus"] = session_focus
+                        if zoom_ai_insight:
+                            brief["zoom_ai_insight"] = zoom_ai_insight
 
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
 
