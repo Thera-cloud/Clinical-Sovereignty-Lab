@@ -29182,14 +29182,20 @@ async def main():
                     print(f"[!] LiminalResolveEngine init failed: {_lr_err}")
             # QUANTUM-CRYSTAL-ARCH — PGSD router (gated by PGSD_ENABLED env var)
             global _pgsd_router
-            if os.environ.get("PGSD_ENABLED", "").lower() in ("1", "true", "yes"):
+            _pgsd_flag = os.environ.get("PGSD_ENABLED", "")
+            print(f"[*] PGSD init reached. PGSD_ENABLED={_pgsd_flag!r}", flush=True)
+            if _pgsd_flag.strip().lower() in ("1", "true", "yes", "on"):
                 try:
                     from app.websocket.pgsd_handlers import PGSDWebSocketRouter
                     _pgsd_router = PGSDWebSocketRouter(db_pool=db_pool)
-                    print("[*] PGSD router initialized (PGSD_ENABLED)")
+                    print("[*] PGSD router initialized (PGSD_ENABLED)", flush=True)
                 except Exception as _pgsd_err:
-                    print(f"[*] PGSD router init failed: {_pgsd_err}")
+                    import traceback as _pgsd_tb
+                    print(f"[!] PGSD router init failed: {_pgsd_err}", flush=True)
+                    _pgsd_tb.print_exc()
                     _pgsd_router = None
+            else:
+                print(f"[*] PGSD router DISABLED (PGSD_ENABLED={_pgsd_flag!r})", flush=True)
             # QUANTUM-CRYSTAL-ARCH — Six-Quotient Growth Engine (per-interaction hook)
             global _six_quotient_growth
             if _SQGEngine:
