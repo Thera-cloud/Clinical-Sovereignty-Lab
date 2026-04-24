@@ -13227,31 +13227,72 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   
   Future<void> _pickAndUploadVideo() async {
+    // Backend caps multipart bodies at 500 MB (MAX_VIDEO_SIZE in
+    // backend/app/routers/sessions.py). On web we have to load the entire
+    // file into a Uint8List before sending; the browser's ArrayBuffer
+    // allocator throws an opaque "Uncaught Error at new ArrayBuffer" when
+    // the file is too big to fit. We catch that, plus enforce the size
+    // cap up front so the user sees a real message.
+    const int maxUploadBytes = 500 * 1024 * 1024;
+
     try {
-      // Use file_picker to select video
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
-        allowMultiple: false,
-        withData: kIsWeb,
-      );
-      
+      final FilePickerResult? result;
+      try {
+        result = await FilePicker.platform.pickFiles(
+          type: FileType.video,
+          allowMultiple: false,
+          withData: kIsWeb,
+          withReadStream: !kIsWeb,
+        );
+      } catch (allocErr) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Selected video is too large for the browser to load. '
+                'Maximum upload is 500MB; please compress or trim and try again. '
+                '(${allocErr.toString().split('\n').first})',
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        }
+        return;
+      }
+
       if (result == null || result.files.isEmpty) return;
       final file = result.files.first;
+      final int fileSize = file.size;
 
-      Uint8List? bytes;
+      if (fileSize > maxUploadBytes) {
+        if (mounted) {
+          final mb = (fileSize / (1024 * 1024)).toStringAsFixed(0);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Video is ${mb}MB. Maximum upload is 500MB. '
+                'Please compress/trim the recording, or let Zoom auto-import the cloud recording instead.',
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+        }
+        return;
+      }
+
+      Uint8List? bytesForWeb;
       if (kIsWeb) {
-        bytes = file.bytes;
-        if (bytes == null || bytes.isEmpty) {
+        bytesForWeb = file.bytes;
+        if (bytesForWeb == null || bytesForWeb.isEmpty) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Could not read file')),
+              const SnackBar(content: Text('Could not read selected file')),
             );
           }
           return;
         }
-      } else {
-        if (file.path == null) return;
-        bytes = await File(file.path!).readAsBytes();
       }
 
       setState(() {
@@ -13259,20 +13300,49 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         _classroomUploadProgress = 0.0;
         _classroomUploadedVideoName = file.name;
       });
-      
-      // Upload via HTTP multipart
+
       final uri = Uri.parse('$_apiBaseUrl/api/classroom/upload-video');
       final request = http.MultipartRequest('POST', uri);
+
+      // Classroom router is gated by Depends(_require_auth); without this
+      // header every upload comes back 403 "Not authenticated".
+      final tok = (_authToken ??
+              widget.currentUserProfile?['token']?.toString() ??
+              '')
+          .trim();
+      if (tok.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $tok';
+      }
+
       request.fields['coach_id'] = widget.currentUserProfile?['hardware_id'] ?? '';
-      request.fields['client_id'] = _clients.isNotEmpty ? (_clients.first['id'] ?? '').toString() : '';
-      request.files.add(http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: file.name,
-      ));
-      
+      request.fields['client_id'] =
+          _clients.isNotEmpty ? (_clients.first['id'] ?? '').toString() : '';
+
+      if (kIsWeb) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          bytesForWeb!,
+          filename: file.name,
+        ));
+      } else if (file.readStream != null) {
+        request.files.add(http.MultipartFile(
+          'file',
+          file.readStream!,
+          fileSize,
+          filename: file.name,
+        ));
+      } else if (file.path != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'file',
+          file.path!,
+          filename: file.name,
+        ));
+      } else {
+        throw Exception('No readable handle for selected file');
+      }
+
       setState(() => _classroomUploadProgress = 0.5);
-      
+
       final response = await request.send();
       final responseBody = await response.stream.bytesToString();
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -13662,6 +13732,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         : 0.0;
     final transcriptSummary = (analysis['transcript_summary'] ?? '').toString().trim();
     final visualObs = (analysis['visual_observations_summary'] ?? '').toString().trim();
+    final facialSummary = (analysis['facial_summary'] is Map)
+        ? Map<String, dynamic>.from(analysis['facial_summary'] as Map)
+        : <String, dynamic>{};
+    final emotionalTimeline = (analysis['emotional_timeline'] is List)
+        ? List<dynamic>.from(analysis['emotional_timeline'] as List)
+        : <dynamic>[];
     final voiceSeriesRaw = analysis['voice_stress_timeline'] ?? analysis['voice_metrics_timeline'] ?? analysis['stress_over_time'];
     final crystalRaw = analysis['crystal_entries'] ?? analysis['crystal_memory'] ?? analysis['crystals_created'];
     final focusFeedback = (analysis['focus_specific_feedback'] ?? '').toString();
@@ -13669,6 +13745,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     final dojoScenarios = List<Map<String, dynamic>>.from((analysis['dojo_scenarios'] ?? []).map((e) => Map<String, dynamic>.from(e as Map)));
     final workbookRecs = List<String>.from(analysis['workbook_recommendations'] ?? []);
     final reflectionSubmitted = analysis['reflection_submitted_at'] != null;
+    final multimodalFusion = (analysis['multimodal_fusion'] is Map)
+        ? Map<String, dynamic>.from(analysis['multimodal_fusion'] as Map)
+        : <String, dynamic>{};
+    final clinicalFlags = (analysis['clinical_flags'] is List)
+        ? List<dynamic>.from(analysis['clinical_flags'] as List)
+        : (multimodalFusion['clinical_flags'] is List
+            ? List<dynamic>.from(multimodalFusion['clinical_flags'] as List)
+            : <dynamic>[]);
+    final sessionArc = (analysis['session_arc'] is Map)
+        ? Map<String, dynamic>.from(analysis['session_arc'] as Map)
+        : (multimodalFusion['session_arc'] is Map
+            ? Map<String, dynamic>.from(multimodalFusion['session_arc'] as Map)
+            : <String, dynamic>{});
+    final longitudinalPatterns = (analysis['longitudinal_patterns'] is Map)
+        ? Map<String, dynamic>.from(analysis['longitudinal_patterns'] as Map)
+        : <String, dynamic>{};
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -13827,12 +13919,30 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           _buildClassroomTextCard("Visual observations", visualObs, Icons.videocam_outlined),
           const SizedBox(height: 16),
         ],
+        if (facialSummary.isNotEmpty) ...[
+          _buildFacialSummarySection(facialSummary, emotionalTimeline),
+          const SizedBox(height: 16),
+        ],
         if (voiceSeriesRaw is List && voiceSeriesRaw.isNotEmpty) ...[
           _buildVoiceTimelineSection(List<dynamic>.from(voiceSeriesRaw)),
           const SizedBox(height: 16),
         ],
         if (crystalRaw is List && crystalRaw.isNotEmpty) ...[
           _buildCrystalEntriesSection(List<dynamic>.from(crystalRaw)),
+          const SizedBox(height: 16),
+        ],
+        if (multimodalFusion.isNotEmpty) ...[
+          _buildMultiModalSection(multimodalFusion, sessionArc),
+          const SizedBox(height: 16),
+        ],
+        if (clinicalFlags.isNotEmpty) ...[
+          _buildClinicalFlagsSection(clinicalFlags),
+          const SizedBox(height: 16),
+        ],
+        if (longitudinalPatterns.isNotEmpty &&
+            (longitudinalPatterns['patterns'] is List) &&
+            (longitudinalPatterns['patterns'] as List).isNotEmpty) ...[
+          _buildLongitudinalPatternsSection(longitudinalPatterns),
           const SizedBox(height: 16),
         ],
         
@@ -13979,6 +14089,192 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
 
+  /// Facial expression analysis summary card (MediaPipe FaceMesh-derived).
+  /// Shows aggregate engagement / aversion / dominant expression and the
+  /// emotional inference timeline as a compact strip of colored dots.
+  Widget _buildFacialSummarySection(
+    Map<String, dynamic> summary,
+    List<dynamic> timeline,
+  ) {
+    final framesWithFace = (summary['frames_with_face'] ?? 0) as int;
+    final framesTotal = (summary['frames_total'] ?? 0) as int;
+    final avgEngagement = (summary['avg_engagement'] is num)
+        ? (summary['avg_engagement'] as num).toDouble()
+        : 0.0;
+    final aversion = (summary['gaze_aversion_ratio'] is num)
+        ? (summary['gaze_aversion_ratio'] as num).toDouble()
+        : 0.0;
+    final variability = (summary['expression_variability'] is num)
+        ? (summary['expression_variability'] as num).toDouble()
+        : 0.0;
+    final dominant = (summary['dominant_expression'] ?? 'neutral').toString();
+    final indicators = List<String>.from(summary['potential_indicators'] ?? []);
+
+    Color colorFor(String emotion) {
+      switch (emotion) {
+        case 'engaged':
+          return const Color(0xFF4ECDC4);
+        case 'attentive':
+          return const Color(0xFF8BC34A);
+        case 'anxious':
+          return const Color(0xFFFFB74D);
+        case 'distressed':
+          return const Color(0xFFEF4444);
+        case 'withdrawn':
+          return const Color(0xFF9D4EDD);
+        case 'surprised':
+          return const Color(0xFFE8D5A3);
+        case 'no_face':
+          return Colors.white12;
+        default:
+          return Colors.grey;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.face_retouching_natural,
+                  color: Color(0xFF4ECDC4), size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                "Facial Expression Analysis",
+                style: TextStyle(
+                    color: Colors.white70, fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Text(
+                "$framesWithFace / $framesTotal frames",
+                style: TextStyle(color: Colors.grey[500], fontSize: 11),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildFacialMetric(
+                  "Engagement", "${(avgEngagement * 100).round()}%",
+                  Icons.visibility),
+              _buildFacialMetric(
+                  "Gaze aversion", "${(aversion * 100).round()}%",
+                  Icons.remove_red_eye_outlined),
+              _buildFacialMetric(
+                  "Variability", variability.toStringAsFixed(2),
+                  Icons.timeline),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.mood, color: Colors.white54, size: 16),
+              const SizedBox(width: 6),
+              Text("Dominant expression: ",
+                  style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+              Text(
+                dominant,
+                style: TextStyle(
+                    color: colorFor(dominant),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          if (timeline.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text("Emotional timeline",
+                style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 18,
+              child: Row(
+                children: [
+                  for (final e in timeline)
+                    if (e is Map)
+                      Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 1),
+                          decoration: BoxDecoration(
+                            color: colorFor(
+                                (e['emotional_inference'] ?? 'neutral')
+                                    .toString()),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                ],
+              ),
+            ),
+          ],
+          if (indicators.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: const Color(0xFFEF4444).withOpacity(0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: const [
+                      Icon(Icons.warning_amber_rounded,
+                          color: Color(0xFFEF4444), size: 16),
+                      SizedBox(width: 6),
+                      Text("Potential indicators",
+                          style: TextStyle(
+                              color: Color(0xFFEF4444),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ...indicators.map((i) => Padding(
+                        padding: const EdgeInsets.only(top: 2.0),
+                        child: Text("• $i",
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.4)),
+                      )),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFacialMetric(String label, String value, IconData icon) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: const Color(0xFF4ECDC4), size: 18),
+          const SizedBox(height: 4),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600)),
+          Text(label,
+              style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
   /// Stress / engagement samples: list of maps with keys like stress, engagement, t, time, score (0–1).
   Widget _buildVoiceTimelineSection(List<dynamic> series) {
     final values = <double>[];
@@ -14095,6 +14391,414 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
   
+  // ===== MULTI-MODAL FUSION DISPLAY =====
+  Widget _buildMultiModalSection(
+    Map<String, dynamic> fusion,
+    Map<String, dynamic> sessionArc,
+  ) {
+    final unified = (fusion['unified_timeline'] is List)
+        ? List<dynamic>.from(fusion['unified_timeline'] as List)
+        : <dynamic>[];
+    final incongruent = (fusion['incongruence_moments'] is List)
+        ? List<dynamic>.from(fusion['incongruence_moments'] as List)
+        : <dynamic>[];
+    final modalities = (fusion['modalities_present'] is Map)
+        ? Map<String, dynamic>.from(fusion['modalities_present'] as Map)
+        : <String, dynamic>{};
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF4ECDC4).withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.layers, color: Color(0xFF4ECDC4), size: 20),
+              const SizedBox(width: 8),
+              const Text("Multi-Modal Analysis",
+                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (modalities.isNotEmpty)
+                Text(
+                  [
+                    if (modalities['text'] == true) "text",
+                    if (modalities['voice'] == true) "voice",
+                    if (modalities['facial'] == true) "face",
+                  ].join(" + "),
+                  style: TextStyle(color: Colors.grey[500], fontSize: 11),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (sessionArc.isNotEmpty && sessionArc['arc_description'] != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A0F),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.timeline, color: Color(0xFF9D4EDD), size: 14),
+                  const SizedBox(width: 6),
+                  Text("Session arc:",
+                      style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      sessionArc['arc_description']?.toString() ?? '',
+                      style: const TextStyle(
+                        color: Color(0xFFE8D5A3),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (unified.isNotEmpty) ...[
+            Text("Unified timeline (${unified.length} moments)",
+                style: TextStyle(color: Colors.grey[400], fontSize: 11)),
+            const SizedBox(height: 6),
+            ...unified.take(8).map((entry) {
+              final m = (entry is Map) ? Map<String, dynamic>.from(entry) : <String, dynamic>{};
+              final isIncongruent = m['incongruence'] != null;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isIncongruent
+                      ? const Color(0xFFEF4444).withOpacity(0.08)
+                      : const Color(0xFF0A0A0F),
+                  borderRadius: BorderRadius.circular(6),
+                  border: isIncongruent
+                      ? Border.all(color: const Color(0xFFEF4444).withOpacity(0.4))
+                      : null,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF9D4EDD).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        "${(m['timestamp'] is num) ? (m['timestamp'] as num).toStringAsFixed(0) : '0'}s",
+                        style: const TextStyle(
+                            color: Color(0xFF9D4EDD), fontSize: 10, fontFamily: 'Courier'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if ((m['text'] ?? '').toString().isNotEmpty)
+                            Text(
+                              m['text'].toString(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: isIncongruent ? Colors.white : Colors.white70,
+                                  fontSize: 12),
+                            ),
+                          const SizedBox(height: 2),
+                          Wrap(
+                            spacing: 6,
+                            children: [
+                              _modalityChip("text", m['text_sentiment']?.toString()),
+                              _modalityChip("voice", m['voice_emotion']?.toString()),
+                              _modalityChip("face", m['facial_emotion']?.toString()),
+                              _modalityChip("gaze", m['gaze']?.toString()),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+          if (incongruent.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              "${incongruent.length} incongruence moment${incongruent.length == 1 ? '' : 's'} flagged",
+              style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _modalityChip(String label, String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty || v == 'unknown' || v == 'no_face' || v == 'silence') {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Text(
+        "$label:$v",
+        style: const TextStyle(color: Colors.white60, fontSize: 10),
+      ),
+    );
+  }
+
+  // ===== CLINICAL FLAGS =====
+  Widget _buildClinicalFlagsSection(List<dynamic> flags) {
+    Color sevColor(String s) {
+      switch (s.toLowerCase()) {
+        case 'high':
+          return const Color(0xFFEF4444);
+        case 'medium':
+          return const Color(0xFFFFD700);
+        default:
+          return const Color(0xFF4ECDC4);
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.flag, color: Color(0xFFEF4444), size: 20),
+              SizedBox(width: 8),
+              Text("Clinical Flags",
+                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...flags.map((f) {
+            final m = (f is Map) ? Map<String, dynamic>.from(f) : <String, dynamic>{};
+            final flag = m['flag']?.toString() ?? 'FLAG';
+            final note = m['clinical_note']?.toString() ?? '';
+            final sev = m['severity']?.toString() ?? 'low';
+            final color = sevColor(sev);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0A0F),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          flag.replaceAll('_', ' '),
+                          style: TextStyle(
+                              color: color, fontWeight: FontWeight.w700, fontSize: 12),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(sev.toUpperCase(),
+                            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(note,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3)),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ===== LONGITUDINAL PATTERNS =====
+  Widget _buildLongitudinalPatternsSection(Map<String, dynamic> longitudinal) {
+    final patterns = (longitudinal['patterns'] is List)
+        ? List<dynamic>.from(longitudinal['patterns'] as List)
+        : <dynamic>[];
+    final sessionsAnalyzed = longitudinal['sessions_analyzed'] ?? 0;
+    final trend = (longitudinal['trend_direction'] ?? '').toString();
+
+    Color trendColor() {
+      switch (trend) {
+        case 'improving':
+          return const Color(0xFF4ECDC4);
+        case 'declining':
+          return const Color(0xFFEF4444);
+        case 'stable':
+          return const Color(0xFFFFD700);
+        default:
+          return Colors.grey;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF9D4EDD).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.insights, color: Color(0xFF9D4EDD), size: 20),
+              const SizedBox(width: 8),
+              const Text("Longitudinal Patterns",
+                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text("$sessionsAnalyzed sessions",
+                  style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+            ],
+          ),
+          if (trend.isNotEmpty && trend != 'insufficient_data') ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  trend == 'improving' ? Icons.trending_up :
+                  trend == 'declining' ? Icons.trending_down :
+                  Icons.trending_flat,
+                  color: trendColor(),
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Text("Trend: $trend",
+                    style: TextStyle(color: trendColor(), fontSize: 11, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          ...patterns.map((p) {
+            final m = (p is Map) ? Map<String, dynamic>.from(p) : <String, dynamic>{};
+            final isTransgen = (m['pattern']?.toString() ?? '') == 'TRANSGENERATIONAL';
+            final matches = (m['matches'] is List)
+                ? List<dynamic>.from(m['matches'] as List)
+                : <dynamic>[];
+            return _buildPatternCard(m, isTransgen: isTransgen, matches: matches);
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPatternCard(
+    Map<String, dynamic> p, {
+    bool isTransgen = false,
+    List<dynamic> matches = const [],
+  }) {
+    final accent = isTransgen ? const Color(0xFFEF4444) : const Color(0xFF9D4EDD);
+    final pattern = p['pattern']?.toString() ?? 'PATTERN';
+    final note = p['clinical_note']?.toString() ?? '';
+    final freq = p['frequency']?.toString() ?? p['trend']?.toString() ?? '';
+    final focus = p['recommended_focus']?.toString() ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A0A0F),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isTransgen ? Icons.family_restroom : Icons.repeat,
+                color: accent,
+                size: 14,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  pattern.replaceAll('_', ' '),
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w700, fontSize: 12),
+                ),
+              ),
+              if (freq.isNotEmpty)
+                Text(freq, style: TextStyle(color: Colors.grey[500], fontSize: 10)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(note, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3)),
+          if (focus.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: Text("Focus: $focus",
+                  style: TextStyle(color: accent, fontSize: 10, fontWeight: FontWeight.w600)),
+            ),
+          ],
+          if (isTransgen && matches.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text("Shared with:",
+                style: TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            ...matches.map((mm) {
+              final mp = (mm is Map) ? Map<String, dynamic>.from(mm) : <String, dynamic>{};
+              final name = mp['family_member']?.toString() ?? 'family member';
+              final shared = (mp['shared_patterns'] is List)
+                  ? (mp['shared_patterns'] as List).join(', ')
+                  : '';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text("• $name: $shared",
+                    style: const TextStyle(color: Colors.white60, fontSize: 11)),
+              );
+            }),
+            const SizedBox(height: 6),
+            Text(
+              "Recommend exploring in Family Sanctuary",
+              style: TextStyle(
+                  color: accent, fontSize: 10, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildAssignmentsSection(
     List<String> reflectionQuestions,
     List<Map<String, dynamic>> dojoScenarios,
