@@ -707,6 +707,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
                     "Cross-modal session intelligence",
                     user_name=client_name or "",
                     domain="clinical",
+                    min_score=0,
                     origin_surface="zoom_cross_reference",
                 )
                 logger.info(
