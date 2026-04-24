@@ -156,6 +156,84 @@ async def auto_analyze_transcript(
         traceback.print_exc()
 
 
+async def _ensure_local_copy_for_analysis(video_id: str) -> None:
+    """
+    If a classroom_sessions.json record points at an R2 key but the local
+    video file is missing (i.e. it was uploaded direct-to-R2 from the
+    browser), stream the R2 object down to the canonical local path so
+    the existing analyzer can operate on it unchanged.
+
+    Best-effort: failures are logged and the analyzer will simply find
+    no local file (analysis falls back to its no-frames branch).
+    """
+    try:
+        from app.services import r2_storage  # local import to avoid cycle
+    except Exception as e:
+        _logger.warning("[ClassroomVideo] R2 import failed for %s: %s", video_id, e)
+        return
+
+    classroom_sessions_file = (
+        Path(os.getenv("CLASSROOM_SESSIONS_FILE", str(DATA_DIR / "classroom_sessions.json")))
+    )
+    try:
+        with open(classroom_sessions_file, "r", encoding="utf-8") as f:
+            sessions = json.load(f)
+    except Exception:
+        return
+
+    target = None
+    for s in sessions:
+        if s.get("session_id") == video_id:
+            target = s
+            break
+    if not target:
+        return
+
+    r2_key = (target.get("r2_key") or "").strip()
+    r2_bucket = (target.get("r2_bucket") or "").strip() or None
+    video_path_str = target.get("video_path") or ""
+
+    if not r2_key:
+        return  # not an R2-sourced upload
+    if video_path_str and Path(video_path_str).exists():
+        return  # already cached locally
+
+    coach_id = target.get("coach_id") or "unknown"
+    ext = (target.get("filename") or r2_key).rsplit(".", 1)[-1].lower()
+    if ext not in ("mp4", "mov", "webm", "avi", "mkv"):
+        ext = "mp4"
+
+    local_dir = DATA_DIR / "classroom_videos" / coach_id
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local_path = local_dir / f"{video_id}.{ext}"
+
+    _logger.info(
+        "[ClassroomVideo] Streaming R2 object to local for analysis: %s → %s",
+        r2_key,
+        local_path,
+    )
+    ok = await r2_storage.download_to_file_async(
+        key=r2_key, dest_path=str(local_path), bucket=r2_bucket
+    )
+    if not ok:
+        _logger.warning(
+            "[ClassroomVideo] R2 download failed for %s key=%s; analyzer will see no local file",
+            video_id,
+            r2_key,
+        )
+        return
+
+    target["video_path"] = str(local_path)
+    try:
+        with open(classroom_sessions_file, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, indent=2, default=str)
+    except Exception as e:
+        _logger.warning(
+            "[ClassroomVideo] Could not persist video_path back to classroom_sessions.json: %s",
+            e,
+        )
+
+
 async def auto_analyze_classroom_video(
     video_id: str,
     coach_id: str,
@@ -170,6 +248,10 @@ async def auto_analyze_classroom_video(
     if not _classroom_analyzer:
         _logger.warning("[ClassroomVideo] Auto-analysis skipped: analyzer unavailable")
         return
+
+    # If the source is R2 (direct browser upload), pull down a local copy first.
+    await _ensure_local_copy_for_analysis(video_id)
+
     client_name = ""
     fam = family_id or ""
     try:
@@ -1490,6 +1572,297 @@ async def upload_classroom_video(
         "file_size": len(content),
         "message": "Video uploaded successfully. Analysis running in the background.",
     }
+
+
+# =============================================================================
+# CLASSROOM VIDEO UPLOAD — Direct-to-R2 multipart (large files: up to 5GB+)
+#
+# The legacy /upload-video endpoint above streams bytes through the FastAPI
+# origin (capped at 500MB by both FastAPI memory and the Cloudflare proxy's
+# 100MB upload limit). For 3 GB+ recordings the browser PUTs each chunk
+# directly to R2 using presigned URLs — bytes never traverse our origin.
+# =============================================================================
+
+# Hard upper bound at the API layer. R2 supports up to 5 TiB; we cap at 5 GiB
+# for sanity and to avoid a single coach accidentally pushing TBs of footage.
+MAX_DIRECT_VIDEO_SIZE = 5 * 1024 * 1024 * 1024  # 5 GiB
+
+
+class _MultipartInitRequest(BaseModel):
+    coach_id: str
+    client_id: str
+    family_id: Optional[str] = ""
+    description: Optional[str] = ""
+    filename: str
+    content_type: Optional[str] = "video/mp4"
+    file_size: int  # bytes
+
+
+class _MultipartCompletePart(BaseModel):
+    PartNumber: int
+    ETag: str
+
+
+class _MultipartCompleteRequest(BaseModel):
+    video_id: str
+    parts: List[_MultipartCompletePart]
+
+
+class _MultipartAbortRequest(BaseModel):
+    video_id: str
+
+
+def _validate_video_filename(name: str) -> str:
+    """Return a sanitized extension for a classroom video filename."""
+    ext = (name or "video.mp4").rsplit(".", 1)[-1].lower()
+    if ext not in ("mp4", "mov", "webm", "avi", "mkv", "mpeg"):
+        ext = "mp4"
+    return ext
+
+
+@classroom_router.post("/upload-video/init")
+async def upload_classroom_video_init(request: Request, body: _MultipartInitRequest):
+    """
+    Begin a direct-browser → R2 multipart upload.
+
+    Returns the per-part presigned PUT URLs the browser uses to push each
+    chunk straight to R2 storage (no CF proxy, no origin memory pressure).
+
+    The browser MUST:
+      1. Slice the local file with `Blob.slice(start, end)` per part.
+      2. PUT each chunk to its presigned URL (no auth header — the URL
+         is signed). Capture the `ETag` response header per part.
+      3. Call POST /api/classroom/upload-video/complete with the parts list.
+
+    On any failure / cancellation, call POST /api/classroom/upload-video/abort
+    so R2 releases staged-part storage.
+    """
+    from app.services import r2_storage
+
+    if not r2_storage.is_r2_configured():
+        raise HTTPException(503, "R2 storage is not configured on this deployment")
+    if body.file_size <= 0:
+        raise HTTPException(400, "file_size must be > 0")
+    if body.file_size > MAX_DIRECT_VIDEO_SIZE:
+        raise HTTPException(
+            413,
+            f"File too large: {body.file_size} bytes. "
+            f"Maximum is {MAX_DIRECT_VIDEO_SIZE // (1024 ** 3)} GiB.",
+        )
+
+    ext = _validate_video_filename(body.filename)
+    video_id = f"VID_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(4).upper()}"
+    key = f"classroom_videos/{body.coach_id}/{video_id}.{ext}"
+
+    part_size = r2_storage.DEFAULT_MULTIPART_PART_SIZE
+    total_parts = (body.file_size + part_size - 1) // part_size
+    if total_parts > r2_storage.MAX_MULTIPART_PARTS:
+        # Re-derive a larger part size to fit within the 10000-part S3 cap.
+        part_size = ((body.file_size + r2_storage.MAX_MULTIPART_PARTS - 1) //
+                     r2_storage.MAX_MULTIPART_PARTS)
+        # Round up to nearest MiB for niceness.
+        part_size = ((part_size + (1024 * 1024) - 1) // (1024 * 1024)) * (1024 * 1024)
+        total_parts = (body.file_size + part_size - 1) // part_size
+
+    mpu = r2_storage.create_multipart_upload(
+        key=key,
+        content_type=body.content_type or "application/octet-stream",
+        metadata={
+            "coach_id": body.coach_id,
+            "client_id": body.client_id,
+            "video_id": video_id,
+        },
+    )
+    if not mpu:
+        raise HTTPException(502, "Failed to initiate R2 multipart upload")
+
+    upload_id = mpu["upload_id"]
+    bucket = mpu["bucket"]
+
+    # Presign every part up front. Each URL is valid for 6 hours which is
+    # ample headroom for a 3 GB upload over a slow connection.
+    parts: List[Dict] = []
+    for part_number in range(1, total_parts + 1):
+        url = r2_storage.generate_presigned_part_url(
+            key=key,
+            upload_id=upload_id,
+            part_number=part_number,
+            bucket=bucket,
+        )
+        if not url:
+            r2_storage.abort_multipart_upload(key=key, upload_id=upload_id, bucket=bucket)
+            raise HTTPException(502, f"Failed to presign part {part_number}")
+        parts.append({"part_number": part_number, "url": url})
+
+    classroom_sessions_file = (
+        Path(os.getenv("CLASSROOM_SESSIONS_FILE", str(DATA_DIR / "classroom_sessions.json")))
+    )
+    sessions = load_json(classroom_sessions_file, [])
+    sessions.append({
+        "session_id": video_id,
+        "coach_id": body.coach_id,
+        "client_id": body.client_id,
+        "family_id": body.family_id or "",
+        "source": "device_upload_r2",
+        "filename": body.filename or f"{video_id}.{ext}",
+        "video_path": "",  # populated after analysis pulls a local copy
+        "r2_bucket": bucket,
+        "r2_key": key,
+        "r2_upload_id": upload_id,
+        "description": body.description or "",
+        "content_type": body.content_type or "video/mp4",
+        "file_size": body.file_size,
+        "status": "uploading",
+        "created_at": str(datetime.now()),
+    })
+    save_json(classroom_sessions_file, sessions)
+
+    return {
+        "video_id": video_id,
+        "upload_id": upload_id,
+        "bucket": bucket,
+        "key": key,
+        "part_size": part_size,
+        "total_parts": total_parts,
+        "parts": parts,
+    }
+
+
+@classroom_router.post("/upload-video/complete")
+async def upload_classroom_video_complete(
+    request: Request, body: _MultipartCompleteRequest
+):
+    """
+    Finalize a multipart upload after the browser has PUT every part.
+
+    Persists the session record in coaching_sessions and kicks off the
+    same auto_analyze_classroom_video pipeline used by the legacy path
+    (which now knows how to stream the object back from R2 for analysis).
+    """
+    from app.services import r2_storage
+
+    classroom_sessions_file = (
+        Path(os.getenv("CLASSROOM_SESSIONS_FILE", str(DATA_DIR / "classroom_sessions.json")))
+    )
+    sessions = load_json(classroom_sessions_file, [])
+
+    target_idx = -1
+    for i, s in enumerate(sessions):
+        if s.get("session_id") == body.video_id:
+            target_idx = i
+            break
+    if target_idx < 0:
+        raise HTTPException(404, f"Upload session {body.video_id} not found")
+
+    target = sessions[target_idx]
+    upload_id = target.get("r2_upload_id") or ""
+    key = target.get("r2_key") or ""
+    bucket = target.get("r2_bucket") or None
+    if not upload_id or not key:
+        raise HTTPException(400, "Session does not have an R2 upload in progress")
+
+    parts_payload = [
+        {"PartNumber": p.PartNumber, "ETag": p.ETag} for p in body.parts
+    ]
+    result = r2_storage.complete_multipart_upload(
+        key=key, upload_id=upload_id, parts=parts_payload, bucket=bucket
+    )
+    if not result:
+        raise HTTPException(502, "R2 complete_multipart_upload failed")
+
+    target["status"] = "uploaded"
+    target["completed_at"] = str(datetime.now())
+    target["r2_etag"] = result.get("ETag", "")
+    target["r2_location"] = f"r2://{bucket}/{key}"
+    sessions[target_idx] = target
+    save_json(classroom_sessions_file, sessions)
+
+    coach_id = target.get("coach_id") or ""
+    client_id = target.get("client_id") or ""
+    family_id = target.get("family_id") or ""
+    description = target.get("description") or ""
+
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if db_pool:
+        try:
+            await upsert_session_pg(
+                db_pool,
+                {
+                    "session_id": body.video_id,
+                    "coach_id": coach_id,
+                    "client_id": client_id,
+                    "client_name": "",
+                    "family_id": family_id,
+                    "session_type": "classroom_upload",
+                    "status": "uploaded",
+                    "scheduled_start": datetime.now(timezone.utc).isoformat(),
+                    "duration_minutes": 0,
+                    "classroom_device_upload": "true",
+                    "filename": target.get("filename"),
+                    "video_path": f"r2://{bucket}/{key}",
+                },
+            )
+        except Exception as _pg_exc:
+            _logger.warning(
+                "[ClassroomVideo] coaching_sessions upsert failed (R2 path): %s", _pg_exc
+            )
+
+    asyncio.create_task(
+        auto_analyze_classroom_video(
+            video_id=body.video_id,
+            coach_id=coach_id,
+            client_id=client_id,
+            family_id=family_id,
+            description=description,
+        )
+    )
+
+    return {
+        "video_id": body.video_id,
+        "status": "uploaded",
+        "r2_location": target["r2_location"],
+        "file_size": target.get("file_size"),
+        "message": "Upload finalized. Analysis running in the background.",
+    }
+
+
+@classroom_router.post("/upload-video/abort")
+async def upload_classroom_video_abort(
+    request: Request, body: _MultipartAbortRequest
+):
+    """
+    Abort an in-flight multipart upload (frees R2-side staged-part storage).
+    Removes the placeholder session record from classroom_sessions.json.
+    """
+    from app.services import r2_storage
+
+    classroom_sessions_file = (
+        Path(os.getenv("CLASSROOM_SESSIONS_FILE", str(DATA_DIR / "classroom_sessions.json")))
+    )
+    sessions = load_json(classroom_sessions_file, [])
+
+    target = None
+    remaining: List[Dict] = []
+    for s in sessions:
+        if s.get("session_id") == body.video_id:
+            target = s
+        else:
+            remaining.append(s)
+    if target is None:
+        raise HTTPException(404, f"Upload session {body.video_id} not found")
+
+    upload_id = target.get("r2_upload_id") or ""
+    key = target.get("r2_key") or ""
+    bucket = target.get("r2_bucket") or None
+
+    aborted = False
+    if upload_id and key:
+        aborted = r2_storage.abort_multipart_upload(
+            key=key, upload_id=upload_id, bucket=bucket
+        )
+
+    save_json(classroom_sessions_file, remaining)
+    return {"video_id": body.video_id, "aborted": aborted}
 
 
 @classroom_router.post("/auto-upload")

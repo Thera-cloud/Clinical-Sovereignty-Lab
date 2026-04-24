@@ -23,6 +23,7 @@ import 'dojo_iframe_stub.dart' if (dart.library.html) 'dojo_iframe_web.dart';
 import 'shared_widgets.dart';
 import 'widgets/calendar_views.dart';
 import 'services/nevedal_flutter.dart';
+import 'services/large_video_upload.dart';
 import 'main.dart' show defaultWsUrl, defaultApiBaseUrl, LobbyScreen, FamilySanctuaryScreen, ClientScheduleScreen, isNativeIOS;
 import 'debug_logger.dart';
 import 'avatar.dart' hide AnimatedBuilder;
@@ -13227,32 +13228,22 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   
   Future<void> _pickAndUploadVideo() async {
-    // Backend caps multipart bodies at 500 MB (MAX_VIDEO_SIZE in
-    // backend/app/routers/sessions.py). On web we have to load the entire
-    // file into a Uint8List before sending; the browser's ArrayBuffer
-    // allocator throws an opaque "Uncaught Error at new ArrayBuffer" when
-    // the file is too big to fit. We catch that, plus enforce the size
-    // cap up front so the user sees a real message.
-    const int maxUploadBytes = 500 * 1024 * 1024;
+    // Direct browser → Cloudflare R2 multipart upload. Bytes never travel
+    // through our origin or the Cloudflare proxy, so we can ship videos
+    // up to 5 GiB (the API hard-caps at MAX_DIRECT_VIDEO_SIZE). On web the
+    // file is sliced via Blob.slice and read 8 MiB at a time, so we do
+    // NOT load the whole file into the JS heap (no more ArrayBuffer crash).
+    const int maxUploadBytes = 5 * 1024 * 1024 * 1024; // 5 GiB
 
+    PickedLargeVideo? picked;
     try {
-      final FilePickerResult? result;
       try {
-        result = await FilePicker.platform.pickFiles(
-          type: FileType.video,
-          allowMultiple: false,
-          withData: kIsWeb,
-          withReadStream: !kIsWeb,
-        );
-      } catch (allocErr) {
+        picked = await pickLargeVideo();
+      } catch (pickErr) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                'Selected video is too large for the browser to load. '
-                'Maximum upload is 500MB; please compress or trim and try again. '
-                '(${allocErr.toString().split('\n').first})',
-              ),
+              content: Text('Could not open file picker: $pickErr'),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 6),
             ),
@@ -13260,19 +13251,25 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         }
         return;
       }
+      if (picked == null) return; // user cancelled
 
-      if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
-      final int fileSize = file.size;
-
+      final fileSize = picked.size;
+      if (fileSize <= 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Selected file is empty')),
+          );
+        }
+        return;
+      }
       if (fileSize > maxUploadBytes) {
         if (mounted) {
-          final mb = (fileSize / (1024 * 1024)).toStringAsFixed(0);
+          final gb = (fileSize / (1024 * 1024 * 1024)).toStringAsFixed(2);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Video is ${mb}MB. Maximum upload is 500MB. '
-                'Please compress/trim the recording, or let Zoom auto-import the cloud recording instead.',
+                'Video is ${gb} GiB. Maximum upload is 5 GiB. '
+                'Please trim the recording, or let Zoom auto-import the cloud recording.',
               ),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 6),
@@ -13280,93 +13277,53 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           );
         }
         return;
-      }
-
-      Uint8List? bytesForWeb;
-      if (kIsWeb) {
-        bytesForWeb = file.bytes;
-        if (bytesForWeb == null || bytesForWeb.isEmpty) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Could not read selected file')),
-            );
-          }
-          return;
-        }
       }
 
       setState(() {
         _classroomUploading = true;
         _classroomUploadProgress = 0.0;
-        _classroomUploadedVideoName = file.name;
+        _classroomUploadedVideoName = picked!.name;
       });
 
-      final uri = Uri.parse('$_apiBaseUrl/api/classroom/upload-video');
-      final request = http.MultipartRequest('POST', uri);
-
-      // Classroom router is gated by Depends(_require_auth); without this
-      // header every upload comes back 403 "Not authenticated".
       final tok = (_authToken ??
               widget.currentUserProfile?['token']?.toString() ??
               '')
           .trim();
-      if (tok.isNotEmpty) {
-        request.headers['Authorization'] = 'Bearer $tok';
-      }
-
-      request.fields['coach_id'] = widget.currentUserProfile?['hardware_id'] ?? '';
-      request.fields['client_id'] =
+      final coachId =
+          (widget.currentUserProfile?['hardware_id'] ?? '').toString();
+      final clientId =
           _clients.isNotEmpty ? (_clients.first['id'] ?? '').toString() : '';
 
-      if (kIsWeb) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'file',
-          bytesForWeb!,
-          filename: file.name,
-        ));
-      } else if (file.readStream != null) {
-        request.files.add(http.MultipartFile(
-          'file',
-          file.readStream!,
-          fileSize,
-          filename: file.name,
-        ));
-      } else if (file.path != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'file',
-          file.path!,
-          filename: file.name,
-        ));
-      } else {
-        throw Exception('No readable handle for selected file');
-      }
+      final result = await uploadLargeVideoDirectToR2(
+        file: picked,
+        apiBaseUrl: _apiBaseUrl,
+        bearerToken: tok,
+        coachId: coachId,
+        clientId: clientId,
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() => _classroomUploadProgress = p);
+        },
+      );
 
-      setState(() => _classroomUploadProgress = 0.5);
+      // uploadLargeVideoDirectToR2 disposed the picker handle in its
+      // finally block; clear our local reference to avoid double-dispose.
+      picked = null;
 
-      final response = await request.send();
-      final responseBody = await response.stream.bytesToString();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('HTTP ${response.statusCode}: $responseBody');
-      }
-      final data = jsonDecode(responseBody) as Map<String, dynamic>;
-      final vid = data['video_id']?.toString();
-      
       setState(() {
         _classroomUploading = false;
         _classroomUploadProgress = 1.0;
-        _classroomUploadedVideoId = vid;
+        _classroomUploadedVideoId = result.videoId;
       });
-      if (vid != null && vid.isNotEmpty) {
-        _startClassroomVideoAnalysisPoll(vid);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Upload complete. Running Classroom analysis…'),
-              backgroundColor: Color(0xFF4ECDC4),
-              duration: Duration(seconds: 3),
-            ),
-          );
-        }
+      _startClassroomVideoAnalysisPoll(result.videoId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Upload complete. Running Classroom analysis…'),
+            backgroundColor: Color(0xFF4ECDC4),
+            duration: Duration(seconds: 3),
+          ),
+        );
       }
     } catch (e) {
       setState(() {
@@ -13375,9 +13332,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text('Upload failed: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 8),
+          ),
         );
       }
+    } finally {
+      try {
+        picked?.dispose();
+      } catch (_) {}
     }
   }
   
