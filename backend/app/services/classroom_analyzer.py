@@ -2001,6 +2001,7 @@ class ClassroomAnalyzer:
             }
 
             wav_path: Optional[Path] = None
+            voice_emotion_result: Optional[Dict[str, Any]] = None
             try:
                 if vp.exists() and _HAS_LIBROSA:
                     wav_path = await asyncio.to_thread(extract_audio_wav, vp)
@@ -2009,6 +2010,26 @@ class ClassroomAnalyzer:
                             compute_voice_metrics_timeline, wav_path, 5.0
                         )
                         combined_visual["voice_metrics_timeline"] = voice_metrics_timeline
+
+                        # Voice emotion classification (transformer or librosa rules)
+                        try:
+                            from app.services.voice_emotion_analyzer import (
+                                VoiceEmotionAnalyzer,
+                            )
+
+                            ve = VoiceEmotionAnalyzer()
+                            if ve.available:
+                                voice_emotion_result = await ve.analyze_audio(
+                                    str(wav_path), segment_seconds=10
+                                )
+                                combined_visual["voice_emotion"] = voice_emotion_result
+                            else:
+                                combined_visual["voice_emotion"] = {
+                                    "error": "no voice emotion backend available"
+                                }
+                        except Exception as _ve_err:
+                            print(f"[Classroom] voice emotion (non-fatal): {_ve_err}")
+                            voice_emotion_result = None
             except Exception as _aud_err:
                 print(f"[Classroom] audio pipeline (non-fatal): {_aud_err}")
                 voice_metrics_timeline = None
@@ -2051,6 +2072,30 @@ class ClassroomAnalyzer:
             except Exception:
                 pass
 
+        # ===== FACIAL / BODY-LANGUAGE ANALYSIS =====
+        # Sample frames every 5s and extract facial expression + gaze
+        # indicators via MediaPipe FaceMesh. Module is import-safe — falls
+        # back gracefully when opencv-python-headless / mediapipe are
+        # unavailable (i.e. before Docker rebuild). Output is aggregate
+        # only — no face images / embeddings are stored.
+        facial_results: Dict[str, Any] = {}
+        try:
+            from app.services.facial_analyzer import FacialAnalyzer
+
+            facial = FacialAnalyzer()
+            if facial.available and vp.exists():
+                facial_results = await facial.analyze_video_frames(
+                    str(vp), sample_interval_seconds=5
+                )
+            elif not facial.available:
+                facial_results = {
+                    "error": "facial analysis unavailable — opencv/mediapipe not installed",
+                    "frames_analyzed": 0,
+                }
+        except Exception as _f_err:
+            print(f"[Classroom] facial analysis (non-fatal): {_f_err}")
+            facial_results = {"error": str(_f_err), "frames_analyzed": 0}
+
         tps = float(frame_analysis.get("therapeutic_presence_score") or 7.0)
         transcript_summary_parts = [
             coaching_insights,
@@ -2058,6 +2103,9 @@ class ClassroomAnalyzer:
             f"Coach question: {coach_query}" if coach_query else "",
         ]
         transcript_summary = "\n".join(p for p in transcript_summary_parts if p).strip()[:4000]
+
+        facial_summary = (facial_results or {}).get("summary", {}) or {}
+        emotional_timeline = (facial_results or {}).get("emotional_timeline", []) or []
 
         analysis: Dict[str, Any] = {
             "session_id": video_id,
@@ -2072,14 +2120,67 @@ class ClassroomAnalyzer:
             "transcript_summary": transcript_summary or None,
             "coaching_insights": coaching_insights,
             "voice_metrics_timeline": voice_metrics_timeline,
+            "voice_emotion": voice_emotion_result,
             "therapeutic_presence_score": tps,
             "key_moments": key_moments,
+            "facial_analysis": facial_results,
+            "facial_summary": facial_summary,
+            "emotional_timeline": emotional_timeline,
             "status": "analyzed",
             "analyzed_at": str(datetime.now()),
             "video_path": video_path_str,
             "filename": video_session.get("filename", ""),
             "crystals_created": [],
         }
+
+        # Align voice emotion with any prior transcript (VTT) we have for
+        # this session. Surfaces incongruence: text says "I'm fine" while
+        # voice reads "sad".
+        try:
+            if voice_emotion_result and voice_emotion_result.get("emotion_timeline"):
+                prior = self.get_session_analysis(video_id) or {}
+                excerpt = prior.get("transcript_excerpt") or []
+                vtt_loc = video_session.get("transcript_location")
+                vtt_storage = video_session.get("transcript_storage", "local")
+                vtt_entries: List[VTTEntry] = []
+                if vtt_loc:
+                    vtt_text = self._load_transcript_content(vtt_loc, vtt_storage)
+                    if vtt_text:
+                        vtt_entries = VTTParser.parse(vtt_text)
+                if vtt_entries:
+                    from app.services.voice_emotion_analyzer import (
+                        VoiceEmotionAnalyzer as _VEA,
+                    )
+                    aligned = _VEA.align_with_transcript(
+                        voice_emotion_result["emotion_timeline"], vtt_entries
+                    )
+                    if aligned:
+                        analysis["aligned_transcript_emotions"] = aligned
+                elif excerpt:
+                    converted: List[Dict[str, Any]] = []
+                    for e in excerpt:
+                        ts = e.get("time", "0:00")
+                        try:
+                            mm, ss = ts.split(":")
+                            secs = int(mm) * 60 + int(ss)
+                        except Exception:
+                            secs = 0
+                        converted.append({
+                            "start_time": float(secs),
+                            "end_time": float(secs + 5),
+                            "speaker": e.get("speaker", "Unknown"),
+                            "text": e.get("text", ""),
+                        })
+                    from app.services.voice_emotion_analyzer import (
+                        VoiceEmotionAnalyzer as _VEA,
+                    )
+                    aligned = _VEA.align_with_transcript(
+                        voice_emotion_result["emotion_timeline"], converted
+                    )
+                    if aligned:
+                        analysis["aligned_transcript_emotions"] = aligned
+        except Exception as _al_err:
+            print(f"[Classroom] voice/transcript alignment (non-fatal): {_al_err}")
 
         db_pool = None
         try:
@@ -2151,8 +2252,353 @@ class ClassroomAnalyzer:
                     domain="clinical",
                     confidence=conf,
                 )
+
+                # ===== FACIAL ANALYSIS → PMB WISDOM =====
+                # Elevated gaze aversion correlates with shame / avoidance
+                # in the shame_resilience domain. Push as a separate
+                # wisdom entry so the PMB predictability model can pick it
+                # up alongside the verbal/voice signal.
+                aversion = float(facial_summary.get("gaze_aversion_ratio", 0.0))
+                if aversion > 0.4:
+                    facial_wisdom_text = (
+                        f"Video session facial analysis ({client_name or client_id[:12]}): "
+                        f"gaze aversion ratio {aversion:.2f} across "
+                        f"{facial_summary.get('frames_with_face', 0)} frames; "
+                        f"dominant expression "
+                        f"{facial_summary.get('dominant_expression', 'neutral')}. "
+                        f"Indicators: {', '.join(facial_summary.get('potential_indicators', []))}"
+                    )
+                    await mgr.extract_wisdom(
+                        "facial_analysis",
+                        facial_wisdom_text[:20000],
+                        user_id=coach_uuid,
+                        domain="shame_resilience",
+                        confidence=0.7,
+                    )
             except Exception as _w_err:
                 print(f"[Classroom] extract_wisdom (non-fatal): {_w_err}")
+
+            # ===== FACIAL ANALYSIS → CLIENT-SCOPED CRYSTALS =====
+            # One crystal per significant indicator so coach + Nate can
+            # surface them in future sessions. Origin tagged so they can
+            # be distinguished from verbal-only crystals downstream.
+            try:
+                from app.websocket.crystal_recall_bridge import (
+                    crystallize_from_conversation,
+                )
+
+                indicators = facial_summary.get("potential_indicators", []) or []
+                frames_n = int(facial_results.get("frames_analyzed", 0) or 0)
+                # Crystals attach to the *client* if we have one — that's
+                # whose session it is — otherwise fall back to the coach.
+                target_id = client_id or coach_id
+                target_name = client_name or (target_id[:12] if target_id else "")
+
+                for indicator in indicators:
+                    user_text = (
+                        f"Video session facial analysis: {indicator}. "
+                        f"Detected from {frames_n} sampled frames "
+                        f"(dominant expression: "
+                        f"{facial_summary.get('dominant_expression', 'neutral')}, "
+                        f"engagement: {facial_summary.get('avg_engagement', 0)})."
+                    )
+                    nate_response = (
+                        "Treat as one signal among many — combine with verbal "
+                        "content and voice timeline before drawing conclusions."
+                    )
+                    try:
+                        ch = await crystallize_from_conversation(
+                            db_pool,
+                            target_id,
+                            user_text,
+                            nate_response,
+                            user_name=target_name,
+                            domain="clinical",
+                            min_score=0,  # facial signal is already pre-scored
+                            origin_surface="facial_analysis",
+                        )
+                        if ch:
+                            crystals_created.append(
+                                {"hash": ch, "domain": "clinical", "source": "facial_analysis"}
+                            )
+                    except Exception as _ic_err:
+                        print(f"[Classroom] facial crystal (non-fatal): {_ic_err}")
+            except Exception as _fc_err:
+                print(f"[Classroom] facial crystallize import (non-fatal): {_fc_err}")
+
+            # ===== VOICE EMOTION → CRYSTALS + WISDOM =====
+            # Each detected pattern (sustained sadness, anger, volatility…)
+            # becomes a client-scoped crystal so coach + Nate surface it
+            # later. High shift counts also feed the emotional_regulation
+            # wisdom domain for the predictive cycle.
+            try:
+                ve_patterns = (voice_emotion_result or {}).get("patterns", []) or []
+                seg_count = int((voice_emotion_result or {}).get("segments_analyzed", 0) or 0)
+                shift_count = int((voice_emotion_result or {}).get("shift_count", 0) or 0)
+                ve_target_id = client_id or coach_id
+                ve_target_name = client_name or (ve_target_id[:12] if ve_target_id else "")
+
+                if ve_patterns and ve_target_id:
+                    from app.websocket.crystal_recall_bridge import (
+                        crystallize_from_conversation as _vec_crystallize,
+                    )
+                    for pattern in ve_patterns:
+                        try:
+                            ch = await _vec_crystallize(
+                                db_pool,
+                                ve_target_id,
+                                f"Voice emotion analysis: {pattern}",
+                                f"Detected across {seg_count} audio segments "
+                                f"(shifts: {shift_count}). Treat as one signal "
+                                "alongside transcript and facial cues.",
+                                user_name=ve_target_name,
+                                domain="clinical",
+                                min_score=0,
+                                origin_surface="voice_emotion",
+                            )
+                            if ch:
+                                crystals_created.append({
+                                    "hash": ch,
+                                    "domain": "clinical",
+                                    "source": "voice_emotion",
+                                })
+                        except Exception as _vc_err:
+                            print(f"[Classroom] voice emotion crystal (non-fatal): {_vc_err}")
+
+                # Volatility → emotional_regulation wisdom
+                if seg_count > 0 and shift_count > seg_count * 0.4:
+                    try:
+                        from app.services.wisdom_lifecycle_manager import (
+                            WisdomLifecycleManager as _WLM,
+                        )
+                        coach_uuid_v = None
+                        async with db_pool.acquire() as _conn:
+                            coach_uuid_v = await _conn.fetchval(
+                                """
+                                SELECT id::text FROM users
+                                WHERE hardware_id = $1 OR username = $1
+                                LIMIT 1
+                                """,
+                                coach_id,
+                            )
+                        wisdom_text = (
+                            f"Voice emotion analysis ({ve_target_name or ve_target_id}): "
+                            f"{shift_count} emotional shifts across {seg_count} segments "
+                            f"(dominant: {(voice_emotion_result or {}).get('dominant_emotion', 'neutral')}). "
+                            f"Patterns: {'; '.join(ve_patterns) or 'none'}."
+                        )
+                        await _WLM(db_pool, None).extract_wisdom(
+                            "voice_emotion",
+                            wisdom_text[:20000],
+                            user_id=coach_uuid_v,
+                            domain="emotional_regulation",
+                            confidence=0.7,
+                        )
+                    except Exception as _vw_err:
+                        print(f"[Classroom] voice emotion wisdom (non-fatal): {_vw_err}")
+            except Exception as _vall_err:
+                print(f"[Classroom] voice emotion pipeline (non-fatal): {_vall_err}")
+
+            # ===== MULTI-MODAL FUSION + LONGITUDINAL PATTERNS =====
+            # Fuse text sentiment + voice emotion + facial expression into a
+            # unified per-moment emotional state, then compare against this
+            # client's prior sessions for shame cycles, attachment patterns,
+            # volatility trends, and transgenerational matches.
+            try:
+                from app.services.multimodal_fusion import (
+                    MultiModalFusionEngine,
+                    transcript_segments_from_vtt,
+                )
+                from app.services.longitudinal_patterns import (
+                    LongitudinalPatternDetector,
+                )
+
+                voice_tl_for_fusion: List[Dict[str, Any]] = (
+                    (voice_emotion_result or {}).get("emotion_timeline", []) or []
+                )
+                facial_tl_for_fusion: List[Dict[str, Any]] = list(
+                    emotional_timeline or []
+                )
+
+                # Build transcript_segments. Prefer parsed VTT (real
+                # timestamps); fall back to cached excerpt.
+                transcript_segments: List[Dict[str, Any]] = []
+                vtt_loc_f = video_session.get("transcript_location")
+                vtt_storage_f = video_session.get(
+                    "transcript_storage", "local"
+                )
+                vtt_entries_f: List[VTTEntry] = []
+                if vtt_loc_f:
+                    try:
+                        vtt_text_f = self._load_transcript_content(
+                            vtt_loc_f, vtt_storage_f
+                        )
+                        if vtt_text_f:
+                            vtt_entries_f = VTTParser.parse(vtt_text_f)
+                    except Exception as _vtt_err:
+                        print(f"[Classroom] fusion vtt load (non-fatal): {_vtt_err}")
+                if vtt_entries_f:
+                    transcript_segments = transcript_segments_from_vtt(
+                        vtt_entries_f,
+                        client_speaker_hint=(client_name or None),
+                    )
+                else:
+                    prior_f = self.get_session_analysis(video_id) or {}
+                    excerpt_f = prior_f.get("transcript_excerpt") or []
+                    converted_f: List[Dict[str, Any]] = []
+                    for _e in excerpt_f:
+                        ts_str = _e.get("time", "0:00")
+                        try:
+                            mm, ss = ts_str.split(":")
+                            secs = int(mm) * 60 + int(ss)
+                        except Exception:
+                            secs = 0
+                        converted_f.append({
+                            "start_time": float(secs),
+                            "end_time": float(secs + 5),
+                            "speaker": _e.get("speaker", "Unknown"),
+                            "text": _e.get("text", ""),
+                        })
+                    if converted_f:
+                        transcript_segments = transcript_segments_from_vtt(
+                            converted_f,
+                            client_speaker_hint=(client_name or None),
+                        )
+
+                # Even with no transcript, run fusion if we have voice or
+                # facial — synthesize timestamp anchors from voice timeline.
+                if not transcript_segments and (
+                    voice_tl_for_fusion or facial_tl_for_fusion
+                ):
+                    anchor = voice_tl_for_fusion or facial_tl_for_fusion
+                    transcript_segments = [
+                        {
+                            "timestamp": float(seg.get("timestamp", 0) or 0),
+                            "speaker": "",
+                            "text": "",
+                            "sentiment": "neutral",
+                        }
+                        for seg in anchor
+                    ]
+
+                fusion_engine = MultiModalFusionEngine()
+                fused = fusion_engine.fuse_session_analysis(
+                    transcript_segments,
+                    voice_tl_for_fusion,
+                    facial_tl_for_fusion,
+                )
+                # Attach voice volatility for downstream longitudinal trend.
+                fused["shift_count"] = int(
+                    (voice_emotion_result or {}).get("shift_count", 0) or 0
+                )
+                fused["avg_engagement"] = float(
+                    facial_summary.get("avg_engagement", 0.0) or 0.0
+                )
+                analysis["multimodal_fusion"] = fused
+                analysis["clinical_flags"] = fused.get("clinical_flags", [])
+                analysis["session_arc"] = fused.get("session_arc", {})
+                analysis["incongruence_count"] = len(
+                    fused.get("incongruence_moments", [])
+                )
+
+                # Longitudinal patterns require a db_pool + a real client.
+                detected: Dict[str, Any] = {
+                    "patterns": [],
+                    "sessions_analyzed": 0,
+                    "trend_direction": "insufficient_data",
+                }
+                target_client_id = client_id or coach_id
+                if db_pool and target_client_id:
+                    try:
+                        detector = LongitudinalPatternDetector(db_pool)
+                        detected = await detector.detect_patterns(
+                            target_client_id, fused
+                        )
+                        if family_id:
+                            try:
+                                trans = await detector.detect_transgenerational(
+                                    target_client_id, family_id
+                                )
+                                if trans:
+                                    detected.setdefault(
+                                        "patterns", []
+                                    ).append(trans)
+                            except Exception as _tg_err:
+                                print(
+                                    f"[Classroom] transgenerational "
+                                    f"(non-fatal): {_tg_err}"
+                                )
+                    except Exception as _lp_err:
+                        print(f"[Classroom] longitudinal (non-fatal): {_lp_err}")
+
+                analysis["longitudinal_patterns"] = detected
+
+                # Persist fusion + patterns onto coaching_sessions if a row
+                # exists for this session_id (additive jsonb merge — never
+                # clobber other keys).
+                if db_pool:
+                    try:
+                        merged_sd = {
+                            "multimodal_fusion": fused,
+                            "longitudinal_patterns": detected,
+                        }
+                        async with db_pool.acquire() as _sd_conn:
+                            await _sd_conn.execute(
+                                """
+                                UPDATE coaching_sessions
+                                SET session_data = COALESCE(session_data, '{}'::jsonb)
+                                                   || $1::jsonb
+                                WHERE session_id = $2
+                                """,
+                                json.dumps(merged_sd),
+                                video_id,
+                            )
+                    except Exception as _sd_err:
+                        print(f"[Classroom] session_data merge (non-fatal): {_sd_err}")
+
+                # Crystallize each significant pattern so coach + Nate can
+                # surface it later.
+                try:
+                    from app.websocket.crystal_recall_bridge import (
+                        crystallize_from_conversation as _pat_crystallize,
+                    )
+                    pat_target_id = client_id or coach_id
+                    pat_target_name = client_name or (
+                        pat_target_id[:12] if pat_target_id else ""
+                    )
+                    sessions_n = int(detected.get("sessions_analyzed", 0) or 0)
+                    for pattern in detected.get("patterns", []) or []:
+                        try:
+                            ch = await _pat_crystallize(
+                                db_pool,
+                                pat_target_id,
+                                f"Longitudinal pattern: "
+                                f"{pattern.get('pattern', 'PATTERN')} — "
+                                f"{pattern.get('clinical_note', '')}",
+                                f"Detected across {sessions_n} sessions. "
+                                "Treat as one signal alongside coach "
+                                "judgment.",
+                                user_name=pat_target_name,
+                                domain=pattern.get(
+                                    "recommended_focus", "clinical"
+                                ),
+                                min_score=0,
+                                origin_surface="multimodal_pattern",
+                            )
+                            if ch:
+                                crystals_created.append({
+                                    "hash": ch,
+                                    "domain": pattern.get(
+                                        "recommended_focus", "clinical"
+                                    ),
+                                    "source": "multimodal_pattern",
+                                })
+                        except Exception as _pc_err:
+                            print(f"[Classroom] pattern crystal (non-fatal): {_pc_err}")
+                except ImportError as _pi_err:
+                    print(f"[Classroom] pattern crystallize import (non-fatal): {_pi_err}")
+            except Exception as _mf_err:
+                print(f"[Classroom] multimodal fusion (non-fatal): {_mf_err}")
 
         analysis["crystals_created"] = crystals_created
 
@@ -2199,6 +2645,18 @@ class ClassroomAnalyzer:
             payload.setdefault("metrics", {})
             if visual_insights:
                 payload["visual_observations_summary"] = (visual_insights or "")[:4000]
+            if facial_summary:
+                payload["facial_summary"] = facial_summary
+            if emotional_timeline:
+                payload["emotional_timeline"] = emotional_timeline
+            if analysis.get("multimodal_fusion"):
+                payload["multimodal_fusion"] = analysis["multimodal_fusion"]
+            if analysis.get("clinical_flags"):
+                payload["clinical_flags"] = analysis["clinical_flags"]
+            if analysis.get("session_arc"):
+                payload["session_arc"] = analysis["session_arc"]
+            if analysis.get("longitudinal_patterns"):
+                payload["longitudinal_patterns"] = analysis["longitudinal_patterns"]
             await notify_coach(
                 coach_id=coach_id,
                 message_type="classroom_analysis_complete",

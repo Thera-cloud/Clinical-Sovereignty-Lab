@@ -17285,6 +17285,40 @@ async def handle_client(websocket, path=None):
                                     except Exception as _zai_err:
                                         zoom_ai_insight = None
                                         logger.warning("get_presession_brief: zoom_ai_insight: %s", _zai_err)
+
+                                    # QUANTUM-CRYSTAL-ARCH: latest multi-modal fusion + longitudinal patterns
+                                    multimodal_brief = None
+                                    longitudinal_brief = None
+                                    if os.getenv("MULTIMODAL_PATTERNS_BRIEF", "true").lower() != "false":
+                                        try:
+                                            _mm_row = await _brconn.fetchrow(
+                                                "SELECT session_id, session_data->'multimodal_fusion' AS mm, "
+                                                "session_data->'longitudinal_patterns' AS lp FROM coaching_sessions "
+                                                "WHERE (client_id = $1 OR ($2::text IS NOT NULL AND client_id = $2::text)) "
+                                                "AND session_data ? 'multimodal_fusion' "
+                                                "ORDER BY COALESCE(actual_end, scheduled_start, created_at) DESC LIMIT 1",
+                                                _chw, _cli_uuid,
+                                            )
+                                            if _mm_row:
+                                                _mm_raw = _mm_row.get("mm")
+                                                _lp_raw = _mm_row.get("lp")
+                                                if isinstance(_mm_raw, str):
+                                                    try: _mm_raw = json.loads(_mm_raw)
+                                                    except Exception: _mm_raw = None
+                                                if isinstance(_lp_raw, str):
+                                                    try: _lp_raw = json.loads(_lp_raw)
+                                                    except Exception: _lp_raw = None
+                                                if isinstance(_mm_raw, dict):
+                                                    multimodal_brief = {"session_id": _mm_row.get("session_id"),
+                                                        "session_arc": _mm_raw.get("session_arc", {}),
+                                                        "clinical_flags": _mm_raw.get("clinical_flags", []),
+                                                        "incongruence_count": len(_mm_raw.get("incongruence_moments", []) or [])}
+                                                if isinstance(_lp_raw, dict):
+                                                    longitudinal_brief = {"patterns": _lp_raw.get("patterns", []),
+                                                        "sessions_analyzed": _lp_raw.get("sessions_analyzed", 0),
+                                                        "trend_direction": _lp_raw.get("trend_direction", "unknown")}
+                                        except Exception as _mm_err:
+                                            logger.warning("get_presession_brief: multimodal_patterns: %s", _mm_err)
                             except Exception as _br_err:
                                 logger.warning("get_presession_brief: crystal/intake enrichment failed: %s", _br_err)
 
@@ -17316,6 +17350,14 @@ async def handle_client(websocket, path=None):
                             brief["session_focus"] = session_focus
                         if zoom_ai_insight:
                             brief["zoom_ai_insight"] = zoom_ai_insight
+                        # QUANTUM-CRYSTAL-ARCH: surface latest fusion + longitudinal patterns to coach
+                        try:
+                            if multimodal_brief:
+                                brief["multimodal_brief"] = multimodal_brief
+                            if longitudinal_brief:
+                                brief["longitudinal_brief"] = longitudinal_brief
+                        except NameError:
+                            pass
 
                         await websocket.send(json.dumps({"type": "presession_brief", "brief": brief}))
 

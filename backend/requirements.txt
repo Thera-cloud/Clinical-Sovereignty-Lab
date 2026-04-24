@@ -56,6 +56,11 @@ librosa~=0.10.1
 moviepy~=1.0.3
 praat-parselmouth~=0.4.3
 
+# Facial / Body Language Analysis (Classroom video sessions)
+# headless variant — no GUI / display libraries required inside containers
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.11
+
 # PDF Processing (for workbook extraction)
 pypdf~=4.0.1
 
@@ -127,6 +132,10 @@ jellyfish>=1.0.0
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch~=2.2.0
 
-# Optional — Family Sanctuary AI detection (graceful fallback if missing)
-# Install manually if needed: pip install transformers~=4.0.0
-# transformers~=4.0.0
+# Voice Emotion Analyzer — wav2vec2 audio emotion classification
+# torchaudio shares the CPU index above. transformers loads the
+# ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition pipeline
+# at first analyze call (lazy). VoiceEmotionAnalyzer falls back to a
+# librosa rule-based classifier if either of these import-fails.
+torchaudio~=2.2.0
+transformers~=4.40.0
