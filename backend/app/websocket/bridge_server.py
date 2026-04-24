@@ -217,6 +217,7 @@ REQUIRED_COACH_ETHICS_VERSION = "v1.0_2026"
 # Database pool — created in main(), used by NateNudge + AI Mode handlers
 db_pool = None
 chat_db_pool = None  # SOVEREIGN-VOICE: dedicated pool for chat context (fast, small)
+_pgsd_router = None  # QUANTUM-CRYSTAL-ARCH — set in init_database when PGSD_ENABLED
 
 # Bridge context — holds vault_bridge for B5 chat-integrated file interactions
 class _BridgeContext:
@@ -10499,6 +10500,13 @@ async def handle_client(websocket, path=None):
                 await websocket.send(json.dumps({"type": "pong"}))
                 continue
 
+            # QUANTUM-CRYSTAL-ARCH — PGSD router dispatch (gated by PGSD_ENABLED)
+            if _pgsd_router is not None and isinstance(t, str) and t.startswith("pgsd_"):
+                _pgsd_reply = await _pgsd_router.dispatch(t, d, current_profile)
+                if _pgsd_reply is not None:
+                    await websocket.send(json.dumps(_pgsd_reply, default=str))
+                    continue
+
             # SOVEREIGN-VOICE — ACK for critical messages carrying msg_id
             _msg_id = d.get("msg_id")
             if _msg_id:
@@ -10682,6 +10690,9 @@ async def handle_client(websocket, path=None):
                 "crystal_system_control",
                 # --- CLI Command Terminal --- # SOVEREIGN-VOICE
                 "nate_cli_chat",
+                # --- PGSD WebSocket router --- # QUANTUM-CRYSTAL-ARCH
+                "pgsd_compute_snapshot", "pgsd_get_history", "pgsd_get_trajectory",
+                "pgsd_get_family_entanglement", "pgsd_get_zero_time_route",
             ))
             if current_profile and current_profile.get("role") == "ADMIN" and t not in _SENTINEL_SKIP:
                 try:
@@ -29169,6 +29180,16 @@ async def main():
                     print("[*] LiminalResolveEngine initialized")
                 except Exception as _lr_err:
                     print(f"[!] LiminalResolveEngine init failed: {_lr_err}")
+            # QUANTUM-CRYSTAL-ARCH — PGSD router (gated by PGSD_ENABLED env var)
+            global _pgsd_router
+            if os.environ.get("PGSD_ENABLED", "").lower() in ("1", "true", "yes"):
+                try:
+                    from app.websocket.pgsd_handlers import PGSDWebSocketRouter
+                    _pgsd_router = PGSDWebSocketRouter(db_pool=db_pool)
+                    print("[*] PGSD router initialized (PGSD_ENABLED)")
+                except Exception as _pgsd_err:
+                    print(f"[*] PGSD router init failed: {_pgsd_err}")
+                    _pgsd_router = None
             # QUANTUM-CRYSTAL-ARCH — Six-Quotient Growth Engine (per-interaction hook)
             global _six_quotient_growth
             if _SQGEngine:
