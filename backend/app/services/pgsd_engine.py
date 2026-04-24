@@ -253,6 +253,24 @@ class QuantumTraceComputer:
         "activation", "grounding", "integration",
     ]
 
+    # Knowledge-domain → emotional-dimension routing for the additive
+    # crystal-mass contribution. Crystal domains are KNOWLEDGE categories
+    # (clinical, coaching, crisis, …); emotional dimensions are STATES.
+    # The mapping is best-effort; weights are tuned so knowledge tilts the
+    # population vector but never dominates the direct state signal.
+    _CRYSTAL_DOMAIN_MAP = {
+        "clinical": ("identity", 0.10),
+        "coaching": ("activation", 0.10),
+        "crisis": ("grounding", 0.20),
+        "liminal_resolve": ("integration", 0.10),
+        "ln_self_curiosity": ("identity", 0.05),
+        "research": ("integration", 0.05),
+        "culture": ("connection", 0.05),
+        "marketing": ("connection", 0.03),
+        "defense": ("trust", 0.05),
+        "general": ("integration", 0.03),
+    }
+
     def compute_density_matrix(
         self,
         crystal_domains: Dict[str, float],
@@ -261,6 +279,7 @@ class QuantumTraceComputer:
         quantum: float,
         voice_emotion: Optional[Dict] = None,
         facial_summary: Optional[Dict] = None,
+        metrics: Optional[Dict] = None,
     ) -> Dict:
         """
         Build the density operator ρ from all available multi-modal data.
@@ -269,14 +288,30 @@ class QuantumTraceComputer:
         diagonal elements + a scalar coherence summary of the off-diagonal
         coherences).
 
-        crystal_domains: {domain: avg_confidence}
+        crystal_domains: {domain: avg_confidence} — knowledge categories
         voice_emotion:   {emotion: proportion} or {"dominant_emotion": ...}
         facial_summary:  {avg_engagement, gaze_aversion_ratio}
+        metrics:         client_metrics row dict (anxiety, stress, depression,
+                         shame_profile, engagement) — required for non-zero
+                         emotional populations. Without it, populations fall
+                         back to the legacy crystal-domain key match (which
+                         almost never matches and yields all zeros).
         """
-        populations: Dict[str, float] = {}
-        for dim in self.DIMENSIONS:
-            pop = crystal_domains.get(dim, 0.0) if crystal_domains else 0.0
-            populations[dim] = round(min(1.0, float(pop)), 3)
+        populations = self._derive_emotional_populations(
+            metrics or {}, voice_emotion, facial_summary,
+            c_emo, gap, quantum,
+        )
+
+        # Additive knowledge contribution from crystal domains (small).
+        if crystal_domains:
+            for dom, conf in crystal_domains.items():
+                mapping = self._CRYSTAL_DOMAIN_MAP.get(str(dom).lower())
+                if mapping:
+                    target_dim, weight = mapping
+                    bump = float(conf or 0.0) * weight
+                    populations[target_dim] = min(
+                        1.0, populations.get(target_dim, 0.0) + bump
+                    )
 
         coherence = self._compute_coherence(
             c_emo, gap, quantum, voice_emotion, facial_summary
@@ -287,6 +322,11 @@ class QuantumTraceComputer:
         if total > 0:
             for k in populations:
                 populations[k] = round(populations[k] / total, 4)
+        else:
+            # Truly no signal at all — uniform prior so the heatmap renders
+            # something interpretable rather than blank black squares.
+            uniform = round(1.0 / len(self.DIMENSIONS), 4)
+            populations = {dim: uniform for dim in self.DIMENSIONS}
 
         return {
             "populations": populations,
@@ -294,6 +334,50 @@ class QuantumTraceComputer:
             "trace": round(sum(populations.values()), 4),
             "purity": self._compute_purity(populations, coherence),
             "timestamp": None,  # set by caller
+        }
+
+    def _derive_emotional_populations(
+        self,
+        metrics: Dict,
+        voice: Optional[Dict],
+        facial: Optional[Dict],
+        c_emo: float,
+        gap: float,
+        quantum: float,
+    ) -> Dict[str, float]:
+        """Map real client state signals to the 10 emotional dimensions.
+
+        anxiety / stress / depression in client_metrics are 0–10 scales;
+        c_emo / gap / quantum / engagement are 0–1. We normalize everything
+        to 0–1 before populating the diagonal.
+        """
+        anx = max(0.0, min(1.0, float(metrics.get("anxiety", 0.0)) / 10.0))
+        stress = max(0.0, min(1.0, float(metrics.get("stress", 0.0)) / 10.0))
+        depr = max(0.0, min(1.0, float(metrics.get("depression", 0.0)) / 10.0))
+        engage = max(0.0, min(1.0, float(metrics.get("avg_engagement", 0.5))))
+        shame_profile = metrics.get("shame_profile") or {}
+        shame_idx = float(shame_profile.get("shame_index", 0.0)) if isinstance(shame_profile, dict) else 0.0
+        shame = max(0.0, min(1.0, shame_idx if shame_idx > 0 else stress * 0.5))
+
+        # Voice incongruence widens grief; facial gaze aversion widens shame.
+        voice_negative = 0.0
+        if voice:
+            for k in ("sad", "angry", "anxious", "fearful"):
+                voice_negative += float(voice.get(k, 0.0) or 0.0)
+            voice_negative = min(1.0, voice_negative)
+        gaze_aversion = float((facial or {}).get("gaze_aversion_ratio", 0.0) or 0.0)
+
+        return {
+            "shame":       round(min(1.0, shame + 0.3 * gaze_aversion), 4),
+            "attachment":  round(max(0.0, 1.0 - anx), 4),
+            "grief":       round(min(1.0, depr + 0.3 * voice_negative), 4),
+            "trust":       round(max(0.0, c_emo), 4),
+            "identity":    round(max(0.0, quantum), 4),
+            "resilience":  round(max(0.0, 1.0 - stress), 4),
+            "connection":  round(engage, 4),
+            "activation":  round(max(0.0, gap), 4),
+            "grounding":   round(max(0.0, 1.0 - anx), 4),
+            "integration": round(max(0.0, quantum * (1.0 - voice_negative * 0.5)), 4),
         }
 
     def _compute_coherence(
@@ -749,6 +833,7 @@ class PGSDEngine:
         density = self.trace.compute_density_matrix(
             crystals.get("domains", {}),
             c_emo, gap, quantum, voice, facial,
+            metrics=metrics,
         )
 
         family_density = None
@@ -796,6 +881,13 @@ class PGSDEngine:
                 "partial_trace": partial,
                 "coherence": density.get("coherence", 0),
                 "purity": density.get("purity", 0),
+                # Always include a lindblad block. On the first snapshot
+                # there is no previous density to diff against, so we
+                # return the canonical "initial" state with fidelity 1.0
+                # rather than letting the dashboard fall through to UNKNOWN.
+                "lindblad": self.trace.compute_lindblad_evolution(
+                    density, None, 0, 0
+                ),
             },
 
             "coordinate_5d": coordinate,
@@ -885,31 +977,56 @@ class PGSDEngine:
             return {"domains": {}, "total_crystals": 0}
 
     async def _load_metrics(self, user_id: str) -> Dict:
-        """Load Nevedal metrics for this user."""
+        """Load Nevedal metrics + emotional state indicators for this user.
+
+        IMPORTANT: client_metrics column is `quantum`, NOT `quantum_score`
+        (see migration 052_data_consolidation.sql). The earlier query
+        silently returned no row, defaulting all metrics to 0.5/0.3/0.5
+        and producing a fake-looking coherence of 0.964 on every snapshot.
+        """
+        defaults = {
+            "C_emo": 0.5, "GAP": 0.3, "Quantum": 0.5,
+            "session_count": 0, "avg_engagement": 0.5,
+            "anxiety": 0.0, "stress": 0.0, "depression": 0.0,
+            "shame_profile": {},
+        }
         if not self.db:
-            return {"C_emo": 0.5, "GAP": 0.3, "Quantum": 0.5}
+            return defaults
         try:
             row = await self.db.fetchrow(
                 """
-                SELECT c_emo, gap, quantum_score,
+                SELECT c_emo, gap, quantum,
                        session_count, engagement,
-                       anxiety_level, stress_level
+                       anxiety_level, stress_level, depression_indicators,
+                       shame_profile
                 FROM client_metrics
-                WHERE user_id = $1
+                WHERE user_id = (
+                    SELECT id FROM users WHERE hardware_id = $1 LIMIT 1
+                )
                 """,
                 user_id,
             )
             if row:
+                shame_raw = row["shame_profile"]
+                if isinstance(shame_raw, str):
+                    try:
+                        shame_raw = json.loads(shame_raw)
+                    except Exception:
+                        shame_raw = {}
                 return {
                     "C_emo": float(row["c_emo"] or 0.5),
                     "GAP": float(row["gap"] or 0.3),
-                    "Quantum": float(row["quantum_score"] or 0.5),
+                    "Quantum": float(row["quantum"] or 0.5),
                     "session_count": int(row["session_count"] or 0),
                     "avg_engagement": float(row["engagement"] or 0.5),
+                    "anxiety": float(row["anxiety_level"] or 0.0),
+                    "stress": float(row["stress_level"] or 0.0),
+                    "depression": float(row["depression_indicators"] or 0.0),
+                    "shame_profile": shame_raw if isinstance(shame_raw, dict) else {},
                 }
-            return {"C_emo": 0.5, "GAP": 0.3, "Quantum": 0.5}
+            return defaults
         except Exception:
-            return {"C_emo": 0.5, "GAP": 0.3, "Quantum": 0.5}
+            return defaults
 
     async def _load_session_data(self, user_id: str) -> Dict:
         """Load session statistics."""

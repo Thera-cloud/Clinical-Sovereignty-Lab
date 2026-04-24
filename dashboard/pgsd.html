@@ -514,7 +514,12 @@ function handleMessage(msg){
         var cid = msg.client_id || selectedClient;
         latestSnapshotByClient[cid] = msg.pgsd;
         renderSnapshot(msg.pgsd);
-        renderEvolution(msg.evolution_from_previous);
+        // On the first snapshot there is no previous to diff against, so
+        // fall back to the engine-supplied "initial" lindblad block carried
+        // inside the snapshot itself rather than rendering UNKNOWN.
+        var lb = msg.evolution_from_previous;
+        if (!lb && msg.pgsd && msg.pgsd.quantum_trace) lb = msg.pgsd.quantum_trace.lindblad;
+        renderEvolution(lb);
         // Refresh history + trajectory after a successful compute.
         send({ type: "pgsd_get_history", client_id: cid, limit: 20 });
         send({ type: "pgsd_get_trajectory", client_id: cid });
