@@ -309,6 +309,17 @@
                     </div>
                 </div>
             </div>
+            <div class="card tall" style="margin-top:16px;">
+                <div class="card-title">Trace evolution over time
+                    <span style="font-weight:400;font-size:10px;color:var(--text-dim);letter-spacing:1px;">latest snapshots &middot; coherence &middot; purity &middot; fidelity</span>
+                </div>
+                <div class="card-chart-wrap"><canvas id="traceTimeline"></canvas></div>
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-swatch" style="background:var(--cyan);"></div>Coherence</div>
+                    <div class="legend-item"><div class="legend-swatch" style="background:var(--gold);"></div>Purity Tr(&rho;&sup2;)</div>
+                    <div class="legend-item"><div class="legend-swatch" style="background:var(--green);"></div>Lindblad Fidelity</div>
+                </div>
+            </div>
         </div>
 
         <!-- SECTION 4 — 5D COORDINATE -->
@@ -632,6 +643,11 @@ function clearAll(){
     renderHeatmap({});
     Object.keys(charts).forEach(function(k){ try { charts[k].destroy(); } catch(e){} delete charts[k]; });
     initCharts();
+    if (charts.traceTimeline){
+        charts.traceTimeline.data.labels = [];
+        charts.traceTimeline.data.datasets.forEach(function(d){ d.data = []; });
+        charts.traceTimeline.update("none");
+    }
 }
 
 // ─── Renderers ─────────────────────────────────────────────────────────────
@@ -725,34 +741,80 @@ function renderHistory(client_id, snaps){
     if (client_id !== selectedClient) return;
     if (snaps.length){
         renderSnapshot(reconstructFromSummary(snaps[0]));
-        renderEvolution(snaps[0] && snaps[0].evolution ? {
-            evolution: snaps[0].evolution.state, fidelity: snaps[0].evolution.fidelity,
-            coherence_delta: 0, population_change: 0
-        } : null);
+        // Lindblad delta numbers aren't persisted as columns, so recompute
+        // from the two newest summaries when available. coherence_delta and
+        // population_change (L1 distance over diagonal populations) match
+        // QuantumTraceComputer.compute_lindblad_evolution's definitions.
+        var evo = null;
+        if (snaps[0] && snaps[0].evolution && snaps[0].evolution.state){
+            evo = {
+                evolution: snaps[0].evolution.state,
+                fidelity: snaps[0].evolution.fidelity,
+                coherence_delta: 0,
+                population_change: 0
+            };
+            if (snaps.length >= 2){
+                var curr = (snaps[0].quantum_trace || {});
+                var prev = (snaps[1].quantum_trace || {});
+                evo.coherence_delta = (Number(curr.coherence) || 0) - (Number(prev.coherence) || 0);
+                var cp = (curr.density_matrix && curr.density_matrix.populations) || {};
+                var pp = (prev.density_matrix && prev.density_matrix.populations) || {};
+                var keys = {};
+                Object.keys(cp).forEach(function(k){ keys[k] = 1; });
+                Object.keys(pp).forEach(function(k){ keys[k] = 1; });
+                var dpop = 0;
+                Object.keys(keys).forEach(function(k){
+                    dpop += Math.abs((Number(cp[k]) || 0) - (Number(pp[k]) || 0));
+                });
+                evo.population_change = dpop;
+            }
+        }
+        renderEvolution(evo);
     }
-    // Void trend chart
-    var labels = [], vals = [];
+    // Void trend chart + Trace evolution timeline (Section III).
+    var labels = [], voidVals = [], cohVals = [], purVals = [], fidVals = [];
     snaps.slice().reverse().forEach(function(s){
         labels.push(s.computed_at ? new Date(s.computed_at).toLocaleDateString() : "—");
-        vals.push((s.timescape && s.timescape.void_fraction) || 0);
+        voidVals.push((s.timescape && s.timescape.void_fraction) || 0);
+        var qt = s.quantum_trace || {};
+        var ev = s.evolution || {};
+        cohVals.push(qt.coherence === null || qt.coherence === undefined ? null : Number(qt.coherence));
+        purVals.push(qt.purity === null || qt.purity === undefined ? null : Number(qt.purity));
+        fidVals.push(ev.fidelity === null || ev.fidelity === undefined ? null : Number(ev.fidelity));
     });
     if (charts.voidTrend){
         charts.voidTrend.data.labels = labels;
-        charts.voidTrend.data.datasets[0].data = vals;
+        charts.voidTrend.data.datasets[0].data = voidVals;
         charts.voidTrend.update("none");
+    }
+    if (charts.traceTimeline){
+        charts.traceTimeline.data.labels = labels;
+        charts.traceTimeline.data.datasets[0].data = cohVals;
+        charts.traceTimeline.data.datasets[1].data = purVals;
+        charts.traceTimeline.data.datasets[2].data = fidVals;
+        charts.traceTimeline.update("none");
     }
 }
 
 function reconstructFromSummary(s){
     // Convert a history-summary row into a full snapshot-like shape so renderSnapshot works.
+    // Server now sends density_matrix + partial_trace + source_metrics in the
+    // summary, so the heatmap and partial-trace bars render on subject-select
+    // instead of staying blank until a manual Compute Now.
+    var qt = s.quantum_trace || {};
     return {
         tduft: s.tduft || {},
         timescape: s.timescape || {},
-        quantum_trace: { coherence: (s.quantum_trace||{}).coherence, purity: (s.quantum_trace||{}).purity, density_matrix: { populations: {} }, partial_trace: {} },
+        quantum_trace: {
+            coherence: qt.coherence,
+            purity: qt.purity,
+            density_matrix: qt.density_matrix || { populations: {} },
+            partial_trace: qt.partial_trace || {}
+        },
         coordinate_5d: s.coordinate_5d || {},
         emotional_fingerprint: s.emotional_fingerprint,
         computed_at: s.computed_at,
-        source_metrics: {}
+        source_metrics: s.source_metrics || {}
     };
 }
 
@@ -973,6 +1035,28 @@ function initCharts(){
             type: "line",
             data: { labels: [], datasets: [{ label:"|C|", data:[], borderColor:"#C9A962", backgroundColor:"rgba(201,169,98,0.15)", tension:0.3, fill:true, pointRadius:3 }] },
             options: common
+        });
+    }
+    // Trace timeline (Section III) — coherence / purity / fidelity over time.
+    // Mirrors magChart's pattern but with three datasets on a 0–1 axis so the
+    // three quantum-trace metrics share one vertical scale.
+    var tt = $("traceTimeline");
+    if (tt && !charts.traceTimeline){
+        charts.traceTimeline = new Chart(tt.getContext("2d"), {
+            type: "line",
+            data: { labels: [], datasets: [
+                { label:"coherence", data:[], borderColor:"#4ECDC4", backgroundColor:"rgba(78,205,196,0.10)", tension:0.3, fill:false, pointRadius:3, spanGaps:true },
+                { label:"purity",    data:[], borderColor:"#C9A962", backgroundColor:"rgba(201,169,98,0.10)", tension:0.3, fill:false, pointRadius:3, spanGaps:true },
+                { label:"fidelity",  data:[], borderColor:"#4ADE80", backgroundColor:"rgba(74,222,128,0.10)", tension:0.3, fill:false, pointRadius:3, borderDash:[4,3], spanGaps:true }
+            ] },
+            options: Object.assign({}, common, {
+                plugins: { legend: { display:false },
+                    tooltip: { callbacks: { label: function(ctx){
+                        var v = ctx.parsed.y;
+                        return ctx.dataset.label + ": " + (v===null||v===undefined?"—":Number(v).toFixed(3));
+                    } } } },
+                scales: { x: common.scales.x, y: Object.assign({}, common.scales.y, { suggestedMin: 0, suggestedMax: 1 }) }
+            })
         });
     }
     // Velocity bars

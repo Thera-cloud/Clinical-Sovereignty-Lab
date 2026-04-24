@@ -561,7 +561,8 @@ class PGSDWebSocketRouter:
                            coherence, purity,
                            d1_valence, d2_arousal, d3_relational,
                            d4_temporal_depth, d5_integration, coordinate_magnitude,
-                           emotional_fingerprint, evolution_state, fidelity
+                           emotional_fingerprint, evolution_state, fidelity,
+                           density_matrix, partial_trace, source_metrics
                     FROM pgsd_snapshots
                     WHERE user_id = $1
                     ORDER BY computed_at DESC
@@ -641,6 +642,9 @@ class PGSDWebSocketRouter:
         ca = row.get("computed_at")
         if isinstance(ca, datetime):
             ca = ca.isoformat()
+        density = PGSDWebSocketRouter._coerce_json(row.get("density_matrix"))
+        partial = PGSDWebSocketRouter._coerce_json(row.get("partial_trace"))
+        source = PGSDWebSocketRouter._coerce_json(row.get("source_metrics"))
         return {
             "id": row.get("id"),
             "computed_at": ca,
@@ -661,6 +665,11 @@ class PGSDWebSocketRouter:
             "quantum_trace": {
                 "coherence": row.get("coherence"),
                 "purity": row.get("purity"),
+                # Full density-matrix populations + partial trace are loaded
+                # so the dashboard heatmap renders on subject-select instead
+                # of staying blank until the next manual Compute Now.
+                "density_matrix": density,
+                "partial_trace": partial,
             },
             "coordinate_5d": {
                 "d1_valence": row.get("d1_valence"),
@@ -675,6 +684,7 @@ class PGSDWebSocketRouter:
                 "state": row.get("evolution_state"),
                 "fidelity": row.get("fidelity"),
             },
+            "source_metrics": source,
         }
 
 
