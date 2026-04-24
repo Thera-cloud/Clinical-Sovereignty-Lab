@@ -139,6 +139,11 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB:-little_nate}
       - DATA_DIR=/app/data
+      # Both bridge and backend share the SAME classroom_sessions.json
+      # (backend's data dir is cross-mounted at /app/backend_data here).
+      # Without this, bridge writes/reads diverge from the backend's
+      # authoritative file and the Coach Command dropdown desyncs.
+      - CLASSROOM_SESSIONS_FILE=/app/backend_data/classroom_sessions.json
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=production
       - ENABLE_VOICE_TRANSCRIPT_CRYSTALLIZATION=true

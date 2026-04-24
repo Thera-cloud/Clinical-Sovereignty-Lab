@@ -1035,7 +1035,14 @@ class ClassroomAnalyzer:
     def __init__(self, data_dir: Path, workbooks_dir: Path = None):
         self.data_dir = Path(data_dir)
         self.workbooks_dir = workbooks_dir
-        self.classroom_file = self.data_dir / "classroom_sessions.json"
+        # Allow ops to point bridge + backend at a single shared file via
+        # CLASSROOM_SESSIONS_FILE so both containers operate on one inode
+        # regardless of bind-mount layout. Falls back to local data_dir when
+        # unset.
+        override = os.getenv("CLASSROOM_SESSIONS_FILE")
+        self.classroom_file = (
+            Path(override) if override else self.data_dir / "classroom_sessions.json"
+        )
         self.client_insights_dir = self.data_dir / "classroom_insights"
         self._ensure_data_file()
         
@@ -1948,7 +1955,7 @@ class ClassroomAnalyzer:
         Analyze an uploaded video using VideoAnalyzer for visual sampling + optional audio timeline.
         Creates crystals / wisdom when DB is available. Never raises on missing AV libraries.
         """
-        classroom_sessions_file = self.data_dir / "classroom_sessions.json"
+        classroom_sessions_file = self.classroom_file
         sessions = []
         try:
             with open(classroom_sessions_file, "r", encoding="utf-8") as f:
