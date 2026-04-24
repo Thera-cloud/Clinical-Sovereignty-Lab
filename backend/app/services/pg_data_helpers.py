@@ -297,7 +297,13 @@ async def upsert_session_pg(db_pool, session: Dict) -> bool:
                      recording_url = EXCLUDED.recording_url,
                      payment_status = EXCLUDED.payment_status,
                      intake_note = EXCLUDED.intake_note,
-                     session_data = EXCLUDED.session_data,
+                     -- JSONB merge (additive) instead of full replace, so async webhook
+                     -- patches (Zoom recording_ready/transcript_pending, etc.) written via
+                     -- _patch_coaching_session_data are not silently overwritten by later
+                     -- upserts that load from the JSON shadow. Keys present in EXCLUDED
+                     -- still override existing values; absent keys are preserved.
+                     session_data = COALESCE(coaching_sessions.session_data, '{}'::jsonb)
+                                    || COALESCE(EXCLUDED.session_data, '{}'::jsonb),
                      consultation_email = EXCLUDED.consultation_email,
                      consultation_name = EXCLUDED.consultation_name,
                      consultation_subject = EXCLUDED.consultation_subject""",
