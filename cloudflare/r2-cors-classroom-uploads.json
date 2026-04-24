@@ -3,20 +3,13 @@
     "AllowedOrigins": [
       "https://coach.sovereignsanctuary.net",
       "https://app.sovereignsanctuary.net",
-      "https://api.sovereignsanctuary.net",
-      "https://sovereignsanctuary.net",
-      "http://localhost:8080",
+      "https://command.sovereignsanctuary.net",
+      "https://pwa.sovereignsanctuary.net",
       "http://localhost:3000"
     ],
-    "AllowedMethods": ["GET", "PUT", "HEAD"],
-    "AllowedHeaders": [
-      "Content-Type",
-      "Content-MD5",
-      "Authorization",
-      "x-amz-content-sha256",
-      "x-amz-date"
-    ],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3000
+    "MaxAgeSeconds": 86400
   }
 ]
