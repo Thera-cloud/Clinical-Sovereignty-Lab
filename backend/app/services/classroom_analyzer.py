@@ -2069,10 +2069,28 @@ class ClassroomAnalyzer:
                     pass
 
             visual_insights = json.dumps(combined_visual, indent=2, default=str)
+        except ImportError:
+            visual_insights = json.dumps(
+                {"error": "VideoAnalyzer not available - visual analysis skipped"}
+            )
+            frame_analysis = {
+                "coaching_insights": "VideoAnalyzer unavailable.",
+                "key_moments": [],
+                "therapeutic_presence_score": 6.0,
+                "frames_analyzed": 0,
+            }
+        except Exception as e:
+            visual_insights = json.dumps({"error": f"Visual analysis error: {e}"})
+            frame_analysis = {
+                "coaching_insights": f"Analysis error: {e}",
+                "key_moments": [],
+                "therapeutic_presence_score": 6.0,
+                "frames_analyzed": 0,
+            }
 
         # ===== WHISPER STT — full conversation transcript =====
         # Direct-uploaded videos historically only got visual + voice-metrics
-        # analysis; the actual coach⇄client conversation was never transcribed,
+        # analysis; the actual coach<->client conversation was never transcribed,
         # which meant Night School + memory crystals + crystal recall were
         # learning from metadata only. Run the same Azure Whisper pipeline
         # we use for Zoom audio fallback so the conversational text feeds
@@ -2096,9 +2114,6 @@ class ClassroomAnalyzer:
                         await asyncio.to_thread(
                             transcript_path.write_bytes, vtt_bytes
                         )
-                        # Reflect transcript location into classroom_sessions.json
-                        # so the bridge's dropdown gets has_transcript=True for
-                        # this device-uploaded video on the next refresh.
                         try:
                             with open(self.classroom_file, "r", encoding="utf-8") as _rf:
                                 _all = json.load(_rf)
@@ -2124,28 +2139,9 @@ class ClassroomAnalyzer:
                 else:
                     print(f"[Classroom STT] whisper produced no VTT for {video_id}")
         except ImportError:
-            # zoom_audio_fallback not present in this build — silent skip.
             pass
         except Exception as _stt_err:
             print(f"[Classroom STT] non-fatal failure for {video_id}: {_stt_err}")
-        except ImportError:
-            visual_insights = json.dumps(
-                {"error": "VideoAnalyzer not available - visual analysis skipped"}
-            )
-            frame_analysis = {
-                "coaching_insights": "VideoAnalyzer unavailable.",
-                "key_moments": [],
-                "therapeutic_presence_score": 6.0,
-                "frames_analyzed": 0,
-            }
-        except Exception as e:
-            visual_insights = json.dumps({"error": f"Visual analysis error: {e}"})
-            frame_analysis = {
-                "coaching_insights": f"Analysis error: {e}",
-                "key_moments": [],
-                "therapeutic_presence_score": 6.0,
-                "frames_analyzed": 0,
-            }
 
         coaching_insights = str(frame_analysis.get("coaching_insights") or "")
         key_moments = list(frame_analysis.get("key_moments") or [])
