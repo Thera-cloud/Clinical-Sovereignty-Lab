@@ -1,0 +1,71 @@
+---
+description: Production reverse proxy is the HOST nginx, not the Docker `nate_nginx` container — dashboard/PWA changes must rsync to /var/www/* and reload host nginx
+alwaysApply: true
+---
+
+# Production Reverse Proxy: Host nginx, Not `nate_nginx`
+
+## The Problem
+
+The repo's `docker-compose.prod.yml` defines an nginx container (`nate_nginx`) bind-mounted to `./dashboard`, `./mobile/build/web`, etc. **In production this container is in `Created` state and never starts** — the host's system-level nginx is squatting on ports 80/443/8001, so Docker can't bind. The host nginx is the actual front door.
+
+This means:
+- `git pull origin main` on the VPS updates `/opt/clinical-sovereignty-lab/dashboard/` but **does NOT** update what nginx serves.
+- `docker compose ... up -d nginx` will silently no-op — the container stays in `Created`.
+- `docker exec nate_nginx nginx -s reload` will fail with `container … is not running`.
+
+## Production Doc Roots (host nginx, not bind mounts)
+
+| Hostname | Doc root on VPS | Repo source |
+|---|---|---|
+| `command.sovereignsanctuary.net` | `/var/www/sovereign-command/` | `/opt/clinical-sovereignty-lab/dashboard/` |
+| `app.sovereignsanctuary.net` | `/var/www/sovereignsanctuary-web/` | `/opt/clinical-sovereignty-lab/mobile/build/web/` |
+| `coach.sovereignsanctuary.net` | `/var/www/sovereignsanctuary-web/` | `/opt/clinical-sovereignty-lab/mobile/build/web/` |
+| `pwa.sovereignsanctuary.net` | `/var/www/sovereign-pwa/` | (PWA build output) |
+
+Vhost configs live in `/etc/nginx/sites-enabled/`. Confirm with:
+
+```bash
+ssh root@68.183.168.75 'nginx -T 2>/dev/null | grep -E "server_name|^\s*root " | head -40'
+```
+
+## Rule
+
+**After any change to `dashboard/`, `mobile/build/web/`, or PWA assets, you must rsync from the repo to the matching `/var/www/<dest>/` and reload the HOST nginx.**
+
+### Dashboard (admin command center)
+
+```bash
+ssh root@68.183.168.75 'rsync -av --exclude=_archive --exclude=Untitled \
+    /opt/clinical-sovereignty-lab/dashboard/ /var/www/sovereign-command/ && \
+  systemctl reload nginx'
+```
+
+### Flutter web (client + coach portals)
+
+```bash
+ssh root@68.183.168.75 'rsync -av --delete \
+    /opt/clinical-sovereignty-lab/mobile/build/web/ /var/www/sovereignsanctuary-web/ && \
+  systemctl reload nginx'
+```
+
+## Verification
+
+After any sync + reload, hit nginx directly (bypassing Cloudflare) to prove what's actually served:
+
+```bash
+ssh root@68.183.168.75 'curl -sk https://localhost/<path> -H "Host: <hostname>" | grep -c "<expected-marker>"'
+```
+
+If origin is correct but browser still shows old content, do a **single-URL Cloudflare purge** (more reliable than "purge everything") for the specific file URL.
+
+## What NOT to Do
+
+- ❌ Don't `docker compose up -d nginx` and assume changes deployed — `nate_nginx` is dead.
+- ❌ Don't `docker exec nate_nginx ...` — container isn't running.
+- ❌ Don't edit files directly in `/var/www/` — they get overwritten by the next rsync from the repo, and the repo loses the source-of-truth.
+- ❌ Don't rely on bind-mount auto-reflection — there is no bind mount in production.
+
+## Long-Term Fix (Not Yet Done)
+
+Either decommission `nate_nginx` from `docker-compose.prod.yml` and document the host-nginx architecture, OR resolve the port conflict so the Docker nginx can take over and the bind mounts actually work. Until then, this rule is required for every dashboard/web deploy.
