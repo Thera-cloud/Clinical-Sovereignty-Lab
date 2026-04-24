@@ -31,8 +31,9 @@ class CoachStoryBridge:
 
         notes = await self._get_recent_notes(coach_id, client_user_id)
         overrides = await self._get_active_overrides(coach_id, client_user_id)
+        patterns = await self._get_longitudinal_patterns(client_user_id)
 
-        return {
+        result = {
             "has_coach": True,
             "coach_id": coach_id,
             "recent_notes": notes,
@@ -41,6 +42,47 @@ class CoachStoryBridge:
             "coach_pacing_override": overrides.get("pacing"),
             "coach_hold_active": bool(overrides.get("clinical_hold", False)),
         }
+        if patterns:
+            result["detected_patterns"] = patterns
+            high = [p for p in patterns if (p.get("severity") or "").lower() == "high"]
+            if high:
+                result["auto_suggested_focus"] = high[0].get("recommended_focus")
+        return result
+
+    async def _get_longitudinal_patterns(self, client_user_id: str) -> List[Dict[str, Any]]:
+        if not self.db:
+            return []
+        try:
+            import json as _json
+            async with self.db.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT session_data->'longitudinal_patterns' AS lp
+                    FROM coaching_sessions
+                    WHERE (client_id = $1 OR client_id IN (
+                              SELECT id::text FROM users
+                              WHERE hardware_id = $1 OR username = $1
+                          ))
+                      AND session_data ? 'longitudinal_patterns'
+                    ORDER BY COALESCE(actual_end, scheduled_start, created_at) DESC
+                    LIMIT 1
+                    """,
+                    client_user_id,
+                )
+                if not row or row["lp"] is None:
+                    return []
+                lp = row["lp"]
+                if isinstance(lp, str):
+                    try:
+                        lp = _json.loads(lp)
+                    except Exception:
+                        return []
+                if isinstance(lp, dict):
+                    pats = lp.get("patterns") or []
+                    return [p for p in pats if isinstance(p, dict)]
+        except Exception as e:
+            logger.warning("CoachStoryBridge._get_longitudinal_patterns: %s", e)
+        return []
 
     async def _get_coach_for_client(self, client_id: str) -> Optional[str]:
         try:

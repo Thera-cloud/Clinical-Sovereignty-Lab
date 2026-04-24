@@ -102,6 +102,8 @@ class LongitudinalPatternDetector:
         self,
         client_id: str,
         family_id: Optional[str],
+        coach_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Compare client's multi-modal patterns against family members to
@@ -110,9 +112,41 @@ class LongitudinalPatternDetector:
         family_id may be a UUID string (real `users.family_id` column) or
         a string identifier stored in `users.profile_data->>'family_id'`.
         Both shapes are handled.
+
+        Access control: caller must be ADMIN, the assigned coach for this
+        family, or a family member themselves (the latter is enforced by
+        the upstream auth layer that resolves client_id from the requester).
         """
         if not family_id or not self.db:
             return None
+
+        # ACL: non-admin callers presenting a coach_id must be assigned to
+        # at least one user in this family. Callers presenting neither are
+        # treated as the family member themselves (auth layer enforces).
+        if not is_admin and coach_id:
+            try:
+                assigned = await self.db.fetchval(
+                    """
+                    SELECT COUNT(*) FROM coach_assignments ca
+                    INNER JOIN users u
+                       ON (u.id::text = ca.entity_id OR u.hardware_id = ca.entity_id
+                           OR u.username = ca.entity_id)
+                    WHERE ca.coach_id = $1
+                      AND (u.family_id::text = $2 OR u.profile_data->>'family_id' = $2)
+                    """,
+                    coach_id, family_id,
+                )
+                if not assigned or int(assigned) <= 0:
+                    logger.warning(
+                        "detect_transgenerational: coach %s not assigned to family %s",
+                        coach_id, family_id,
+                    )
+                    return None
+            except Exception as _acl_err:
+                logger.warning(
+                    "detect_transgenerational: ACL check failed: %s", _acl_err
+                )
+                return None
 
         try:
             members = await self.db.fetch(

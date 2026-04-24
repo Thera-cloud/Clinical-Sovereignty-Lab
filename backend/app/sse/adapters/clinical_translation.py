@@ -19,6 +19,11 @@ therapeutic terminology (IFS, EFT, AEDP, CBT as appropriate). Include:
 - Emotional coherence movement if detectable from cues (otherwise null)
 - Recommended coach follow-up if applicable (otherwise null)
 
+If the user blob includes a "session_observations" field with multimodal/longitudinal pattern data \
+from recent sessions (e.g. shame cycle, sustained withdrawal, gaze aversion), reference observed \
+behavioral patterns in the clinical summary (e.g. "Client's recent sessions show elevated gaze \
+aversion consistent with shame cycle — this panel's exile retrieval theme is therapeutically aligned").
+
 Return JSON only, no markdown:
 {"clinical_summary": "3-4 sentences max", "therapeutic_modality": "short label", \
 "behavioral_indicators": ["..."], "ec_movement": null or {"from": float, "to": float}, \
@@ -84,6 +89,13 @@ class ClinicalTranslationEngine:
             "biome": (panel_metadata.get("biome") or "")[:200],
             "panel_tone": (panel_metadata.get("panel_tone") or "")[:120],
         }
+        _obs = panel_metadata.get("session_observations") or panel_metadata.get("multimodal") \
+            or panel_metadata.get("longitudinal_patterns")
+        if _obs:
+            try:
+                user_blob["session_observations"] = json.dumps(_obs, ensure_ascii=False)[:1500]
+            except Exception:
+                user_blob["session_observations"] = str(_obs)[:1500]
         messages = [
             {"role": "system", "content": _SYSTEM_PANEL},
             {"role": "user", "content": json.dumps(user_blob, ensure_ascii=False)},

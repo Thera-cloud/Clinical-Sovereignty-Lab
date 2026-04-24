@@ -17354,8 +17354,14 @@ async def handle_client(websocket, path=None):
                         try:
                             if multimodal_brief:
                                 brief["multimodal_brief"] = multimodal_brief
+                                brief["multimodal_insight"] = {
+                                    "session_arc": multimodal_brief.get("session_arc", {}),
+                                    "clinical_flags": multimodal_brief.get("clinical_flags", []),
+                                    "incongruence_count": multimodal_brief.get("incongruence_count", 0),
+                                }
                             if longitudinal_brief:
                                 brief["longitudinal_brief"] = longitudinal_brief
+                                brief["longitudinal_patterns"] = longitudinal_brief.get("patterns", [])
                         except NameError:
                             pass
 

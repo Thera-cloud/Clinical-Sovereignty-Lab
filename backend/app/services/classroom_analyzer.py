@@ -2517,7 +2517,8 @@ class ClassroomAnalyzer:
                         if family_id:
                             try:
                                 trans = await detector.detect_transgenerational(
-                                    target_client_id, family_id
+                                    target_client_id, family_id,
+                                    coach_id=coach_id, is_admin=False,
                                 )
                                 if trans:
                                     detected.setdefault(
@@ -2555,6 +2556,56 @@ class ClassroomAnalyzer:
                             )
                     except Exception as _sd_err:
                         print(f"[Classroom] session_data merge (non-fatal): {_sd_err}")
+
+                # ---- FIX 3: Phase 4 → Nevedal metrics nudge ----
+                try:
+                    if db_pool and target_client_id:
+                        avg_eng = float(fused.get("avg_engagement", 0.0) or 0.0)
+                        flags = set(fused.get("clinical_flags", []) or [])
+                        c_emo_delta = 0.0
+                        if avg_eng > 0.7:
+                            c_emo_delta = 0.02
+                        elif avg_eng < 0.3:
+                            c_emo_delta = -0.02
+                        anx_delta = 0.0
+                        str_delta = 0.0
+                        if "SUSTAINED_WITHDRAWAL" in flags or "REPEATED_INCONGRUENCE" in flags:
+                            anx_delta = 0.03
+                            str_delta = 0.03
+                        if c_emo_delta != 0.0 or anx_delta != 0.0:
+                            async with db_pool.acquire() as _cm_conn:
+                                await _cm_conn.execute(
+                                    """
+                                    UPDATE client_metrics
+                                    SET c_emo = LEAST(1.0, GREATEST(0.0, COALESCE(c_emo, 0.5) + $2)),
+                                        anxiety_level = LEAST(1.0, GREATEST(0.0, COALESCE(anxiety_level, 0.0) + $3)),
+                                        stress_level = LEAST(1.0, GREATEST(0.0, COALESCE(stress_level, 0.0) + $4)),
+                                        updated_at = NOW()
+                                    WHERE hardware_id = $1 OR user_id::text = $1
+                                    """,
+                                    target_client_id, c_emo_delta, anx_delta, str_delta,
+                                )
+                except Exception as _nm_err:
+                    print(f"[Classroom] nevedal metrics nudge (non-fatal): {_nm_err}")
+
+                # ---- FIX 4: Phase 4 patterns → Wisdom Lifecycle ----
+                try:
+                    if db_pool and detected.get("patterns"):
+                        from app.services.wisdom_lifecycle_manager import (
+                            WisdomLifecycleManager as _PWLM,
+                        )
+                        _pwl = _PWLM(db_pool, None)
+                        for _pat in detected.get("patterns", []) or []:
+                            if (_pat.get("severity") or "").lower() in ("medium", "high"):
+                                asyncio.create_task(_pwl.extract_wisdom(
+                                    source="multimodal_pattern",
+                                    content=str(_pat.get("clinical_note") or ""),
+                                    user_id=target_client_id,
+                                    domain=_pat.get("recommended_focus", "clinical"),
+                                    confidence=0.75,
+                                ))
+                except Exception as _ww_err:
+                    print(f"[Classroom] pattern wisdom extract (non-fatal): {_ww_err}")
 
                 # Crystallize each significant pattern so coach + Nate can
                 # surface it later.
@@ -2668,6 +2719,17 @@ class ClassroomAnalyzer:
             )
         except Exception as _n_err:
             print(f"[Classroom] Video notify_coach failed: {_n_err}")
+
+        # ---- FIX 2: storage minimization — delete original video after analysis ----
+        try:
+            if vp and vp.exists():
+                try:
+                    vp.unlink(missing_ok=True)
+                    print(f"[Classroom] Deleted video after analysis: {vp}")
+                except Exception as _del_err:
+                    print(f"[Classroom] Could not delete video {vp}: {_del_err}")
+        except Exception:
+            pass
 
         return analysis
 
