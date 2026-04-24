@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sovereign Command | Planetary Galactic Scale Detector</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-dark: #050505; --bg-chamber: #0A0A0A; --bg-card: #111111; --bg-elevated: #1A1A1A;
+            --gold: #C9A962; --gold-bright: #E8D5A3; --gold-dim: #8B7355; --gold-glow: rgba(201,169,98,0.18);
+            --cyan: #4ECDC4; --cyan-dim: rgba(78,205,196,0.15);
+            --green: #4ADE80; --green-dim: rgba(74,222,128,0.15);
+            --red: #EF4444; --red-dim: rgba(239,68,68,0.18);
+            --orange: #F59E0B; --orange-dim: rgba(245,158,11,0.18);
+            --purple: #9D4EDD; --purple-dim: rgba(157,78,221,0.15);
+            --blue: #4A90D9; --blue-dim: rgba(74,144,217,0.15);
+            --text: #F5F5F5; --text-dim: #888; --text-faint: #555; --border: #1F1F1F;
+        }
+        body { font-family: 'DM Sans','Segoe UI',system-ui,sans-serif; background: var(--bg-dark); color: var(--text); min-height: 100vh; font-size: 13px; }
+        .header { background: linear-gradient(180deg,#0A0808 0%,#050505 100%); border-bottom: 1px solid var(--gold-dim); padding: 18px 28px; display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 14px; }
+        .logo-icon { width: 52px; height: 52px; background: radial-gradient(circle at 30% 30%,var(--gold-bright),var(--gold-dim)); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 0 24px var(--gold-glow); }
+        .logo-text { font-family: 'Cormorant Garamond',serif; font-size: 22px; font-weight: 700; color: var(--gold-bright); letter-spacing: 4px; }
+        .logo-subtitle { font-size: 10px; color: var(--gold-dim); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+        .header-right { display: flex; gap: 12px; align-items: center; }
+        .header-badge { padding: 6px 14px; background: var(--gold-glow); border: 1px solid var(--gold-dim); border-radius: 20px; font-size: 10px; color: var(--gold-bright); font-weight: 600; letter-spacing: 1px; }
+        .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); display: inline-block; margin-right: 6px; transition: background 0.3s; }
+        .conn-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: blink 2s infinite; }
+        @keyframes blink { 0%,100%{ opacity: 1; } 50%{ opacity: 0.4; } }
+        .btn { padding: 9px 18px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid transparent; letter-spacing: 1px; text-transform: uppercase; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
+        .btn-gold { background: var(--gold); color: #050505; border-color: var(--gold); }
+        .btn-gold:hover { background: var(--gold-bright); }
+        .btn-ghost { background: transparent; color: var(--gold-bright); border-color: var(--gold-dim); }
+        .btn-ghost:hover { background: var(--gold-glow); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .sub-nav { background: var(--bg-chamber); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; gap: 28px; }
+        .sub-nav-item { padding: 14px 0; font-size: 11px; color: var(--text-dim); border-bottom: 2px solid transparent; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; letter-spacing: 1px; text-transform: uppercase; }
+        .sub-nav-item.active { color: var(--gold-bright); border-bottom-color: var(--gold); }
+        .sub-nav-item:hover { color: var(--gold-bright); }
+
+        .toolbar { padding: 16px 28px; background: var(--bg-chamber); border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+        .toolbar label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+        .select { padding: 9px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; min-width: 240px; cursor: pointer; }
+        .select:focus { outline: none; border-color: var(--gold-dim); }
+        .toolbar .spacer { flex: 1; }
+        .toolbar .meta { font-size: 11px; color: var(--text-dim); }
+        .toolbar .meta strong { color: var(--gold-bright); font-family: 'Courier New',monospace; }
+
+        .main { padding: 24px 28px; }
+        .section { margin-bottom: 28px; }
+        .section-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        .section-title { font-family: 'Cormorant Garamond',serif; font-size: 20px; font-weight: 600; color: var(--gold-bright); letter-spacing: 2px; }
+        .section-formula { font-family: 'Courier New',monospace; font-size: 11px; color: var(--gold-dim); }
+
+        .grid { display: grid; gap: 16px; }
+        .grid.cols-6 { grid-template-columns: repeat(6,1fr); }
+        .grid.cols-4 { grid-template-columns: repeat(4,1fr); }
+        .grid.cols-3 { grid-template-columns: repeat(3,1fr); }
+        .grid.cols-2 { grid-template-columns: repeat(2,1fr); }
+        @media (max-width: 1400px) { .grid.cols-6 { grid-template-columns: repeat(3,1fr); } .grid.cols-4 { grid-template-columns: repeat(2,1fr); } }
+        @media (max-width: 900px) { .grid.cols-6,.grid.cols-4,.grid.cols-3,.grid.cols-2 { grid-template-columns: 1fr; } }
+
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; position: relative; }
+        .card.tall { min-height: 320px; }
+        .card-label { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+        .card-symbol { font-family: 'Times New Roman',serif; font-style: italic; color: var(--gold-dim); font-size: 11px; margin-left: 4px; }
+        .card-value { font-family: 'Courier New',monospace; font-size: 32px; font-weight: 700; color: var(--gold-bright); line-height: 1.1; margin-bottom: 4px; }
+        .card-value.small { font-size: 22px; }
+        .card-value.cyan { color: var(--cyan); }
+        .card-value.green { color: var(--green); }
+        .card-value.red { color: var(--red); }
+        .card-sub { font-size: 11px; color: var(--text-dim); }
+        .card-title { font-size: 12px; font-weight: 600; color: var(--gold-bright); margin-bottom: 14px; letter-spacing: 1px; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center; }
+        .card-chart-wrap { position: relative; height: 220px; }
+        .card-chart-wrap.short { height: 140px; }
+        .card-chart-wrap.tall { height: 360px; }
+
+        /* Linear gauge bar */
+        .bar { height: 6px; background: var(--bg-elevated); border-radius: 3px; overflow: hidden; margin-top: 8px; position: relative; }
+        .bar-fill { height: 100%; transition: width 0.4s ease; border-radius: 3px; }
+        .bar-fill.gold { background: linear-gradient(90deg,var(--gold-dim),var(--gold-bright)); }
+        .bar-fill.cyan { background: linear-gradient(90deg,var(--cyan-dim),var(--cyan)); }
+        .bar-fill.green { background: linear-gradient(90deg,var(--green-dim),var(--green)); }
+        .bar-fill.red { background: linear-gradient(90deg,var(--red-dim),var(--red)); }
+        .bar-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--orange); }
+
+        /* Density matrix heatmap */
+        .heatmap { display: grid; grid-template-columns: 80px repeat(10,1fr); gap: 2px; font-size: 9px; }
+        .heatmap .hm-corner, .heatmap .hm-rowlabel, .heatmap .hm-collabel { color: var(--text-dim); padding: 4px 2px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+        .heatmap .hm-rowlabel { text-align: right; padding-right: 8px; }
+        .heatmap .hm-collabel { text-align: center; writing-mode: vertical-rl; transform: rotate(180deg); height: 70px; }
+        .heatmap .hm-cell { aspect-ratio: 1; border-radius: 2px; background: var(--bg-elevated); display: flex; align-items: center; justify-content: center; font-family: 'Courier New',monospace; font-size: 9px; color: rgba(255,255,255,0.55); cursor: default; }
+
+        /* Zero-time route */
+        .route-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 11px; }
+        .route-row:last-child { border-bottom: none; }
+        .route-dim { flex: 0 0 130px; color: var(--gold-bright); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }
+        .route-arrow { flex: 1; height: 4px; background: var(--bg-elevated); border-radius: 2px; position: relative; }
+        .route-arrow .seg { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+        .route-arrow .seg.deeper { background: var(--red); }
+        .route-arrow .seg.resolving { background: var(--green); }
+        .route-num { font-family: 'Courier New',monospace; color: var(--text-dim); font-size: 10px; flex: 0 0 80px; text-align: right; }
+        .route-tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 1px; }
+        .route-tag.deeper { background: var(--red-dim); color: var(--red); }
+        .route-tag.resolving { background: var(--green-dim); color: var(--green); }
+
+        /* Family table */
+        table.fam { width: 100%; border-collapse: collapse; font-size: 11px; }
+        table.fam th { text-align: left; padding: 8px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; border-bottom: 1px solid var(--border); }
+        table.fam td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-family: 'Courier New',monospace; }
+        table.fam td .fp { color: var(--gold-bright); }
+        table.fam td .uid { color: var(--text-dim); font-size: 10px; }
+
+        .pill { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
+        .pill.void { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+        .pill.transition { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
+        .pill.dense { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+        .pill.coherent { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+        .pill.mixed { background: var(--orange-dim); color: var(--orange); border: 1px solid var(--orange); }
+        .pill.decoherent { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+        .pill.initial, .pill.unknown { background: var(--bg-elevated); color: var(--text-dim); border: 1px solid var(--border); }
+        .pill.gold { background: var(--gold-glow); color: var(--gold-bright); border: 1px solid var(--gold-dim); }
+
+        .empty { color: var(--text-faint); font-size: 12px; text-align: center; padding: 40px 20px; font-style: italic; }
+        .toast { position: fixed; bottom: 24px; right: 24px; background: var(--bg-elevated); border: 1px solid var(--gold-dim); border-radius: 6px; padding: 12px 18px; font-size: 11px; color: var(--gold-bright); display: none; z-index: 100; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
+        .toast.show { display: block; animation: slideIn 0.25s ease; }
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        .formula-pill { display: inline-block; padding: 2px 8px; background: var(--bg-elevated); border-radius: 4px; font-family: 'Courier New',monospace; color: var(--gold-bright); font-size: 11px; margin-left: 4px; }
+        .legend { display: flex; gap: 16px; font-size: 10px; color: var(--text-dim); margin-top: 8px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">
+            <div class="logo-icon">&#x1F30C;</div>
+            <div>
+                <div class="logo-text">PLANETARY GALACTIC SCALE DETECTOR</div>
+                <div class="logo-subtitle">Trans-Dimensional Therapeutic Intelligence</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <span class="header-badge"><span id="connDot" class="conn-dot"></span><span id="connText">Disconnected</span></span>
+            <a href="system.html" class="btn btn-ghost">&#x2190; System</a>
+            <button id="computeBtn" class="btn btn-gold" onclick="computeNow()" disabled>Compute Now</button>
+        </div>
+    </div>
+
+    <div class="sub-nav">
+        <a href="pgsd.html" class="sub-nav-item active"><span>&#x1F30C;</span> PGSD</a>
+        <a href="nevedal_lab_live.html" class="sub-nav-item"><span>&#x1F52C;</span> Nevedal Lab</a>
+        <a href="system.html" class="sub-nav-item"><span>&#x1F3DB;</span> System</a>
+    </div>
+
+    <div class="toolbar">
+        <label>Subject</label>
+        <select id="clientSelect" class="select" onchange="onClientChange()"><option value="">Loading users...</option></select>
+        <button class="btn btn-ghost" onclick="loadAll()" id="reloadBtn" disabled>Reload</button>
+        <div class="spacer"></div>
+        <div class="meta">Latest snapshot: <strong id="latestAt">—</strong></div>
+        <div class="meta">Fingerprint: <strong id="latestFp">—</strong></div>
+    </div>
+
+    <div class="main">
+        <!-- SECTION 1 — TDUFT METRICS -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">I. TDUFT Core Metrics</div>
+                <div class="section-formula">M = D&sup3;T&sup2; &nbsp; G = 1/T&#8308; &nbsp; E = D&#8309; &nbsp; V = D/T &nbsp; &rho;_T = T&sup2;</div>
+            </div>
+            <div class="grid cols-6">
+                <div class="card">
+                    <div class="card-label">Therapeutic Mass<span class="card-symbol">M</span></div>
+                    <div class="card-value" id="tduft_mass">—</div>
+                    <div class="card-sub">D&sup3;T&sup2;</div>
+                    <div class="bar"><div id="tduft_mass_bar" class="bar-fill gold" style="width:0%"></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Pattern Gravity<span class="card-symbol">G</span></div>
+                    <div class="card-value" id="tduft_gravity">—</div>
+                    <div class="card-sub">0 = released &middot; 1 = held tight</div>
+                    <div class="bar"><div id="tduft_gravity_bar" class="bar-fill red" style="width:0%"></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Therapeutic Energy<span class="card-symbol">E</span></div>
+                    <div class="card-value" id="tduft_energy">—</div>
+                    <div class="card-sub">D&#8309; transformative potential</div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Velocity<span class="card-symbol">V</span></div>
+                    <div class="card-value" id="tduft_velocity">—</div>
+                    <div class="card-sub">crystals / month</div>
+                    <div class="bar">
+                        <div id="tduft_velocity_bar" class="bar-fill cyan" style="width:0%"></div>
+                        <div class="bar-mark" style="left:85%"></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Time Density<span class="card-symbol">&rho;_T</span></div>
+                    <div class="card-value" id="tduft_density">—</div>
+                    <div class="card-sub">0 &ndash; 10 scale</div>
+                    <div class="bar"><div id="tduft_density_bar" class="bar-fill green" style="width:0%"></div></div>
+                </div>
+                <div class="card">
+                    <div class="card-label">Noah Factor<span class="card-symbol">&Delta;t/&Delta;&tau;</span></div>
+                    <div class="card-value" id="tduft_noah">—</div>
+                    <div class="card-sub" id="tduft_noah_text">&mdash;</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2 — TIMESCAPE -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">II. Timescape</div>
+                <div class="section-formula">&delta;_T = 1 &minus; (0.35 &middot; (1 &minus; f_v))</div>
+            </div>
+            <div class="grid cols-3">
+                <div class="card tall">
+                    <div class="card-title">Void Fraction <span id="ts_region_pill" class="pill unknown">—</span></div>
+                    <div class="card-chart-wrap"><canvas id="voidDonut"></canvas></div>
+                    <div style="text-align:center;margin-top:8px;font-size:11px;color:var(--text-dim);">
+                        <span style="color:var(--green);">Void (resolved)</span> &nbsp;&middot;&nbsp;
+                        <span style="color:var(--red);">Dense (active)</span>
+                    </div>
+                </div>
+                <div class="card tall">
+                    <div class="card-title">Time Dilation</div>
+                    <div class="card-value" style="text-align:center;font-size:48px;" id="ts_dilation">—</div>
+                    <div class="card-sub" style="text-align:center;">effective time-flow rate (0.65 &ndash; 1.0)</div>
+                    <div class="bar" style="margin-top:18px;height:10px;"><div id="ts_dilation_bar" class="bar-fill gold" style="width:0%"></div></div>
+                    <div style="margin-top:18px;text-align:center;font-size:11px;color:var(--text-dim);">
+                        <strong style="color:var(--gold-bright);font-size:18px;font-family:'Courier New',monospace;" id="ts_eff_min">—</strong>
+                        <div>effective therapeutic minutes per 50-min session</div>
+                    </div>
+                </div>
+                <div class="card tall">
+                    <div class="card-title">Void Trend (history)</div>
+                    <div class="card-chart-wrap"><canvas id="voidTrendChart"></canvas></div>
+                    <div class="card-sub" style="text-align:center;margin-top:6px;">Increasing &rarr; expanding growth territory</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3 — QUANTUM TRACE -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">III. Quantum Trace</div>
+                <div class="section-formula">&rho; &nbsp; &middot; &nbsp; Tr(&rho;&sup2;) &nbsp; &middot; &nbsp; d&rho;/dt = &minus;i[H,&rho;] + &Sigma;(L&rho;L&dagger; &minus; &frac12;{L&dagger;L,&rho;})</div>
+            </div>
+            <div class="grid cols-2">
+                <div class="card tall">
+                    <div class="card-title">Density Matrix &rho; (diagonal populations)</div>
+                    <div id="heatmapWrap" style="overflow-x:auto;"></div>
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-swatch" style="background:rgba(78,205,196,0.15);"></div>0.0</div>
+                        <div class="legend-item"><div class="legend-swatch" style="background:rgba(78,205,196,0.5);"></div>0.3</div>
+                        <div class="legend-item"><div class="legend-swatch" style="background:rgba(201,169,98,0.7);"></div>0.5</div>
+                        <div class="legend-item"><div class="legend-swatch" style="background:rgba(239,68,68,0.7);"></div>&gt; 0.7</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="grid cols-2">
+                        <div class="card">
+                            <div class="card-label">Coherence</div>
+                            <div class="card-value cyan" id="qt_coh">—</div>
+                            <div class="bar"><div id="qt_coh_bar" class="bar-fill cyan" style="width:0%"></div></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-label">Purity Tr(&rho;&sup2;)</div>
+                            <div class="card-value" id="qt_pur">—</div>
+                            <div class="bar"><div id="qt_pur_bar" class="bar-fill gold" style="width:0%"></div></div>
+                        </div>
+                    </div>
+                    <div class="card" style="margin-top:16px;">
+                        <div class="card-title">Lindblad Evolution (vs previous snapshot) <span id="lb_pill" class="pill unknown">—</span></div>
+                        <div style="display:flex;align-items:baseline;gap:18px;">
+                            <div>
+                                <div class="card-label">Fidelity</div>
+                                <div class="card-value small" id="lb_fid">—</div>
+                            </div>
+                            <div>
+                                <div class="card-label">Coherence &Delta;</div>
+                                <div class="card-value small" id="lb_dcoh">—</div>
+                            </div>
+                            <div>
+                                <div class="card-label">Population &Delta;</div>
+                                <div class="card-value small" id="lb_dpop">—</div>
+                            </div>
+                        </div>
+                        <div class="bar" style="margin-top:14px;height:8px;"><div id="lb_fid_bar" class="bar-fill green" style="width:0%"></div></div>
+                    </div>
+                    <div class="card" style="margin-top:16px;">
+                        <div class="card-title">Partial Trace &mdash; individual vs environment</div>
+                        <div style="display:flex;height:24px;border-radius:4px;overflow:hidden;background:var(--bg-elevated);">
+                            <div id="pt_indiv_bar" style="background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));width:50%;"></div>
+                            <div id="pt_env_bar" style="background:linear-gradient(90deg,var(--purple),var(--purple-dim));width:50%;"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--text-dim);">
+                            <span>Individual <strong style="color:var(--cyan);" id="pt_indiv_pct">—</strong></span>
+                            <span id="pt_decoupled" class="pill unknown">—</span>
+                            <span>Env. coupling <strong style="color:var(--purple);" id="pt_env_pct">—</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4 — 5D COORDINATE -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">IV. 5D Spatio-Temporal Coordinate</div>
+                <div class="section-formula">D&sup1; valence &middot; D&sup2; arousal &middot; D&sup3; relational &middot; D&#8308; temporal-depth &middot; D&#8309; integration</div>
+            </div>
+            <div class="grid cols-2">
+                <div class="card tall">
+                    <div class="card-title">Position in 5D Space</div>
+                    <div class="card-chart-wrap tall"><canvas id="radarChart"></canvas></div>
+                    <div class="legend">
+                        <div class="legend-item"><div class="legend-swatch" style="background:var(--gold);"></div>Current</div>
+                        <div class="legend-item"><div class="legend-swatch" style="background:var(--text-dim);"></div>Previous</div>
+                        <div class="legend-item"><div class="legend-swatch" style="background:var(--cyan);opacity:0.5;"></div>Predicted next</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="grid cols-2">
+                        <div class="card"><div class="card-label">D&sup1; Valence</div><div class="card-value small" id="d1">—</div><div class="card-sub">&minus;1 negative &middot; +1 positive</div></div>
+                        <div class="card"><div class="card-label">D&sup2; Arousal</div><div class="card-value small" id="d2">—</div><div class="card-sub">0 deactivated &middot; 1 activated</div></div>
+                        <div class="card"><div class="card-label">D&sup3; Relational</div><div class="card-value small" id="d3">—</div><div class="card-sub">&minus;1 isolated &middot; +1 connected</div></div>
+                        <div class="card"><div class="card-label">D&#8308; Temporal Depth</div><div class="card-value small" id="d4">—</div><div class="card-sub">0 present &middot; high &rarr; historical</div></div>
+                        <div class="card"><div class="card-label">D&#8309; Integration</div><div class="card-value small" id="d5">—</div><div class="card-sub">0 fragmented &middot; 1 coherent</div></div>
+                        <div class="card"><div class="card-label">Magnitude &#x2016;C&#x2016;</div><div class="card-value small" id="dmag">—</div><div class="card-sub">distance from origin</div></div>
+                    </div>
+                    <div class="card" style="margin-top:16px;">
+                        <div class="card-label">Emotional Fingerprint (GPS pin)</div>
+                        <div class="card-value" style="font-family:'Courier New',monospace;font-size:24px;letter-spacing:4px;color:var(--gold-bright);" id="fp_big">—</div>
+                        <div class="card-sub">SHA-256 prefix &mdash; unique to this individual at this moment</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 5 — TRAJECTORY -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">V. Trajectory &amp; Latent Dynamics</div>
+                <div class="section-formula">latest 10 snapshots &middot; principal direction of movement</div>
+            </div>
+            <div class="grid cols-3">
+                <div class="card tall">
+                    <div class="card-title">Coordinate Magnitude over Time</div>
+                    <div class="card-chart-wrap"><canvas id="magChart"></canvas></div>
+                </div>
+                <div class="card tall">
+                    <div class="card-title">Velocity per Dimension</div>
+                    <div class="card-chart-wrap"><canvas id="velChart"></canvas></div>
+                </div>
+                <div class="card tall">
+                    <div class="card-title">Movement Summary</div>
+                    <div class="card-label">Dominant Dimension</div>
+                    <div class="card-value small" id="traj_dom">—</div>
+                    <div style="margin-top:14px;"><div class="card-label">Direction</div><div class="card-value small" id="traj_dir">—</div></div>
+                    <div style="margin-top:14px;"><div class="card-label">Stability</div><div class="card-value small" id="traj_stab">—</div>
+                    <div class="bar"><div id="traj_stab_bar" class="bar-fill cyan" style="width:0%"></div></div></div>
+                    <div style="margin-top:14px;"><div class="card-label">Snapshots used</div><div class="card-value small" id="traj_count">—</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 6 — ZERO-TIME ROUTE -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">VI. Zero-Time Route</div>
+                <div class="section-formula">dimensional path &middot; gravitational obstacles &middot; estimated sessions</div>
+            </div>
+            <div class="card">
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px;">
+                    <label style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Origin</label>
+                    <select id="originSel" class="select" style="min-width:280px;"><option value="">Need history...</option></select>
+                    <span style="color:var(--gold-dim);">&rarr;</span>
+                    <label style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Destination</label>
+                    <select id="destSel" class="select" style="min-width:280px;"><option value="">Need history...</option></select>
+                    <button class="btn btn-gold" id="routeBtn" onclick="computeRoute()" disabled>Compute Route</button>
+                </div>
+                <div class="grid cols-3" style="margin-bottom:14px;">
+                    <div><div class="card-label">Dimensional Distance</div><div class="card-value small" id="rt_dist">—</div></div>
+                    <div><div class="card-label">Estimated Sessions</div><div class="card-value small" id="rt_sess">—</div></div>
+                    <div><div class="card-label">Complexity</div><div class="card-value small" id="rt_complex">—</div></div>
+                </div>
+                <div id="rt_obstacles" style="margin-bottom:12px;font-size:11px;color:var(--text-dim);"></div>
+                <div id="rt_path"></div>
+            </div>
+        </div>
+
+        <!-- SECTION 7 — FAMILY ENTANGLEMENT -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-title">VII. Family Entanglement</div>
+                <div class="section-formula">cross-member partial traces &middot; shared gravitational wells</div>
+            </div>
+            <div class="card">
+                <div style="display:flex;gap:12px;align-items:center;margin-bottom:18px;">
+                    <label style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;">Family</label>
+                    <select id="familySel" class="select" style="min-width:280px;"><option value="">No families loaded</option></select>
+                    <button class="btn btn-ghost" id="famBtn" onclick="computeFamily()" disabled>Compute Entanglement</button>
+                </div>
+                <div id="famMembersWrap"></div>
+                <div id="famCouplingsWrap" style="margin-top:18px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast">—</div>
+
+<script>
+"use strict";
+// ─── Auth recovery (mirrors nevedal_lab_live pattern) ──────────────────────
+(function recoverAuth(){
+    function ck(n){ var m = document.cookie.match(new RegExp('(^| )'+n+'=([^;]+)')); return m ? decodeURIComponent(m[2]) : ''; }
+    var hp = new URLSearchParams(location.hash.slice(1));
+    var ht = hp.get('t'), hu = hp.get('u'), hpf = hp.get('p');
+    if (ht) { try{ sessionStorage.setItem('token', decodeURIComponent(ht)); }catch(e){} try{ localStorage.setItem('sc_token', decodeURIComponent(ht)); }catch(e){} }
+    if (hu) { try{ sessionStorage.setItem('username', decodeURIComponent(hu)); }catch(e){} try{ localStorage.setItem('sc_username', decodeURIComponent(hu)); }catch(e){} }
+    if (hpf){ try{ sessionStorage.setItem('profile', decodeURIComponent(hpf)); }catch(e){} try{ localStorage.setItem('sc_profile', decodeURIComponent(hpf)); }catch(e){} }
+    if (!sessionStorage.getItem('token')){ var ct = ck('sc_token') || localStorage.getItem('sc_token'); if (ct) try{ sessionStorage.setItem('token', ct); }catch(e){} }
+    if (!sessionStorage.getItem('username')){ var cu = ck('sc_username') || localStorage.getItem('sc_username'); if (cu) try{ sessionStorage.setItem('username', cu); }catch(e){} }
+    if (!sessionStorage.getItem('profile')){ var cp = ck('sc_profile') || localStorage.getItem('sc_profile'); if (cp) try{ sessionStorage.setItem('profile', cp); }catch(e){} }
+})();
+
+var username = sessionStorage.getItem("username") || localStorage.getItem("sc_username");
+var token = sessionStorage.getItem("token") || localStorage.getItem("sc_token");
+var profile = JSON.parse((sessionStorage.getItem("profile") || localStorage.getItem("sc_profile")) || "{}");
+if (!username) { window.location.href = "index.html"; }
+
+var ws = null, authenticated = false, reconnectTimer = null;
+var allUsers = [];
+var familiesIndex = {};            // family_id -> [user objects]
+var selectedClient = "";           // hardware_id of selected client
+var historyByClient = {};          // hardware_id -> [snapshots newest-first]
+var latestSnapshotByClient = {};   // hardware_id -> snapshot
+var lastTrajectory = null;
+var charts = {};                   // chart.js instances
+
+// ─── DOM helpers ───────────────────────────────────────────────────────────
+function $(id){ return document.getElementById(id); }
+function setText(id, v){ var el=$(id); if(el) el.textContent = (v===null||v===undefined||v==="") ? "—" : v; }
+function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+function pct(v){ return Math.round(clamp(v,0,1)*100); }
+function fmt(v, d){ if (v===null||v===undefined||isNaN(v)) return "—"; return Number(v).toFixed(d===undefined?2:d); }
+
+function toast(msg, isError){
+    var t = $("toast");
+    t.textContent = msg;
+    t.style.borderColor = isError ? "var(--red)" : "var(--gold-dim)";
+    t.style.color = isError ? "var(--red)" : "var(--gold-bright)";
+    t.classList.add("show");
+    clearTimeout(t._h); t._h = setTimeout(function(){ t.classList.remove("show"); }, 3500);
+}
+
+// ─── WebSocket ─────────────────────────────────────────────────────────────
+function getWsUrl(){
+    var h = location.hostname;
+    if (!h || h === "localhost" || h === "127.0.0.1" || location.protocol === "file:") return "wss://api.sovereignsanctuary.net/ws";
+    if (h.indexOf("sovereignsanctuary") >= 0) return "wss://" + h + "/ws";
+    return "wss://api.sovereignsanctuary.net/ws";
+}
+function setLive(live){
+    $("connDot").classList.toggle("live", !!live);
+    $("connText").textContent = live ? "Connected" : "Connecting…";
+}
+function send(obj){
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(JSON.stringify(obj)); return true;
+}
+function connect(){
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    setLive(false);
+    try { ws = new WebSocket(getWsUrl()); }
+    catch(e){ scheduleReconnect(); return; }
+    ws.onopen = function(){
+        send({ type: "auth", token: token, hardware_id: profile.hardware_id || "WEB_ADMIN" });
+    };
+    ws.onmessage = function(ev){
+        var msg; try { msg = JSON.parse(ev.data); } catch(e){ return; }
+        handleMessage(msg);
+    };
+    ws.onclose = function(){ authenticated = false; setLive(false); scheduleReconnect(); };
+    ws.onerror = function(){ try { ws.close(); } catch(e){} };
+}
+function scheduleReconnect(){
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 3000);
+}
+
+function handleMessage(msg){
+    if (msg.type === "login_success" || msg.type === "auth_success"){
+        authenticated = true; setLive(true);
+        send({ type: "admin_get_users" });
+        return;
+    }
+    if ((msg.type === "admin_users" || msg.type === "admin_users_list") && msg.users){
+        allUsers = msg.users.slice();
+        buildClientList();
+        buildFamilyList();
+        return;
+    }
+    if (msg.type === "pgsd_snapshot"){
+        if (!msg.ok){ toast("Snapshot failed: " + (msg.error || "unknown"), true); return; }
+        var cid = msg.client_id || selectedClient;
+        latestSnapshotByClient[cid] = msg.pgsd;
+        renderSnapshot(msg.pgsd);
+        renderEvolution(msg.evolution_from_previous);
+        // Refresh history + trajectory after a successful compute.
+        send({ type: "pgsd_get_history", client_id: cid, limit: 20 });
+        send({ type: "pgsd_get_trajectory", client_id: cid });
+        toast("PGSD snapshot computed.");
+        return;
+    }
+    if (msg.type === "pgsd_history"){
+        if (!msg.ok){ return; }
+        historyByClient[msg.client_id] = msg.snapshots || [];
+        renderHistory(msg.client_id, msg.snapshots || []);
+        populateRouteSelectors(msg.snapshots || []);
+        return;
+    }
+    if (msg.type === "pgsd_trajectory"){
+        if (!msg.ok){ return; }
+        lastTrajectory = msg.trajectory || null;
+        renderTrajectory(msg);
+        return;
+    }
+    if (msg.type === "pgsd_zero_time_route"){
+        if (!msg.ok){ toast("Route compute failed: " + (msg.error || "unknown"), true); return; }
+        renderRoute(msg.route);
+        return;
+    }
+    if (msg.type === "pgsd_family_entanglement"){
+        if (!msg.ok){ toast("Family compute failed: " + (msg.error || "unknown"), true); return; }
+        renderFamily(msg);
+        return;
+    }
+    // Forbidden / generic error replies from the PGSD router
+    if (typeof msg.type === "string" && msg.type.indexOf("pgsd_") === 0 && msg.ok === false){
+        toast((msg.code === "forbidden" ? "Forbidden: " : "Error: ") + (msg.error || "unknown"), true);
+    }
+}
+
+// ─── Client + family pickers ───────────────────────────────────────────────
+function buildClientList(){
+    var sel = $("clientSelect");
+    sel.innerHTML = "";
+    var opt0 = document.createElement("option"); opt0.value = ""; opt0.textContent = "— select subject —"; sel.appendChild(opt0);
+    var sorted = allUsers.slice().sort(function(a,b){ return (a.username||"").localeCompare(b.username||""); });
+    sorted.forEach(function(u){
+        var hwid = u.hardware_id || u.id || "";
+        if (!hwid) return;
+        var name = u.username || u.email || hwid.substring(0,12);
+        var role = (u.role || "CLIENT").toUpperCase();
+        var opt = document.createElement("option");
+        opt.value = hwid;
+        opt.textContent = name + "  ·  " + role + (u.family_id ? "  ·  fam:" + String(u.family_id).substring(0,8) : "");
+        sel.appendChild(opt);
+    });
+    $("reloadBtn").disabled = false;
+    $("computeBtn").disabled = true;
+}
+function buildFamilyList(){
+    familiesIndex = {};
+    allUsers.forEach(function(u){
+        var fid = u.family_id || (u.profile && u.profile.family_id);
+        if (!fid) return;
+        (familiesIndex[fid] = familiesIndex[fid] || []).push(u);
+    });
+    var sel = $("familySel"); sel.innerHTML = "";
+    var keys = Object.keys(familiesIndex).sort();
+    if (!keys.length){
+        var o = document.createElement("option"); o.value = ""; o.textContent = "No families found"; sel.appendChild(o);
+        $("famBtn").disabled = true; return;
+    }
+    var o0 = document.createElement("option"); o0.value = ""; o0.textContent = "— select family —"; sel.appendChild(o0);
+    keys.forEach(function(k){
+        var o = document.createElement("option"); o.value = k;
+        o.textContent = k.substring(0,12) + "  (" + familiesIndex[k].length + " members)";
+        sel.appendChild(o);
+    });
+    sel.onchange = function(){ $("famBtn").disabled = !sel.value; };
+}
+function onClientChange(){
+    selectedClient = $("clientSelect").value;
+    $("computeBtn").disabled = !selectedClient || !authenticated;
+    if (selectedClient){
+        send({ type: "pgsd_get_history", client_id: selectedClient, limit: 20 });
+        send({ type: "pgsd_get_trajectory", client_id: selectedClient });
+    } else {
+        clearAll();
+    }
+}
+function loadAll(){
+    if (!authenticated) return;
+    send({ type: "admin_get_users" });
+    if (selectedClient){
+        send({ type: "pgsd_get_history", client_id: selectedClient, limit: 20 });
+        send({ type: "pgsd_get_trajectory", client_id: selectedClient });
+    }
+}
+function computeNow(){
+    if (!selectedClient){ toast("Select a subject first.", true); return; }
+    send({ type: "pgsd_compute_snapshot", client_id: selectedClient });
+}
+function clearAll(){
+    ["tduft_mass","tduft_gravity","tduft_energy","tduft_velocity","tduft_density","tduft_noah","tduft_noah_text",
+     "ts_dilation","ts_eff_min","qt_coh","qt_pur","lb_fid","lb_dcoh","lb_dpop",
+     "pt_indiv_pct","pt_env_pct","d1","d2","d3","d4","d5","dmag","fp_big",
+     "latestAt","latestFp","traj_dom","traj_dir","traj_stab","traj_count",
+     "rt_dist","rt_sess","rt_complex"].forEach(function(id){ setText(id, "—"); });
+    ["tduft_mass_bar","tduft_gravity_bar","tduft_velocity_bar","tduft_density_bar",
+     "ts_dilation_bar","qt_coh_bar","qt_pur_bar","lb_fid_bar","traj_stab_bar"].forEach(function(id){
+        var el = $(id); if (el) el.style.width = "0%";
+    });
+    $("rt_path").innerHTML = ""; $("rt_obstacles").innerHTML = "";
+    $("famMembersWrap").innerHTML = ""; $("famCouplingsWrap").innerHTML = "";
+    renderHeatmap({});
+    Object.keys(charts).forEach(function(k){ try { charts[k].destroy(); } catch(e){} delete charts[k]; });
+    initCharts();
+}
+
+// ─── Renderers ─────────────────────────────────────────────────────────────
+function renderSnapshot(p){
+    if (!p) return;
+    var t = p.tduft || {}, ts = p.timescape || {}, qt = p.quantum_trace || {}, c = p.coordinate_5d || {};
+
+    // Section 1 — TDUFT
+    setText("tduft_mass", fmt(t.therapeutic_mass));
+    $("tduft_mass_bar").style.width = clamp(Math.log10((t.therapeutic_mass || 0) + 1) * 25, 0, 100) + "%";
+    setText("tduft_gravity", fmt(t.pattern_gravity, 4));
+    $("tduft_gravity_bar").style.width = pct(t.pattern_gravity || 0) + "%";
+    setText("tduft_energy", fmt(t.therapeutic_energy));
+    setText("tduft_velocity", fmt(t.velocity, 3));
+    $("tduft_velocity_bar").style.width = clamp((t.velocity || 0) * 100, 0, 100) + "%";
+    setText("tduft_density", fmt(t.time_density));
+    $("tduft_density_bar").style.width = clamp((t.time_density || 0) * 10, 0, 100) + "%";
+    setText("tduft_noah", fmt(t.noah_factor, 3));
+    var span = (latestSnapshotByClient[selectedClient] && latestSnapshotByClient[selectedClient].source_metrics) || {};
+    setText("tduft_noah_text", noahInterpretation(t.noah_factor));
+
+    // Section 2 — Timescape
+    setText("ts_dilation", fmt(ts.time_dilation, 3));
+    $("ts_dilation_bar").style.width = clamp(((ts.time_dilation || 0.65) - 0.65) / 0.35 * 100, 0, 100) + "%";
+    setText("ts_eff_min", fmt(50 * (ts.time_dilation || 0), 1));
+    var rp = $("ts_region_pill");
+    rp.className = "pill " + (ts.session_region || "unknown");
+    rp.textContent = (ts.session_region || "unknown").toUpperCase();
+    drawVoidDonut(ts.void_fraction || 0);
+
+    // Section 3 — Quantum Trace
+    setText("qt_coh", fmt(qt.coherence, 3));
+    $("qt_coh_bar").style.width = pct(qt.coherence || 0) + "%";
+    setText("qt_pur", fmt(qt.purity, 4));
+    $("qt_pur_bar").style.width = pct(qt.purity || 0) + "%";
+    var dens = (qt.density_matrix && qt.density_matrix.populations) || {};
+    renderHeatmap(dens);
+    var pt = qt.partial_trace || {};
+    var coup = clamp(pt.environmental_coupling || 0, 0, 1);
+    var indiv = 1 - coup;
+    $("pt_indiv_bar").style.width = (indiv * 100).toFixed(1) + "%";
+    $("pt_env_bar").style.width = (coup * 100).toFixed(1) + "%";
+    setText("pt_indiv_pct", (indiv * 100).toFixed(0) + "%");
+    setText("pt_env_pct", (coup * 100).toFixed(0) + "%");
+    var dec = $("pt_decoupled");
+    dec.className = "pill " + (pt.decoupled ? "coherent" : "mixed");
+    dec.textContent = pt.decoupled ? "Decoupled" : "Coupled";
+
+    // Section 4 — 5D
+    setText("d1", fmt(c.d1_valence, 3));
+    setText("d2", fmt(c.d2_arousal, 3));
+    setText("d3", fmt(c.d3_relational, 3));
+    setText("d4", fmt(c.d4_temporal_depth, 3));
+    setText("d5", fmt(c.d5_integration, 3));
+    setText("dmag", fmt(c.magnitude, 3));
+    setText("fp_big", p.emotional_fingerprint || "—");
+    setText("latestFp", p.emotional_fingerprint || "—");
+    setText("latestAt", p.computed_at ? new Date(p.computed_at).toLocaleString() : "—");
+    drawRadar(c, getPreviousCoord(), getPredictedCoord());
+}
+
+function noahInterpretation(noah){
+    if (!noah || noah <= 0) return "—";
+    // ratio = noah^4, ext_min = ratio * session_min, but we don't always know session_min.
+    // Show a friendly multi-scale read: years compressed per session-minute.
+    var ratio = Math.pow(noah, 4);
+    if (ratio > 525600) {
+        return "Traversed ~" + (ratio/525600).toFixed(1) + " years per session-minute";
+    }
+    if (ratio > 1440) {
+        return "Traversed ~" + (ratio/1440).toFixed(1) + " days per session-minute";
+    }
+    return "Traversed ~" + ratio.toFixed(1) + " minutes of historical span per session-minute";
+}
+
+function renderEvolution(evo){
+    if (!evo){
+        var p = $("lb_pill"); p.className = "pill unknown"; p.textContent = "no previous snapshot";
+        setText("lb_fid","—"); setText("lb_dcoh","—"); setText("lb_dpop","—");
+        $("lb_fid_bar").style.width = "0%"; return;
+    }
+    var p = $("lb_pill"); p.className = "pill " + (evo.evolution || "unknown");
+    p.textContent = (evo.evolution || "unknown").toUpperCase();
+    setText("lb_fid", fmt(evo.fidelity, 3));
+    setText("lb_dcoh", fmt(evo.coherence_delta, 4));
+    setText("lb_dpop", fmt(evo.population_change, 4));
+    $("lb_fid_bar").style.width = pct(evo.fidelity || 0) + "%";
+}
+
+function renderHistory(client_id, snaps){
+    if (client_id !== selectedClient) return;
+    if (snaps.length){
+        renderSnapshot(reconstructFromSummary(snaps[0]));
+        renderEvolution(snaps[0] && snaps[0].evolution ? {
+            evolution: snaps[0].evolution.state, fidelity: snaps[0].evolution.fidelity,
+            coherence_delta: 0, population_change: 0
+        } : null);
+    }
+    // Void trend chart
+    var labels = [], vals = [];
+    snaps.slice().reverse().forEach(function(s){
+        labels.push(s.computed_at ? new Date(s.computed_at).toLocaleDateString() : "—");
+        vals.push((s.timescape && s.timescape.void_fraction) || 0);
+    });
+    if (charts.voidTrend){
+        charts.voidTrend.data.labels = labels;
+        charts.voidTrend.data.datasets[0].data = vals;
+        charts.voidTrend.update("none");
+    }
+}
+
+function reconstructFromSummary(s){
+    // Convert a history-summary row into a full snapshot-like shape so renderSnapshot works.
+    return {
+        tduft: s.tduft || {},
+        timescape: s.timescape || {},
+        quantum_trace: { coherence: (s.quantum_trace||{}).coherence, purity: (s.quantum_trace||{}).purity, density_matrix: { populations: {} }, partial_trace: {} },
+        coordinate_5d: s.coordinate_5d || {},
+        emotional_fingerprint: s.emotional_fingerprint,
+        computed_at: s.computed_at,
+        source_metrics: {}
+    };
+}
+
+function getPreviousCoord(){
+    var hist = historyByClient[selectedClient] || [];
+    if (hist.length < 2) return null;
+    return hist[1].coordinate_5d || null;
+}
+function getPredictedCoord(){
+    if (!lastTrajectory || lastTrajectory.trajectory === "insufficient_data") return null;
+    return lastTrajectory.predicted_next || null;
+}
+
+function renderTrajectory(msg){
+    var traj = msg.trajectory || {};
+    setText("traj_count", String(msg.coordinate_count || 0));
+    if (traj.trajectory === "insufficient_data" || !traj.velocities){
+        setText("traj_dom","insufficient data"); setText("traj_dir","—"); setText("traj_stab","—");
+        $("traj_stab_bar").style.width = "0%";
+        if (charts.vel){ charts.vel.data.datasets[0].data = [0,0,0,0,0]; charts.vel.update("none"); }
+        if (charts.mag){ charts.mag.data.labels=[]; charts.mag.data.datasets[0].data=[]; charts.mag.update("none"); }
+        return;
+    }
+    setText("traj_dom", traj.dominant_dimension || "—");
+    setText("traj_dir", traj.direction || "—");
+    setText("traj_stab", fmt(traj.stability, 3));
+    $("traj_stab_bar").style.width = pct(traj.stability || 0) + "%";
+    var dims = ["d1_valence","d2_arousal","d3_relational","d4_temporal_depth","d5_integration"];
+    if (charts.vel){
+        charts.vel.data.datasets[0].data = dims.map(function(d){ return traj.velocities[d] || 0; });
+        charts.vel.update("none");
+    }
+    var hist = historyByClient[selectedClient] || [];
+    var rev = hist.slice().reverse();
+    if (charts.mag){
+        charts.mag.data.labels = rev.map(function(s){ return s.computed_at ? new Date(s.computed_at).toLocaleDateString() : ""; });
+        charts.mag.data.datasets[0].data = rev.map(function(s){ return (s.coordinate_5d && s.coordinate_5d.magnitude) || 0; });
+        charts.mag.update("none");
+    }
+}
+
+function populateRouteSelectors(snaps){
+    ["originSel","destSel"].forEach(function(id){
+        var sel = $(id); sel.innerHTML = "";
+        if (!snaps.length){ var o = document.createElement("option"); o.value=""; o.textContent="— no snapshots —"; sel.appendChild(o); $("routeBtn").disabled = true; return; }
+        var o0 = document.createElement("option"); o0.value=""; o0.textContent="— select snapshot —"; sel.appendChild(o0);
+        snaps.forEach(function(s){
+            var o = document.createElement("option");
+            o.value = s.id;
+            var ts = s.computed_at ? new Date(s.computed_at).toLocaleString() : ("#"+s.id);
+            o.textContent = "#" + s.id + "  ·  " + ts + "  ·  fp:" + (s.emotional_fingerprint || "—");
+            sel.appendChild(o);
+        });
+    });
+    $("originSel").onchange = $("destSel").onchange = function(){
+        $("routeBtn").disabled = !($("originSel").value && $("destSel").value && selectedClient);
+    };
+}
+
+function computeRoute(){
+    var oid = parseInt($("originSel").value, 10);
+    var did = parseInt($("destSel").value, 10);
+    if (!selectedClient || !oid || !did) return;
+    send({ type: "pgsd_get_zero_time_route", client_id: selectedClient,
+           origin_snapshot_id: oid, destination_snapshot_id: did });
+}
+
+function renderRoute(route){
+    if (!route){ $("rt_path").innerHTML = '<div class="empty">No route data.</div>'; return; }
+    setText("rt_dist", fmt(route.dimensional_distance, 4));
+    setText("rt_sess", String(route.estimated_sessions || 0));
+    setText("rt_complex", route.route_complexity || "—");
+    var obs = route.gravitational_obstacles || 0;
+    $("rt_obstacles").innerHTML = obs > 0
+        ? '<span class="pill dense">' + obs + ' gravitational obstacle' + (obs===1?'':'s') + ' along path</span>'
+        : '<span class="pill coherent">No major obstacles</span>';
+    var dims = route.route_dimensions || [];
+    if (!dims.length){ $("rt_path").innerHTML = '<div class="empty">No significant dimensional movement between these snapshots.</div>'; return; }
+    var html = "";
+    dims.forEach(function(d){
+        var pctw = clamp(d.traversal * 100, 5, 100);
+        html += '<div class="route-row">'
+              +   '<div class="route-dim">' + d.dimension + '</div>'
+              +   '<div class="route-arrow"><div class="seg ' + d.direction + '" style="width:' + pctw + '%;left:0;"></div></div>'
+              +   '<div class="route-num">' + fmt(d.origin,2) + ' &rarr; ' + fmt(d.destination,2) + '</div>'
+              +   '<span class="route-tag ' + d.direction + '">' + d.direction + '</span>'
+              + '</div>';
+    });
+    $("rt_path").innerHTML = html;
+}
+
+function computeFamily(){
+    var fid = $("familySel").value;
+    if (!fid) return;
+    $("famMembersWrap").innerHTML = '<div class="empty">Computing per-member PGSD…</div>';
+    send({ type: "pgsd_get_family_entanglement", family_id: fid });
+}
+
+function renderFamily(msg){
+    var members = msg.members || [];
+    var couplings = msg.couplings || [];
+    if (!members.length){
+        $("famMembersWrap").innerHTML = '<div class="empty">' + (msg.note || "No members") + '</div>';
+        $("famCouplingsWrap").innerHTML = "";
+        return;
+    }
+    var rows = '<table class="fam"><thead><tr>'
+             + '<th>Member</th><th>D1</th><th>D2</th><th>D3</th><th>D4</th><th>D5</th>'
+             + '<th>&#x2016;C&#x2016;</th><th>Mass</th><th>Region</th><th>Fingerprint</th>'
+             + '</tr></thead><tbody>';
+    members.forEach(function(m){
+        var c = m.coordinate_5d || {}, t = m.tduft || {}, ts = m.timescape || {};
+        rows += '<tr>'
+              + '<td><div class="uid">' + (m.user_id || "—") + '</div></td>'
+              + '<td>' + fmt(c.d1_valence,2) + '</td>'
+              + '<td>' + fmt(c.d2_arousal,2) + '</td>'
+              + '<td>' + fmt(c.d3_relational,2) + '</td>'
+              + '<td>' + fmt(c.d4_temporal_depth,2) + '</td>'
+              + '<td>' + fmt(c.d5_integration,2) + '</td>'
+              + '<td>' + fmt(c.magnitude,2) + '</td>'
+              + '<td>' + fmt(t.therapeutic_mass,1) + '</td>'
+              + '<td><span class="pill ' + (ts.session_region||"unknown") + '">' + (ts.session_region||"—") + '</span></td>'
+              + '<td><span class="fp">' + (m.fingerprint || "—") + '</span></td>'
+              + '</tr>';
+    });
+    rows += '</tbody></table>';
+    $("famMembersWrap").innerHTML = rows;
+
+    if (!couplings.length){
+        $("famCouplingsWrap").innerHTML = '<div class="empty">No pairwise couplings computed.</div>';
+        return;
+    }
+    var ch = '<div class="card-title">Pairwise Couplings &amp; Shared Gravitational Wells</div>';
+    ch += '<table class="fam"><thead><tr><th>Pair</th><th>Entanglement</th><th>Coupling</th><th>Shared Wells</th><th>Status</th></tr></thead><tbody>';
+    couplings.forEach(function(c){
+        var strength = clamp(c.entanglement_strength || 0, 0, 1);
+        var wellTags = (c.shared_gravity_wells || []).map(function(w){
+            return '<span class="pill gold" style="margin-right:4px;">' + w + '</span>';
+        }).join("") || '<span style="color:var(--text-faint);">none</span>';
+        ch += '<tr>'
+            + '<td><div class="uid">' + c.member_a + '</div><div class="uid">↕ ' + c.member_b + '</div></td>'
+            + '<td>' + fmt(c.entanglement_strength,4) + '<div class="bar" style="margin-top:4px;width:120px;"><div class="bar-fill gold" style="width:' + (strength*100) + '%"></div></div></td>'
+            + '<td>' + fmt(c.coupling_coefficient,4) + '</td>'
+            + '<td>' + wellTags + '</td>'
+            + '<td><span class="pill ' + (c.decoupled ? "coherent" : "mixed") + '">' + (c.decoupled ? "Decoupled" : "Coupled") + '</span></td>'
+            + '</tr>';
+    });
+    ch += '</tbody></table>';
+    $("famCouplingsWrap").innerHTML = ch;
+}
+
+// ─── Density matrix heatmap ────────────────────────────────────────────────
+var DIMS = ["shame","attachment","grief","trust","identity","resilience","connection","activation","grounding","integration"];
+function renderHeatmap(pops){
+    var html = '<div class="heatmap" style="grid-template-columns: 80px repeat(' + DIMS.length + ', 1fr);">';
+    html += '<div class="hm-corner"></div>';
+    DIMS.forEach(function(d){ html += '<div class="hm-collabel">' + d + '</div>'; });
+    DIMS.forEach(function(rd){
+        html += '<div class="hm-rowlabel">' + rd + '</div>';
+        DIMS.forEach(function(cd){
+            var v;
+            if (rd === cd) {
+                v = pops[rd] || 0;
+            } else {
+                // Off-diagonal coherence proxy = sqrt(pop_a * pop_b) * 0.5
+                v = Math.sqrt((pops[rd]||0) * (pops[cd]||0)) * 0.5;
+            }
+            var bg = heatColor(v);
+            var label = v > 0.05 ? v.toFixed(2) : "";
+            html += '<div class="hm-cell" style="background:' + bg + ';" title="' + rd + '×' + cd + ' = ' + v.toFixed(3) + '">' + label + '</div>';
+        });
+    });
+    html += '</div>';
+    $("heatmapWrap").innerHTML = html;
+}
+function heatColor(v){
+    v = clamp(v, 0, 1);
+    if (v < 0.001) return "var(--bg-elevated)";
+    if (v < 0.3) return "rgba(78,205,196," + (0.15 + v) + ")";
+    if (v < 0.6) return "rgba(201,169,98," + (0.4 + v*0.5) + ")";
+    return "rgba(239,68,68," + (0.4 + v*0.5) + ")";
+}
+
+// ─── Charts ────────────────────────────────────────────────────────────────
+function initCharts(){
+    var common = {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: "#888", font: { size: 9 } }, grid: { color: "#1F1F1F" } },
+            y: { ticks: { color: "#888", font: { size: 9 } }, grid: { color: "#1F1F1F" }, beginAtZero: true }
+        }
+    };
+
+    // Void donut
+    var vd = $("voidDonut");
+    if (vd && !charts.voidDonut){
+        charts.voidDonut = new Chart(vd.getContext("2d"), {
+            type: "doughnut",
+            data: { labels: ["Void","Dense"], datasets: [{ data: [0,1], backgroundColor:["#4ADE80","#EF4444"], borderColor:"#0A0A0A", borderWidth: 2 }] },
+            options: { responsive:true, maintainAspectRatio:false, cutout:"68%",
+                plugins: { legend: { display:false }, tooltip: { callbacks: { label: function(ctx){ return ctx.label + ": " + (ctx.parsed*100).toFixed(1) + "%"; } } } } }
+        });
+    }
+    // Void trend line
+    var vt = $("voidTrendChart");
+    if (vt && !charts.voidTrend){
+        charts.voidTrend = new Chart(vt.getContext("2d"), {
+            type: "line",
+            data: { labels: [], datasets: [{ label:"void_fraction", data:[], borderColor:"#4ADE80", backgroundColor:"rgba(74,222,128,0.15)", tension:0.3, fill:true, pointRadius:3 }] },
+            options: Object.assign({}, common, { scales: { x: common.scales.x, y: Object.assign({}, common.scales.y, { suggestedMax: 1, suggestedMin: 0 }) } })
+        });
+    }
+    // Magnitude line
+    var mg = $("magChart");
+    if (mg && !charts.mag){
+        charts.mag = new Chart(mg.getContext("2d"), {
+            type: "line",
+            data: { labels: [], datasets: [{ label:"|C|", data:[], borderColor:"#C9A962", backgroundColor:"rgba(201,169,98,0.15)", tension:0.3, fill:true, pointRadius:3 }] },
+            options: common
+        });
+    }
+    // Velocity bars
+    var vc = $("velChart");
+    if (vc && !charts.vel){
+        charts.vel = new Chart(vc.getContext("2d"), {
+            type: "bar",
+            data: { labels: ["D1 val","D2 aro","D3 rel","D4 dep","D5 int"],
+                datasets: [{ label:"velocity", data:[0,0,0,0,0],
+                    backgroundColor: ["#4ECDC4","#F59E0B","#9D4EDD","#4A90D9","#4ADE80"], borderRadius: 3 }] },
+            options: Object.assign({}, common, { scales: { x: common.scales.x, y: Object.assign({}, common.scales.y, { beginAtZero: false }) } })
+        });
+    }
+    // Radar
+    var rd = $("radarChart");
+    if (rd && !charts.radar){
+        charts.radar = new Chart(rd.getContext("2d"), {
+            type: "radar",
+            data: { labels: ["Valence","Arousal","Relational","Temporal Depth","Integration"],
+                datasets: [
+                    { label:"Current", data:[0,0,0,0,0], borderColor:"#C9A962", backgroundColor:"rgba(201,169,98,0.25)", borderWidth: 2, pointBackgroundColor:"#C9A962" },
+                    { label:"Previous", data:[0,0,0,0,0], borderColor:"#888", backgroundColor:"transparent", borderWidth: 1.5, borderDash:[4,4], pointBackgroundColor:"#888" },
+                    { label:"Predicted", data:[0,0,0,0,0], borderColor:"#4ECDC4", backgroundColor:"transparent", borderWidth: 1.5, borderDash:[2,3], pointBackgroundColor:"#4ECDC4" }
+                ] },
+            options: { responsive:true, maintainAspectRatio:false,
+                plugins: { legend: { display: false } },
+                scales: { r: { angleLines: { color: "#1F1F1F" }, grid: { color: "#1F1F1F" },
+                    pointLabels: { color: "#888", font: { size: 10 } },
+                    ticks: { color: "#555", backdropColor: "transparent", font: { size: 8 } },
+                    suggestedMin: -1, suggestedMax: 1 } } }
+        });
+    }
+}
+function drawVoidDonut(vf){
+    if (!charts.voidDonut) return;
+    vf = clamp(vf, 0, 1);
+    charts.voidDonut.data.datasets[0].data = [vf, 1 - vf];
+    charts.voidDonut.update("none");
+}
+function drawRadar(curr, prev, pred){
+    if (!charts.radar) return;
+    function toArr(c){
+        if (!c) return [0,0,0,0,0];
+        return [
+            (c.d1_valence || 0),
+            (c.d2_arousal || 0),
+            (c.d3_relational || 0),
+            // D4 temporal depth can exceed 1 — normalize to [-1,1] band by tanh-like clip to keep radar sane.
+            clamp((c.d4_temporal_depth || 0) / 5, -1, 1),
+            (c.d5_integration || 0)
+        ];
+    }
+    charts.radar.data.datasets[0].data = toArr(curr);
+    charts.radar.data.datasets[1].data = toArr(prev);
+    charts.radar.data.datasets[2].data = toArr(pred);
+    charts.radar.update("none");
+}
+
+// ─── Boot ──────────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", function(){
+    initCharts();
+    renderHeatmap({});
+    connect();
+});
+</script>
+</body>
+</html>
