@@ -1058,12 +1058,33 @@ class ClassroomAnalyzer:
             self.client_insights_dir.mkdir(parents=True, exist_ok=True)
     
     def load_sessions(self) -> List[Dict]:
-        """Load all analyzed classroom sessions."""
+        """Load all analyzed classroom sessions.
+
+        The backend's save_json may Fernet-encrypt other *sessions*.json
+        files at rest. classroom_sessions.json is explicitly excluded from
+        that path, but we still defensively try to decrypt here so the
+        bridge does not silently lose the dropdown if encryption ever
+        sneaks back in (defence in depth).
+        """
         try:
-            return json.loads(self.classroom_file.read_text(encoding="utf-8"))
+            raw = self.classroom_file.read_bytes()
         except Exception:
             return []
-    
+        if not raw:
+            return []
+        if not (raw.lstrip().startswith(b"[") or raw.lstrip().startswith(b"{")):
+            try:
+                from app.field_encryption import _get_fernet
+                fernet = _get_fernet()
+                if fernet is not None:
+                    raw = fernet.decrypt(raw)
+            except Exception:
+                return []
+        try:
+            return json.loads(raw)
+        except Exception:
+            return []
+
     def save_sessions(self, sessions: List[Dict]):
         """Save classroom sessions."""
         self.classroom_file.write_text(

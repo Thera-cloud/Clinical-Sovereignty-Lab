@@ -287,9 +287,15 @@ def load_json(filepath: Path, default=None):
 def save_json(filepath: Path, data):
     filepath.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, indent=2, default=str).encode('utf-8')
-    # Encrypt session files at rest if encryption key is available
+    # Encrypt session files at rest if encryption key is available.
+    # Exclude classroom_sessions.json: it is shared cross-container with the
+    # bridge's ClassroomAnalyzer, which reads via plain json.loads. Encrypting
+    # it silently breaks the Coach Command "Select Session to Analyze"
+    # dropdown. Transcripts themselves live in blob storage and are protected
+    # there; this file is just metadata (session_id, coach_id, video_path).
     fernet = _get_fernet()
-    if fernet and 'sessions' in str(filepath):
+    name = filepath.name
+    if fernet and 'sessions' in str(filepath) and name != 'classroom_sessions.json':
         payload = fernet.encrypt(payload)
     with open(filepath, 'wb') as f:
         f.write(payload)
