@@ -1,10 +1,11 @@
 """
 HIVE DEFENSE v4.3 — Multi-Cloud Heritage Vault
-Triple-redundant storage for Heritage Vault data across:
+Quad-redundant storage for Heritage Vault data across:
 
-1. Azure Blob Storage (primary cloud)
-2. AWS S3 (secondary cloud)
-3. Local NAS / filesystem (tertiary / air-gap fallback)
+1. Cloudflare R2     (primary cloud — zero egress fees, read-first)
+2. Azure Blob Storage (secondary cloud)
+3. AWS S3            (tertiary cloud)
+4. Local NAS / filesystem (quaternary / air-gap fallback)
 
 Heritage data includes: Legacy recordings, family vault snapshots,
 longitudinal research data, and signed guardian fibre snapshots.
@@ -37,6 +38,8 @@ AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_BUCKET = os.getenv("HERITAGE_AWS_BUCKET", "heritage-vault")
 AWS_REGION = os.getenv("HERITAGE_AWS_REGION", "us-east-1")
 
+R2_HERITAGE_BUCKET = os.getenv("R2_HERITAGE_BUCKET", "nate-heritage-vault")
+
 LOCAL_NAS_ROOT = Path(os.getenv("HERITAGE_LOCAL_NAS_PATH", "/mnt/heritage-vault"))
 
 # Minimum required successful backends for a write to be considered durable
@@ -47,6 +50,7 @@ class ReplicationResult:
     """Result of a replication operation across all backends."""
 
     def __init__(self):
+        self.r2_ok: bool = False
         self.azure_ok: bool = False
         self.aws_ok: bool = False
         self.local_ok: bool = False
@@ -60,10 +64,11 @@ class ReplicationResult:
 
     @property
     def success_count(self) -> int:
-        return sum([self.azure_ok, self.aws_ok, self.local_ok])
+        return sum([self.r2_ok, self.azure_ok, self.aws_ok, self.local_ok])
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "r2": self.r2_ok,
             "azure": self.azure_ok,
             "aws": self.aws_ok,
             "local": self.local_ok,
@@ -83,11 +88,26 @@ class MultiCloudHeritageVault:
         self._db = db_pool
         self._azure_client = None
         self._s3_client = None
+        self._r2_available = False
         self._initialized = False
 
     async def initialize(self) -> Dict[str, bool]:
-        """Initialize connections to all three backends."""
-        status = {"azure": False, "aws": False, "local": False}
+        """Initialize connections to all four backends."""
+        status = {"r2": False, "azure": False, "aws": False, "local": False}
+
+        # Cloudflare R2 — uses the existing project-wide r2_storage helper
+        # rather than a per-instance boto3 client. Probe by checking config.
+        try:
+            from app.services import r2_storage
+            if r2_storage.is_r2_configured():
+                self._r2_available = True
+                status["r2"] = True
+                _logger.info("Cloudflare R2 initialized for heritage vault (bucket=%s)",
+                             R2_HERITAGE_BUCKET)
+            else:
+                _logger.info("Cloudflare R2 not configured for heritage vault")
+        except Exception as exc:
+            _logger.warning("R2 init failed (non-fatal): %s", exc)
 
         # Azure Blob Storage
         if AZURE_STORAGE_ACCOUNT and AZURE_STORAGE_KEY:
@@ -153,33 +173,40 @@ class MultiCloudHeritageVault:
         meta["manifest_hash"] = result.manifest_hash
         meta["replicated_at"] = datetime.now(timezone.utc).isoformat()
 
-        # Run all three writes concurrently
+        # Run all four writes concurrently
+        r2_task = self._write_r2(key, data, meta)
         azure_task = self._write_azure(key, data, meta)
         aws_task = self._write_aws(key, data, meta)
         local_task = self._write_local(key, data, meta)
 
         outcomes = await asyncio.gather(
-            azure_task, aws_task, local_task,
+            r2_task, azure_task, aws_task, local_task,
             return_exceptions=True,
         )
 
-        # Azure
+        # R2
         if isinstance(outcomes[0], Exception):
-            result.errors["azure"] = str(outcomes[0])
+            result.errors["r2"] = str(outcomes[0])
         else:
-            result.azure_ok = outcomes[0]
+            result.r2_ok = outcomes[0]
+
+        # Azure
+        if isinstance(outcomes[1], Exception):
+            result.errors["azure"] = str(outcomes[1])
+        else:
+            result.azure_ok = outcomes[1]
 
         # AWS
-        if isinstance(outcomes[1], Exception):
-            result.errors["aws"] = str(outcomes[1])
+        if isinstance(outcomes[2], Exception):
+            result.errors["aws"] = str(outcomes[2])
         else:
-            result.aws_ok = outcomes[1]
+            result.aws_ok = outcomes[2]
 
         # Local
-        if isinstance(outcomes[2], Exception):
-            result.errors["local"] = str(outcomes[2])
+        if isinstance(outcomes[3], Exception):
+            result.errors["local"] = str(outcomes[3])
         else:
-            result.local_ok = outcomes[2]
+            result.local_ok = outcomes[3]
 
         # Record replication event
         await self._log_replication(key, result)
@@ -187,11 +214,11 @@ class MultiCloudHeritageVault:
         if not result.durable:
             _logger.error(
                 "HERITAGE VAULT DEGRADED: key=%s success=%d/%d errors=%s",
-                key, result.success_count, 3, result.errors,
+                key, result.success_count, 4, result.errors,
             )
         else:
             _logger.info(
-                "Heritage vault replicated: key=%s backends=%d/3 hash=%s",
+                "Heritage vault replicated: key=%s backends=%d/4 hash=%s",
                 key, result.success_count, result.manifest_hash[:16],
             )
 
@@ -203,6 +230,14 @@ class MultiCloudHeritageVault:
         Returns per-backend hash comparison.
         """
         hashes: Dict[str, Optional[str]] = {}
+
+        # R2
+        try:
+            h = await self._hash_r2(key)
+            hashes["r2"] = h
+        except Exception as exc:
+            hashes["r2"] = None
+            _logger.debug("R2 hash check failed for %s: %s", key, exc)
 
         # Azure
         try:
@@ -239,11 +274,19 @@ class MultiCloudHeritageVault:
     async def retrieve(self, key: str) -> Optional[bytes]:
         """
         Retrieve data from the first available backend.
-        Tries local first (fastest), then Azure, then AWS.
+        Order: local (fastest) → R2 (zero egress) → Azure → AWS.
         """
         # Try local
         try:
             data = await self._read_local(key)
+            if data is not None:
+                return data
+        except Exception:
+            pass
+
+        # Try R2 — preferred remote (no egress fees)
+        try:
+            data = await self._read_r2(key)
             if data is not None:
                 return data
         except Exception:
@@ -277,6 +320,40 @@ class MultiCloudHeritageVault:
             if f.is_file() and not f.name.endswith(".meta.json"):
                 keys.append(str(f.relative_to(LOCAL_NAS_ROOT)))
         return sorted(keys)
+
+    # ─── Cloudflare R2 Backend ────────────────────────────────────────────────
+
+    async def _write_r2(self, key: str, data: bytes, meta: Dict) -> bool:
+        if not self._r2_available:
+            return False
+        try:
+            from app.services import r2_storage
+            # r2_storage.upload_bytes_async returns (etag, location)
+            await r2_storage.upload_bytes_async(
+                key=key,
+                content=data,
+                bucket=R2_HERITAGE_BUCKET,
+                content_type="application/octet-stream",
+                metadata={k: str(v) for k, v in meta.items()},
+            )
+            return True
+        except Exception as exc:
+            _logger.error("R2 write failed for %s: %s", key, exc)
+            raise
+
+    async def _read_r2(self, key: str) -> Optional[bytes]:
+        if not self._r2_available:
+            return None
+        from app.services import r2_storage
+        return await r2_storage.download_bytes_async(
+            key=key, bucket=R2_HERITAGE_BUCKET
+        )
+
+    async def _hash_r2(self, key: str) -> Optional[str]:
+        data = await self._read_r2(key)
+        if data is None:
+            return None
+        return hashlib.sha256(data).hexdigest()
 
     # ─── Azure Backend ─────────────────────────────────────────────────────────
 
@@ -383,7 +460,27 @@ class MultiCloudHeritageVault:
     async def _log_replication(self, key: str, result: ReplicationResult) -> None:
         if not self._db:
             return
+        # First try the new schema (with r2_ok column from migration 118).
+        # Fall back to the legacy schema so a missing migration doesn't break
+        # writes on day-1 of deploy. The r2_ok flag is also embedded in
+        # `errors` JSON for forensic traceability when the column is absent.
         try:
+            await self._db.execute(
+                """INSERT INTO heritage_vault_replication_log
+                   (vault_key, manifest_hash, r2_ok, azure_ok, aws_ok, local_ok,
+                    durable, errors, created_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())""",
+                key, result.manifest_hash,
+                result.r2_ok, result.azure_ok, result.aws_ok, result.local_ok,
+                result.durable, json.dumps(result.errors),
+            )
+            return
+        except Exception as exc_new:
+            _logger.debug("Replication log (new schema) failed: %s", exc_new)
+
+        try:
+            legacy_errors = dict(result.errors)
+            legacy_errors["_r2_ok"] = result.r2_ok
             await self._db.execute(
                 """INSERT INTO heritage_vault_replication_log
                    (vault_key, manifest_hash, azure_ok, aws_ok, local_ok,
@@ -391,7 +488,7 @@ class MultiCloudHeritageVault:
                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())""",
                 key, result.manifest_hash,
                 result.azure_ok, result.aws_ok, result.local_ok,
-                result.durable, json.dumps(result.errors),
+                result.durable, json.dumps(legacy_errors),
             )
         except Exception as exc:
             _logger.error("Replication log write failed: %s", exc)

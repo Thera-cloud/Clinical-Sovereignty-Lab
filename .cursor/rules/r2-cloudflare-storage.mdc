@@ -65,8 +65,12 @@ If R2 is not configured, the system falls back to Azure, then local disk — ide
 7. **Cache-Control headers guide Cloudflare Tiered Cache** — the `CacheControlMiddleware` sets appropriate headers. Never override `Cache-Control` on responses that already have it set.
 8. **The Cloudflare Worker script** (`cloudflare/workers/nate-edge-cache.js`) must be deployed via `wrangler deploy`. It is NOT part of the Python backend.
 9. **Session memories write local first, then R2** — local disk is the hot path for immediate retrieval. R2 is the redundancy layer. On read, local is checked first; if missing, R2 is fetched and cached locally.
-10. **Classroom videos write local first, then R2** — videos can be large (up to 500MB). The R2 upload happens after local write + validation. If R2 upload fails, the video is still available locally.
+10. **Classroom videos use two upload paths**:
+    - **Small (≤100 MB)**: legacy multipart-form POST → backend writes local + replicates to R2.
+    - **Large (>100 MB, up to 5 GiB)**: direct browser → R2 multipart upload via presigned PUT URLs. Bytes never touch the backend or Cloudflare proxy. Endpoints: `POST /api/classroom/upload-video/{init,complete,abort}`. Requires R2 bucket CORS to expose `ETag` and allow `PUT` from the app origins (see `cloudflare/r2-cors-classroom-uploads.json`).
 11. **Coach uploads go directly through blob_storage** — the unified R2 → Azure → local chain. The `azure_blob_url` column stores the R2 key or local path.
+12. **Warm/Cold tiers are R2-primary, Azure-fallback** — `WarmMemoryTier` writes to `nate-warm-memory` first; `ColdMemoryTier` writes to `nate-cold-archive` first. Reads try R2 first (zero egress), then Azure (for pre-cutover data), then local cache. Deletes hit BOTH clouds so a deleted key cannot resurrect from the fallback.
+13. **Heritage Vault audit log requires migration 192** — `heritage_vault_replication_log.r2_ok` column is added by `backend/migrations/192_r2_heritage_vault.sql`. Before migration runs, replication still works; the writer falls back to a legacy INSERT and stores `r2_ok` inside the `errors` JSON column.
 
 ## Tiered Cache Setup (Cloudflare Dashboard)
 
