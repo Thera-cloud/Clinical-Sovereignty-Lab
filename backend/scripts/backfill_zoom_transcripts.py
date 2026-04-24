@@ -101,8 +101,37 @@ async def _backfill_one(
 
     t_url, t_ext = _pick_transcript_from_recording_files(files)
     if not t_url:
-        log.info("no transcript yet for %s/%s — leaving for poller", sid, mid)
-        return "no_transcript_yet"
+        if dry_run:
+            log.info("DRY RUN would mark transcript_pending for %s/%s", sid, mid)
+            return "would_mark_pending"
+        try:
+            import datetime as _dt
+            import json as _json
+            patch = {
+                "recording_ready": True,
+                "transcript_pending": True,
+                "zoom_recording_webhook_at": _dt.datetime.utcnow().isoformat(),
+            }
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE coaching_sessions
+                    SET session_data = COALESCE(session_data, '{}'::jsonb) || $2::jsonb,
+                        updated_at = NOW()
+                    WHERE session_id = $1
+                    """,
+                    sid,
+                    _json.dumps(patch),
+                )
+            log.info(
+                "no transcript yet for %s/%s — marked transcript_pending for drip poller",
+                sid,
+                mid,
+            )
+        except Exception as pe:
+            log.warning("failed to mark transcript_pending for %s/%s: %s", sid, mid, pe)
+            return "pending_mark_error"
+        return "marked_pending"
 
     if dry_run:
         log.info("DRY RUN would archive %s/%s (ext=%s)", sid, mid, t_ext or "vtt")
