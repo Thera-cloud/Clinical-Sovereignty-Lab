@@ -661,7 +661,7 @@ async def _archive_transcript_and_classroom_for_pg_session(
     except Exception as _ca_err:
         logger.warning("[Zoom] Classroom analyze/queue for %s: %s", session_id, _ca_err)
 
-    if learning_ok and zoom_ai_summary_text and (vtt_text or "").strip() and client_id:
+    if zoom_ai_summary_text and (vtt_text or "").strip() and client_id:
         async def _cross_ref_crystal():
             try:
                 from app.websocket.crystal_recall_bridge import (
