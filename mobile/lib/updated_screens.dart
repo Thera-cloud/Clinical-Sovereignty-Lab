@@ -6388,6 +6388,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ),
             );
           }
+          // Re-pull the dropdown so the just-analyzed video flips from
+          // pending to ready (transcript_location now set, status=analyzed).
+          _requestClassroomSessions();
         }
       }
       else if (data['type'] == 'classroom_analysis') {
@@ -13315,6 +13318,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         _classroomUploadProgress = 1.0;
         _classroomUploadedVideoId = result.videoId;
       });
+      // Refresh the Select Session to Analyze dropdown immediately so the
+      // newly-uploaded video shows up without the user having to hit refresh.
+      // The bridge merges classroom_sessions.json on every classroom_get_sessions
+      // and special-cases uploaded_video records to bypass the transcript
+      // requirement, so the in-progress / just-completed upload appears.
+      _requestClassroomSessions();
       _startClassroomVideoAnalysisPoll(result.videoId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -2069,6 +2069,65 @@ class ClassroomAnalyzer:
                     pass
 
             visual_insights = json.dumps(combined_visual, indent=2, default=str)
+
+        # ===== WHISPER STT — full conversation transcript =====
+        # Direct-uploaded videos historically only got visual + voice-metrics
+        # analysis; the actual coach⇄client conversation was never transcribed,
+        # which meant Night School + memory crystals + crystal recall were
+        # learning from metadata only. Run the same Azure Whisper pipeline
+        # we use for Zoom audio fallback so the conversational text feeds
+        # the downstream learners. Best-effort: failures don't abort analysis.
+        vtt_text: str = ""
+        try:
+            if vp.exists():
+                from app.services.zoom_audio_fallback import (
+                    transcribe_zoom_audio_to_vtt,
+                )
+
+                video_bytes = await asyncio.to_thread(vp.read_bytes)
+                vtt_bytes = await transcribe_zoom_audio_to_vtt(
+                    video_bytes,
+                    speaker_label="COACH/CLIENT",
+                )
+                if vtt_bytes:
+                    vtt_text = vtt_bytes.decode("utf-8", errors="replace")
+                    transcript_path = vp.with_suffix(vp.suffix + ".vtt")
+                    try:
+                        await asyncio.to_thread(
+                            transcript_path.write_bytes, vtt_bytes
+                        )
+                        # Reflect transcript location into classroom_sessions.json
+                        # so the bridge's dropdown gets has_transcript=True for
+                        # this device-uploaded video on the next refresh.
+                        try:
+                            with open(self.classroom_file, "r", encoding="utf-8") as _rf:
+                                _all = json.load(_rf)
+                            for _s in _all:
+                                if _s.get("session_id") == video_id:
+                                    _s["transcript_location"] = str(transcript_path)
+                                    _s["transcript_archived_at"] = (
+                                        datetime.utcnow().isoformat() + "Z"
+                                    )
+                                    _s["transcript_source"] = "whisper_stt"
+                                    break
+                            with open(self.classroom_file, "w", encoding="utf-8") as _wf:
+                                json.dump(_all, _wf, indent=2, default=str)
+                        except Exception as _persist_err:
+                            print(
+                                f"[Classroom] could not persist transcript_location: {_persist_err}"
+                            )
+                    except Exception as _wr:
+                        print(f"[Classroom] writing VTT to disk failed: {_wr}")
+                    print(
+                        f"[Classroom STT] transcribed {len(vtt_bytes)} VTT bytes for {video_id}"
+                    )
+                else:
+                    print(f"[Classroom STT] whisper produced no VTT for {video_id}")
+        except ImportError:
+            # zoom_audio_fallback not present in this build — silent skip.
+            pass
+        except Exception as _stt_err:
+            print(f"[Classroom STT] non-fatal failure for {video_id}: {_stt_err}")
         except ImportError:
             visual_insights = json.dumps(
                 {"error": "VideoAnalyzer not available - visual analysis skipped"}
@@ -2707,7 +2766,7 @@ class ClassroomAnalyzer:
                 ai_result=ai_result,
                 coach_id=coach_id,
                 session_id=video_id,
-                vtt_content="",
+                vtt_content=vtt_text,  # whisper-produced transcript (may be "")
                 full_analysis=analysis,
             )
         except Exception as e:
