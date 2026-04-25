@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import os
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
@@ -45,6 +46,19 @@ try:
     _HAS_LIBROSA = True
 except Exception:
     pass
+
+
+def _force_librosa_only() -> bool:
+    """
+    GREEN cannot afford to load wav2vec2 (~1.5 GB) inside the FastAPI
+    container. When VOICE_EMOTION_FORCE_LIBROSA=1 (set by docker-compose
+    on the GREEN node, or by classroom_remote_dispatch when no ORANGE
+    voice endpoint is configured), the analyzer never enters transformer
+    mode — it stays in librosa rule-based mode regardless of capability.
+    See `.cursor/rules/three-node-sync-discipline.mdc` for routing.
+    """
+    flag = (os.getenv("VOICE_EMOTION_FORCE_LIBROSA", "") or "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
 
 
 # Normalize labels emitted by the upstream wav2vec2 model.
@@ -90,7 +104,9 @@ class VoiceEmotionAnalyzer:
     def __init__(self):
         self._model = None
         self._model_load_attempted = False
-        if _HAS_TRANSFORMERS and _HAS_TORCHAUDIO:
+        if _force_librosa_only():
+            self._mode = "librosa" if _HAS_LIBROSA else None
+        elif _HAS_TRANSFORMERS and _HAS_TORCHAUDIO:
             self._mode = "transformer"
         elif _HAS_LIBROSA:
             self._mode = "librosa"
@@ -163,37 +179,53 @@ class VoiceEmotionAnalyzer:
     def _analyze_transformer_sync(
         self, audio_path: str, seg_sec: int
     ) -> Dict[str, Any]:
+        # Audio I/O strategy:
+        #   torchaudio 2.x dropped its native loaders and now requires
+        #   `torchcodec`, which has fragile ARM64 wheels (see ORANGE
+        #   deployment Apr 2026). librosa.load is the portable path and
+        #   produces exactly the float32 numpy array the transformers
+        #   pipeline wants — no torch tensors needed for inference.
         try:
-            import torchaudio
-            import torchaudio.transforms as T
+            import numpy as np  # noqa: F401
         except Exception as e:
-            return {"error": f"torchaudio unavailable: {e}"}
+            return {"error": f"numpy unavailable: {e}"}
+
+        sr = 16000  # wav2vec2 expects 16 kHz mono
+        waveform_np = None
 
         try:
-            waveform, sr = torchaudio.load(audio_path)
-        except Exception as e:
-            return {"error": f"audio load failed: {e}"}
-
-        if sr != 16000:
+            import librosa
+            waveform_np, sr = librosa.load(audio_path, sr=sr, mono=True)
+        except Exception as librosa_err:
             try:
-                waveform = T.Resample(sr, 16000)(waveform)
-                sr = 16000
-            except Exception as e:
-                return {"error": f"resample failed: {e}"}
+                import torchaudio
+                import torchaudio.transforms as T
+                waveform, native_sr = torchaudio.load(audio_path)
+                if native_sr != sr:
+                    waveform = T.Resample(native_sr, sr)(waveform)
+                if waveform.dim() > 1 and waveform.shape[0] > 1:
+                    waveform = waveform.mean(dim=0)
+                else:
+                    waveform = waveform.squeeze(0)
+                waveform_np = waveform.numpy()
+            except Exception as torch_err:
+                return {
+                    "error": (
+                        f"audio load failed (librosa: {librosa_err}; "
+                        f"torchaudio: {torch_err})"
+                    )
+                }
 
-        # Down-mix to mono
-        if waveform.dim() > 1 and waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0)
-        else:
-            waveform = waveform.squeeze(0)
+        if waveform_np is None or waveform_np.size == 0:
+            return {"error": "audio load returned empty waveform"}
 
         segment_samples = max(1, int(seg_sec * sr))
-        total_samples = int(waveform.shape[0])
+        total_samples = int(waveform_np.shape[0])
 
         timeline: List[Dict[str, Any]] = []
         for start in range(0, total_samples, segment_samples):
             end = min(start + segment_samples, total_samples)
-            segment = waveform[start:end].numpy()
+            segment = waveform_np[start:end]
 
             if len(segment) < sr:  # skip < 1s tail
                 continue

@@ -87,6 +87,30 @@ services:
       - MAC_AGENT_URL=https://twin-agent.sovereignsanctuary.net
       - MAC_AGENT_TOKEN=${MAC_AGENT_TOKEN:-}
       - WEB_CONCURRENCY=2
+      # ---- Three-node compute routing for classroom video pipeline ----
+      # See .cursor/rules/three-node-sync-discipline.mdc.
+      # GREEN owns orchestration only. Heavy ML lives on ORANGE/BLUE.
+      - NODE_COLOR=green
+      # Hard guard: never load wav2vec2 (~1.5 GB) inside this 6 GB
+      # container. Force VoiceEmotionAnalyzer into librosa-rules mode
+      # whenever ORANGE is unreachable. Flip to "0" once ORANGE is live.
+      # GREEN: keep 1 so local fallback never loads wav2vec2. ORANGE owns transformer.
+      # Override in .env only if you accept OOM risk on this 6G container.
+      - VOICE_EMOTION_FORCE_LIBROSA=${VOICE_EMOTION_FORCE_LIBROSA:-1}
+      # ORANGE (Hetzner CAX41 over WireGuard) — wav2vec2 voice-emotion server.
+      # Stays unset until backend/scripts/orange/voice_emotion_server.py
+      # is deployed; classroom_remote_dispatch.voice_emotion_remote_enabled()
+      # gates the dispatch.
+      - CLASSROOM_VOICE_REMOTE_URL=${CLASSROOM_VOICE_REMOTE_URL:-}
+      # BLUE (Mac via Twin Engine tunnel + overseer-manifold VPC) —
+      # Apple GPU visual frame analysis server. Stays unset until the
+      # Mac-side server is running and the tunnel route is wired.
+      - CLASSROOM_VISUAL_REMOTE_URL=${CLASSROOM_VISUAL_REMOTE_URL:-}
+      # Shared bearer between GREEN, ORANGE, and BLUE for the dispatch
+      # endpoints. Generate once with `openssl rand -hex 32` and set on
+      # all three nodes. Empty = no auth (only safe over WireGuard/tunnel).
+      - CLASSROOM_REMOTE_AUTH_TOKEN=${CLASSROOM_REMOTE_AUTH_TOKEN:-}
+      - CLASSROOM_REMOTE_TIMEOUT_SEC=${CLASSROOM_REMOTE_TIMEOUT_SEC:-1800}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8000}:8000"
     depends_on:

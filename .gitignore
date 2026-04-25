@@ -8,6 +8,7 @@
 .env
 .env.*
 !.env.template
+!.env.example
 *.pem
 *.key
 secrets/

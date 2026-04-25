@@ -1,0 +1,23 @@
+[Unit]
+Description=ORANGE Voice Emotion Server (wav2vec2) — Sovereign Sanctuary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/sovereign/voice_emotion.env
+# CLASSROOM_REMOTE_AUTH_TOKEN must match the value set on GREEN
+# (docker-compose.prod.yml). Generate with `openssl rand -hex 32`.
+ExecStart=/opt/sovereign/voice-emotion/.venv/bin/uvicorn voice_emotion_server:app --host 0.0.0.0 --port 8090 --log-level info --timeout-keep-alive 1800
+WorkingDirectory=/opt/sovereign/voice-emotion
+Restart=on-failure
+RestartSec=10
+# wav2vec2 + audio buffers stay well under 4 GB; cap so a runaway request
+# can't starve the rest of ORANGE.
+MemoryMax=6G
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

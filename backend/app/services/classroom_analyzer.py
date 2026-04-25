@@ -2007,57 +2007,159 @@ class ClassroomAnalyzer:
                 compute_voice_metrics_timeline,
             )
 
+            # ===== Three-node dispatch for visual frame analysis =====
+            # BLUE (Mac, Apple GPU via overseer-manifold tunnel) owns the
+            # visual pass — see `.cursor/rules/cloudflare-tunnel-twin-engine.mdc`
+            # ("Mac Owns: 70B model weights, Apple GPU"). When
+            # CLASSROOM_VISUAL_REMOTE_URL is set, BLUE pulls the video via a
+            # presigned R2 URL, runs the GPU-accelerated frame analysis, and
+            # returns the same dict shape. Otherwise GREEN does the
+            # lightweight CPU sampling locally so we always have a result.
+            blue_frame_analysis: Optional[Dict[str, Any]] = None
+            try:
+                from app.services import classroom_remote_dispatch as _remote_v
+            except Exception:
+                _remote_v = None  # type: ignore
+
+            if _remote_v and _remote_v.visual_remote_enabled():
+                try:
+                    from app.services import r2_storage as _r2v
+                    r2_key_v = (video_session.get("r2_key") or "").strip()
+                    r2_bucket_v = (video_session.get("r2_bucket") or "").strip() or None
+                    if r2_key_v:
+                        presigned_v = _r2v.generate_presigned_url(
+                            key=r2_key_v, bucket=r2_bucket_v, expires_in=7200
+                        )
+                        if presigned_v:
+                            blue_frame_analysis = await _remote_v.remote_visual_frames(
+                                presigned_v, interval_seconds=5, max_frames=5
+                            )
+                except Exception as _blue_err:
+                    print(f"[Classroom] BLUE visual dispatch failed (non-fatal): {_blue_err}")
+                    blue_frame_analysis = None
+
             analyzer = VideoAnalyzer()
             frames: List[bytes] = []
-            if vp.exists():
-                frames = analyzer.extract_frames(vp, interval_seconds=5, max_frames=5)
-            if frames:
-                frame_analysis = analyzer.analyze_classroom_frames(frames)
+            if blue_frame_analysis:
+                frame_analysis = blue_frame_analysis
+                frame_analysis.setdefault("coaching_insights", "Visual analysis served by BLUE (Mac GPU).")
+                print(
+                    f"[Classroom] visual frames served by BLUE: "
+                    f"frames_analyzed={frame_analysis.get('frames_analyzed', 0)}"
+                )
             else:
-                frame_analysis = {
-                    "coaching_insights": "No frames extracted (missing codecs or unreadable video).",
-                    "key_moments": [],
-                    "therapeutic_presence_score": 6.0,
-                    "frames_analyzed": 0,
-                }
+                if vp.exists():
+                    frames = analyzer.extract_frames(vp, interval_seconds=5, max_frames=5)
+                if frames:
+                    frame_analysis = analyzer.analyze_classroom_frames(frames)
+                else:
+                    frame_analysis = {
+                        "coaching_insights": "No frames extracted (missing codecs or unreadable video).",
+                        "key_moments": [],
+                        "therapeutic_presence_score": 6.0,
+                        "frames_analyzed": 0,
+                    }
 
             combined_visual = {
                 "frame_analysis": frame_analysis,
                 "voice_metrics_timeline": None,
                 "librosa_gate": _HAS_LIBROSA,
                 "moviepy_gate": _HAS_MOVIEPY,
+                "visual_node": "blue" if blue_frame_analysis else "green",
             }
 
             wav_path: Optional[Path] = None
             voice_emotion_result: Optional[Dict[str, Any]] = None
+
+            # ===== Three-node dispatch for the HEAVY part of voice analysis =====
+            # wav2vec2 weights are ~1.5 GB. Loading them inside the GREEN
+            # FastAPI container (6 GB total, hosting 100+ services) is what
+            # OOM-killed the recovery run. Per
+            # `.cursor/rules/three-node-sync-discipline.mdc`:
+            #   - ORANGE (Hetzner CAX41, 32 GB) owns wav2vec2 voice emotion
+            #   - GREEN orchestrates only
+            # If CLASSROOM_VOICE_REMOTE_URL is set, hand the audio off to
+            # ORANGE via a presigned R2 URL and use its result. Otherwise
+            # force the local analyzer into librosa-rules mode (no
+            # transformer load) — see VOICE_EMOTION_FORCE_LIBROSA in
+            # voice_emotion_analyzer.py.
+            try:
+                from app.services import classroom_remote_dispatch as _remote
+            except Exception:
+                _remote = None  # type: ignore
+
+            r2_voice_url: Optional[str] = None
+            if _remote and _remote.voice_emotion_remote_enabled():
+                try:
+                    from app.services import r2_storage as _r2
+                    r2_key = (video_session.get("r2_key") or "").strip()
+                    r2_bucket = (video_session.get("r2_bucket") or "").strip() or None
+                    if r2_key:
+                        r2_voice_url = _r2.generate_presigned_url(
+                            key=r2_key, bucket=r2_bucket, expires_in=7200
+                        )
+                except Exception as _presign_err:
+                    print(f"[Classroom] R2 presign for ORANGE failed (non-fatal): {_presign_err}")
+                    r2_voice_url = None
+
+                if r2_voice_url:
+                    try:
+                        # Adaptive sampling on ORANGE: coarse 30s sweep,
+                        # then 10s re-analysis around emotion transitions.
+                        # Faster than uniform 10s; full precision where it
+                        # matters for clinical signal.
+                        voice_emotion_result = await _remote.remote_voice_emotion(
+                            r2_voice_url,
+                            segment_seconds=30,
+                            adaptive_segment_seconds=10,
+                        )
+                        if voice_emotion_result:
+                            combined_visual["voice_emotion"] = voice_emotion_result
+                            combined_visual["voice_emotion_node"] = "orange"
+                            print(
+                                f"[Classroom] voice emotion served by ORANGE: "
+                                f"{voice_emotion_result.get('segments_analyzed', 0)} segments, "
+                                f"mode={voice_emotion_result.get('analysis_mode', '?')}"
+                            )
+                    except Exception as _orange_err:
+                        print(f"[Classroom] ORANGE voice dispatch failed (non-fatal): {_orange_err}")
+                        voice_emotion_result = None
+
             try:
                 if vp.exists() and _HAS_LIBROSA:
                     wav_path = await asyncio.to_thread(extract_audio_wav, vp)
                     if wav_path:
+                        # voice_metrics_timeline (energy/silence) stays GREEN —
+                        # it's tiny and used downstream regardless of node.
                         voice_metrics_timeline = await asyncio.to_thread(
                             compute_voice_metrics_timeline, wav_path, 5.0
                         )
                         combined_visual["voice_metrics_timeline"] = voice_metrics_timeline
 
-                        # Voice emotion classification (transformer or librosa rules)
-                        try:
-                            from app.services.voice_emotion_analyzer import (
-                                VoiceEmotionAnalyzer,
-                            )
-
-                            ve = VoiceEmotionAnalyzer()
-                            if ve.available:
-                                voice_emotion_result = await ve.analyze_audio(
-                                    str(wav_path), segment_seconds=10
+                        # Local voice-emotion fallback only runs if ORANGE
+                        # didn't already produce a result. On GREEN with
+                        # VOICE_EMOTION_FORCE_LIBROSA=1, this stays in the
+                        # rule-based path — never loads wav2vec2.
+                        if voice_emotion_result is None:
+                            try:
+                                from app.services.voice_emotion_analyzer import (
+                                    VoiceEmotionAnalyzer,
                                 )
-                                combined_visual["voice_emotion"] = voice_emotion_result
-                            else:
-                                combined_visual["voice_emotion"] = {
-                                    "error": "no voice emotion backend available"
-                                }
-                        except Exception as _ve_err:
-                            print(f"[Classroom] voice emotion (non-fatal): {_ve_err}")
-                            voice_emotion_result = None
+
+                                ve = VoiceEmotionAnalyzer()
+                                if ve.available:
+                                    voice_emotion_result = await ve.analyze_audio(
+                                        str(wav_path), segment_seconds=10
+                                    )
+                                    combined_visual["voice_emotion"] = voice_emotion_result
+                                    combined_visual["voice_emotion_node"] = "green"
+                                else:
+                                    combined_visual["voice_emotion"] = {
+                                        "error": "no voice emotion backend available"
+                                    }
+                            except Exception as _ve_err:
+                                print(f"[Classroom] voice emotion (non-fatal): {_ve_err}")
+                                voice_emotion_result = None
             except Exception as _aud_err:
                 print(f"[Classroom] audio pipeline (non-fatal): {_aud_err}")
                 voice_metrics_timeline = None
