@@ -1049,6 +1049,8 @@ class ClassroomAnalyzer:
         # Initialize participant identifier and insights extractor
         self.participant_identifier = ParticipantIdentifier(data_dir)
         self.insights_extractor = ClientInsightsExtractor(data_dir)
+        # Used by _push_to_night_school when full_analysis lacks client_id
+        self._session_cache: Dict[str, Dict[str, Any]] = {}
     
     def _ensure_data_file(self):
         """Ensure classroom_sessions.json and insights directory exist."""
@@ -1992,6 +1994,10 @@ class ClassroomAnalyzer:
 
         if not video_session:
             return {"error": f"Video session {video_id} not found"}
+
+        _cid = (client_id or video_session.get("client_id") or "").strip()
+        _fid = (family_id or video_session.get("family_id") or "").strip()
+        self._session_cache[video_id] = {"client_id": _cid, "family_id": _fid}
 
         video_path_str = video_session.get("video_path", "")
         vp = Path(video_path_str) if video_path_str else Path()
