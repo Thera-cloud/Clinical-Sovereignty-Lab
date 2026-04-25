@@ -6327,9 +6327,48 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       // ===== CLASSROOM HANDLERS =====
       else if (data['type'] == 'classroom_sessions') {
         if (mounted) {
+          final incoming = List<Map<String, dynamic>>.from(data['sessions'] ?? []);
           setState(() {
-            _classroomSessions = List<Map<String, dynamic>>.from(data['sessions'] ?? []);
+            _classroomSessions = incoming;
           });
+          // Tab-switch / page-refresh restoration:
+          // If we don't currently have an active video in the UI but the
+          // backend reports a device-upload that's still being analyzed
+          // (status uploading/uploaded — i.e. analyze_video has not finished
+          // writing transcript_location + flipping status to analyzed), pick
+          // it back up and resume the analysis-in-progress UI. This means
+          // the coach can switch tabs / refresh the browser during the long
+          // (5-15 min) STT + analysis run and still find their video here
+          // when they return, without re-uploading.
+          if (_classroomUploadedVideoId == null &&
+              _classroomAnalysis == null &&
+              !_classroomAnalyzing) {
+            try {
+              final pending = incoming.firstWhere(
+                (s) {
+                  final sid = (s['session_id'] ?? '').toString();
+                  final st = (s['status'] ?? '').toString().toLowerCase();
+                  final type = (s['type'] ?? '').toString();
+                  if (sid.isEmpty) return false;
+                  if (type != 'uploaded_video') return false;
+                  return st == 'uploading' || st == 'uploaded' || st == 'analyzing';
+                },
+                orElse: () => <String, dynamic>{},
+              );
+              final pendingId = (pending['session_id'] ?? '').toString();
+              if (pendingId.isNotEmpty) {
+                _classroomUploadedVideoId = pendingId;
+                _startClassroomVideoAnalysisPoll(pendingId);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Resumed analysis for ${pending['filename'] ?? pendingId}'),
+                    backgroundColor: const Color(0xFF4ECDC4),
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            } catch (_) {}
+          }
         }
       }
       else if (data['type'] == 'classroom_progress') {
@@ -15026,7 +15065,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         return;
       }
       ticks += 1;
-      if (ticks * 5 > 120) {
+      // 30-min ceiling: a 90-min Zoom recording typically needs ~5-8 min for
+      // whisper STT plus 2-4 min for the rest of the pipeline, but very long
+      // or contention-heavy runs can push past 15 min. Don't kill the poll
+      // prematurely — the backend keeps working in the background, and the
+      // tab-restoration logic in classroom_sessions handler will reconnect
+      // automatically if the user switches tabs and comes back.
+      if (ticks * 5 > 1800) {
         _cancelClassroomVideoPoll();
         setState(() {
           _classroomVideoPipelineActive = false;
@@ -15034,8 +15079,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Analysis is still running. Pull to refresh or check back shortly.'),
-            duration: Duration(seconds: 5),
+            content: Text(
+              'Analysis is still running in the background. '
+              'Switch tabs freely \u2014 it will reappear here when ready.',
+            ),
+            duration: Duration(seconds: 6),
           ),
         );
         return;
