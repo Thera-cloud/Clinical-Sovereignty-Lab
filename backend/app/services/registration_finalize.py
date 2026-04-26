@@ -226,12 +226,251 @@ async def finalize_signup(
 
 
 # ---------------------------------------------------------------------------
-# Dependent signup (no Stripe — free under parent's Sovereign Circle plan)
+# Dependent signup — Sovereign Circle family plan
+#
+# Pricing model (matches stripe_integration.family_tier_price_cents):
+#   - 1st dependent of any age: FREE  (rides on parent's Sovereign Circle plan)
+#   - 2nd dependent: $75/mo via STRIPE_PRICE_FAMILY_TIER_1
+#   - 3rd dependent: $60/mo via STRIPE_PRICE_FAMILY_TIER_2
+#   - 4th dependent: $45/mo via STRIPE_PRICE_FAMILY_TIER_3
+#   - 5th+ dependent: $30/mo via STRIPE_PRICE_FAMILY_TIER_4
+#
+# `finalize_dependent_signup` is called at *prepare* time. It only finalizes
+# the FREE case directly. For paid slots it returns DEPENDENT_REQUIRES_PAYMENT
+# so the caller can route through Stripe Checkout. After Stripe completes,
+# `finalize_paid_dependent_signup` is called from the webhook to materialize
+# the user.
 # ---------------------------------------------------------------------------
 
-# Parent must be on one of these tiers for free-dependent linkage.
+# Parent must be on one of these tiers for any dependent linkage.
 DEPENDENT_ELIGIBLE_PARENT_TIERS = {"TOP_TIER", "TOP", "SOVEREIGN_CIRCLE"}
 DEPENDENT_ELIGIBLE_PARENT_STATUSES = {"ACTIVE", "FAMILY_PLAN_ACTIVE", "TRIAL_ACTIVE"}
+
+# Cents per family-tier slot (1-indexed among PAID dependents, 4+ all == 3000).
+# Mirrors stripe_integration.FAMILY_TIER_PRICES so the disclosed cost matches
+# what the webhook handler will actually charge.
+FAMILY_TIER_PRICE_CENTS = {1: 7500, 2: 6000, 3: 4500}
+FAMILY_TIER_PRICE_DEFAULT_CENTS = 3000  # 4th+ paid slot
+
+
+def _family_tier_price_cents(paid_ordinal: int) -> int:
+    return FAMILY_TIER_PRICE_CENTS.get(paid_ordinal, FAMILY_TIER_PRICE_DEFAULT_CENTS)
+
+
+def _family_tier_env_key(paid_ordinal: int) -> str:
+    """Stripe price env var name for a given paid ordinal (1..4)."""
+    capped = max(1, min(paid_ordinal, 4))
+    return f"STRIPE_PRICE_FAMILY_TIER_{capped}"
+
+
+async def _validate_parent_for_dependent(conn, parent_username: str):
+    """Look up the parent and verify they can sponsor a dependent.
+
+    Returns (parent_row, error_reason). On success error_reason is None.
+    """
+    parent = await conn.fetchrow(
+        """
+        SELECT id, family_id, tier, subscription_status, name,
+               profile_data->>'stripe_customer_id' AS stripe_customer_id,
+               profile_data->>'stripe_subscription_id' AS stripe_subscription_id
+        FROM users
+        WHERE LOWER(username) = LOWER($1) AND role = 'CLIENT'
+        """,
+        parent_username,
+    )
+    if not parent:
+        return None, "PARENT_NOT_FOUND"
+
+    parent_tier = (parent["tier"] or "").upper()
+    parent_status = (parent["subscription_status"] or "").upper()
+    if parent_tier not in DEPENDENT_ELIGIBLE_PARENT_TIERS:
+        return parent, "PARENT_NOT_SOVEREIGN_CIRCLE"
+    if parent_status not in DEPENDENT_ELIGIBLE_PARENT_STATUSES:
+        return parent, "PARENT_SUBSCRIPTION_INACTIVE"
+    return parent, None
+
+
+async def _ensure_family_row(conn, parent) -> str:
+    """Make sure parent has a families row; return the family_id."""
+    family_id = parent["family_id"]
+    parent_username = parent.get("name") or ""
+    if not family_id:
+        family_code = f"FAM_{secrets.token_hex(4).upper()}"
+        family_id = await conn.fetchval(
+            """
+            INSERT INTO families (family_code, head_of_household_id, name)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            """,
+            family_code,
+            parent["id"],
+            f"{parent_username or 'Sovereign'} family",
+        )
+        await conn.execute(
+            "UPDATE users SET family_id = $1 WHERE id = $2",
+            family_id,
+            parent["id"],
+        )
+    else:
+        hoh = await conn.fetchval(
+            "SELECT head_of_household_id FROM families WHERE id = $1",
+            family_id,
+        )
+        if not hoh:
+            await conn.execute(
+                "UPDATE families SET head_of_household_id = $1 WHERE id = $2",
+                parent["id"],
+                family_id,
+            )
+    return family_id
+
+
+async def _count_existing_dependents(conn, family_id) -> int:
+    """Count existing dependents (excluding HOH/spouse) under this family."""
+    return await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM users
+        WHERE family_id = $1
+          AND tier = 'DEPENDENT'
+        """,
+        family_id,
+    ) or 0
+
+
+def _compute_is_minor(dob_str):
+    """Return (dob_date_or_None, is_minor)."""
+    if not dob_str:
+        return None, False
+    try:
+        dob_date = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
+        age = (datetime.date.today() - dob_date).days // 365
+        return dob_date, age < 18
+    except ValueError:
+        return None, False
+
+
+def _build_dependent_profile(
+    *,
+    username: str,
+    email: str,
+    profile_fields: dict,
+    family_id,
+    parent,
+    parent_username: str,
+    is_minor: bool,
+    paid_ordinal: int,
+    monthly_cost_cents: int,
+    stripe_customer_id: str = "",
+    stripe_subscription_id: str = "",
+) -> dict:
+    """Shared profile_data dict for both free and paid dependent inserts."""
+    now = datetime.datetime.now()
+    today = str(now.date())
+    hardware_id = f"CLIENT_{username.upper()}_ID"
+    plan_label = (
+        "DEPENDENT_UNDER_SOVEREIGN_CIRCLE"
+        if paid_ordinal == 0
+        else f"DEPENDENT_PAID_TIER_{min(paid_ordinal, 4)}"
+    )
+
+    return {
+        "role": "CLIENT",
+        "name": profile_fields.get("name", ""),
+        "email": email,
+        "phone": profile_fields.get("phone", ""),
+        "hardware_id": hardware_id,
+        "family_id": str(family_id),
+        "joined_date": today,
+        "tier": "DEPENDENT",
+        "registration_type": "DEPENDENT",
+        "dob": profile_fields.get("dob"),
+        "is_minor": is_minor,
+        "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
+        "timezone": profile_fields.get("timezone", "America/New_York"),
+        "subscription_status": "FAMILY_PLAN_ACTIVE",
+        "subscription_plan": plan_label,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": stripe_subscription_id,
+        "subscription_start_date": today,
+        "trial_end_date": "",
+        "parent_username": parent_username,
+        "parent_id": str(parent["id"]),
+        "guardian_id": str(parent["id"]),
+        "head_of_household_id": str(parent["id"]),
+        # Billing audit
+        "paid_slot_ordinal": paid_ordinal,  # 0 = free first dependent
+        "monthly_cost_cents": monthly_cost_cents,
+        "family_tier_price_key": (
+            None if paid_ordinal == 0 else _family_tier_env_key(paid_ordinal)
+        ),
+        "total_sessions_count": 0,
+        "token_balance": 50000,
+        "token_usage_today": 0,
+        "token_usage_month": 0,
+        "last_token_reset": today,
+        "can_access_nate": True,
+        "coach_id": profile_fields.get("coach_id", "COACH_COACHN_ID"),
+        "assigned_coach": profile_fields.get("assigned_coach", "CoachN"),
+        "assigned_coach_id": profile_fields.get(
+            "assigned_coach_id", "COACH_COACHN_ID"
+        ),
+        "created_at": str(now),
+        "updated_at": str(now),
+        "onboarding_completed": False,
+        "discount_code": "",
+    }
+
+
+async def _insert_dependent_user(
+    conn,
+    *,
+    username: str,
+    password_hash: str,
+    email: str,
+    profile_fields: dict,
+    family_id,
+    parent,
+    is_minor: bool,
+    dob_date,
+    new_profile: dict,
+):
+    """Common INSERT into users for both free and paid dependents."""
+    return await conn.fetchval(
+        """
+        INSERT INTO users (
+            username, role, password_hash, name, email, dob,
+            tier, subscription_status, token_balance,
+            family_id, guardian_id, is_minor,
+            family_role, linked_by, linked_at,
+            consent_version, consent_date,
+            profile_data, hardware_id, intake_data
+        ) VALUES (
+            $1, 'CLIENT', $2, $3, $4, $5,
+            'DEPENDENT', 'FAMILY_PLAN_ACTIVE', $6,
+            $7, $8, $9,
+            'dependent', $8, NOW(),
+            $10, NOW(),
+            $11::jsonb, $12, $13::jsonb
+        )
+        RETURNING id
+        """,
+        username,
+        password_hash,
+        profile_fields.get("name", ""),
+        email or None,
+        dob_date,
+        50000,
+        family_id,
+        parent["id"],
+        is_minor,
+        profile_fields.get("consent_version", "v13.0_2026"),
+        json.dumps(new_profile),
+        f"CLIENT_{username.upper()}_ID",
+        json.dumps({
+            "goals": [],
+            "modality": profile_fields.get("modality", "General"),
+        }),
+    )
 
 
 async def finalize_dependent_signup(
@@ -243,11 +482,16 @@ async def finalize_dependent_signup(
     profile_fields: dict,
     parent_username: str,
 ) -> Tuple[bool, str, dict]:
-    """Create a CLIENT user as a dependent under an existing parent's Sovereign
-    Circle plan, with no Stripe charge.
+    """Decide whether a dependent under `parent_username` is FREE or PAID and,
+    if FREE, finalize the user immediately under the parent's Sovereign Circle
+    plan with no Stripe charge.
 
-    Returns (ok, reason, info_dict). On success, info_dict contains
-    user_id, family_id, parent_id, parent_username.
+    Outcomes:
+      * (True, "DEPENDENT_REGISTRATION_SUCCESS", info) — free dep created.
+      * (False, "DEPENDENT_REQUIRES_PAYMENT", info)    — caller must run
+        Stripe Checkout with the price ID indicated by info["family_tier_price_key"]
+        and call finalize_paid_dependent_signup() from the webhook on success.
+      * (False, <error_reason>, {})                    — validation failed.
     """
     email = (email or "").strip().lower()
     parent_username = (parent_username or "").strip()
@@ -261,154 +505,69 @@ async def finalize_dependent_signup(
         ):
             return False, "USERNAME_TAKEN", {}
 
-        parent = await conn.fetchrow(
-            """
-            SELECT id, family_id, tier, subscription_status, name
-            FROM users
-            WHERE LOWER(username) = LOWER($1) AND role = 'CLIENT'
-            """,
-            parent_username,
+        parent, err = await _validate_parent_for_dependent(conn, parent_username)
+        if err:
+            extra = {}
+            if parent:
+                extra = {"parent_tier": (parent["tier"] or "").upper(),
+                         "parent_status": (parent["subscription_status"] or "").upper()}
+            return False, err, extra
+
+        family_id = await _ensure_family_row(conn, parent)
+        existing_count = await _count_existing_dependents(conn, family_id)
+
+        # 0 existing => this dep is the 1st (free). 1 existing => 1st paid. etc.
+        paid_ordinal = existing_count  # 0 means free slot
+
+        dob_date, is_minor = _compute_is_minor(profile_fields.get("dob"))
+
+        if paid_ordinal > 0:
+            # Caller must route through Stripe Checkout. Do NOT create user.
+            price_cents = _family_tier_price_cents(paid_ordinal)
+            tier_key = _family_tier_env_key(paid_ordinal)
+            return False, "DEPENDENT_REQUIRES_PAYMENT", {
+                "parent_id": str(parent["id"]),
+                "parent_username": parent_username,
+                "family_id": str(family_id),
+                "is_minor": is_minor,
+                "paid_ordinal": paid_ordinal,
+                "monthly_cost_cents": price_cents,
+                "family_tier_price_key": tier_key,
+                "existing_dependent_count": existing_count,
+            }
+
+        # FREE path — first dependent.
+        new_profile = _build_dependent_profile(
+            username=username,
+            email=email,
+            profile_fields=profile_fields,
+            family_id=family_id,
+            parent=parent,
+            parent_username=parent_username,
+            is_minor=is_minor,
+            paid_ordinal=0,
+            monthly_cost_cents=0,
         )
-        if not parent:
-            return False, "PARENT_NOT_FOUND", {}
-
-        parent_tier = (parent["tier"] or "").upper()
-        parent_status = (parent["subscription_status"] or "").upper()
-        if parent_tier not in DEPENDENT_ELIGIBLE_PARENT_TIERS:
-            return False, "PARENT_NOT_SOVEREIGN_CIRCLE", {"parent_tier": parent_tier}
-        if parent_status not in DEPENDENT_ELIGIBLE_PARENT_STATUSES:
-            return False, "PARENT_SUBSCRIPTION_INACTIVE", {"parent_status": parent_status}
-
-        # Ensure the parent has a family row; create one if not.
-        family_id = parent["family_id"]
-        if not family_id:
-            family_code = f"FAM_{secrets.token_hex(4).upper()}"
-            family_id = await conn.fetchval(
-                """
-                INSERT INTO families (family_code, head_of_household_id, name)
-                VALUES ($1, $2, $3)
-                RETURNING id
-                """,
-                family_code,
-                parent["id"],
-                f"{parent['name'] or parent_username} family",
-            )
-            await conn.execute(
-                "UPDATE users SET family_id = $1 WHERE id = $2",
-                family_id,
-                parent["id"],
-            )
-        else:
-            hoh = await conn.fetchval(
-                "SELECT head_of_household_id FROM families WHERE id = $1",
-                family_id,
-            )
-            if not hoh:
-                await conn.execute(
-                    "UPDATE families SET head_of_household_id = $1 WHERE id = $2",
-                    parent["id"],
-                    family_id,
-                )
-
-        # Compute is_minor from DOB.
-        dob_str = profile_fields.get("dob")
-        is_minor = False
-        dob_date = None
-        if dob_str:
-            try:
-                dob_date = datetime.datetime.strptime(dob_str, "%Y-%m-%d").date()
-                age = (datetime.date.today() - dob_date).days // 365
-                is_minor = age < 18
-            except ValueError:
-                dob_date = None
-
-        now = datetime.datetime.now()
-        today = str(now.date())
-        hardware_id = f"CLIENT_{username.upper()}_ID"
-
-        new_profile = {
-            "role": "CLIENT",
-            "name": profile_fields.get("name", ""),
-            "email": email,
-            "phone": profile_fields.get("phone", ""),
-            "hardware_id": hardware_id,
-            "family_id": str(family_id),
-            "joined_date": today,
-            "tier": "DEPENDENT",
-            "registration_type": "DEPENDENT",
-            "dob": dob_str,
-            "is_minor": is_minor,
-            "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
-            "timezone": profile_fields.get("timezone", "America/New_York"),
-            "subscription_status": "FAMILY_PLAN_ACTIVE",
-            "subscription_plan": "DEPENDENT_UNDER_SOVEREIGN_CIRCLE",
-            "stripe_customer_id": "",  # Inherited via parent's Stripe subscription.
-            "subscription_start_date": today,
-            "trial_end_date": "",
-            "parent_username": parent_username,
-            "parent_id": str(parent["id"]),
-            "guardian_id": str(parent["id"]),
-            "head_of_household_id": str(parent["id"]),
-            "total_sessions_count": 0,
-            "token_balance": 50000,
-            "token_usage_today": 0,
-            "token_usage_month": 0,
-            "last_token_reset": today,
-            "can_access_nate": True,
-            "coach_id": profile_fields.get("coach_id", "COACH_COACHN_ID"),
-            "assigned_coach": profile_fields.get("assigned_coach", "CoachN"),
-            "assigned_coach_id": profile_fields.get(
-                "assigned_coach_id", "COACH_COACHN_ID"
-            ),
-            "created_at": str(now),
-            "updated_at": str(now),
-            "onboarding_completed": False,
-            "discount_code": "",
-        }
 
         try:
-            new_user_id = await conn.fetchval(
-                """
-                INSERT INTO users (
-                    username, role, password_hash, name, email, dob,
-                    tier, subscription_status, token_balance,
-                    family_id, guardian_id, is_minor,
-                    family_role, linked_by, linked_at,
-                    consent_version, consent_date,
-                    profile_data, hardware_id, intake_data
-                ) VALUES (
-                    $1, 'CLIENT', $2, $3, $4, $5,
-                    'DEPENDENT', 'FAMILY_PLAN_ACTIVE', $6,
-                    $7, $8, $9,
-                    'dependent', $8, NOW(),
-                    $10, NOW(),
-                    $11::jsonb, $12, $13::jsonb
-                )
-                RETURNING id
-                """,
-                username,
-                password_hash,
-                profile_fields.get("name", ""),
-                email or None,
-                dob_date,
-                50000,
-                family_id,
-                parent["id"],
-                is_minor,
-                profile_fields.get("consent_version", "v13.0_2026"),
-                json.dumps(new_profile),
-                hardware_id,
-                json.dumps({
-                    "goals": [],
-                    "modality": profile_fields.get("modality", "General"),
-                }),
+            new_user_id = await _insert_dependent_user(
+                conn,
+                username=username,
+                password_hash=password_hash,
+                email=email,
+                profile_fields=profile_fields,
+                family_id=family_id,
+                parent=parent,
+                is_minor=is_minor,
+                dob_date=dob_date,
+                new_profile=new_profile,
             )
         except Exception as e:
             logger.error("finalize_dependent_signup INSERT failed for %s: %s", username, e)
             return False, f"DB_ERROR: {e}", {}
 
     logger.info(
-        "finalize_dependent_signup: created dependent %s under parent %s family=%s",
+        "finalize_dependent_signup: FREE dependent %s under parent %s family=%s",
         username, parent_username, family_id,
     )
     return True, "DEPENDENT_REGISTRATION_SUCCESS", {
@@ -417,4 +576,106 @@ async def finalize_dependent_signup(
         "parent_id": str(parent["id"]),
         "parent_username": parent_username,
         "is_minor": is_minor,
+        "paid_ordinal": 0,
+        "monthly_cost_cents": 0,
+    }
+
+
+async def finalize_paid_dependent_signup(
+    db_pool,
+    *,
+    username: str,
+    password_hash: str,
+    email: str,
+    profile_fields: dict,
+    parent_username: str,
+    paid_ordinal: int,
+    monthly_cost_cents: int,
+    stripe_customer_id: str,
+    stripe_subscription_id: str,
+    stripe_checkout_session_id: str,
+) -> Tuple[bool, str, dict]:
+    """Materialize a paid dependent AFTER Stripe Checkout has succeeded.
+
+    Called from the webhook handler. We re-validate parent eligibility and
+    family count to defend against tier changes between prepare and webhook.
+    """
+    email = (email or "").strip().lower()
+    parent_username = (parent_username or "").strip()
+    if not parent_username:
+        return False, "PARENT_USERNAME_REQUIRED", {}
+
+    async with db_pool.acquire() as conn:
+        if await conn.fetchval(
+            "SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)", username
+        ):
+            return False, "USERNAME_TAKEN", {}
+
+        parent, err = await _validate_parent_for_dependent(conn, parent_username)
+        if err:
+            return False, err, {}
+
+        family_id = await _ensure_family_row(conn, parent)
+        # Re-count: another dependent might have been added between
+        # prepare-checkout and webhook completion. Recompute the ordinal so
+        # the audit trail is correct, but trust the price the user already
+        # paid (no double-charge / clawback here — Stripe is source of truth).
+        existing_count = await _count_existing_dependents(conn, family_id)
+        actual_ordinal = existing_count if existing_count > 0 else 1
+        if actual_ordinal != paid_ordinal:
+            logger.warning(
+                "finalize_paid_dependent_signup: ordinal drift for %s — "
+                "expected %d, actual %d", username, paid_ordinal, actual_ordinal,
+            )
+
+        dob_date, is_minor = _compute_is_minor(profile_fields.get("dob"))
+
+        new_profile = _build_dependent_profile(
+            username=username,
+            email=email,
+            profile_fields=profile_fields,
+            family_id=family_id,
+            parent=parent,
+            parent_username=parent_username,
+            is_minor=is_minor,
+            paid_ordinal=actual_ordinal,
+            monthly_cost_cents=monthly_cost_cents,
+            stripe_customer_id=stripe_customer_id,
+            stripe_subscription_id=stripe_subscription_id,
+        )
+        new_profile["stripe_checkout_session_id"] = stripe_checkout_session_id
+
+        try:
+            new_user_id = await _insert_dependent_user(
+                conn,
+                username=username,
+                password_hash=password_hash,
+                email=email,
+                profile_fields=profile_fields,
+                family_id=family_id,
+                parent=parent,
+                is_minor=is_minor,
+                dob_date=dob_date,
+                new_profile=new_profile,
+            )
+        except Exception as e:
+            logger.error(
+                "finalize_paid_dependent_signup INSERT failed for %s: %s",
+                username, e,
+            )
+            return False, f"DB_ERROR: {e}", {}
+
+    logger.info(
+        "finalize_paid_dependent_signup: PAID dependent %s under parent %s "
+        "family=%s ordinal=%d cost=%d¢",
+        username, parent_username, family_id, actual_ordinal, monthly_cost_cents,
+    )
+    return True, "DEPENDENT_PAID_REGISTRATION_SUCCESS", {
+        "user_id": str(new_user_id),
+        "family_id": str(family_id),
+        "parent_id": str(parent["id"]),
+        "parent_username": parent_username,
+        "is_minor": is_minor,
+        "paid_ordinal": actual_ordinal,
+        "monthly_cost_cents": monthly_cost_cents,
     }

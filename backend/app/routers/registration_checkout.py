@@ -40,6 +40,12 @@ PRICES = {
     "DOJO_TEACHER": os.getenv("STRIPE_PRICE_DOJO_TEACHER"),
     "DOJO_JUDGE": os.getenv("STRIPE_PRICE_DOJO_JUDGE"),
     "DOJO_COACH_NATE": os.getenv("STRIPE_PRICE_DOJO_COACH_NATE"),
+    # Family-plan add-on prices (paid dependents under Sovereign Circle).
+    # Cents: $75 / $60 / $45 / $30 — see family_tier_price_cents().
+    "FAMILY_TIER_1": os.getenv("STRIPE_PRICE_FAMILY_TIER_1"),
+    "FAMILY_TIER_2": os.getenv("STRIPE_PRICE_FAMILY_TIER_2"),
+    "FAMILY_TIER_3": os.getenv("STRIPE_PRICE_FAMILY_TIER_3"),
+    "FAMILY_TIER_4": os.getenv("STRIPE_PRICE_FAMILY_TIER_4"),
 }
 
 DOJO_PRICES_CENTS = {
@@ -334,6 +340,103 @@ class PrepareRequest(BaseModel):
     auth_token: Optional[str] = None
 
 
+@public_router.get("/dependent-price")
+async def dependent_price_preview(parent_username: str, request: Request):
+    """Return the monthly cost for adding a dependent under `parent_username`.
+
+    Used by the registration form to disclose "This will be the 2nd dependent
+    at $75/mo" BEFORE the user submits — so paid-dep redirects to Stripe are
+    not a surprise. Free first-dependent returns monthly_cost_cents=0.
+
+    Public, rate-limited; rejects if parent is not on an active Sovereign
+    Circle plan.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_check(client_ip):
+        raise HTTPException(429, "Too many lookups. Please try again shortly.")
+
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(503, "Service temporarily unavailable")
+
+    parent_username = (parent_username or "").strip()
+    if not parent_username:
+        raise HTTPException(400, "parent_username is required")
+
+    from app.services.registration_finalize import (
+        DEPENDENT_ELIGIBLE_PARENT_TIERS,
+        DEPENDENT_ELIGIBLE_PARENT_STATUSES,
+        FAMILY_TIER_PRICE_CENTS,
+        FAMILY_TIER_PRICE_DEFAULT_CENTS,
+    )
+
+    async with db_pool.acquire() as conn:
+        parent = await conn.fetchrow(
+            """
+            SELECT id, family_id, tier, subscription_status
+            FROM users
+            WHERE LOWER(username) = LOWER($1) AND role = 'CLIENT'
+            """,
+            parent_username,
+        )
+        if not parent:
+            return {
+                "eligible": False,
+                "reason": "PARENT_NOT_FOUND",
+                "message": "Head-of-household account not found.",
+            }
+        parent_tier = (parent["tier"] or "").upper()
+        parent_status = (parent["subscription_status"] or "").upper()
+        if parent_tier not in DEPENDENT_ELIGIBLE_PARENT_TIERS:
+            return {
+                "eligible": False,
+                "reason": "PARENT_NOT_SOVEREIGN_CIRCLE",
+                "message": "Head of household must be on Sovereign Circle.",
+            }
+        if parent_status not in DEPENDENT_ELIGIBLE_PARENT_STATUSES:
+            return {
+                "eligible": False,
+                "reason": "PARENT_SUBSCRIPTION_INACTIVE",
+                "message": "Head-of-household subscription is not active.",
+            }
+
+        existing = 0
+        if parent["family_id"]:
+            existing = await conn.fetchval(
+                "SELECT COUNT(*) FROM users "
+                "WHERE family_id = $1 AND tier = 'DEPENDENT'",
+                parent["family_id"],
+            ) or 0
+
+    if existing == 0:
+        return {
+            "eligible": True,
+            "free": True,
+            "ordinal": 1,
+            "monthly_cost_cents": 0,
+            "monthly_cost_display": "$0.00",
+            "message": "First dependent on Sovereign Circle is free.",
+        }
+
+    paid_ordinal = existing  # 0 existing→free, 1→1st paid, etc.
+    cents = FAMILY_TIER_PRICE_CENTS.get(paid_ordinal, FAMILY_TIER_PRICE_DEFAULT_CENTS)
+    capped = max(1, min(paid_ordinal, 4))
+    return {
+        "eligible": True,
+        "free": False,
+        "ordinal": existing + 1,
+        "paid_ordinal": paid_ordinal,
+        "family_tier_price_key": f"STRIPE_PRICE_FAMILY_TIER_{capped}",
+        "monthly_cost_cents": cents,
+        "monthly_cost_display": f"${cents / 100:.2f}",
+        "message": (
+            f"Parent already has {existing} dependent"
+            f"{'s' if existing != 1 else ''}. This will be dependent #{existing + 1} "
+            f"at ${cents / 100:.2f}/mo."
+        ),
+    }
+
+
 @public_router.post("/checkout/prepare")
 async def prepare_checkout(body: PrepareRequest, request: Request):
     """Create a pending signup and Stripe Checkout session."""
@@ -379,8 +482,12 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     profile_fields["consent_version"] = body.consent_version
 
     # ------------------------------------------------------------------
-    # Free-dependent path: a CLIENT signing up under a parent who is on
-    # Sovereign Circle. No Stripe charge — dependent rides on parent's plan.
+    # Dependent path: a CLIENT signing up under a parent on Sovereign Circle.
+    #   - 1st dependent in the family is FREE → finalized inline.
+    #   - 2nd+ dependent is PAID via STRIPE_PRICE_FAMILY_TIER_N
+    #     ($75 / $60 / $45 / $30 by ordinal). We create a pending_signups
+    #     row and Stripe Checkout session; the webhook calls
+    #     finalize_paid_dependent_signup() on success.
     # ------------------------------------------------------------------
     parent_username = (body.parent_username or "").strip()
     if role == "CLIENT" and parent_username:
@@ -394,38 +501,183 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
             profile_fields=profile_fields,
             parent_username=parent_username,
         )
-        if not ok:
-            human = {
-                "USERNAME_TAKEN": ("Username is already taken", 409),
-                "PARENT_NOT_FOUND": (
-                    "Head-of-household account not found. Check the parent's username.",
-                    400,
-                ),
-                "PARENT_NOT_SOVEREIGN_CIRCLE": (
-                    "Free dependent membership requires the head of household to be on Sovereign Circle.",
-                    400,
-                ),
-                "PARENT_SUBSCRIPTION_INACTIVE": (
-                    "Head-of-household subscription is not active.",
-                    400,
-                ),
-                "PARENT_USERNAME_REQUIRED": ("Parent username is required.", 400),
-            }
-            msg, status = human.get(reason, (f"Dependent registration failed: {reason}", 400))
-            if reason.startswith("DB_ERROR"):
-                logger.error("finalize_dependent_signup DB error: %s", reason)
-                msg, status = "Registration setup failed", 500
-            raise HTTPException(status, msg)
 
-        return {
-            "checkout_url": None,
-            "dependent_created": True,
-            "user_id": info.get("user_id"),
-            "family_id": info.get("family_id"),
-            "parent_username": info.get("parent_username"),
-            "is_minor": info.get("is_minor", False),
-            "message": "Dependent linked to Sovereign Circle plan — no payment required.",
+        if ok:
+            return {
+                "checkout_url": None,
+                "dependent_created": True,
+                "user_id": info.get("user_id"),
+                "family_id": info.get("family_id"),
+                "parent_username": info.get("parent_username"),
+                "is_minor": info.get("is_minor", False),
+                "paid_ordinal": info.get("paid_ordinal", 0),
+                "monthly_cost_cents": info.get("monthly_cost_cents", 0),
+                "message": "Dependent linked to Sovereign Circle plan — no payment required.",
+            }
+
+        # Paid-dependent path: create pending signup + Stripe Checkout.
+        if reason == "DEPENDENT_REQUIRES_PAYMENT":
+            tier_key = info.get("family_tier_price_key")  # e.g. STRIPE_PRICE_FAMILY_TIER_1
+            paid_ordinal = info.get("paid_ordinal", 1)
+            monthly_cost_cents = info.get("monthly_cost_cents", 0)
+            family_id = info.get("family_id")
+            parent_id = info.get("parent_id")
+            is_minor = info.get("is_minor", False)
+
+            # Resolve to a price_id via PRICES dict (FAMILY_TIER_N keys).
+            price_lookup_key = (tier_key or "").replace("STRIPE_PRICE_", "")
+            price_id = PRICES.get(price_lookup_key)
+            if not price_id:
+                logger.error(
+                    "Family tier price not configured: %s (paid_ordinal=%d)",
+                    tier_key, paid_ordinal,
+                )
+                raise HTTPException(
+                    503,
+                    "Family-plan billing is not configured. Please contact support.",
+                )
+
+            # Encode dependent context inside payload so the webhook can
+            # finalize via finalize_paid_dependent_signup.
+            dep_payload = dict(profile_fields)
+            dep_payload["signup_type"] = "dependent"
+            dep_payload["parent_username"] = parent_username
+            dep_payload["parent_id"] = parent_id
+            dep_payload["family_id"] = family_id
+            dep_payload["is_minor"] = is_minor
+            dep_payload["paid_ordinal"] = paid_ordinal
+            dep_payload["monthly_cost_cents"] = monthly_cost_cents
+            dep_payload["family_tier_price_key"] = tier_key
+
+            dep_pricing_snapshot = {
+                "tier": "DEPENDENT",
+                "billing_cycle": "monthly",
+                "price_key": price_lookup_key,
+                "paid_ordinal": paid_ordinal,
+                "monthly_cost_cents": monthly_cost_cents,
+                "parent_username": parent_username,
+                "family_id": family_id,
+            }
+
+            try:
+                async with db_pool.acquire() as conn:
+                    if pending:
+                        await conn.execute(
+                            """
+                            UPDATE pending_signups
+                            SET password_hash = $2, email = $3, payload = $4::jsonb,
+                                tier = $5, selected_dojos = $6::jsonb,
+                                discount_code = $7, pricing_snapshot = $8::jsonb,
+                                expires_at = NOW() + INTERVAL '2 hours',
+                                created_at = NOW()
+                            WHERE id = $1
+                            """,
+                            pending,
+                            password_hash,
+                            email,
+                            json.dumps(dep_payload),
+                            "DEPENDENT",
+                            json.dumps([]),
+                            None,
+                            json.dumps(dep_pricing_snapshot),
+                        )
+                        signup_id = str(pending)
+                    else:
+                        row = await conn.fetchrow(
+                            """
+                            INSERT INTO pending_signups
+                                (role, username, password_hash, email, payload, tier,
+                                 selected_dojos, discount_code, pricing_snapshot)
+                            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)
+                            RETURNING id
+                            """,
+                            "CLIENT",
+                            username,
+                            password_hash,
+                            email,
+                            json.dumps(dep_payload),
+                            "DEPENDENT",
+                            json.dumps([]),
+                            None,
+                            json.dumps(dep_pricing_snapshot),
+                        )
+                        signup_id = str(row["id"])
+            except Exception as e:
+                logger.error("paid-dependent pending_signups INSERT failed: %s", e)
+                raise HTTPException(500, "Registration setup failed")
+
+            try:
+                checkout_session = stripe.checkout.Session.create(
+                    mode="subscription",
+                    payment_method_types=["card"],
+                    line_items=[{"price": price_id, "quantity": 1}],
+                    success_url=SUCCESS_URL,
+                    cancel_url=CANCEL_URL,
+                    metadata={
+                        "type": "pending_dependent_signup",
+                        "pending_signup_id": signup_id,
+                        "parent_username": parent_username,
+                        "family_id": str(family_id),
+                        "paid_ordinal": str(paid_ordinal),
+                        "family_tier_price_key": tier_key or "",
+                    },
+                )
+            except stripe.StripeError as e:
+                logger.error(
+                    "Stripe Checkout creation failed (paid dependent): %s", e
+                )
+                raise HTTPException(502, "Payment service unavailable")
+
+            try:
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE pending_signups SET stripe_checkout_session_id = $1 "
+                        "WHERE id = $2::uuid",
+                        checkout_session.id,
+                        signup_id,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to link Stripe session to dependent pending_signup: %s",
+                    e,
+                )
+
+            return {
+                "checkout_url": checkout_session.url,
+                "session_id": checkout_session.id,
+                "pricing_snapshot": dep_pricing_snapshot,
+                "dependent_paid": True,
+                "paid_ordinal": paid_ordinal,
+                "monthly_cost_cents": monthly_cost_cents,
+                "parent_username": parent_username,
+                "message": (
+                    f"Dependent #{paid_ordinal + 1} under Sovereign Circle — "
+                    f"${monthly_cost_cents / 100:.2f}/mo. Continue to payment."
+                ),
+            }
+
+        # Validation failures.
+        human = {
+            "USERNAME_TAKEN": ("Username is already taken", 409),
+            "PARENT_NOT_FOUND": (
+                "Head-of-household account not found. Check the parent's username.",
+                400,
+            ),
+            "PARENT_NOT_SOVEREIGN_CIRCLE": (
+                "Dependent membership requires the head of household to be on Sovereign Circle.",
+                400,
+            ),
+            "PARENT_SUBSCRIPTION_INACTIVE": (
+                "Head-of-household subscription is not active.",
+                400,
+            ),
+            "PARENT_USERNAME_REQUIRED": ("Parent username is required.", 400),
         }
+        msg, status = human.get(reason, (f"Dependent registration failed: {reason}", 400))
+        if reason.startswith("DB_ERROR"):
+            logger.error("finalize_dependent_signup DB error: %s", reason)
+            msg, status = "Registration setup failed", 500
+        raise HTTPException(status, msg)
 
     # Build Stripe line_items
     line_items = []

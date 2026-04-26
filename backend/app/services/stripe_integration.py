@@ -1997,21 +1997,45 @@ class StripeWebhookHandler:
         payload = row["payload"] if isinstance(row["payload"], dict) else {}
         dojos = row["selected_dojos"] if isinstance(row["selected_dojos"], list) else []
 
+        # Dispatch on payload.signup_type — paid dependents follow a different
+        # finalize path than primary subscribers.
+        signup_type = (payload.get("signup_type") or "").lower() if isinstance(payload, dict) else ""
+        is_dependent = (
+            signup_type == "dependent"
+            or bool(payload.get("parent_username"))
+        )
+
         try:
-            from app.services.registration_finalize import finalize_signup
-            ok, reason = await finalize_signup(
-                self.db,
-                role=row["role"],
-                username=row["username"],
-                password_hash=row["password_hash"],
-                email=row["email"] or "",
-                profile_fields=payload,
-                tier=row["tier"] or "",
-                selected_dojos=dojos,
-                discount_code=row["discount_code"] or "",
-                stripe_customer_id=session.get("customer", ""),
-                stripe_checkout_session_id=session.get("id", ""),
-            )
+            if is_dependent:
+                from app.services.registration_finalize import finalize_paid_dependent_signup
+                ok, reason, _info = await finalize_paid_dependent_signup(
+                    self.db,
+                    username=row["username"],
+                    password_hash=row["password_hash"],
+                    email=row["email"] or "",
+                    profile_fields=payload,
+                    parent_username=payload.get("parent_username", ""),
+                    paid_ordinal=int(payload.get("paid_ordinal") or 1),
+                    monthly_cost_cents=int(payload.get("monthly_cost_cents") or 0),
+                    stripe_customer_id=session.get("customer", "") or "",
+                    stripe_subscription_id=session.get("subscription", "") or "",
+                    stripe_checkout_session_id=session.get("id", "") or "",
+                )
+            else:
+                from app.services.registration_finalize import finalize_signup
+                ok, reason = await finalize_signup(
+                    self.db,
+                    role=row["role"],
+                    username=row["username"],
+                    password_hash=row["password_hash"],
+                    email=row["email"] or "",
+                    profile_fields=payload,
+                    tier=row["tier"] or "",
+                    selected_dojos=dojos,
+                    discount_code=row["discount_code"] or "",
+                    stripe_customer_id=session.get("customer", ""),
+                    stripe_checkout_session_id=session.get("id", ""),
+                )
         except Exception as e:
             print(f">>> [STRIPE] finalize_signup exception: {e}")
             ok, reason = False, f"EXCEPTION: {e}"
