@@ -317,6 +317,7 @@ class PrepareRequest(BaseModel):
     email: Optional[str] = ""
     name: str
     dob: Optional[str] = None
+    phone: Optional[str] = None
     consent_version: str = "v13.0_2026"
     consent_agreed: bool = True
     tier: Optional[str] = None
@@ -324,6 +325,10 @@ class PrepareRequest(BaseModel):
     selected_dojos: Optional[List[str]] = None
     discount_code: Optional[str] = None
     profile_fields: Optional[dict] = None
+    # Family-plan dependent (e.g. Zack under Paula's Sovereign Circle).
+    # When set, the dependent is created free under the parent and Stripe
+    # checkout is skipped entirely.
+    parent_username: Optional[str] = None
     # Coach upgrade fields
     flow: Optional[str] = None
     auth_token: Optional[str] = None
@@ -370,7 +375,57 @@ async def prepare_checkout(body: PrepareRequest, request: Request):
     profile_fields["name"] = body.name
     profile_fields["email"] = email
     profile_fields["dob"] = body.dob
+    profile_fields["phone"] = (body.phone or "").strip()
     profile_fields["consent_version"] = body.consent_version
+
+    # ------------------------------------------------------------------
+    # Free-dependent path: a CLIENT signing up under a parent who is on
+    # Sovereign Circle. No Stripe charge — dependent rides on parent's plan.
+    # ------------------------------------------------------------------
+    parent_username = (body.parent_username or "").strip()
+    if role == "CLIENT" and parent_username:
+        from app.services.registration_finalize import finalize_dependent_signup
+
+        ok, reason, info = await finalize_dependent_signup(
+            db_pool,
+            username=username,
+            password_hash=password_hash,
+            email=email,
+            profile_fields=profile_fields,
+            parent_username=parent_username,
+        )
+        if not ok:
+            human = {
+                "USERNAME_TAKEN": ("Username is already taken", 409),
+                "PARENT_NOT_FOUND": (
+                    "Head-of-household account not found. Check the parent's username.",
+                    400,
+                ),
+                "PARENT_NOT_SOVEREIGN_CIRCLE": (
+                    "Free dependent membership requires the head of household to be on Sovereign Circle.",
+                    400,
+                ),
+                "PARENT_SUBSCRIPTION_INACTIVE": (
+                    "Head-of-household subscription is not active.",
+                    400,
+                ),
+                "PARENT_USERNAME_REQUIRED": ("Parent username is required.", 400),
+            }
+            msg, status = human.get(reason, (f"Dependent registration failed: {reason}", 400))
+            if reason.startswith("DB_ERROR"):
+                logger.error("finalize_dependent_signup DB error: %s", reason)
+                msg, status = "Registration setup failed", 500
+            raise HTTPException(status, msg)
+
+        return {
+            "checkout_url": None,
+            "dependent_created": True,
+            "user_id": info.get("user_id"),
+            "family_id": info.get("family_id"),
+            "parent_username": info.get("parent_username"),
+            "is_minor": info.get("is_minor", False),
+            "message": "Dependent linked to Sovereign Circle plan — no payment required.",
+        }
 
     # Build Stripe line_items
     line_items = []

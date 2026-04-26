@@ -9678,9 +9678,29 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
+
+        // Dependent path: backend created the user under the parent's
+        // Sovereign Circle plan with no Stripe charge. Auto-login.
+        if (data['dependent_created'] == true) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Dependent account linked under head-of-household. Logging in...'),
+            ));
+          }
+          await _loginAfterDependentCreate();
+          return;
+        }
+
         final checkoutUrl = data['checkout_url'] as String?;
         if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
-          final launched = await launchUrl(Uri.parse(checkoutUrl), mode: LaunchMode.externalApplication);
+          // On Flutter Web, an awaited http.post consumes the user gesture,
+          // so window.open(_blank) is popup-blocked by mobile Safari/Chrome.
+          // Redirect the current tab instead — never blocked.
+          final launched = await launchUrl(
+            Uri.parse(checkoutUrl),
+            mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
+            webOnlyWindowName: kIsWeb ? '_self' : null,
+          );
           if (!launched && mounted) {
             setState(() => _stripeError = 'Could not open payment page. Please try again.');
           }
@@ -9697,6 +9717,70 @@ class _SignUpWizardState extends State<SignUpWizard> {
     } finally {
       if (mounted) setState(() => _isLaunchingStripe = false);
     }
+  }
+
+  /// Called after `/checkout/prepare` returns `dependent_created: true`.
+  /// The user already exists in PostgreSQL under the parent's family.
+  /// Open a websocket and send a `login_request` directly — skip
+  /// `register_request` because the dependent is already provisioned.
+  Future<void> _loginAfterDependentCreate() async {
+    final username = _userCtrl.text.trim();
+    final password = _passCtrl.text.trim();
+    final role = _effectiveRole;
+
+    final loginSocket = WebSocketChannel.connect(Uri.parse(_endpoints[0]));
+    Timer? loginTimeout;
+    bool resolved = false;
+
+    loginTimeout = Timer(const Duration(seconds: 30), () {
+      if (resolved || !mounted) return;
+      resolved = true;
+      try { loginSocket.sink.close(); } catch (_) {}
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Dependent created, but auto-login timed out. Please log in manually.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 6),
+      ));
+    });
+
+    loginSocket.stream.listen((message) {
+      if (resolved) return;
+      try {
+        final data = jsonDecode(message);
+        if (data['type'] == 'login_success') {
+          resolved = true;
+          loginTimeout?.cancel();
+          if (!mounted) return;
+          _handleLoginSuccess(Map<String, dynamic>.from(data), loginSocket);
+        } else if (data['type'] == 'error' || data['type'] == 'registration_failed') {
+          resolved = true;
+          loginTimeout?.cancel();
+          try { loginSocket.sink.close(); } catch (_) {}
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Login after dependent create failed: ${data['message'] ?? 'unknown'}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 6),
+          ));
+        }
+      } catch (_) {}
+    }, onError: (e) {
+      if (resolved) return;
+      resolved = true;
+      loginTimeout?.cancel();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Login connection error: $e'),
+        backgroundColor: Colors.red,
+      ));
+    });
+
+    loginSocket.sink.add(jsonEncode({
+      'type': 'login_request',
+      'username': username,
+      'password': password,
+      'expected_role': role,
+    }));
   }
 }
 
