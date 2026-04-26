@@ -33,9 +33,22 @@ aws s3api put-bucket-cors \
   --cors-configuration file://cloudflare/r2-cors-classroom-uploads.json
 ```
 
+## Diff vs the previous CORS policy
+
+The pre-existing rule allowed only `GET, HEAD` from the same origins.
+We extended ONE rule in place rather than appending a second rule — S3
+CORS picks the first match, so a misordered second rule for the same
+origins would never be reached for GET/HEAD requests.
+
+| Field | Before | After | Why |
+|---|---|---|---|
+| `AllowedMethods` | `[GET, HEAD]` | `[GET, HEAD, PUT]` | PUT is the verb of every presigned-part URL the browser uploads to |
+| `ExposeHeaders` | (absent) | `[ETag]` | The browser hides cross-origin response headers from JS by default; we need ETag to send back to /complete |
+| `AllowedOrigins`, `AllowedHeaders`, `MaxAgeSeconds` | (unchanged) | (unchanged) | Existing signed-GET flow keeps working identically |
+
 ## Verify
 
-After applying, run from a coach.sovereignsanctuary.net browser console:
+After applying, run from any allowed origin's browser console:
 
 ```js
 fetch('https://<account>.r2.cloudflarestorage.com/nate-vault/_probe/x', {
@@ -44,5 +57,5 @@ fetch('https://<account>.r2.cloudflarestorage.com/nate-vault/_probe/x', {
 }).then(r => console.log(r.status, [...r.headers]));
 ```
 
-You should see `Access-Control-Allow-Methods: GET, PUT, HEAD` and
+You should see `Access-Control-Allow-Methods: GET, HEAD, PUT` and
 `Access-Control-Expose-Headers: ETag` in the response.

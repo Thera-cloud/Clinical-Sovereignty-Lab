@@ -86,6 +86,38 @@ After EVERY deploy to GREEN, before declaring done:
 If you change the count in a source file above, you MUST update the
 corresponding `trust_baseline` row in the same deploy.
 
+## Pre-Build Disk Check (MANDATORY before Docker rebuild)
+
+Root disk (`/dev/vda1`) fills during builds even though Docker data lives on
+`/mnt/volume_sfo2_01`. Build context and temp files use `/tmp` on the root
+disk, so a "Docker has plenty of space" assumption will still produce
+`no space left on device` mid-build and corrupt the deploy.
+
+Before ANY `docker compose build`:
+
+1. Prune the build cache:
+
+   ```bash
+   docker builder prune -af
+   ```
+
+2. Confirm `df -h /` shows **at least 10 GB free** on the root filesystem.
+3. If less than 10 GB free, prune images first:
+
+   ```bash
+   docker image prune -af
+   ```
+
+4. Monitor disk during the build (separate shell):
+
+   ```bash
+   watch -n5 'df -h / | tail -1'
+   ```
+
+If root disk drops below ~2 GB during a build, abort and prune before
+retrying — a failed build at 0 bytes free can leave dangling layers that
+must be cleared manually before the next attempt.
+
 ## Deploy Workflow (Trust-Safe)
 
 ```bash

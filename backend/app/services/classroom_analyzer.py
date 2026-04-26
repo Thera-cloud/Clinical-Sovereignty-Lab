@@ -2387,46 +2387,88 @@ class ClassroomAnalyzer:
             f"Key moments: {json.dumps(key_moments, default=str)[:4000]}"
         )
 
-        if db_pool and (transcript_summary or coaching_insights or key_moments):
+        # Transcript/coaching gating only applies to the primary
+        # `classroom_video` crystal and `classroom` wisdom. Voice, facial, and
+        # multimodal outputs must still crystallize when ORANGE/BLUE return
+        # signal but Whisper (or the AI pass) left summary fields empty.
+        if db_pool:
+            if transcript_summary or coaching_insights or key_moments:
+                try:
+                    from app.websocket.crystal_recall_bridge import (
+                        crystallize_from_conversation,
+                    )
+
+                    user_text = (
+                        f"Classroom video session {video_id} for professional review. "
+                        f"Summary and observations: {transcript_summary[:1800]}\n"
+                        f"Coaching lens: {coaching_insights[:1200]}\n"
+                        "Patterns around empathy, trust, attunement, and therapeutic "
+                        "presence are relevant for ongoing skill development."
+                    )
+                    nate_response = (
+                        coaching_insights
+                        or "Consider how safety, pacing, and connection show up on "
+                        "camera for the client."
+                    )
+                    if coach_query:
+                        nate_response = f"{nate_response}\nCoach asked: {coach_query[:500]}"
+
+                    ch = await crystallize_from_conversation(
+                        db_pool,
+                        coach_id,
+                        user_text,
+                        nate_response,
+                        user_name=client_name or coach_id[:12],
+                        domain="clinical",
+                        min_score=3,
+                        origin_surface="classroom_video",
+                    )
+                    if ch:
+                        crystals_created.append({"hash": ch, "domain": "clinical"})
+                except Exception as _cr_err:
+                    print(
+                        f"[Classroom] crystallize_from_conversation (non-fatal): {_cr_err}"
+                    )
+
+                try:
+                    from app.services.wisdom_lifecycle_manager import (
+                        WisdomLifecycleManager,
+                    )
+
+                    coach_uuid = None
+                    if db_pool:
+                        async with db_pool.acquire() as _conn:
+                            coach_uuid = await _conn.fetchval(
+                                """
+                                SELECT id::text FROM users
+                                WHERE hardware_id = $1 OR username = $1
+                                LIMIT 1
+                                """,
+                                coach_id,
+                            )
+                    mgr = WisdomLifecycleManager(db_pool, None)
+                    conf = min(0.95, max(0.5, tps / 10.0))
+                    await mgr.extract_wisdom(
+                        "classroom",
+                        summary_for_wisdom.strip()[:20000],
+                        user_id=coach_uuid,
+                        domain="clinical",
+                        confidence=conf,
+                    )
+                except Exception as _w_err:
+                    print(f"[Classroom] extract_wisdom classroom (non-fatal): {_w_err}")
+
+            # ===== FACIAL ANALYSIS → PMB WISDOM (not transcript-gated) =====
             try:
-                from app.websocket.crystal_recall_bridge import crystallize_from_conversation
+                aversion = float(facial_summary.get("gaze_aversion_ratio", 0.0))
+                if aversion > 0.4:
+                    from app.services.wisdom_lifecycle_manager import (
+                        WisdomLifecycleManager,
+                    )
 
-                user_text = (
-                    f"Classroom video session {video_id} for professional review. "
-                    f"Summary and observations: {transcript_summary[:1800]}\n"
-                    f"Coaching lens: {coaching_insights[:1200]}\n"
-                    "Patterns around empathy, trust, attunement, and therapeutic presence "
-                    "are relevant for ongoing skill development."
-                )
-                nate_response = (
-                    coaching_insights
-                    or "Consider how safety, pacing, and connection show up on camera for the client."
-                )
-                if coach_query:
-                    nate_response = f"{nate_response}\nCoach asked: {coach_query[:500]}"
-
-                ch = await crystallize_from_conversation(
-                    db_pool,
-                    coach_id,
-                    user_text,
-                    nate_response,
-                    user_name=client_name or coach_id[:12],
-                    domain="clinical",
-                    min_score=3,
-                    origin_surface="classroom_video",
-                )
-                if ch:
-                    crystals_created.append({"hash": ch, "domain": "clinical"})
-            except Exception as _cr_err:
-                print(f"[Classroom] crystallize_from_conversation (non-fatal): {_cr_err}")
-
-            try:
-                from app.services.wisdom_lifecycle_manager import WisdomLifecycleManager
-
-                coach_uuid = None
-                if db_pool:
+                    coach_uuid_f = None
                     async with db_pool.acquire() as _conn:
-                        coach_uuid = await _conn.fetchval(
+                        coach_uuid_f = await _conn.fetchval(
                             """
                             SELECT id::text FROM users
                             WHERE hardware_id = $1 OR username = $1
@@ -2434,23 +2476,7 @@ class ClassroomAnalyzer:
                             """,
                             coach_id,
                         )
-                mgr = WisdomLifecycleManager(db_pool, None)
-                conf = min(0.95, max(0.5, tps / 10.0))
-                await mgr.extract_wisdom(
-                    "classroom",
-                    summary_for_wisdom.strip()[:20000],
-                    user_id=coach_uuid,
-                    domain="clinical",
-                    confidence=conf,
-                )
-
-                # ===== FACIAL ANALYSIS → PMB WISDOM =====
-                # Elevated gaze aversion correlates with shame / avoidance
-                # in the shame_resilience domain. Push as a separate
-                # wisdom entry so the PMB predictability model can pick it
-                # up alongside the verbal/voice signal.
-                aversion = float(facial_summary.get("gaze_aversion_ratio", 0.0))
-                if aversion > 0.4:
+                    _mgr = WisdomLifecycleManager(db_pool, None)
                     facial_wisdom_text = (
                         f"Video session facial analysis ({client_name or client_id[:12]}): "
                         f"gaze aversion ratio {aversion:.2f} across "
@@ -2459,15 +2485,17 @@ class ClassroomAnalyzer:
                         f"{facial_summary.get('dominant_expression', 'neutral')}. "
                         f"Indicators: {', '.join(facial_summary.get('potential_indicators', []))}"
                     )
-                    await mgr.extract_wisdom(
+                    await _mgr.extract_wisdom(
                         "facial_analysis",
                         facial_wisdom_text[:20000],
-                        user_id=coach_uuid,
+                        user_id=coach_uuid_f,
                         domain="shame_resilience",
                         confidence=0.7,
                     )
-            except Exception as _w_err:
-                print(f"[Classroom] extract_wisdom (non-fatal): {_w_err}")
+            except Exception as _fw_err:
+                print(
+                    f"[Classroom] extract_wisdom facial aversion (non-fatal): {_fw_err}"
+                )
 
             # ===== FACIAL ANALYSIS → CLIENT-SCOPED CRYSTALS =====
             # One crystal per significant indicator so coach + Nate can

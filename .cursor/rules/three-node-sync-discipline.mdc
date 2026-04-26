@@ -50,3 +50,30 @@ After modifying a file, determine if sync is needed:
 ## When to Flag Sync
 
 When a task involves modifying files that run on GREEN or ORANGE, **always include the sync step in the plan**. If the conversation ends with "changes made" but no `scp`/deploy command was run, flag it: "These changes are local to BLUE — they need to be pushed to GREEN before they take effect."
+
+## Compute Routing — Where Heavy Workloads Belong
+
+GREEN is **orchestration only**. The 6 GB DigitalOcean VPS runs PostgreSQL, Redis, the bridge, and 100+ Python services in a single cgroup. Loading multi-GB ML models (wav2vec2 ~1.5 GB, large vision pipelines, etc.) inside `nate_backend` reliably triggers oom-killer. When a workload needs GPU/large-RAM compute, dispatch it to ORANGE or BLUE.
+
+| Workload | Owner | Why | Dispatch primitive |
+|---|---|---|---|
+| wav2vec2 voice-emotion classification | ORANGE | Hetzner has 32 GB RAM and the canonical sovereign-inference stack | `CLASSROOM_VOICE_REMOTE_URL` → `backend/scripts/orange/voice_emotion_server.py` :8090 over WireGuard |
+| Whisper STT (long-form audio) | ORANGE (canonical) or Azure (current) | Same as above; `whisper_stt.py` is a thin wrapper that can be flipped | `whisper_stt.py` (Azure for now) — ORANGE-hosted Whisper is a future swap |
+| Visual frame analysis (cv2/moviepy + future vision models) | BLUE | Apple Silicon GPU, lots of unified memory | `CLASSROOM_VISUAL_REMOTE_URL` → `backend/scripts/blue/classroom_visual_server.py` :8200 via Twin Engine tunnel |
+| 70B clinical-depth synthesis (TENSION/DEEP_TENSION) | BLUE | Ollama 70B already runs on Mac via `overseer-manifold` | `nate_inference_router` already routes `clinical` tier here when `HOME_GPU_URL` is set |
+| Sovereign 8B / 14B / 32B chat | ORANGE | `SOVEREIGN_INFERENCE_URL=10.13.13.5:11434` | `nate_inference_router` (`distributed_inference_config.py`) |
+
+### GREEN-side guardrails
+
+* `NODE_COLOR=green` is set in `docker-compose.prod.yml`.
+* `VOICE_EMOTION_FORCE_LIBROSA=1` keeps `VoiceEmotionAnalyzer` in librosa-rules mode whenever ORANGE is unreachable. **Never set this to 0 unless the ORANGE voice-emotion server is responding to `/health`.**
+* `classroom_remote_dispatch.py` is the only component that should call ORANGE/BLUE for the classroom video pipeline. New heavy workloads should grow new helpers there rather than re-implementing the HTTP shim.
+
+### When you add a new heavy workload
+
+1. Decide which node owns it (table above).
+2. Write the server under `backend/scripts/<color>/` with a `/health` route and a `Bearer`-protected POST endpoint.
+3. Add a thin async client to `classroom_remote_dispatch.py` (or a sibling module if it's not classroom-related).
+4. Wire the env-var hooks into `docker-compose.prod.yml` so the GREEN container can dispatch.
+5. Update this rule's table.
+6. Deploy the server first, flip the GREEN env var second.

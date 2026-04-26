@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchDaemon for the BLUE Classroom Visual Server (Mac, Apple GPU).
+
+  Install:
+    sudo cp com.sovereignsanctuary.classroom-visual.plist \
+        /Library/LaunchDaemons/
+    sudo chown root:wheel /Library/LaunchDaemons/com.sovereignsanctuary.classroom-visual.plist
+    sudo chmod 644 /Library/LaunchDaemons/com.sovereignsanctuary.classroom-visual.plist
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.sovereignsanctuary.classroom-visual.plist
+
+  Edit the EnvironmentVariables block to inject CLASSROOM_REMOTE_AUTH_TOKEN
+  (must match the value on GREEN/ORANGE — generate once with
+  `openssl rand -hex 32`).
+
+  Edit the WorkingDirectory + ProgramArguments paths to match where
+  you've vendored the backend/ tree on this Mac. The default below
+  assumes ~/SovereignSanctuary/clinical-sovereignty-lab/.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sovereignsanctuary.classroom-visual</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/nathannevedal/SovereignSanctuary/clinical-sovereignty-lab/backend/scripts/blue</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/nathannevedal/SovereignSanctuary/clinical-sovereignty-lab/.venv/bin/uvicorn</string>
+        <string>classroom_visual_server:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8200</string>
+        <string>--log-level</string>
+        <string>info</string>
+        <string>--timeout-keep-alive</string>
+        <string>1800</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>CLASSROOM_REMOTE_AUTH_TOKEN</key>
+        <string>REPLACE_WITH_SHARED_TOKEN_FROM_GREEN_AND_ORANGE</string>
+        <key>BLUE_VISUAL_HOST</key>
+        <string>127.0.0.1</string>
+        <key>BLUE_VISUAL_PORT</key>
+        <string>8200</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/sovereign/classroom-visual.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/sovereign/classroom-visual.err.log</string>
+
+    <!-- Apple Silicon GPU + ffmpeg can spike briefly; cap to keep room
+         for Ollama 70B (the higher-priority Mac workload per
+         cloudflare-tunnel-twin-engine.mdc rule #4). -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>

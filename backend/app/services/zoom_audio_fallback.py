@@ -209,53 +209,96 @@ async def transcribe_zoom_audio_to_vtt(
         td = Path(td_str)
         src_path = td / "source.bin"
         src_path.write_bytes(audio_bytes)
+        return await _transcribe_normalized(src_path, td, speaker_label)
 
-        normalized = td / "audio_16k.ogg"
-        if not _encode_mono_16k(src_path, normalized):
+
+async def transcribe_audio_file_to_vtt(
+    source_path: Path,
+    *,
+    speaker_label: str = "SPEAKER",
+) -> Optional[bytes]:
+    """
+    Path-based variant of transcribe_zoom_audio_to_vtt. Use this when the
+    source media is already on disk (e.g. a downloaded R2 video) so we
+    avoid loading hundreds of MB of bytes into Python memory just to
+    immediately write them back to a temp file. ffmpeg reads the path
+    directly, drops audio to mono 16 kHz Opus, then chunks if needed.
+    """
+    if not source_path.exists() or source_path.stat().st_size < 1024:
+        return None
+    if not _have_ffmpeg():
+        _logger.warning("ffmpeg not available — cannot run Whisper fallback")
+        return None
+
+    from app.services import whisper_stt  # noqa: WPS433
+    if not whisper_stt.is_whisper_configured():
+        _logger.warning("Whisper STT not configured — cannot run audio fallback")
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="zoom_whisper_") as td_str:
+        td = Path(td_str)
+        return await _transcribe_normalized(source_path, td, speaker_label)
+
+
+async def _transcribe_normalized(
+    src_path: Path, td: Path, speaker_label: str
+) -> Optional[bytes]:
+    """Shared core: encode → chunk → whisper → stitched VTT."""
+    from app.services import whisper_stt  # noqa: WPS433
+
+    normalized = td / "audio_16k.ogg"
+    if not _encode_mono_16k(src_path, normalized):
+        return None
+
+    size = normalized.stat().st_size
+    duration = _probe_duration_seconds(normalized)
+    _logger.info(
+        "[ZoomFallback] normalized audio: %.1f MB, %.1f s",
+        size / (1024 * 1024), duration,
+    )
+
+    chunk_paths: List[Path]
+    chunk_starts: List[float]
+    if size <= _MAX_CHUNK_BYTES or duration <= 0:
+        chunk_paths = [normalized]
+        chunk_starts = [0.0]
+    else:
+        # Conservative: 600 s per chunk at 16 kbps mono opus ~= 1.2 MB,
+        # leaves plenty of headroom under the 22 MB Whisper REST cap.
+        chunk_seconds = 600
+        chunk_dir = td / "chunks"
+        chunk_dir.mkdir()
+        chunk_paths = _chunk_by_seconds(normalized, chunk_dir, chunk_seconds)
+        if not chunk_paths:
             return None
-
-        size = normalized.stat().st_size
-        duration = _probe_duration_seconds(normalized)
+        chunk_starts = [i * chunk_seconds for i in range(len(chunk_paths))]
         _logger.info(
-            "[ZoomFallback] normalized audio: %.1f MB, %.1f s",
-            size / (1024 * 1024), duration,
+            "[ZoomFallback] split into %d chunks of ~%ds",
+            len(chunk_paths), chunk_seconds,
         )
 
-        # Decide chunking
-        chunk_paths: List[Path]
-        chunk_starts: List[float]
-        if size <= _MAX_CHUNK_BYTES or duration <= 0:
-            chunk_paths = [normalized]
-            chunk_starts = [0.0]
-        else:
-            # Conservative: 600 s per chunk at 16 kbps mono opus ≈ 1.2 MB,
-            # leaves plenty of headroom under 22 MB.
-            chunk_seconds = 600
-            chunk_dir = td / "chunks"
-            chunk_dir.mkdir()
-            chunk_paths = _chunk_by_seconds(normalized, chunk_dir, chunk_seconds)
-            if not chunk_paths:
-                return None
-            chunk_starts = [i * chunk_seconds for i in range(len(chunk_paths))]
-            _logger.info("[ZoomFallback] split into %d chunks of ~%ds", len(chunk_paths), chunk_seconds)
+    cues: List[str] = []
+    for path, offset in zip(chunk_paths, chunk_starts):
+        try:
+            data = path.read_bytes()
+        except Exception:
+            continue
+        vtt_text = await _transcribe_chunk_as_vtt(whisper_stt, data)
+        if not vtt_text:
+            continue
+        cues.extend(_shift_vtt(vtt_text, offset, speaker_label))
+        # Free the per-chunk bytes ASAP so we don't accumulate ~24 MB of
+        # uncompressed audio per minute of source for very long videos.
+        del data
 
-        cues: List[str] = []
-        for path, offset in zip(chunk_paths, chunk_starts):
-            try:
-                data = path.read_bytes()
-            except Exception:
-                continue
-            vtt_text = await _transcribe_chunk_as_vtt(whisper_stt, data)
-            if not vtt_text:
-                continue
-            cues.extend(_shift_vtt(vtt_text, offset, speaker_label))
+    if not cues:
+        _logger.warning(
+            "[ZoomFallback] no cues produced from %d chunks", len(chunk_paths)
+        )
+        return None
 
-        if not cues:
-            _logger.warning("[ZoomFallback] no cues produced from %d chunks", len(chunk_paths))
-            return None
-
-        body = "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
-        return body.encode("utf-8")
+    body = "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
+    return body.encode("utf-8")
 
 
 async def _transcribe_chunk_as_vtt(whisper_stt_module, audio_data: bytes) -> Optional[str]:
