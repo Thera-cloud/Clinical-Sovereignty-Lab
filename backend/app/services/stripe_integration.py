@@ -1764,10 +1764,6 @@ class StripeWebhookHandler:
                         print(f">>> [STRIPE] DOJO activation failed: {e}")
                 return
 
-            if checkout_type == 'voice_block':
-                await self._handle_voice_block(session, metadata)
-                return
-
             pack_type = metadata.get('pack_type')
             if pack_type:
                 config = PACK_CONFIGS[PackType(pack_type)]
@@ -1783,84 +1779,6 @@ class StripeWebhookHandler:
                     user_id, pack_type, config.sessions, config.price_cents,
                     session['payment_intent'], expires_at
                 )
-    
-    async def _handle_voice_block(self, session: Dict, metadata: Dict):  # QUANTUM-CRYSTAL-ARCH
-        """Handle voice block purchase via main webhook (consolidated from voice_billing_api)."""
-        try:
-            from app.services.voice_billing import VoiceBillingSystem
-        except ImportError:
-            print(">>> [STRIPE] voice_billing module unavailable — skipping voice block credit")
-            return
-
-        phone = metadata.get("phone", "")
-        seconds = int(metadata.get("seconds", "1200"))
-        customer_id = session.get("customer", "")
-        payment_id = session.get("payment_intent", "")
-        amount_cents = session.get("amount_total", 0)
-
-        user_id = metadata.get("user_id", "")
-        if not user_id and phone:
-            row = await self.db.fetchrow(
-                "SELECT username FROM users WHERE profile_data->>'phone' = $1 LIMIT 1",
-                phone,
-            )
-            if row:
-                user_id = row["username"]
-        if not user_id:
-            user_id = phone
-
-        if not user_id:
-            print(">>> [STRIPE] Voice block webhook: no user_id or phone in metadata")
-            return
-
-        stripe_session_id = session.get("id", "")
-        if stripe_session_id:
-            try:
-                already = await self.db.fetchval(
-                    "SELECT 1 FROM voice_transactions WHERE stripe_payment_id = $1 LIMIT 1",
-                    stripe_session_id)
-                if already:
-                    print(f">>> [STRIPE] Voice block already credited for session {stripe_session_id} — skipping")
-                    return
-            except Exception as _idem_err:
-                _logger.warning("Voice block idempotency check failed (proceeding): %s", _idem_err)
-
-        billing = VoiceBillingSystem(self.db)
-        new_balance = await billing.credit_seconds(
-            user_id=user_id,
-            phone=phone,
-            seconds=seconds,
-            stripe_customer_id=customer_id,
-            stripe_payment_id=payment_id,
-            amount_cents=amount_cents,
-        )
-
-        print(f">>> [STRIPE] Voice block credited: user={user_id[:8]}, seconds={seconds}, balance={new_balance}")
-
-        if phone:
-            try:
-                await self.db.execute(
-                    "UPDATE voice_leads SET converted = TRUE WHERE phone = $1", phone
-                )
-            except Exception:
-                pass
-
-        try:
-            import asyncio
-            from app.services.voice_notifications import send_recharge_confirmation_sms
-            name = ""
-            if phone:
-                row = await self.db.fetchrow(
-                    "SELECT COALESCE(name, profile_data->>'name', '') AS name "
-                    "FROM users WHERE profile_data->>'phone' = $1 LIMIT 1",
-                    phone,
-                )
-                name = row["name"] if row else ""
-            asyncio.create_task(
-                send_recharge_confirmation_sms(phone, name, seconds // 60, new_balance // 60)
-            )
-        except Exception as e:
-            print(f">>> [STRIPE] Voice confirmation SMS failed: {e}")
 
     async def _handle_invoice_paid(self, invoice: Dict):
         """Handle successful invoice payment."""
