@@ -1523,8 +1523,13 @@ class StripeWebhookHandler:
         if fortress and event_id:
             try:
                 await fortress.mark_processed(event_id)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.error(
+                    "WebhookFortress mark_processed failed for event %s: %s",
+                    event_id,
+                    e,
+                    exc_info=True,
+                )
 
         return {"status": "processed", "event_type": event_type}
     
