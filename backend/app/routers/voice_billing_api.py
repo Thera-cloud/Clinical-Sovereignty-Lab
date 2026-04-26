@@ -299,6 +299,27 @@ async def create_recharge(request: Request, _u: dict = Depends(_auth())):
     return {"checkout_url": url}
 
 
+@router.get("/me/balance")
+async def get_my_voice_balance(request: Request, _u: dict = Depends(_auth())):
+    """Return prepaid voice balance for the authenticated user (by hardware_id / username)."""
+    billing = getattr(request.app.state, "voice_billing", None)
+    if not billing:
+        raise HTTPException(500, "Voice billing not initialized")
+    uid = (_u.get("hardware_id") or _u.get("username") or "").strip()
+    if not uid:
+        raise HTTPException(400, "Missing user identity")
+    acc = await billing.get_account_by_user_id(uid)
+    if not acc:
+        return {"has_account": False, "balance_minutes": 0, "balance_seconds": 0}
+    sec = int(acc.get("balance_seconds") or 0)
+    return {
+        "has_account": True,
+        "balance_minutes": sec // 60,
+        "balance_seconds": sec,
+        "phone": acc.get("phone") or "",
+    }
+
+
 @router.get("/sessions/{user_id}")
 async def get_sessions(user_id: str, request: Request, _u: dict = Depends(_auth())):
     """Get voice session history for a user."""

@@ -89,6 +89,10 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   int? _vaultUsageBytes;
   int? _vaultLimitBytes;
 
+  // Voice Therapy prepaid (Twilio) — from GET /api/voice/me/balance
+  int? _voiceBalanceMinutes;
+  bool _voiceBalanceLoading = false;
+
   // Family members roster
   List<Map<String, dynamic>> _familyMembers = [];
   List<Map<String, dynamic>> _pendingInvites = [];
@@ -135,6 +139,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _fetchArchetypeStatus();
     _fetchQuestsAndMissions();
     _refreshProfileFromServer();
+    if (!_isCoachOnly) _fetchVoiceBalance();
   }
 
   Future<void> _refreshProfileFromServer() async {
@@ -738,6 +743,155 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             SnackBar(content: Text('Purchase failed: ${resp.body}'), backgroundColor: Colors.red),
           );
         }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchVoiceBalance() async {
+    if (_isCoachOnly) return;
+    final token = _profile['token']?.toString() ?? '';
+    if (token.isEmpty) return;
+    if (mounted) setState(() => _voiceBalanceLoading = true);
+    try {
+      final resp = await http
+          .get(
+            Uri.parse('${AppConfig.apiBaseUrl}/api/voice/me/balance'),
+            headers: {'Authorization': 'Bearer $token'},
+          )
+          .timeout(const Duration(seconds: 12));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final d = jsonDecode(resp.body) as Map<String, dynamic>;
+        final m = d['balance_minutes'];
+        final mins = m is int ? m : (m is num ? m.toInt() : 0);
+        setState(() {
+          _voiceBalanceMinutes = mins;
+          _voiceBalanceLoading = false;
+        });
+        return;
+      }
+      setState(() => _voiceBalanceLoading = false);
+    } catch (_) {
+      if (mounted) setState(() => _voiceBalanceLoading = false);
+    }
+  }
+
+  void _showBuyVoiceMinutesSheet() {
+    final packs = [
+      {'id': '1block', 'label': '1 block (20 min)', 'detail': 'Checkout', 'mins': '20 min'},
+      {'id': '5blocks', 'label': '5 blocks (100 min)', 'detail': 'Checkout', 'mins': '100 min'},
+      {'id': '10blocks', 'label': '10 blocks (200 min)', 'detail': 'Checkout', 'mins': '200 min'},
+      {'id': '20blocks', 'label': '20 blocks (400 min)', 'detail': 'Checkout', 'mins': '400 min'},
+    ];
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF111111),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                  width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            ),
+            const SizedBox(height: 16),
+            const Text('Buy Voice Minutes', style: TextStyle(color: Color(0xFFC9A962), fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            const Text('Secure Stripe checkout. Minutes credit after payment.', style: TextStyle(color: Colors.white54, fontSize: 13)),
+            const SizedBox(height: 20),
+            ...packs.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _purchaseVoiceBlock(p['id']! as String);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0A0A0A),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFC9A962).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.phone_in_talk, color: Color(0xFFC9A962), size: 28),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(p['label']! as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                                Text('≈ ${p['mins']}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          Text(p['detail']! as String, style: const TextStyle(color: Color(0xFFC9A962), fontWeight: FontWeight.bold, fontSize: 14)),
+                        ],
+                      ),
+                    ),
+                  ),
+                )),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _purchaseVoiceBlock(String pack) async {
+    final token = _profile['token']?.toString() ?? '';
+    final userId = (_profile['hardware_id'] ?? _profile['username'] ?? '').toString();
+    final phone = _phoneCtrl.text.isNotEmpty ? _phoneCtrl.text : (_profile['phone'] ?? '').toString();
+    if (userId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile missing user id for voice purchase'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+    try {
+      final resp = await http
+          .post(
+            Uri.parse('${AppConfig.apiBaseUrl}/api/voice/recharge'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'user_id': userId,
+              'phone': phone,
+              'pack': pack,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final url = data['checkout_url'];
+        if (url != null) {
+          await launchCheckoutUrl(url.toString());
+          await _fetchVoiceBalance();
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start checkout (${resp.statusCode})'), backgroundColor: Colors.red),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -2055,6 +2209,57 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ]),
             const SizedBox(height: 12),
             _PaymentHistoryWidget(profile: _profile),
+          ]),
+          const SizedBox(height: 20),
+
+          // --- Voice Therapy (prepaid call minutes) ---
+          _sectionHeader('VOICE THERAPY', Icons.phone_in_talk),
+          _settingsCard([
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Prepaid balance', style: TextStyle(color: _Design.textSecondary, fontSize: 11)),
+                    const SizedBox(height: 4),
+                    if (_voiceBalanceLoading)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: _Design.cyan),
+                      )
+                    else
+                      Text(
+                        _voiceBalanceMinutes == null
+                            ? '—'
+                            : '$_voiceBalanceMinutes min',
+                        style: const TextStyle(
+                          color: _Design.cyan,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Courier',
+                        ),
+                      ),
+                  ],
+                ),
+                const Icon(Icons.graphic_eq, color: _Design.cyan, size: 28),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _Design.gold,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.shopping_cart_outlined, color: Colors.black, size: 18),
+                label: const Text('Buy Voice Minutes', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13)),
+                onPressed: _showBuyVoiceMinutesSheet,
+              ),
+            ),
           ]),
           const SizedBox(height: 20),
 
