@@ -481,9 +481,18 @@ async def _get_stripe_customer(user_id: str, db_pool=None) -> Optional[str]:
 async def upgrade_subscription(
     req: UpgradeDowngradeRequest,
     request: Request,
-    auth_user_id: str = Depends(get_current_user_id),
+    current: dict = Depends(get_current_user),
 ):
-    """Change plan upward."""
+    """Change plan upward (ADMIN/COACH only; see comment below)."""
+    # This endpoint bypasses Stripe payment for trial users. Restricted to
+    # admin/coach to prevent unauthorized free upgrades. Normal users must
+    # use /api/billing/checkout which enforces Stripe payment.
+    role = (current.get("role") or "").upper()
+    if role not in ("ADMIN", "COACH"):
+        raise HTTPException(403, "This upgrade path is restricted to staff")
+    auth_user_id = (current.get("hardware_id") or current.get("username") or "").strip()
+    if not auth_user_id:
+        raise HTTPException(401, "Not authenticated")
     _verify_ownership(req.user_id, auth_user_id)
 
     if req.new_plan not in PLAN_DETAILS:
