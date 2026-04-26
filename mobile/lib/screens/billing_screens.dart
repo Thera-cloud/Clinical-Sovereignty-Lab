@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show defaultApiBaseUrl;
 import '../services/payment_service.dart';
+import '../services/checkout_launcher.dart';
 import 'payment_confirmation_screen.dart';
 import '../config/app_config.dart';
 
@@ -377,14 +378,15 @@ class _MembershipSelectionScreenState extends State<MembershipSelectionScreen> {
         if (url != null) {
           PaymentConfirmationScreen.pendingCheckout = true;
           PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(isUpgrade ? 'Opening secure checkout…' : 'Opening plan change…'),
               backgroundColor: _D.bgElevated,
             ));
+            // On Web we're navigating the same tab, so pop before redirect.
             Navigator.pop(context, planKey);
           }
+          await launchCheckoutUrl(url.toString());
         }
       } else {
         final body = jsonDecode(resp.body);
@@ -1513,7 +1515,7 @@ class _CoachingPackScreenState extends State<CoachingPackScreen> {
                   final data = jsonDecode(resp.body);
                   final url = data['checkout_url'] ?? '';
                   if (url.isNotEmpty) {
-                    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                    await launchCheckoutUrl(url.toString());
                   }
                 } else {
                   if (mounted) {
@@ -2182,10 +2184,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen>
         final data = jsonDecode(resp.body);
         final url = data['checkout_url'] as String?;
         if (url != null && url.isNotEmpty) {
-          final uri = Uri.parse(url);
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
+          await launchCheckoutUrl(url);
         }
       } else {
         final err = jsonDecode(resp.body);
@@ -2839,13 +2838,13 @@ class _TrialBannerWidgetState extends State<TrialBannerWidget> {
         if (url != null && url.isNotEmpty) {
           PaymentConfirmationScreen.pendingCheckout = true;
           PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Opening secure checkout…'),
               backgroundColor: Color(0xFF1A1A1A),
             ),
           );
+          await launchCheckoutUrl(url);
         }
       } else {
         final body = jsonDecode(resp.body);

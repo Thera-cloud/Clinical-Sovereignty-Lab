@@ -38,6 +38,7 @@ import 'widgets/upload_progress_indicator.dart';
 import 'widgets/nate_home_widget.dart';
 import 'package:home_widget/home_widget.dart';
 import 'screens/checkin_screen.dart';
+import 'services/checkout_launcher.dart';
 
 /// Debug-only print: suppressed in production builds.
 // ignore: avoid_print
@@ -7957,14 +7958,23 @@ class _SignUpWizardState extends State<SignUpWizard> {
             final checkoutUrl = data['checkout_url'] as String?;
             final newSid = data['session_id'] as String?;
             if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
-              await launchUrl(Uri.parse(checkoutUrl), mode: LaunchMode.externalApplication);
               if (newSid != null && newSid.isNotEmpty) {
                 _trialStripeSessionId = newSid;
               }
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('After you add your card, return here and tap Create Account again.'),
-                duration: Duration(seconds: 6),
-              ));
+              if (kIsWeb) {
+                // Same-tab redirect on Web — never blocked. We won't return
+                // to this screen, so show the message before navigating.
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Opening secure checkout…'),
+                  duration: Duration(seconds: 3),
+                ));
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('After you add your card, return here and tap Create Account again.'),
+                  duration: Duration(seconds: 6),
+                ));
+              }
+              await launchCheckoutUrl(checkoutUrl);
             }
           } else {
             var msg = 'Billing setup failed';
@@ -9693,14 +9703,7 @@ class _SignUpWizardState extends State<SignUpWizard> {
 
         final checkoutUrl = data['checkout_url'] as String?;
         if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
-          // On Flutter Web, an awaited http.post consumes the user gesture,
-          // so window.open(_blank) is popup-blocked by mobile Safari/Chrome.
-          // Redirect the current tab instead — never blocked.
-          final launched = await launchUrl(
-            Uri.parse(checkoutUrl),
-            mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
-            webOnlyWindowName: kIsWeb ? '_self' : null,
-          );
+          final launched = await launchCheckoutUrl(checkoutUrl);
           if (!launched && mounted) {
             setState(() => _stripeError = 'Could not open payment page. Please try again.');
           }

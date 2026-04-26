@@ -4,9 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../config/app_config.dart';
+import 'checkout_launcher.dart';
 
 /// Stripe-only payment service. All purchases redirect to an external
 /// Stripe Checkout page in the default browser.
@@ -161,7 +161,7 @@ class PaymentService {
       final data = jsonDecode(resp.body) as Map<String, dynamic>;
       final url = data['checkout_url'] as String?;
       if (url != null && url.isNotEmpty) {
-        final launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        final launched = await launchCheckoutUrl(url);
         if (!launched) {
           _logger.w('PaymentService: Could not launch checkout URL');
           _purchaseUpdates.add(PurchaseStatusResult(

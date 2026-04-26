@@ -18,6 +18,7 @@ import '../main.dart' show LobbyScreen, HardwareIdentity, ClientScheduleScreen;
 import 'billing_screens.dart';
 import '../config/app_config.dart';
 import '../services/payment_service.dart';
+import '../services/checkout_launcher.dart';
 import 'payment_confirmation_screen.dart';
 import 'vault_browser_screen.dart';
 import 'nate_organizer_screen.dart';
@@ -729,7 +730,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         if (url != null && mounted) {
           PaymentConfirmationScreen.pendingCheckout = true;
           PaymentConfirmationScreen.pendingCheckoutType = 'token_purchase';
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+          await launchCheckoutUrl(url.toString());
         }
       } else {
         if (mounted) {
@@ -757,7 +758,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       if (!mounted) return;
       if (resp.statusCode == 200) {
         final url = jsonDecode(resp.body)['portal_url'];
-        if (url != null) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        if (url != null) await launchCheckoutUrl(url.toString());
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to open billing portal'), backgroundColor: Colors.red));
@@ -946,13 +947,13 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         if (url != null) {
           PaymentConfirmationScreen.pendingCheckout = true;
           PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(isUpgrade ? 'Opening secure checkout…' : 'Opening plan change…'),
               backgroundColor: const Color(0xFF1A1A1A),
             ),
           );
+          await launchCheckoutUrl(url.toString());
         }
       } else {
         final body = jsonDecode(resp.body);
@@ -1530,8 +1531,8 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         if (url != null && url.isNotEmpty) {
           PaymentConfirmationScreen.pendingCheckout = true;
           PaymentConfirmationScreen.pendingCheckoutType = 'plan_upgrade';
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
           setState(() { _profile['upgrade_to_coach_status'] = 'PAYMENT_IN_PROGRESS'; });
+          await launchCheckoutUrl(url);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('No checkout URL received'), backgroundColor: Colors.red),
