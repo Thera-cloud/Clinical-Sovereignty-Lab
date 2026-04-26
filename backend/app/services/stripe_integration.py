@@ -1535,6 +1535,13 @@ class StripeWebhookHandler:
         if metadata.get('type') == 'voice_block':
             return  # handled by voice_billing webhook
 
+        if (metadata.get("type") or "").lower() == "family_member":
+            from app.services.registration_finalize import (
+                activate_family_member_from_stripe_checkout,
+            )
+            await activate_family_member_from_stripe_checkout(self.db, session)
+            return
+
         # --- Stripe-first registration: pending_signup flow --- # QUANTUM-CRYSTAL-ARCH
         pending_signup_id = metadata.get("pending_signup_id")
         if pending_signup_id:

@@ -5,6 +5,7 @@ Extracts core user-creation logic from bridge_server.register_new_user().
 import datetime
 import json
 import logging
+import os
 import secrets
 from pathlib import Path
 from typing import Tuple
@@ -679,3 +680,134 @@ async def finalize_paid_dependent_signup(
         "paid_ordinal": actual_ordinal,
         "monthly_cost_cents": monthly_cost_cents,
     }
+
+
+async def activate_family_member_from_stripe_checkout(db_pool, session: dict) -> None:
+    """Activate an existing dependent after Checkout when metadata.type == family_member.
+    Called from stripe_integration on checkout.session.completed.
+    """
+    import stripe
+
+    metadata = session.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except Exception:
+            metadata = {}
+    hoh_username = (metadata.get("hoh_username") or "").strip()
+    dep_username = (metadata.get("dependent_username") or "").strip()
+    dep_id_str = (metadata.get("user_id") or "").strip()
+    try:
+        ordinal = int(str(metadata.get("ordinal") or "1"))
+    except (TypeError, ValueError):
+        ordinal = 1
+    subscription_id = session.get("subscription")
+    customer_id = (session.get("customer") or "").strip()
+    if not hoh_username or not subscription_id:
+        logger.warning("activate_family_member: missing hoh_username or subscription id")
+        return
+    ocap = max(1, min(ordinal, 4))
+    plan_label = f"DEPENDENT_PAID_TIER_{ocap}"
+    monthly_cents = _family_tier_price_cents(ordinal)
+    today = str(datetime.date.today())
+    now_iso = str(datetime.datetime.now())
+
+    try:
+        async with db_pool.acquire() as conn:
+            hoh = await conn.fetchrow(
+                """
+                SELECT id, username, family_id FROM users
+                WHERE LOWER(username) = LOWER($1) AND role = 'CLIENT'
+                """,
+                hoh_username,
+            )
+            if not hoh:
+                logger.error("activate_family_member: HOH not found: %s", hoh_username)
+                return
+            if dep_id_str:
+                dep = await conn.fetchrow(
+                    """
+                    SELECT id, username, profile_data, family_id, guardian_id, tier, subscription_status
+                    FROM users WHERE id = $1::uuid
+                    """,
+                    dep_id_str,
+                )
+            else:
+                dep = await conn.fetchrow(
+                    """
+                    SELECT id, username, profile_data, family_id, guardian_id, tier, subscription_status
+                    FROM users WHERE LOWER(username) = LOWER($1)
+                    """,
+                    dep_username,
+                )
+            if not dep:
+                logger.error(
+                    "activate_family_member: dependent not found user_id=%s username=%s",
+                    dep_id_str, dep_username,
+                )
+                return
+            pd = dep["profile_data"]
+            if isinstance(pd, str):
+                try:
+                    pd = json.loads(pd)
+                except Exception:
+                    pd = {}
+            pd = dict(pd or {})
+            ok_link = False
+            if dep.get("guardian_id") == hoh["id"]:
+                ok_link = True
+            elif str(pd.get("head_of_household_id") or "") == str(hoh["id"]):
+                ok_link = True
+            elif (pd.get("parent_username") or "").lower() == hoh_username.lower():
+                ok_link = True
+            if not ok_link and dep.get("family_id") and hoh.get("family_id"):
+                if str(dep["family_id"]) == str(hoh["family_id"]):
+                    ok_link = True
+            if not ok_link:
+                logger.error(
+                    "activate_family_member: dependent %s not linked to HOH %s",
+                    dep.get("username"), hoh_username,
+                )
+                return
+            pd["subscription_status"] = "FAMILY_PLAN_ACTIVE"
+            pd["subscription_plan"] = plan_label
+            pd["paid_slot_ordinal"] = ordinal
+            pd["monthly_cost_cents"] = monthly_cents
+            pd["family_tier_price_key"] = _family_tier_env_key(ordinal) if ordinal > 0 else None
+            pd["stripe_customer_id"] = customer_id
+            pd["stripe_subscription_id"] = subscription_id
+            pd["subscription_start_date"] = today
+            pd["trial_end_date"] = ""
+            pd["updated_at"] = now_iso
+            pd["can_access_nate"] = True
+            sub_obj = None
+            try:
+                if stripe.api_key or os.environ.get("STRIPE_SECRET_KEY"):
+                    sub_obj = stripe.Subscription.retrieve(subscription_id)
+            except Exception as e:
+                logger.warning("activate_family_member: Subscription.retrieve failed: %s", e)
+            if sub_obj:
+                pd["stripe_current_period_start"] = str(sub_obj.get("current_period_start", ""))
+                pd["stripe_current_period_end"] = str(sub_obj.get("current_period_end", ""))
+            await conn.execute(
+                """
+                UPDATE users
+                SET tier = 'DEPENDENT', subscription_status = 'FAMILY_PLAN_ACTIVE', profile_data = $1::jsonb
+                WHERE id = $2
+                """,
+                json.dumps(pd), dep["id"],
+            )
+        uname = dep["username"]
+        try:
+            from app.services.api_server import _get_auth_redis
+            r = await _get_auth_redis()
+            if r and uname:
+                await r.publish("nate:user_reload", json.dumps({"username": uname}))
+        except Exception as e:
+            logger.warning("activate_family_member: user_reload failed: %s", e)
+        logger.info(
+            "activate_family_member: activated %s ordinal=%d sub=%s",
+            uname, ordinal, subscription_id,
+        )
+    except Exception as e:
+        logger.error("activate_family_member: failed: %s", e, exc_info=True)

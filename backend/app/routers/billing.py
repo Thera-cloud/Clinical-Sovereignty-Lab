@@ -1722,6 +1722,7 @@ async def checkout_family_member(req: FamilyMemberCheckoutRequest, request: Requ
             "type": "family_member",
             "hoh_username": caller,
             "dependent_username": req.dependent_username,
+            "user_id": dep["uid"],
             "ordinal": str(req.ordinal),
         },
     }

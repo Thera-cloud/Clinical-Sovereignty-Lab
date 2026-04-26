@@ -58,7 +58,7 @@ Canonical four charges (single source of truth in `sanctuary_engine.py`: `SANCTU
    - Have the bridge call a backend endpoint that creates Checkout with the correct `FAMILY_TIER_{ordinal}` price, or
    - Keep bridge creating one subscription item and have backend/bridge pass the correct price_id based on ordinal (already supported in `stripe_integration.py` via `_stripe_price_for_tier(ordinal)`).
 
-3. **Web flow**: From the Family tab (web), “Add paid member” should call `POST /api/billing/checkout/family-member` with `dependent_username` and `ordinal` (1-based index of paid slot), then redirect to Stripe Checkout. Success/cancel URLs already point to app.sovereignsanctuary.net.
+3. **Web flow**: From the Family tab (web), “Add paid member” should call `POST /api/billing/checkout/family-member` with `dependent_username` and `ordinal` (1-based index of paid slot), then redirect to Stripe Checkout. Success/cancel URLs already point to app.sovereignsanctuary.net. The checkout session includes Stripe metadata: `type=family_member`, `hoh_username` (caller), `dependent_username`, `user_id` (dependent’s PostgreSQL `users.id` UUID), and `ordinal`. On `checkout.session.completed`, the main Stripe webhook (`/api/stripe/webhook`) activates the dependent in PostgreSQL, sets tier / `FAMILY_PLAN_ACTIVE` / add-on billing fields, and publishes `nate:user_reload` for the dependent.
 
 ---
 
@@ -99,7 +99,7 @@ Canonical four charges (single source of truth in `sanctuary_engine.py`: `SANCTU
 
 - When the user taps “Invite Family Member” and selects a **paid** role (e.g. “Dependent (2nd)” or “Additional Member”):
   - **Native iOS**: If ordinal is known (e.g. “next paid slot is 1”), call `PaymentService.purchase(familyAddon75)` (or the correct product for that ordinal). On success, backend receipt verification runs and activates the add-on; then refresh family members and billing summary.
-  - **Web**: Redirect to Stripe Checkout via `POST /api/billing/checkout/family-member` with `ordinal` and dependent info (or open Stripe Checkout in browser).
+  - **Web**: Redirect to Stripe Checkout via `POST /api/billing/checkout/family-member` with `ordinal` and `dependent_username` (server adds `user_id` to session metadata for webhook idempotency). After successful payment, the webhook path above applies so the add-on is active in-app without a silent failure.
 
 ---
 
@@ -206,7 +206,7 @@ Canonical four charges (single source of truth in `sanctuary_engine.py`: `SANCTU
 
 ## 7. File reference (where to implement)
 
-- **Stripe**: `backend/app/services/stripe_integration.py` (PRICES, FAMILY_TIER_*), `backend/app/websocket/stripe_billing.py` (FAMILY_PRICING, add_family_member_billing), `backend/app/routers/billing.py` (checkout/family-member).
+- **Stripe**: `backend/app/services/stripe_integration.py` (PRICES, FAMILY_TIER_*; `checkout.session.completed` → `activate_family_member_from_stripe_checkout` in `registration_finalize.py` when `metadata.type=family_member`), `backend/app/websocket/stripe_billing.py` (FAMILY_PRICING, add_family_member_billing), `backend/app/routers/billing.py` (`POST /api/billing/checkout/family-member` with metadata `type`, `hoh_username`, `dependent_username`, `user_id`, `ordinal`).
 - **Apple IAP**: `mobile/lib/services/payment_service.dart` (product IDs, purchase), `backend/app/routers/receipt_validation.py` (PRODUCT_TO_PLAN or family-addon map, apply family_billing_price_cents after verify).
 - **Billing summary API**: `backend/app/routers/billing.py` (extend get_family_members; add get family/billing-summary and optional family/session-charges).
 - **Sanctuary sessions API**: New in `billing.py` or `client_data_api.py`, e.g. GET family/sanctuary-sessions; optional migration for `family_sanctuary_sessions` table; bridge: write row when session ends.
