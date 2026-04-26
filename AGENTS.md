@@ -214,18 +214,20 @@ ssh root@68.183.168.75 "docker exec nate_backend printenv | grep -E 'REDIS_HOST|
 
 ### Steps
 
-1. **Source Tag Completeness** — Verify all 4 consumption points in `bridge_server.py` pass a `source` parameter:
+1. **Dual Stripe webhooks (voice + main)** — In the Stripe Dashboard, confirm **both** webhook endpoints are registered: main `POST /api/stripe/webhook` (secret `STRIPE_WEBHOOK_SECRET`) and voice `POST /api/voice/webhook/stripe` (secret `STRIPE_VOICE_WEBHOOK_SECRET`). If only the main URL exists, voice block purchases are charged but minutes are never credited.
+
+2. **Source Tag Completeness** — Verify all 4 consumption points in `bridge_server.py` pass a `source` parameter:
    ```bash
    rg "use_tokens\(|add_token_usage\(" backend/app/websocket/bridge_server.py | rg "source="
    ```
    Expected: 4 matches (ai_chat, sanctuary_ai, group_coaching, private_coaching).
 
-2. **Token Transaction Schema** — Verify the `source` column exists on `token_transactions`:
+3. **Token Transaction Schema** — Verify the `source` column exists on `token_transactions`:
    ```bash
    ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c '\d token_transactions' | grep source"
    ```
 
-3. **Token Pack Definitions** — Verify `TOKEN_PACKS` in `stripe_integration.py` has 4 entries with correct prices:
+4. **Token Pack Definitions** — Verify `TOKEN_PACKS` in `stripe_integration.py` has 4 entries with correct prices:
    ```bash
    python3 -c "
    import re
@@ -238,17 +240,17 @@ ssh root@68.183.168.75 "docker exec nate_backend printenv | grep -E 'REDIS_HOST|
    "
    ```
 
-4. **Usage Map Endpoint** — Verify `/api/token-lab/usage-by-source` returns data:
+5. **Usage Map Endpoint** — Verify `/api/token-lab/usage-by-source` returns data:
    ```bash
    ssh root@68.183.168.75 'curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/token-lab/usage-by-source?days=30 | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"{len(d)} sources\")"'
    ```
 
-5. **Token Usage Agent Running** — Verify agent is in `_service_checks` and started:
+6. **Token Usage Agent Running** — Verify agent is in `_service_checks` and started:
    ```bash
    ssh root@68.183.168.75 "docker logs nate_backend --since 5m 2>&1 | grep TokenUsageAgent"
    ```
 
-6. **Webhook Handler** — Verify `_handle_checkout_completed` checks for `metadata.type == "token_pack"`:
+7. **Webhook Handler** — Verify `_handle_checkout_completed` checks for `metadata.type == "token_pack"`:
    ```bash
    rg "token_pack" backend/app/services/stripe_integration.py
    ```

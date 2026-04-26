@@ -20,6 +20,15 @@ All Stripe prices use `STRIPE_PRICE_*` env vars. The code reads these at import 
 | Coaching Monthly | `STRIPE_PRICE_COACHING_MONTHLY` | Subscription |
 | Family Monthly | `STRIPE_PRICE_FAMILY_MONTHLY` | Subscription |
 
+## CRITICAL: Dual Webhook Requirement
+
+Voice block purchases require a **separate** Stripe webhook endpoint with its own signing secret (`STRIPE_VOICE_WEBHOOK_SECRET`). The main webhook at `POST /api/stripe/webhook` **intentionally skips** `metadata.type == voice_block` in `_handle_checkout_completed`. **Do not** consolidate into a single endpoint. Two webhook URLs must be registered in the Stripe Dashboard:
+
+1. **Main** — `POST /api/stripe/webhook` (`STRIPE_WEBHOOK_SECRET`) — token packs, subscriptions, family add-ons, etc.
+2. **Voice** — `POST /api/voice/webhook/stripe` (`STRIPE_VOICE_WEBHOOK_SECRET`) — `voice_block` checkouts, credits, voice account creation
+
+Consolidating or dropping the voice URL silently breaks voice billing: customers are charged but prepaid minutes are never credited.
+
 ## Price ID Format
 
 - Always starts with `price_` (not `prod_`)

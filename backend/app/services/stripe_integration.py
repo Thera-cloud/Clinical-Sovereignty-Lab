@@ -1533,7 +1533,11 @@ class StripeWebhookHandler:
         
         metadata = session.get('metadata', {})
         if metadata.get('type') == 'voice_block':
-            return  # handled by voice_billing webhook
+            # voice_block events are handled by the dedicated voice webhook at
+            # voice_billing_api.py:stripe_voice_webhook (POST /api/voice/webhook/stripe)
+            # using STRIPE_VOICE_WEBHOOK_SECRET.
+            # DO NOT remove this skip — see .cursor/rules/stripe-payment-billing-architecture.mdc
+            return
 
         if (metadata.get("type") or "").lower() == "family_member":
             from app.services.registration_finalize import (
