@@ -23,7 +23,7 @@ Env vars (defaults in parens):
     NODE_COLOR                       - "green" | "orange" | "blue" (green)
     CLASSROOM_VOICE_REMOTE_URL       - http://10.13.13.5:8090     (unset)
     CLASSROOM_VISUAL_REMOTE_URL      - http://twin.internal.../classroom/visual (unset)
-    CLASSROOM_REMOTE_TIMEOUT_SEC     - per-call HTTP timeout       (1800)
+    CLASSROOM_REMOTE_TIMEOUT_SEC     - per-call HTTP timeout       (300)
     CLASSROOM_REMOTE_AUTH_TOKEN      - shared bearer between nodes (unset)
 
 The remote endpoints contract (kept tiny on purpose):
@@ -68,9 +68,9 @@ def _visual_url() -> str:
 
 def _timeout() -> float:
     try:
-        return float(os.getenv("CLASSROOM_REMOTE_TIMEOUT_SEC", "1800"))
+        return float(os.getenv("CLASSROOM_REMOTE_TIMEOUT_SEC", "300"))
     except Exception:
-        return 1800.0
+        return 300.0
 
 
 def _auth_headers() -> Dict[str, str]:

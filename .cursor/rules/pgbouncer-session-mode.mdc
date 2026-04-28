@@ -1,0 +1,130 @@
+# PgBouncer — Session Mode (Current Deployment)
+
+PgBouncer was deployed on **2026-04-26** in front of PostgreSQL on the production VPS (GREEN, 68.183.168.75). It runs in **`POOL_MODE: session`** — the safe default that preserves all session state. Transaction mode is the long-term goal but is blocked on four codebase issues that have not been remediated.
+
+## Deployment Verification (2026-04-26 21:25 ET)
+
+| Check | Result |
+|---|---|
+| `nate_pgbouncer` container | Up and healthy (listens on `0.0.0.0:6432` via explicit `LISTEN_PORT: 6432`) |
+| `nate_backend` container | Up and healthy (force-recreated to pick up `pgbouncer:6432` routing) |
+| `nate_bridge` container | Up and healthy — **NOT recreated** (protected-file constraint, see Blocker 4) |
+| Backend startup | `STARTUP COMPLETE: 113/113 services healthy — ALL SYSTEMS NOMINAL` |
+| `pg_stat_activity` distribution | `nate_pgbouncer @ 172.20.0.7` = 60 conns (pooled) · `nate_bridge @ 172.20.0.5` = 2 conns (direct) |
+| pgcrypto round-trip | `SELECT count(*) FROM users WHERE password_hash IS NOT NULL` = 42 ✅ encrypted reads work through pooled session |
+| Authenticated REST | `GET /api/trust-enforcer/status` = 200 · `GET /api/skyeye/pulse` = 200 |
+| Live pgbouncer stats (first 5 min) | Burst: `104 xacts/s, 104 queries/s, 0 server parses/s` · Steady: `6 xacts/s` |
+| Backend errors since recreate | None pgbouncer-related. SendGrid 403 + APA RSS parse are pre-existing operational warnings (see `service-health-49-49.mdc`) |
+| Bridge errors since recreate | None |
+
+The `0 server parses/s` line is the proof that session mode is preserving asyncpg's prepared-statement cache exactly as it does without pgbouncer — Blocker 2 is dormant, not active.
+
+## Current Routing (Authoritative)
+
+```
+backend  → pgbouncer:6432 → postgres:5432   ✅ pooled (DEFAULT_POOL_SIZE=100, MAX_CLIENT_CONN=500)
+bridge   → postgres:5432  (direct)          ❌ bypasses pgbouncer (protected-file constraint)
+admin    → (no DB connection)
+nginx    → (no DB connection)
+```
+
+The clone VPS (`159.65.108.25`, also a `sovereign-core` LB origin) connects to the primary's postgres directly via VPC at `10.120.0.2:5432`. It is **not** routed through pgbouncer. See `cloudflare-load-balancer.mdc`.
+
+## Why Session Mode (Not Transaction Mode)
+
+Transaction mode is what most pgbouncer deployments use because it returns server connections to the pool after every transaction, allowing dramatically higher client:server ratios. We can't use it yet because the codebase has **four hard blockers**, each of which would silently corrupt or break production if we flipped the toggle today.
+
+### Blocker 1 — `pgcrypto` PII key is session-scoped
+
+`backend/app/services/db_encryption_middleware.py` injects the per-tenant encryption key with:
+
+```python
+await conn.execute(f"SET app.pii_key = '{key}'")
+```
+
+This is a **session GUC**. Migration 105's `pgcrypto` triggers on encrypted columns read `current_setting('app.pii_key')` to encrypt/decrypt PII at INSERT/UPDATE/SELECT time. Under session pooling that's fine — the GUC lives as long as the pgbouncer-held server connection. Under **transaction** pooling, pgbouncer can hand the next client transaction a different server connection that has no `app.pii_key` set, and the trigger silently writes NULL or garbage into encrypted columns.
+
+**Fix required for transaction mode:** convert every `SET app.pii_key` to `SET LOCAL app.pii_key` and wrap the affected query in an explicit `BEGIN`/`COMMIT`. Audit every PII-touching call site (encrypted columns are tagged in migration 105). Verify with a soak test that no encrypted insert/update lands NULL.
+
+### Blocker 2 — `asyncpg` server-side prepared statement cache
+
+`asyncpg.create_pool(...)` defaults to `statement_cache_size=100`. asyncpg names prepared statements `__asyncpg_stmt_NNN__` on the **server**. Under transaction pooling, the next client transaction may land on a different server connection that has never heard of that statement ID and the query fails with:
+
+```
+asyncpg.exceptions.InvalidSQLStatementNameError:
+prepared statement "__asyncpg_stmt_42__" does not exist
+```
+
+There are **50+ `asyncpg.create_pool(...)` call sites** across `backend/`. Every single one needs `statement_cache_size=0` (or equivalent per-connection setup) before transaction mode flips on. This is the single largest change.
+
+**Fix required for transaction mode:** add `statement_cache_size=0` to every `create_pool` call, run the full audit suite, and confirm under load that the loss of plan caching does not regress the load-test baseline (`load-test-performance-baseline.mdc`).
+
+### Blocker 3 — `backend/app/main.py` (PROTECTED) host inference
+
+`main.py` infers the asyncpg host from a substring match against `DATABASE_URL` (`@postgres:` → `postgres`) and falls back to `settings.POSTGRES_HOST`. This is why the docker-compose backend block sets **both** `DATABASE_URL=...@pgbouncer:6432/...` **and** explicit `POSTGRES_HOST=pgbouncer` / `POSTGRES_PORT=6432` — both code paths land on pgbouncer deterministically.
+
+This is not strictly a transaction-mode blocker; it's a fragility. The cleanup belongs in the same migration so we stop relying on substring-of-DATABASE_URL parsing.
+
+**Fix required:** make `main.py` always read `POSTGRES_HOST`/`POSTGRES_PORT` directly. Per `.cursorrules` this is a protected file — change must be ≤50 lines, marked `# QUANTUM-CRYSTAL-ARCH`, and behind a feature flag.
+
+### Blocker 4 — `backend/app/websocket/bridge_server.py` (PROTECTED) hardcoded host
+
+Around lines 29197–29199, the bridge has:
+
+```python
+if _pg_host != "postgres":
+    print(f"[*] Overriding POSTGRES_HOST={_pg_host} → postgres (Docker service)")
+    _pg_host = "postgres"
+```
+
+This is the documented **defense-in-depth** for `bridge-postgres-connectivity.mdc` — it prevents a misconfigured `.env` from breaking auth. Side effect: the bridge cannot route through pgbouncer at all. Setting `POSTGRES_HOST=pgbouncer` on the bridge container has no effect; the override fires and silently swaps it back.
+
+For session-mode rollout this is **fine**: the bridge runs a small fixed pool (`min_size=2`, `max_size=40` per `load-test-performance-baseline.mdc` H3) so it doesn't benefit much from pooling anyway, and it cannot exhaust postgres on its own.
+
+**Fix required for transaction mode:** gate the override behind a feature flag (e.g. `BRIDGE_DB_HOST_OVERRIDE=postgres`), allow `pgbouncer` as an explicit value, and add a `# SOVEREIGN-VOICE` comment per `.cursorrules`. Maximum 50 lines changed; review required.
+
+## Migration Estimate
+
+Resolving all four blockers + load-test pass: **1–2 weeks** of careful refactoring. Do **not** start this work as a side effect of any unrelated change. When it is started, the order should be:
+
+1. Fix Blocker 2 (asyncpg cache) — biggest blast radius, easiest to verify.
+2. Fix Blocker 1 (pgcrypto / `SET LOCAL`) — paired with a soak test on encrypted columns.
+3. Fix Blocker 3 (main.py host inference) — small protected-file change.
+4. Fix Blocker 4 (bridge_server host override flag) — small protected-file change.
+5. Flip `POOL_MODE` to `transaction` in `docker-compose.prod.yml`.
+6. Verify under graduated load test (`load-test-performance-baseline.mdc`).
+7. Update this rule to reflect transaction-mode-as-current.
+
+Until those steps are all done, **do not change `POOL_MODE` to `transaction`**. The damage modes (silent NULL writes to encrypted columns, intermittent prepared-statement-not-found errors under load) are exactly the kind that take days to diagnose and require database restoration to recover from.
+
+## Operational Reality
+
+- **Why pool at 100/500?** Even in session mode, having pgbouncer in front gives us `MAX_CLIENT_CONN=500` queue protection during connection storms. PostgreSQL itself caps at `max_connections=200` (per `load-test-performance-baseline.mdc` H3 context). Without pgbouncer, a connection-burst event from the backend can OOM postgres' worker pool. With pgbouncer, those clients queue on pgbouncer instead of being rejected by postgres.
+- **Why is the bridge on max_size=25 (not 40)?** That's the H3 fix from the March 21, 2026 load test. **Never** lower below 25 without rerunning the graduated load test. See `load-test-performance-baseline.mdc`.
+- **Why does the clone bypass pgbouncer?** The clone (159.65.108.25) is in a different DigitalOcean datacenter and reaches the primary's postgres over the VPC peering at `10.120.0.2:5432`. Adding the clone to pgbouncer's load would funnel cross-DC traffic through the primary's pool — defeating the LB's purpose and adding a single point of failure. If pgbouncer ever goes down on the primary, the clone keeps serving REST API traffic.
+
+## Verification After Any pgbouncer-Adjacent Change
+
+```bash
+# pgbouncer healthy
+ssh root@68.183.168.75 'docker ps --format "table {{.Names}}\t{{.Status}}" | grep pgbouncer'
+
+# pool counts (look for sv_active climbing into the 100s under load)
+ssh root@68.183.168.75 'docker exec nate_pgbouncer psql -h localhost -p 6432 -U nate_admin -d little_nate -c "SHOW POOLS;"'
+
+# backend is actually using pgbouncer (look for "host=pgbouncer" or pid hitting pgbouncer)
+ssh root@68.183.168.75 'docker exec nate_postgres psql -U nate_admin -d little_nate -c "SELECT application_name, client_addr, state, count(*) FROM pg_stat_activity GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 20"'
+
+# Health invariants from service-health-49-49.mdc
+ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'"
+# Expected: 112/112 services healthy — ALL SYSTEMS NOMINAL
+```
+
+## Never Do (Until Migration Is Complete)
+
+- **Never** flip `POOL_MODE` to `transaction` without resolving all four blockers above and rerunning the load-test baseline.
+- **Never** route the bridge through pgbouncer without first gating the `_pg_host = "postgres"` override behind a feature flag in `bridge_server.py`.
+- **Never** route the clone VPS through pgbouncer — it would create a cross-DC funnel and a single point of failure.
+- **Never** lower `MAX_CLIENT_CONN` below 200; the backend + bridge together can spike past that under load.
+- **Never** lower `DEFAULT_POOL_SIZE` below 50; PostgreSQL `max_connections=200` minus headroom for bridge (25) and admin tooling (~10) leaves comfortable room for 100, but going below 50 starves backend concurrency.
+- **Never** expose pgbouncer's port 6432 to the public internet. It must remain on the `nate_network` Docker bridge only.

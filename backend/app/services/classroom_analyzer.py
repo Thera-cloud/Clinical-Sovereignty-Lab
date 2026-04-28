@@ -1106,6 +1106,42 @@ class ClassroomAnalyzer:
             if s.get("session_id") == session_id:
                 return s
         return None
+
+    def _set_pipeline_stage(
+        self, video_id: str, label: str, index: int
+    ) -> None:
+        """Persist live pipeline stage to classroom_sessions.json for coach UI."""
+        try:
+            sessions = self.load_sessions()
+            for s in sessions:
+                if s.get("session_id") == video_id:
+                    s["status"] = "analyzing"
+                    s["pipeline_stage"] = label
+                    s["pipeline_stage_index"] = index
+                    s["pipeline_stage_at"] = datetime.utcnow().isoformat() + "Z"
+                    self.save_sessions(sessions)
+                    return
+        except Exception as _pl_err:
+            print(f"[Classroom] pipeline stage update (non-fatal): {_pl_err}")
+
+    def clear_pipeline_stage(self, video_id: str) -> None:
+        """Remove pipeline fields after success or on failure."""
+        try:
+            sessions = self.load_sessions()
+            changed = False
+            for s in sessions:
+                if s.get("session_id") == video_id:
+                    s.pop("pipeline_stage", None)
+                    s.pop("pipeline_stage_index", None)
+                    s.pop("pipeline_stage_at", None)
+                    if s.get("status") == "analyzing":
+                        s["status"] = "pending"
+                    changed = True
+                    break
+            if changed:
+                self.save_sessions(sessions)
+        except Exception as _cl_err:
+            print(f"[Classroom] clear pipeline (non-fatal): {_cl_err}")
     
     def analyze_transcript(
         self,
@@ -1998,6 +2034,9 @@ class ClassroomAnalyzer:
         _cid = (client_id or video_session.get("client_id") or "").strip()
         _fid = (family_id or video_session.get("family_id") or "").strip()
         self._session_cache[video_id] = {"client_id": _cid, "family_id": _fid}
+        self._set_pipeline_stage(
+            video_id, "Preparing video & visual analysis...", 0
+        )
 
         video_path_str = video_session.get("video_path", "")
         vp = Path(video_path_str) if video_path_str else Path()
@@ -2177,6 +2216,11 @@ class ClassroomAnalyzer:
                     pass
 
             visual_insights = json.dumps(combined_visual, indent=2, default=str)
+            self._set_pipeline_stage(
+                video_id,
+                "Video & voice feature extraction done — running transcription...",
+                1,
+            )
         except ImportError:
             visual_insights = json.dumps(
                 {"error": "VideoAnalyzer not available - visual analysis skipped"}
@@ -2187,6 +2231,11 @@ class ClassroomAnalyzer:
                 "therapeutic_presence_score": 6.0,
                 "frames_analyzed": 0,
             }
+            self._set_pipeline_stage(
+                video_id,
+                "Video & voice feature extraction done — running transcription...",
+                1,
+            )
         except Exception as e:
             visual_insights = json.dumps({"error": f"Visual analysis error: {e}"})
             frame_analysis = {
@@ -2195,6 +2244,11 @@ class ClassroomAnalyzer:
                 "therapeutic_presence_score": 6.0,
                 "frames_analyzed": 0,
             }
+            self._set_pipeline_stage(
+                video_id,
+                "Video & voice feature extraction done — running transcription...",
+                1,
+            )
 
         # ===== WHISPER STT — full conversation transcript =====
         # Direct-uploaded videos historically only got visual + voice-metrics
@@ -2210,6 +2264,11 @@ class ClassroomAnalyzer:
                     transcribe_zoom_audio_to_vtt,
                 )
 
+                self._set_pipeline_stage(
+                    video_id,
+                    "Transcribing with Whisper (may take a few minutes)...",
+                    2,
+                )
                 video_bytes = await asyncio.to_thread(vp.read_bytes)
                 vtt_bytes = await transcribe_zoom_audio_to_vtt(
                     video_bytes,
@@ -2250,6 +2309,10 @@ class ClassroomAnalyzer:
             pass
         except Exception as _stt_err:
             print(f"[Classroom STT] non-fatal failure for {video_id}: {_stt_err}")
+
+        self._set_pipeline_stage(
+            video_id, "Running facial, fusion & session synthesis...", 3
+        )
 
         coaching_insights = str(frame_analysis.get("coaching_insights") or "")
         key_moments = list(frame_analysis.get("key_moments") or [])
@@ -2297,6 +2360,12 @@ class ClassroomAnalyzer:
 
         facial_summary = (facial_results or {}).get("summary", {}) or {}
         emotional_timeline = (facial_results or {}).get("emotional_timeline", []) or []
+
+        self._set_pipeline_stage(
+            video_id,
+            "Building insights, crystals & night-school learning...",
+            4,
+        )
 
         analysis: Dict[str, Any] = {
             "session_id": video_id,
@@ -2874,6 +2943,9 @@ class ClassroomAnalyzer:
 
         for s in sessions:
             if s.get("session_id") == video_id:
+                s.pop("pipeline_stage", None)
+                s.pop("pipeline_stage_index", None)
+                s.pop("pipeline_stage_at", None)
                 s["status"] = "analyzed"
                 s["analysis"] = analysis
                 break

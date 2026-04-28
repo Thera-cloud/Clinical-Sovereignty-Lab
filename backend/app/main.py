@@ -3409,7 +3409,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS.split(","),
+    # Strip whitespace: .env CORS list often has ", https://..." and breaks allow_origin exact match
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
     # Allow local Flutter web dev server origins (random port) to call REST endpoints.
     # WebSockets are separate; this is specifically for /api/* fetches (e.g. schedule session).
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",

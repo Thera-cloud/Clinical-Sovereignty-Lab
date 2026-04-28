@@ -192,24 +192,57 @@ async def finalize_signup(
 
     profile_json = json.dumps(new_profile)
 
+    name_val = (profile_fields.get("name") or "").strip()
+    if not name_val:
+        name_val = username
+    phone_val = str(profile_fields.get("phone") or "").strip()
+    dob_str = profile_fields.get("dob")
+    dob_date = None
+    if dob_str:
+        try:
+            dob_date = datetime.datetime.strptime(str(dob_str), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            dob_date = None
+    consent_version = profile_fields.get("consent_version", "v13.0_2026")
+
+    valid_tier = tier_val if tier_val in (
+        "MASTER", "SUPERVISOR", "TOP", "TOP_TIER", "STANDARD", "TRIAL", "DEPENDENT"
+    ) else "STANDARD"
+    valid_status = sub_status if sub_status in (
+        "ACTIVE", "TRIAL_ACTIVE", "PENDING_VERIFICATION", "FAMILY_PLAN_ACTIVE",
+    ) else "ACTIVE"
+
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO users (
-                    username, role, password_hash, tier, subscription_status,
-                    token_balance, profile_data, hardware_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                    username, role, password_hash, name, email, phone, dob,
+                    tier, subscription_status, token_balance,
+                    consent_version, consent_date,
+                    stripe_customer_id, hardware_id, profile_data
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7,
+                    $8, $9, $10,
+                    $11, NOW(),
+                    $12, $13, $14::jsonb
+                )
                 ON CONFLICT (username) DO NOTHING
                 """,
                 username,
                 role,
                 password_hash,
-                tier_val if tier_val in ("STANDARD", "TRIAL", "TOP_TIER") else "STANDARD",
-                sub_status if sub_status in ("ACTIVE", "TRIAL_ACTIVE") else "ACTIVE",
+                name_val,
+                email or None,
+                phone_val,
+                dob_date,
+                valid_tier,
+                valid_status,
                 token_balance,
-                profile_json,
+                consent_version,
+                stripe_customer_id or None,
                 hardware_id,
+                profile_json,
             )
 
             inserted = await conn.fetchval(
@@ -436,29 +469,35 @@ async def _insert_dependent_user(
     new_profile: dict,
 ):
     """Common INSERT into users for both free and paid dependents."""
+    # Defensive name/phone resolution — `name` column is NOT NULL.
+    # Stripe-paid dependent invites may arrive without a name field if the
+    # guardian skips it; fall back to username instead of NULL-violating.
+    _dep_name = str(profile_fields.get("name") or "").strip() or username
+    _dep_phone = str(profile_fields.get("phone") or "").strip()
     return await conn.fetchval(
         """
         INSERT INTO users (
-            username, role, password_hash, name, email, dob,
+            username, role, password_hash, name, email, phone, dob,
             tier, subscription_status, token_balance,
             family_id, guardian_id, is_minor,
             family_role, linked_by, linked_at,
             consent_version, consent_date,
             profile_data, hardware_id, intake_data
         ) VALUES (
-            $1, 'CLIENT', $2, $3, $4, $5,
-            'DEPENDENT', 'FAMILY_PLAN_ACTIVE', $6,
-            $7, $8, $9,
-            'dependent', $8, NOW(),
-            $10, NOW(),
-            $11::jsonb, $12, $13::jsonb
+            $1, 'CLIENT', $2, $3, $4, $5, $6,
+            'DEPENDENT', 'FAMILY_PLAN_ACTIVE', $7,
+            $8, $9, $10,
+            'dependent', $9, NOW(),
+            $11, NOW(),
+            $12::jsonb, $13, $14::jsonb
         )
         RETURNING id
         """,
         username,
         password_hash,
-        profile_fields.get("name", ""),
+        _dep_name,
         email or None,
+        _dep_phone or None,
         dob_date,
         50000,
         family_id,

@@ -31,6 +31,78 @@ import 'coaching_mesh_screen.dart';
 import 'community_mesh_screen.dart';
 import 'night_school_screen.dart';
 import 'ai_modes_screen.dart';
+import '../services/export_service.dart';
+
+// =============================================================================
+// EPHEMERAL WEBSOCKET REQUEST HELPER
+// =============================================================================
+/// Opens a short-lived WebSocket, authenticates, sends [request], and awaits
+/// a response whose `type` is in [expectedTypes].
+///
+/// Use this for action-followed-by-confirmation flows (e.g. account deletion)
+/// where the parent's persistent socket cannot easily be listened to from
+/// inside a leaf widget. Mirrors the pattern used by `_sendFamilyInvitesBatch`.
+///
+/// Throws on auth failure, connection error, connection close, or timeout.
+Future<Map<String, dynamic>> _ephemeralWsRequest({
+  required String token,
+  required String hardwareId,
+  required Map<String, dynamic> request,
+  required Set<String> expectedTypes,
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  if (token.isEmpty) {
+    throw Exception('Not authenticated');
+  }
+
+  WebSocketChannel? socket;
+  StreamSubscription? sub;
+  final completer = Completer<Map<String, dynamic>>();
+
+  try {
+    socket = WebSocketChannel.connect(Uri.parse(AppConfig.wsUrl));
+
+    sub = socket.stream.listen((raw) {
+      if (completer.isCompleted) return;
+      try {
+        final data = jsonDecode(raw as String) as Map<String, dynamic>;
+        final type = (data['type'] ?? '').toString();
+        if (type == 'connected') {
+          socket?.sink.add(jsonEncode({
+            'type': 'auth',
+            'token': token,
+            'hardware_id': hardwareId,
+          }));
+        } else if (type == 'auth_success' || type == 'login_success') {
+          socket?.sink.add(jsonEncode(request));
+        } else if (type == 'auth_failed') {
+          completer.completeError(Exception('Authentication failed'));
+        } else if (expectedTypes.contains(type)) {
+          completer.complete(data);
+        }
+      } catch (_) {
+        // Ignore non-JSON or unexpected payloads
+      }
+    }, onError: (e) {
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('Connection error: $e'));
+      }
+    }, onDone: () {
+      if (!completer.isCompleted) {
+        completer.completeError(Exception('Connection closed before response'));
+      }
+    });
+
+    return await completer.future.timeout(timeout, onTimeout: () {
+      throw TimeoutException('Request timed out');
+    });
+  } finally {
+    await sub?.cancel();
+    try {
+      await socket?.sink.close();
+    } catch (_) {}
+  }
+}
 
 // =============================================================================
 // DESIGN TOKENS
@@ -73,6 +145,9 @@ class ClientSettingsScreen extends StatefulWidget {
 class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   late Map<String, dynamic> _profile;
   bool _editingProfile = false;
+  bool _savingProfile = false; // SOVEREIGN-VOICE: B3 — guard against double-tap + immediate-success
+  bool _savingNotifPrefs = false;
+  bool _savingVoicePref = false;
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emergencyCtrl = TextEditingController();
@@ -1156,34 +1231,163 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     );
   }
 
-  void _saveProfile() {
-    _sendWs({
-      'type': 'update_profile',
-      'email': _emailCtrl.text.trim(),
-      'phone': _phoneCtrl.text.trim(),
-      'timezone': _timezoneCtrl.text.trim(),
-      'emergency_contact': _emergencyCtrl.text.trim(),
-    });
-    setState(() => _editingProfile = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile updated'), backgroundColor: Color(0xFF1A1A1A)),
-    );
+  // SOVEREIGN-VOICE: B3 — await backend confirmation before showing success.
+  // Profile changes (email/phone) are auth-recovery-critical; lying about success
+  // can lock users out of password reset.
+  Future<void> _saveProfile() async {
+    if (_savingProfile) return;
+    setState(() => _savingProfile = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_profile',
+          'email': _emailCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+          'timezone': _timezoneCtrl.text.trim(),
+          'emergency_contact': _emergencyCtrl.text.trim(),
+        },
+        expectedTypes: {'profile_updated', 'error'},
+      );
+      if (!mounted) return;
+      final type = (resp['type'] ?? '').toString();
+      final persisted = resp['persisted'] == true;
+      if (type == 'profile_updated' && persisted) {
+        setState(() => _editingProfile = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile saved'),
+            backgroundColor: _Design.green,
+          ),
+        );
+      } else if (type == 'profile_updated' && !persisted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile change accepted but not yet persisted. Please retry.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else {
+        final reason = (resp['message'] ?? resp['error'] ?? 'Unknown error').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile save failed: $reason'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Profile save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingProfile = false);
+    }
   }
 
-  void _saveNotificationPrefs() {
-    _sendWs({
-      'type': 'update_notification_prefs',
-      'push_enabled': _notifPush,
-      'session_reminders': _notifSessionReminders,
-      'crisis_alerts': _notifCrisisAlerts,
-    });
+  // SOVEREIGN-VOICE: B3 — await persisted confirmation before declaring success.
+  Future<void> _saveNotificationPrefs() async {
+    if (_savingNotifPrefs) return;
+    setState(() => _savingNotifPrefs = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_notification_prefs',
+          'push_enabled': _notifPush,
+          'session_reminders': _notifSessionReminders,
+          'crisis_alerts': _notifCrisisAlerts,
+        },
+        expectedTypes: {'notification_prefs_updated', 'error'},
+      );
+      if (!mounted) return;
+      final type = (resp['type'] ?? '').toString();
+      final persisted = resp['persisted'] == true;
+      if (type == 'notification_prefs_updated' && persisted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Notification preferences saved'),
+            backgroundColor: _Design.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save notification preferences. Please retry.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Notification save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingNotifPrefs = false);
+    }
   }
 
-  void _saveVoicePref() {
-    _sendWs({
-      'type': 'update_voice_preference',
-      'voice_mode_default': _voiceModeDefault,
-    });
+  // SOVEREIGN-VOICE: B3 — await persisted confirmation before declaring success.
+  Future<void> _saveVoicePref() async {
+    if (_savingVoicePref) return;
+    setState(() => _savingVoicePref = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_voice_preference',
+          'voice_mode_default': _voiceModeDefault,
+        },
+        expectedTypes: {'voice_preference_updated', 'voice_pref_updated', 'error'},
+      );
+      if (!mounted) return;
+      final type = (resp['type'] ?? '').toString();
+      final persisted = resp['persisted'] == true;
+      if ((type == 'voice_preference_updated' || type == 'voice_pref_updated') && persisted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Voice preference saved'),
+            backgroundColor: _Design.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save voice preference. Please retry.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Voice preference save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingVoicePref = false);
+    }
   }
 
   // ---- Web-safe share: clipboard fallback for Flutter web ----
@@ -1747,7 +1951,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _Design.red),
-              onPressed: () {
+              onPressed: () async {
                 if (confirmCtrl.text.trim().toUpperCase() != 'DELETE') {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Please type DELETE to confirm')),
@@ -1755,13 +1959,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                   return;
                 }
                 Navigator.pop(ctx);
-                _sendWs({'type': 'request_account_deletion'});
-                // Logout
-                widget.onLogout?.call();
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LobbyScreen()),
-                  (_) => false,
-                );
+                await _performAccountDeletion();
               },
               child: const Text('Delete Account', style: TextStyle(color: Colors.white)),
             ),
@@ -1769,6 +1967,68 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _performAccountDeletion() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: _Design.gold),
+      ),
+    );
+
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'request_account_deletion'},
+        expectedTypes: {'account_deletion_confirmed', 'account_deletion_denied'},
+      );
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss spinner
+
+      final type = (resp['type'] ?? '').toString();
+      if (type == 'account_deletion_confirmed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account scheduled for deletion. Sign back in within 30 days to restore.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (!mounted) return;
+        widget.onLogout?.call();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LobbyScreen()),
+          (_) => false,
+        );
+      } else {
+        // Denied — show reason and stay logged in
+        final reason = (resp['message'] ?? resp['reason'] ?? 'Unable to delete this account.').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Deletion denied: $reason'),
+            backgroundColor: _Design.red,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss spinner
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not complete deletion: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: _Design.red,
+        ),
+      );
+    }
   }
 
   // ---- Weekly Coherence Brief ----
@@ -1807,31 +2067,72 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
             onPressed: () async {
               Navigator.pop(ctx);
-              final userId = _profile['hardware_id'] ?? _profile['user_id'] ?? '';
-              final token = _profile['token'] ?? '';
-              try {
-                final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
-                final response = await http.get(url, headers: {'Authorization': 'Bearer $token'});
-                if (response.statusCode == 200) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Data exported successfully'), backgroundColor: Colors.green),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
-                  );
-                }
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
-                );
-              }
+              await _performDataExport();
             },
             child: const Text('Export Data', style: TextStyle(color: Colors.black)),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _performDataExport() async {
+    final userId = (_profile['hardware_id'] ?? _profile['user_id'] ?? '').toString();
+    final token = (_profile['token'] ?? '').toString();
+    if (userId.isEmpty || token.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not authenticated'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: _Design.gold)),
+    );
+
+    try {
+      final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
+      final response = await http
+          .get(url, headers: {'Authorization': 'Bearer $token'})
+          .timeout(const Duration(seconds: 60));
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop(); // dismiss spinner
+
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+
+      final ts = DateTime.now().toIso8601String().split('T').first;
+      final filename = 'sovereign_sanctuary_data_${userId}_$ts.json';
+      final saved = await ConversationExportService().saveToLocal(response.body, filename);
+
+      if (!mounted) return;
+      if (saved) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(kIsWeb ? 'Data downloaded' : 'Data exported — choose where to save'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save export to device'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   // ---- Legal Viewer ----
@@ -1878,14 +2179,16 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               children: [
                 if (_editingProfile) ...[
                   TextButton(
-                    onPressed: () => setState(() => _editingProfile = false),
+                    onPressed: _savingProfile ? null : () => setState(() => _editingProfile = false),
                     child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: _Design.gold, padding: const EdgeInsets.symmetric(horizontal: 20)),
-                    onPressed: _saveProfile,
-                    child: const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
+                    onPressed: _savingProfile ? null : _saveProfile,
+                    child: _savingProfile
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                        : const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
                   ),
                 ] else
                   TextButton.icon(
@@ -3388,6 +3691,10 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
   late Map<String, dynamic> _profile;
   bool _editingProfile = false;
   bool _editingPractice = false;
+  // SOVEREIGN-VOICE: B3 — guard against double-tap + immediate-success
+  bool _savingProfile = false;
+  bool _savingPractice = false;
+  bool _savingNotifPrefs = false;
 
   // Profile fields
   final _emailCtrl = TextEditingController();
@@ -3661,44 +3968,175 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     }
   }
 
-  void _saveProfile() {
-    _sendWs({
-      'type': 'update_profile',
-      'email': _emailCtrl.text.trim(),
-      'phone': _phoneCtrl.text.trim(),
-      'timezone': _timezoneCtrl.text.trim(),
-      'emergency_contact': _emergencyCtrl.text.trim(),
-    });
-    _sendWs({
-      'type': 'update_coach_profile',
-      'specialties': _specialtiesCtrl.text.trim(),
-      'coaching_style': _coachingStyle,
-      'zoom_link': _zoomLinkCtrl.text.trim(),
-    });
-    setState(() => _editingProfile = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile updated'), backgroundColor: Color(0xFF1A1A1A)),
-    );
+  // SOVEREIGN-VOICE: B3 — await persisted backend confirmation for both
+  // update_profile (email/phone/tz/emergency) and update_coach_profile
+  // (specialties/style/zoom). Only declare success when both persisted.
+  Future<void> _saveProfile() async {
+    if (_savingProfile) return;
+    setState(() => _savingProfile = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final r1 = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_profile',
+          'email': _emailCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+          'timezone': _timezoneCtrl.text.trim(),
+          'emergency_contact': _emergencyCtrl.text.trim(),
+        },
+        expectedTypes: {'profile_updated', 'error'},
+      );
+      final r2 = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_coach_profile',
+          'specialties': _specialtiesCtrl.text.trim(),
+          'coaching_style': _coachingStyle,
+          'zoom_link': _zoomLinkCtrl.text.trim(),
+        },
+        expectedTypes: {'profile_updated', 'error'},
+      );
+      if (!mounted) return;
+      final ok1 = (r1['type'] == 'profile_updated') && (r1['persisted'] == true);
+      final ok2 = (r2['type'] == 'profile_updated') && (r2['persisted'] == true);
+      if (ok1 && ok2) {
+        setState(() => _editingProfile = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile saved'),
+            backgroundColor: _Design.green,
+          ),
+        );
+      } else {
+        final reason = (r1['message'] ?? r1['error'] ?? r2['message'] ?? r2['error'] ?? 'Server did not confirm persistence').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile save failed: $reason'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Profile save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingProfile = false);
+    }
   }
 
-  void _savePractice() {
+  // SOVEREIGN-VOICE: B3 — practice fee + payment mode are revenue-critical;
+  // never lie about success. Wait for backend ack on both updates.
+  Future<void> _savePractice() async {
+    if (_savingPractice) return;
+    setState(() => _savingPractice = true);
     final fee = double.tryParse(_feeCtrl.text.trim()) ?? 0;
-    _sendWs({'type': 'coach_set_fee', 'coaching_fee': fee});
-    _sendWs({'type': 'coach_set_payment_mode', 'payment_mode': _paymentMode});
-    setState(() => _editingPractice = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Practice settings updated'), backgroundColor: Color(0xFF1A1A1A)),
-    );
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final r1 = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'coach_set_fee', 'coaching_fee': fee},
+        expectedTypes: {'coach_fee_updated', 'fee_updated', 'profile_updated', 'error'},
+      );
+      final r2 = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'coach_set_payment_mode', 'payment_mode': _paymentMode},
+        expectedTypes: {'coach_payment_mode_updated', 'payment_mode_updated', 'profile_updated', 'error'},
+      );
+      if (!mounted) return;
+      final t1 = (r1['type'] ?? '').toString();
+      final t2 = (r2['type'] ?? '').toString();
+      final err = t1 == 'error' || t2 == 'error';
+      if (!err) {
+        setState(() => _editingPractice = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Practice settings saved'),
+            backgroundColor: _Design.green,
+          ),
+        );
+      } else {
+        final reason = (r1['message'] ?? r1['error'] ?? r2['message'] ?? r2['error'] ?? 'Save not confirmed').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Practice save failed: $reason'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Practice save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingPractice = false);
+    }
   }
 
-  void _saveNotificationPrefs() {
-    _sendWs({
-      'type': 'update_notification_prefs',
-      'new_client_alerts': _notifNewClient,
-      'session_reminders': _notifSessionReminders,
-      'crisis_alerts': _notifCrisisAlerts,
-      'night_school_updates': _notifNightSchool,
-    });
+  // SOVEREIGN-VOICE: B3 — await persisted confirmation before declaring success.
+  Future<void> _saveNotificationPrefs() async {
+    if (_savingNotifPrefs) return;
+    setState(() => _savingNotifPrefs = true);
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {
+          'type': 'update_notification_prefs',
+          'new_client_alerts': _notifNewClient,
+          'session_reminders': _notifSessionReminders,
+          'crisis_alerts': _notifCrisisAlerts,
+          'night_school_updates': _notifNightSchool,
+        },
+        expectedTypes: {'notification_prefs_updated', 'error'},
+      );
+      if (!mounted) return;
+      final type = (resp['type'] ?? '').toString();
+      final persisted = resp['persisted'] == true;
+      if (type == 'notification_prefs_updated' && persisted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Notification preferences saved'),
+            backgroundColor: _Design.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save notification preferences. Please retry.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Notification save failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingNotifPrefs = false);
+    }
   }
 
   void _showAssistantManagementPanel() {
@@ -4075,7 +4513,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _Design.red),
-              onPressed: () {
+              onPressed: () async {
                 if (confirmCtrl.text.trim().toUpperCase() != 'DELETE') {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Please type DELETE to confirm')),
@@ -4083,12 +4521,7 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
                   return;
                 }
                 Navigator.pop(ctx);
-                _sendWs({'type': 'request_account_deletion'});
-                widget.onLogout?.call();
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const LobbyScreen()),
-                  (_) => false,
-                );
+                await _performAccountDeletion();
               },
               child: const Text('Delete Account', style: TextStyle(color: Colors.white)),
             ),
@@ -4096,6 +4529,67 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _performAccountDeletion() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: _Design.gold),
+      ),
+    );
+
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    final hwId = (_profile['hardware_id'] ?? widget.profile['hardware_id'] ?? '').toString();
+
+    try {
+      final resp = await _ephemeralWsRequest(
+        token: token,
+        hardwareId: hwId,
+        request: {'type': 'request_account_deletion'},
+        expectedTypes: {'account_deletion_confirmed', 'account_deletion_denied'},
+      );
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      final type = (resp['type'] ?? '').toString();
+      if (type == 'account_deletion_confirmed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account scheduled for deletion. Sign back in within 30 days to restore.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (!mounted) return;
+        widget.onLogout?.call();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LobbyScreen()),
+          (_) => false,
+        );
+      } else {
+        final reason = (resp['message'] ?? resp['reason'] ?? 'Unable to delete this account.').toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Deletion denied: $reason'),
+            backgroundColor: _Design.red,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not complete deletion: ${e.toString().replaceAll('Exception: ', '')}'),
+          backgroundColor: _Design.red,
+        ),
+      );
+    }
   }
 
   void _requestDataExport() async {
@@ -4123,31 +4617,72 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: _Design.gold),
             onPressed: () async {
               Navigator.pop(ctx);
-              final userId = _profile['hardware_id'] ?? _profile['user_id'] ?? '';
-              final token = _profile['token'] ?? '';
-              try {
-                final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
-                final response = await http.get(url, headers: {'Authorization': 'Bearer $token'});
-                if (response.statusCode == 200) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Data exported successfully'), backgroundColor: Colors.green),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
-                  );
-                }
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
-                );
-              }
+              await _performDataExport();
             },
             child: const Text('Export Data', style: TextStyle(color: Colors.black)),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _performDataExport() async {
+    final userId = (_profile['hardware_id'] ?? _profile['user_id'] ?? '').toString();
+    final token = (_profile['token'] ?? widget.profile['token'] ?? '').toString();
+    if (userId.isEmpty || token.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Not authenticated'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator(color: _Design.gold)),
+    );
+
+    try {
+      final url = Uri.parse('${AppConfig.apiBaseUrl}/api/users/$userId/data-export');
+      final response = await http
+          .get(url, headers: {'Authorization': 'Bearer $token'})
+          .timeout(const Duration(seconds: 60));
+
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: ${response.statusCode}'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+
+      final ts = DateTime.now().toIso8601String().split('T').first;
+      final filename = 'sovereign_sanctuary_data_${userId}_$ts.json';
+      final saved = await ConversationExportService().saveToLocal(response.body, filename);
+
+      if (!mounted) return;
+      if (saved) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(kIsWeb ? 'Data downloaded' : 'Data exported — choose where to save'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save export to device'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+      );
+    }
   }
 
   void _showLegalAgreement() {
@@ -4408,14 +4943,16 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
               children: [
                 if (_editingProfile) ...[
                   TextButton(
-                    onPressed: () => setState(() => _editingProfile = false),
+                    onPressed: _savingProfile ? null : () => setState(() => _editingProfile = false),
                     child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: _Design.gold, padding: const EdgeInsets.symmetric(horizontal: 20)),
-                    onPressed: _saveProfile,
-                    child: const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
+                    onPressed: _savingProfile ? null : _saveProfile,
+                    child: _savingProfile
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                        : const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
                   ),
                 ] else
                   TextButton.icon(
@@ -4470,14 +5007,16 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
               children: [
                 if (_editingPractice) ...[
                   TextButton(
-                    onPressed: () => setState(() => _editingPractice = false),
+                    onPressed: _savingPractice ? null : () => setState(() => _editingPractice = false),
                     child: const Text('Cancel', style: TextStyle(color: _Design.textSecondary)),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: _Design.gold, padding: const EdgeInsets.symmetric(horizontal: 20)),
-                    onPressed: _savePractice,
-                    child: const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
+                    onPressed: _savingPractice ? null : _savePractice,
+                    child: _savingPractice
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                        : const Text('Save', style: TextStyle(color: Colors.black, fontSize: 12)),
                   ),
                 ] else
                   TextButton.icon(

@@ -1,0 +1,145 @@
+# =============================================================================
+# LITTLE NATE — Python Dependencies (GREEN / Orchestration-Only)
+#
+# Excludes heavy ML packages (torch, transformers, mediapipe, opencv,
+# moviepy, librosa, torchaudio) that belong on ORANGE/BLUE nodes.
+# See .cursor/rules/three-node-sync-discipline.mdc for routing.
+#
+# All backend code that imports those packages already uses try/except
+# with availability flags — removing them here just means those flags
+# stay False and the code dispatches to ORANGE/BLUE via HTTP instead.
+# =============================================================================
+
+# Web Framework
+fastapi~=0.115.0
+uvicorn[standard]~=0.27.0
+python-multipart~=0.0.18
+
+# WebSocket
+websockets~=12.0
+
+# Database
+asyncpg~=0.29.0
+sqlalchemy~=2.0.25
+
+# Authentication — PyJWT replaces abandoned python-jose (CVE-2024-33663, CVE-2024-33664)
+PyJWT[crypto]~=2.9.0
+
+# Cryptography (explicit — used directly by Me2Me vault AES-256-GCM encryption)
+cryptography>=43.0.0
+
+# Validation
+pydantic~=2.5.3
+pydantic-settings~=2.1.0
+email-validator~=2.1.0
+
+# HTTP Client
+httpx~=0.27.0
+aiohttp~=3.9.1
+
+# AWS S3-compatible (Cloudflare R2)
+boto3>=1.34.0
+
+# Web Search (DuckDuckGo fallback - no API key required)
+ddgs>=9.0.0
+
+# Redis (redis-py includes async support — aioredis is deprecated and removed)
+redis[hiredis]~=5.0.1
+
+# Stripe
+stripe~=7.10.0
+
+# Email
+aiosmtplib~=3.0.1
+jinja2~=3.1.6
+sendgrid~=6.11.0
+
+# SMS (Twilio)
+twilio~=9.0.4
+
+# Numerical (lightweight — needed by nevedal_engine, coherence, stats)
+numpy~=1.26.3
+scipy~=1.12.0
+
+# Pitch extraction (Nevedal voice biometrics — ~15MB, NOT heavy)
+praat-parselmouth~=0.4.3
+
+# PDF Processing (for workbook extraction)
+pypdf~=4.0.1
+
+# OCR — Threat Dropbox image text extraction (requires system package: tesseract-ocr)
+pytesseract~=0.3.13
+
+# Sovereign Vault — File processing pipeline
+PyMuPDF~=1.26.7
+python-docx~=1.1.0
+python-magic~=0.4.27
+Pillow~=10.4.0
+
+# PDF Generation (for DOJO assessments + Gantt charts)
+fpdf2~=2.7.9
+
+# Excel Generation (for PM DOJO exports)
+openpyxl~=3.1.2
+
+# 2FA (TOTP for secure search + admin protection)
+pyotp~=2.9.0
+qrcode~=7.4.2
+webauthn~=2.7.0
+
+# Utilities
+python-dotenv~=1.0.0
+orjson~=3.9.12
+
+# Testing
+pytest~=7.4.4
+pytest-asyncio~=0.23.3
+
+# Logging
+structlog~=24.1.0
+
+# Date/Time
+python-dateutil~=2.8.2
+
+# Background Scheduler (drip campaigns + SkyEye sessions)
+apscheduler~=3.10.0
+
+# SkyEye — Social Media Platform SDKs (optional, graceful fallback)
+google-api-python-client~=2.100.0
+google-auth~=2.25.0
+asyncpraw~=7.7.0
+
+# SkyEye — DNS verification for security hardening
+dnspython~=2.4.0
+
+# Foresight Engine — Time-series forecasting
+statsmodels~=0.14.0
+
+# Wisdom Mesh — TF-IDF convergence detection (optional, graceful fallback to Jaccard)
+scikit-learn~=1.3.0
+
+# ZEFCP — Reed-Solomon error correction for Patent Claim 25
+reedsolo~=1.7.0
+
+# ZEFCP — BLE communication for Parasitic Transport (Patent Claim 25)
+bleak~=0.21.0
+
+# Phonetic matching for voice pipeline STT error recovery
+jellyfish>=1.0.0
+
+# =============================================================================
+# EXCLUDED — Heavy ML packages (run on ORANGE/BLUE, not GREEN)
+#
+# torch~=2.2.0          → ORANGE (voice emotion wav2vec2) / BLUE (Neural Mirror)
+# torchaudio~=2.2.0     → ORANGE (voice emotion audio loading)
+# transformers~=4.40.0  → ORANGE (wav2vec2 pipeline)
+# opencv-python-headless → BLUE (classroom visual analysis)
+# mediapipe==0.10.11    → BLUE (facial analyzer)
+# moviepy~=1.0.3        → BLUE (video processing)
+# librosa~=0.10.1       → ORANGE (audio feature extraction)
+#
+# All code that imports these packages uses try/except guards.
+# On GREEN, the availability flags stay False and work is dispatched
+# to the appropriate node via classroom_remote_dispatch.py or
+# the voice emotion HTTP shim.
+# =============================================================================

@@ -190,6 +190,24 @@ except ImportError:
     _sovereign_stream = None
 _ZERO_COST_PROVIDERS = frozenset({"sovereign", "workers_ai", "grok", "home_gpu", "digitalocean"})
 
+# QUANTUM-CRYSTAL-ARCH: DOJO per-type model-tier routing override.
+# Bypasses ODPE classification for DOJO scenarios where the cost/quality tradeoff
+# is known up-front (high-stakes scenarios → premium grok tier; rote drilling →
+# free workers_ai tier). Maps DOJO scenario id (lowercased) to inference tier:
+#   "tension"    → odpe_signal="TENSION"  → grok primary (premium)
+#   "workers_ai" → odpe_signal="LOCKED"   → workers_ai primary (free)
+#   "auto"       → no signal              → ODPE classifies normally
+# Non-DOJO chat (no dojo_type field) ALWAYS uses ODPE — this table is opt-in.
+_DOJO_TYPE_MODEL_TIER = {
+    "pitch_practice": "tension", "financial_analysis": "tension",
+    "market_strategy": "tension", "client_acquisition": "workers_ai",
+    "operations": "workers_ai", "leadership": "tension",
+    "therapist": "tension", "crisis": "workers_ai", "hostile": "workers_ai",
+    "judge": "tension", "mcat": "tension", "project_pm": "workers_ai",
+    "cnc": "workers_ai", "teacher": "workers_ai", "coach_nate": "tension",
+}
+_DOJO_TIER_TO_SIGNAL = {"tension": "TENSION", "workers_ai": "LOCKED", "auto": None}
+
 # QUANTUM-CRYSTAL-ARCH: per-user turn accumulator for session-level crystals
 _chat_session_turns: dict = {}  # uid -> list of {"user_text": ..., "ai_text": ...}
 _CHAT_SESSION_CRYSTAL_INTERVAL = 5  # create session crystal every N turns
@@ -3291,8 +3309,11 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         return False, "CONSENT_REQUIRED"
     
     username = data.get("username")
-    email = (data.get("email") or "").strip()
-    phone_raw = (data.get("phone") or "").strip()
+    # SOVEREIGN-VOICE: defensive str() casts — Stripe webhooks/Twilio Verify can
+    # deliver phone as int or null. Without these, .strip() raises AttributeError
+    # and the whole register_request silently fails (Paula Swain incident).
+    email = str(data.get("email") or "").strip()
+    phone_raw = str(data.get("phone") or "").strip()
     phone_digits = re.sub(r"\D", "", phone_raw)
     role = data.get("role", "CLIENT")
     registry = load_registry()
@@ -3400,9 +3421,12 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
             if not stripe_customer_for_new_user:
                 return False, "Invalid or expired billing setup. Please complete card setup again."
     
+    # SOVEREIGN-VOICE: name fallback to username — `name` column is NOT NULL.
+    # If client omits/empties name, fall back rather than crash on INSERT.
+    _name_val = str(data.get("name") or "").strip() or username
     new_profile = {
         "role": role,
-        "name": data.get("name"),
+        "name": _name_val,
         "email": email,
         "phone": phone_raw,
         "hardware_id": f"{role}_{username.upper()}_ID",
@@ -3625,11 +3649,16 @@ async def create_dependent_account(guardian_id: str, data: dict) -> Tuple[bool, 
     _dep_coach_id = guardian_profile.get("assigned_coach_id", "COACH_COACHN_ID")
     _dep_coach_hw = guardian_profile.get("coach_id", _dep_coach_id)
 
+    # SOVEREIGN-VOICE: dependent name fallback — guardian-driven invite may
+    # omit name; `name` column is NOT NULL so we fall back to username.
+    _dep_name = str(data.get("name") or "").strip() or username
+    _dep_email = str(data.get("email") or "").strip()
+    _dep_phone = str(data.get("phone") or "").strip()
     new_profile = {
         "role": "CLIENT",
-        "name": data.get("name"),
-        "email": "",
-        "phone": "",
+        "name": _dep_name,
+        "email": _dep_email,
+        "phone": _dep_phone,
         "family_id": fam_id,
         "hardware_id": f"CHILD_{username.upper()}_ID",
         "tier": "DEPENDENT",
@@ -7497,22 +7526,35 @@ class AzureCortex:
         except Exception as e:
             print(f">>> [RECON] marker apply error: {e}")
 
-    def register(self, uid: str, ws):
+    def register(self, uid: str, ws, client_context: str = "main"):
         if uid not in self.sockets:
             self.sockets[uid] = set()
-        
-        # Clean dead sockets before adding the new one
-        dead = set()
-        for s in self.sockets[uid]:
+
+        # QUANTUM-CRYSTAL-ARCH: Per-context single-session enforcement. Evict ONLY
+        # prior sockets for this hardware_id whose client_context matches the new
+        # socket's context. Parent dashboard ("main") and embedded DOJO iframe
+        # ("dojo") coexist without fighting. Reconnect-after-network-flap (same
+        # context) still gets evicted, fixing the original DOJO duplicate-response
+        # bug. Old socket closed with code 4001 / reason
+        # "session_replaced_by_new_login" so client onclose can skip auto-reconnect.
+        try:
+            ws._eviction_context = client_context  # tag for future evictions
+        except Exception:
+            pass
+        for _prior_ws in list(self.sockets[uid]):
+            if _prior_ws is ws:
+                continue
+            _prior_ctx = getattr(_prior_ws, "_eviction_context", "main")
+            if _prior_ctx != client_context:
+                continue  # different surface (e.g. main vs dojo) — preserve
             try:
-                if not s.open:
-                    dead.add(s)
-            except Exception:
-                dead.add(s)
-        if dead:
-            self.sockets[uid] -= dead
-            print(f">>> [SOCKET CLEANUP] Removed {len(dead)} dead socket(s) for {uid}")
-        
+                _prior_id = id(_prior_ws)
+                asyncio.create_task(_prior_ws.close(code=4001, reason="session_replaced_by_new_login"))
+                self.sockets[uid].discard(_prior_ws)
+                print(f">>> [SOCKET EVICT] uid={uid} ctx={client_context} old_socket_id={_prior_id} reason=session_replaced_by_new_login")
+            except Exception as _evict_e:
+                print(f">>> [SOCKET EVICT] uid={uid} ctx={client_context} close_failed: {_evict_e}")
+
         self.sockets[uid].add(ws)
         
         # End previous session if exists (prevent orphaned sessions)
@@ -7823,9 +7865,18 @@ class AzureCortex:
             print(f">>> [CLASSROOM CONTEXT ERROR] {e}")
             return ""
 
-    async def process_interaction(self, profile: dict, user_text: str):
+    async def process_interaction(self, profile: dict, user_text: str, dojo_type: Optional[str] = None, client_context: Optional[str] = None):
         uid = profile.get("hardware_id", "UNKNOWN")
-        print(f">>> [AI] Cortex Active for {profile.get('name')}")
+        # QUANTUM-CRYSTAL-ARCH: scope all _send() emissions to the originating
+        # context (e.g. "dojo" iframe). Without this filter, both parent and
+        # iframe sockets receive the response and the iframe shows duplicates.
+        _ctx = client_context  # local alias used in every _send below
+        print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx}")
+        # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
+        _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
+        _dojo_signal = _DOJO_TIER_TO_SIGNAL.get(_dojo_tier) if _dojo_tier else None
+        if dojo_type:
+            print(f">>> [DOJO ROUTE] dojo_type={dojo_type} model_tier_used={_dojo_tier or 'auto'} model_tier_source={'override' if _dojo_tier else 'odpe_signal'}")
 
         # QUANTUM-CRYSTAL-ARCH — track client messages for Layer 8 false-positive guard
         if not user_text.startswith("[SEARCH SYNTHESIS]"):
@@ -7838,7 +7889,7 @@ class AzureCortex:
         _ip_deflection = check_ip_boundary(user_text, _role)
         if _ip_deflection:
             print(f">>> [IP BOUNDARY] Blocked restricted topic probe from {_role} user {profile.get('name')}")
-            await self._send(uid, _ip_deflection)
+            await self._send(uid, _ip_deflection, client_context=_ctx)
             return
 
         # Check if this is a Dojo simulation - skip token deduction for training
@@ -7857,7 +7908,7 @@ class AzureCortex:
                 # #region agent log
                 print(f">>> [DBG-H4] TOKEN FAIL - returning early for {uid}")
                 # #endregion
-                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.")
+                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx)
                 return
                 
         # Record analytics (skip for Dojo to keep stats clean)
@@ -7961,7 +8012,7 @@ class AzureCortex:
                                     "Do NOT output any JSON, code, or search queries.")
                             else:
                                 print(f">>> [WEB SEARCH] Detected intent for {profile.get('name')}: '{_query[:80]}'")
-                                await self._send(uid, f"Searching online for {_query[:60]}...")
+                                await self._send(uid, f"Searching online for {_query[:60]}...", client_context=_ctx)
                                 import asyncio as _aio_search
                                 try:
                                     _search_result = await _aio_search.wait_for(
@@ -8650,6 +8701,7 @@ class AzureCortex:
                     _clean_prefix = ""
                     async for delta, provider in _sovereign_stream(
                         system_prompt, user_text,
+                        odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
                         temperature=_user_temp, max_tokens=1500,
                         domain="clinical",
                         image_data_url=_vault_image_data_url,
@@ -8720,7 +8772,7 @@ class AzureCortex:
                                 print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
                                 _first_token = False
                             if len(_chunk_buf) >= 25:
-                                await self._send(uid, full_response)
+                                await self._send(uid, full_response, client_context=_ctx)
                                 _chunk_buf = ""
 
                     if _garble_aborted:
@@ -8740,7 +8792,7 @@ class AzureCortex:
                             if _fb_resp:
                                 full_response = _fb_resp
                                 _provider_used = _fb_prov
-                                await self._send(uid, full_response)
+                                await self._send(uid, full_response, client_context=_ctx)
                                 _already_streamed = True
                                 print(f">>> [GARBLE] Fallback via {_fb_prov}: {len(full_response)} chars")
                         except Exception as _fb_err:
@@ -8755,7 +8807,7 @@ class AzureCortex:
                         elif not _think_resolved and _raw_accum:
                             full_response = _raw_accum
                         if _chunk_buf or (full_response and not _chunk_buf):
-                            await self._send(uid, full_response)
+                            await self._send(uid, full_response, client_context=_ctx)
                     if not _garble_aborted:
                         _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send
                 except Exception as _sov_err:
@@ -8769,6 +8821,7 @@ class AzureCortex:
                 try:
                     full_response, _provider_used = await _sovereign_generate(
                         system_prompt, user_text,
+                        odpe_signal=_dojo_signal,  # QUANTUM-CRYSTAL-ARCH: DOJO tier override
                         temperature=_user_temp, max_tokens=1500,
                         domain="clinical",
                     )
@@ -8806,7 +8859,7 @@ class AzureCortex:
                                 event_type = event.get("type")
                                 if event_type == "response.text.delta":
                                     full_response += event.get("delta", "")
-                                    await self._send(uid, full_response)
+                                    await self._send(uid, full_response, client_context=_ctx)
                                 elif event_type in ("response.text.done", "response.done"):
                                     break
                                 elif event_type == "error":
@@ -8879,7 +8932,7 @@ class AzureCortex:
 
             # SOVEREIGN-VOICE — send response (sovereign/race paths need explicit send)
             if _provider_used != "azure" and not _already_streamed:
-                await self._send(uid, full_response)
+                await self._send(uid, full_response, client_context=_ctx)
 
             # SOVEREIGN-VOICE — zero-cost token refund
             if not is_dojo_simulation and _provider_used in _ZERO_COST_PROVIDERS:
@@ -8895,6 +8948,12 @@ class AzureCortex:
                             break
                 except Exception as _ref_err:
                     print(f">>> [REFUND] Error (non-fatal): {_ref_err}")
+
+            # QUANTUM-CRYSTAL-ARCH: DOJO analytics line — track tier-routing decisions for tuning.
+            # Logged for every DOJO-tagged turn so we can audit which scenarios produce weak responses.
+            if dojo_type:
+                _dojo_total_ms = int((_time_inf.monotonic() - _t_inf_start) * 1000)
+                print(f">>> [DOJO ANALYTICS] dojo_type={dojo_type} model_tier_used={_dojo_tier or 'auto'} model_tier_source={'override' if _dojo_tier else 'odpe_signal'} provider={_provider_used} response_latency_ms={_dojo_total_ms} response_chars={len(full_response)}")
 
             # SOVEREIGN-VOICE: log ODPE signal to odpe_signal_log
             if db_pool and _provider_used and full_response.strip():
@@ -8924,7 +8983,7 @@ class AzureCortex:
                     print(f">>> [SOVEREIGN] Post-process stripped <think> block ({_pre_len} → {len(full_response)} chars)")
             _final_response = full_response
             if not full_response.strip():
-                await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.")
+                await self._send(uid, "I'm having trouble connecting right now. Please try again in a moment.", client_context=_ctx)
                 print(f">>> [AI] Empty response for {uid} - sent fallback message")
             else:
                 _sanitized = sanitize_ai_response(full_response, _role)
@@ -8935,7 +8994,7 @@ class AzureCortex:
                     pass
                 if _sanitized != full_response:
                     print(f">>> [IP BOUNDARY] Sanitized AI response for {_role} user {profile.get('name')}")
-                    await self._send(uid, _sanitized)
+                    await self._send(uid, _sanitized, client_context=_ctx)
                     _final_response = _sanitized
 
             # QUANTUM-CRYSTAL-ARCH — Layer 8 factual grounding post-check
@@ -8949,7 +9008,7 @@ class AzureCortex:
                         user_id=uid,
                     )
                     if not _v8.get("safe"):
-                        await self._send(uid, _v8["redirect"])
+                        await self._send(uid, _v8["redirect"], client_context=_ctx)
                         _final_response = _v8["redirect"]
                         print(f">>> [LAYER 8] Factual grounding redirect for {uid}: {_v8.get('reason')}")
                 except Exception as _v8e:
@@ -8962,7 +9021,7 @@ class AzureCortex:
                     _qg_uid = _UUID(int=0)
                     _safe, _blocked = await _queens_guard.verify_output(_qg_uid, _final_response)
                     if _blocked:
-                        await self._send(uid, _safe)
+                        await self._send(uid, _safe, client_context=_ctx)
                         _final_response = _safe
                         print(f">>> [LAYER 9] Queens Guard L3 blocked output for {uid}")
                 except Exception as _qg_err:
@@ -9116,7 +9175,7 @@ class AzureCortex:
                 "the weight it deserves. Tell me more about what brought this up "
                 "right now — what's happening in your body as you say it?"
             )
-            await self._send(uid, _fallback)
+            await self._send(uid, _fallback, client_context=_ctx)
 
     async def process_sanctuary_message(
             self,
@@ -10073,8 +10132,16 @@ class AzureCortex:
                     }
 
 
-    async def _send(self, uid: str, text: str):
-        """Send message to all connected sockets for user"""
+    async def _send(self, uid: str, text: str, client_context: Optional[str] = None):
+        """Send message to connected sockets for user.
+
+        QUANTUM-CRYSTAL-ARCH: When `client_context` is provided, only sockets
+        whose `_eviction_context` matches are targeted. This prevents the DOJO
+        iframe response from also being delivered to the parent dashboard
+        socket (which caused visible duplicate Nate messages because both
+        sockets feed UI panels). When `None` (legacy callers), broadcasts to
+        all sockets for backward compatibility.
+        """
         # Admin Contact Shield: redact protected PII before transmission
         text = _admin_shield.redact(text)
         if uid in self.sockets:
@@ -10082,8 +10149,14 @@ class AzureCortex:
             _socket_count = len(self.sockets[uid])
             _sent_ok = 0
             _sent_fail = 0
+            _skipped_ctx = 0
             # #endregion
             for ws in list(self.sockets[uid]):
+                if client_context is not None:
+                    _ws_ctx = getattr(ws, "_eviction_context", "main")
+                    if _ws_ctx != client_context:
+                        _skipped_ctx += 1
+                        continue
                 try:
                     await ws.send(json.dumps({"type": "nate_response", "text": text}))
                     # #region agent log
@@ -10095,8 +10168,8 @@ class AzureCortex:
                     _sent_fail += 1
                     # #endregion
             # #region agent log
-            if len(text) < 30 or _sent_fail > 0:
-                print(f">>> [DBG-H5] _send uid={uid} sockets={_socket_count} ok={_sent_ok} fail={_sent_fail} text_len={len(text)}")
+            if len(text) < 30 or _sent_fail > 0 or _skipped_ctx > 0:
+                print(f">>> [DBG-H5] _send uid={uid} ctx={client_context} sockets={_socket_count} ok={_sent_ok} fail={_sent_fail} skipped_ctx={_skipped_ctx} text_len={len(text)}")
             # #endregion
         else:
             # #region agent log
@@ -11021,8 +11094,11 @@ async def handle_client(websocket, path=None):
                                         _v["profile"].pop("deletion_requested_at", None)
                                         _v["profile"]["updated_at"] = str(datetime.datetime.now())
                                         res = _v["profile"]
-                                        save_registry(registry)
-                                        print(f"[Account] Restored PENDING_DELETION account for {uid}")
+                                        _restored = await save_registry_async(registry, changed_keys=[_k])
+                                        if _restored:
+                                            print(f"[Account] Restored PENDING_DELETION account for {uid} (PG confirmed)")
+                                        else:
+                                            print(f"[Account] CRITICAL: PG write failed restoring {uid}")
 
                                         # Cancel the staged_deletion in PostgreSQL
                                         try:
@@ -11080,7 +11156,8 @@ async def handle_client(websocket, path=None):
 
                     current_profile = res
                     current_username = d.get("username")
-                    cortex.register(uid, websocket)
+                    # QUANTUM-CRYSTAL-ARCH: per-context eviction (default "main")
+                    cortex.register(uid, websocket, client_context=d.get("client_context", "main"))
                     analytics_engine.record_event("login", uid)
                     notification_system.register_connection(uid, websocket)
                     
@@ -11241,7 +11318,8 @@ async def handle_client(websocket, path=None):
                         current_profile = found_profile
                         uid = hw_id
                         current_hardware_id = hw_id
-                        cortex.register(uid, websocket)
+                        # QUANTUM-CRYSTAL-ARCH: per-context eviction (DOJO iframe sends "dojo")
+                        cortex.register(uid, websocket, client_context=d.get("client_context", "main"))
                         notification_system.register_connection(uid, websocket)
 
                         if found_profile.get("role") in ("COACH", "ADMIN"):
@@ -11390,7 +11468,8 @@ async def handle_client(websocket, path=None):
                         if tok:
                             uid = prof.get("hardware_id")
                             current_profile = prof
-                            cortex.register(uid, websocket)
+                            # QUANTUM-CRYSTAL-ARCH: per-context eviction (default "main")
+                            cortex.register(uid, websocket, client_context=d.get("client_context", "main"))
                             notification_system.register_connection(uid, websocket)
                             analytics_engine.record_event("login", uid)
                             _consent_needed_reg = prof.pop("_consent_update_needed", False)
@@ -11467,12 +11546,16 @@ async def handle_client(websocket, path=None):
                             prof["password_reset_token"] = reset_token
                             prof["password_reset_expires"] = (datetime.datetime.now() + datetime.timedelta(hours=1)).isoformat()
                             target_val["profile"] = prof
-                            save_registry(registry)
-                            reset_link = f"{APP_BASE_URL.rstrip('/')}/index.html?reset_token={reset_token}"
-                            try:
-                                await notification_system.send_password_reset_email(to_email, reset_link, username)
-                            except Exception as em:
-                                print(f">>> [FORGOT_PW] Email send failed: {em}")
+                            _pw_saved = await save_registry_async(registry, changed_keys=[target_key])
+                            if not _pw_saved:
+                                print(f">>> [FORGOT_PW] CRITICAL: PG write failed for {target_key} — token NOT persisted, email NOT sent")
+                            else:
+                                reset_link = f"{APP_BASE_URL.rstrip('/')}/index.html?reset_token={reset_token}"
+                                try:
+                                    await notification_system.send_password_reset_email(to_email, reset_link, username)
+                                    print(f">>> [FORGOT_PW] Reset link emailed to {to_email} (PG confirmed)")
+                                except Exception as em:
+                                    print(f">>> [FORGOT_PW] Email send failed: {em}")
                     await websocket.send(json.dumps({"type": "forgot_password_sent", "message": "If that email exists, a reset link was sent"}))
             
             # === FORGOT PASSWORD CONFIRM (public, uses token) ===
@@ -11555,7 +11638,7 @@ async def handle_client(websocket, path=None):
 
             # === FORGOT PASSWORD PHONE REQUEST (public, SMS-based) ===
             elif t == "forgot_password_phone_request":
-                phone_raw = (d.get("phone", "") or "").strip()
+                phone_raw = str(d.get("phone") or "").strip()
                 # Normalize: strip spaces/dashes, ensure starts with +
                 phone_normalized = phone_raw.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
                 if not phone_normalized.startswith("+"):
@@ -11571,7 +11654,7 @@ async def handle_client(websocket, path=None):
                     target_val = None
                     for k, v in registry.items():
                         prof = v.get("profile", {}) or {}
-                        stored_phone = (prof.get("phone") or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                        stored_phone = str(prof.get("phone") or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
                         if not stored_phone.startswith("+"):
                             stored_phone = "+1" + stored_phone if stored_phone else ""
                         if stored_phone and stored_phone == phone_normalized:
@@ -11586,22 +11669,24 @@ async def handle_client(websocket, path=None):
                         prof["phone_reset_expires"] = (datetime.datetime.now() + datetime.timedelta(minutes=10)).isoformat()
                         prof["phone_reset_attempts"] = 0
                         target_val["profile"] = prof
-                        save_registry(registry)
-                        
-                        try:
-                            await notification_system.send_password_reset_sms(phone_normalized, reset_code)
-                            print(f">>> [FORGOT_PW_PHONE] SMS code sent")
-                        except Exception as em:
-                            print(f">>> [FORGOT_PW_PHONE] SMS send failed: {em}")
+                        _ph_saved = await save_registry_async(registry, changed_keys=[target_key])
+                        if not _ph_saved:
+                            print(f">>> [FORGOT_PW_PHONE] CRITICAL: PG write failed for {target_key} — code NOT persisted, SMS NOT sent")
+                        else:
+                            try:
+                                await notification_system.send_password_reset_sms(phone_normalized, reset_code)
+                                print(f">>> [FORGOT_PW_PHONE] SMS code sent (PG confirmed)")
+                            except Exception as em:
+                                print(f">>> [FORGOT_PW_PHONE] SMS send failed: {em}")
                     
                     # Always return same response (prevent phone enumeration)
                     await websocket.send(json.dumps({"type": "forgot_password_phone_sent", "message": "If that phone number is on file, a code was sent"}))
             
             # === FORGOT PASSWORD PHONE CONFIRM (public, verifies SMS code) ===
             elif t == "forgot_password_phone_confirm":
-                phone_raw = (d.get("phone", "") or "").strip()
-                code = (d.get("code", "") or "").strip()
-                new_password = (d.get("new_password", "") or "").strip()
+                phone_raw = str(d.get("phone") or "").strip()
+                code = str(d.get("code") or "").strip()
+                new_password = str(d.get("new_password") or "").strip()
                 
                 phone_normalized = phone_raw.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
                 if not phone_normalized.startswith("+"):
@@ -11616,7 +11701,7 @@ async def handle_client(websocket, path=None):
                     found = False
                     for k, v in registry.items():
                         prof = v.get("profile", {}) or {}
-                        stored_phone = (prof.get("phone") or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+                        stored_phone = str(prof.get("phone") or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
                         if not stored_phone.startswith("+"):
                             stored_phone = "+1" + stored_phone if stored_phone else ""
                         if stored_phone and stored_phone == phone_normalized:
@@ -11748,7 +11833,9 @@ async def handle_client(websocket, path=None):
             # === CHAT MESSAGE ===
             elif t == "chat_message":
                 if current_profile:
-                    await cortex.process_interaction(current_profile, d.get("text", ""))
+                    # QUANTUM-CRYSTAL-ARCH: DOJO per-type tier override (forward dojo_type to cortex)
+                    # QUANTUM-CRYSTAL-ARCH: scope response to originating socket context
+                    await cortex.process_interaction(current_profile, d.get("text", ""), dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
                 else:
                     await websocket.send(json.dumps({"type": "error", "message": "Not authenticated"}))
             
@@ -11790,7 +11877,7 @@ async def handle_client(websocket, path=None):
                                 # Don't know what content type — store pending, let Nate ask
                                 export_intent_detector.set_pending(uid, export_intent)
                                 print(f">>> [EXPORT] needs content type clarification, stored pending for uid={uid}")
-                                await cortex.process_interaction(current_profile, text)
+                                await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
                             else:
                                 # Content type is known — generate the export
                                 try:
@@ -11841,10 +11928,10 @@ async def handle_client(websocket, path=None):
                                     print(f">>> [EXPORT] export_ready sent to uid={uid} file={export_result['filename']}")
                                 except Exception as ex:
                                     print(f">>> [EXPORT] generation error for uid={uid}: {ex}")
-                                    await cortex.process_interaction(current_profile, text)
+                                    await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
                         else:
-                            # Normal Nate conversation
-                            await cortex.process_interaction(current_profile, text)
+                            # Normal Nate conversation — QUANTUM-CRYSTAL-ARCH: forward optional dojo_type
+                            await cortex.process_interaction(current_profile, text, dojo_type=d.get("dojo_type"), client_context=getattr(websocket, "_eviction_context", "main"))
 
                         # #region agent log
                         print(f">>> [DBG-H1] nate_query DONE uid={uid} sockets_after={list(cortex.sockets.get(uid, set()))} ts={datetime.datetime.now().isoformat()}")
@@ -13495,7 +13582,7 @@ async def handle_client(websocket, path=None):
                                 _gp_row = await _gp_conn.fetchrow(
                                     """SELECT username, role, email, name, hardware_id, family_id,
                                               tier, subscription_status, token_balance,
-                                              coach_id, profile_data, created_at, last_login_at,
+                                              profile_data, created_at, last_login_at,
                                               company_id, password_hash IS NOT NULL AS has_password
                                        FROM users
                                        WHERE hardware_id = $1 OR username = $1
@@ -13520,7 +13607,7 @@ async def handle_client(websocket, path=None):
                                     _gp_profile["tier"] = _gp_row["tier"]
                                     _gp_profile["subscription_status"] = _gp_row["subscription_status"]
                                     _gp_profile["token_balance"] = int(_gp_row["token_balance"] or 0)
-                                    _gp_profile["coach_id"] = _gp_row["coach_id"]
+                                    _gp_profile["coach_id"] = _gp_pdata.get("coach_id") or _gp_profile.get("coach_id")
                                     _gp_profile["company_id"] = str(_gp_row["company_id"]) if _gp_row["company_id"] else None
                                     if _gp_row.get("created_at"):
                                         _gp_profile["created_at"] = _gp_row["created_at"].isoformat()
@@ -19169,7 +19256,7 @@ If 'challenge', respectfully push the coach's thinking."""
                     else:
                         augmented_query = f"[Coach general query]: {query}"
                     
-                    await cortex.process_interaction(current_profile, augmented_query)
+                    await cortex.process_interaction(current_profile, augmented_query, client_context=getattr(websocket, "_eviction_context", "main"))
             
             # === COACH: SAVE RECORDING METADATA ===
             elif t == "save_recording":
@@ -20187,7 +20274,8 @@ If 'challenge', respectfully push the coach's thinking."""
                             SELECT session_id, coach_id, client_id, client_name,
                                    session_type, scheduled_start, duration_minutes,
                                    zoom_meeting_id, zoom_link, status,
-                                   consultation_name, consultation_email,
+                                   session_data->>'consultation_name' AS consultation_name,
+                                   session_data->>'consultation_email' AS consultation_email,
                                    session_data->>'transcript_location' AS transcript_location,
                                    session_data->>'transcript_archived_at' AS transcript_archived_at
                             FROM coaching_sessions
@@ -20698,6 +20786,11 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                         "analysis": analysis,
                     }))
                 except Exception as e:
+                    try:
+                        if classroom_analyzer and video_id:
+                            classroom_analyzer.clear_pipeline_stage(str(video_id))
+                    except Exception:
+                        pass
                     await websocket.send(json.dumps({
                         "type": "error",
                         "message": "VIDEO_ANALYSIS_FAILED"
@@ -20734,7 +20827,20 @@ Key insight: {ai_result.get('focus_specific_feedback', '')}
                                 print(f"[Classroom] load analysis from backend_data JSON: {_be}")
                     if analysis and isinstance(analysis.get("analysis"), dict):
                         inner = analysis["analysis"]
-                        analysis = {**analysis, **inner}
+                        # CLASSROOM-PIPELINE: preserve session status + pipeline fields when merging nested analysis
+                        st_top = (analysis.get("status") or "").lower()
+                        preserved = {}
+                        for _k in (
+                            "status",
+                            "pipeline_stage",
+                            "pipeline_stage_index",
+                            "pipeline_stage_at",
+                        ):
+                            if _k in analysis and analysis.get(_k) is not None:
+                                preserved[_k] = analysis[_k]
+                        analysis = {**analysis, **inner, **preserved}
+                        if st_top == "analyzing":
+                            analysis["status"] = "analyzing"
                         analysis.pop("analysis", None)
 
                     if analysis:
@@ -22783,8 +22889,13 @@ Coach Reflection on Session {session_id}:
                                 if field in d:
                                     v["profile"][field] = d[field]
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
-                            save_registry(registry)
-                            await websocket.send(json.dumps({"type": "profile_updated", "profile": v["profile"]}))
+                            # SOVEREIGN-VOICE: persist email/phone (auth-recovery critical) via PG-confirmed write
+                            ok = await save_registry_async(registry, changed_keys=[k])
+                            await websocket.send(json.dumps({
+                                "type": "profile_updated",
+                                "profile": v["profile"],
+                                "persisted": bool(ok),
+                            }))
                             break
             
             # === ACCEPT CONSENT UPDATE ===
@@ -22852,8 +22963,13 @@ Coach Reflection on Session {session_id}:
                                 if field in d:
                                     v["profile"][field] = d[field]
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
-                            save_registry(registry)
-                            await websocket.send(json.dumps({"type": "profile_updated", "profile": v["profile"]}))
+                            # SOVEREIGN-VOICE: PG-confirmed coach profile write
+                            ok = await save_registry_async(registry, changed_keys=[k])
+                            await websocket.send(json.dumps({
+                                "type": "profile_updated",
+                                "profile": v["profile"],
+                                "persisted": bool(ok),
+                            }))
                             break
 
             # === UPDATE NOTIFICATION PREFERENCES ===
@@ -22870,8 +22986,13 @@ Coach Reflection on Session {session_id}:
                                 if field in d:
                                     v["profile"]["notification_prefs"][field] = d[field]
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
-                            save_registry(registry)
-                            await websocket.send(json.dumps({"type": "notification_prefs_updated", "prefs": v["profile"]["notification_prefs"]}))
+                            # SOVEREIGN-VOICE: PG-confirmed notification prefs write
+                            ok = await save_registry_async(registry, changed_keys=[k])
+                            await websocket.send(json.dumps({
+                                "type": "notification_prefs_updated",
+                                "prefs": v["profile"]["notification_prefs"],
+                                "persisted": bool(ok),
+                            }))
                             break
 
             # === UPDATE VOICE PREFERENCE ===
@@ -22884,8 +23005,13 @@ Coach Reflection on Session {session_id}:
                                 v["profile"]["notification_prefs"] = {}
                             v["profile"]["notification_prefs"]["voice_mode_default"] = d.get("voice_mode_default", False)
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
-                            save_registry(registry)
-                            await websocket.send(json.dumps({"type": "voice_pref_updated", "voice_mode_default": d.get("voice_mode_default", False)}))
+                            # SOVEREIGN-VOICE: PG-confirmed voice pref write
+                            ok = await save_registry_async(registry, changed_keys=[k])
+                            await websocket.send(json.dumps({
+                                "type": "voice_pref_updated",
+                                "voice_mode_default": d.get("voice_mode_default", False),
+                                "persisted": bool(ok),
+                            }))
                             break
 
             # === REQUEST ACCOUNT DELETION (30-day soft delete — clients and coaches only) ===
@@ -23599,10 +23725,10 @@ Coach Reflection on Session {session_id}:
                         "expires_at": str(datetime.datetime.now() + datetime.timedelta(days=7))
                     }
                     save_registry(registry)
-                    fi_email = (d.get("email") or "").strip()
-                    fi_phone = (d.get("phone") or "").strip()
+                    fi_email = str(d.get("email") or "").strip()
+                    fi_phone = str(d.get("phone") or "").strip()
                     fi_contact = fi_email or fi_phone
-                    fi_invitee_name = (d.get("name") or "").strip()
+                    fi_invitee_name = str(d.get("name") or "").strip()
                     fi_inviter_name = (current_profile.get("name") or "Your family")
                     fi_sent = False
                     fi_method = None
@@ -24261,7 +24387,12 @@ Coach Reflection on Session {session_id}:
                         coaching_prompt = f"[Coach asking about client {client_id}]: {query}"
                     else:
                         coaching_prompt = f"[Coach question]: {query}"
-                    await cortex.process_interaction(current_profile, coaching_prompt)
+                    # QUANTUM-CRYSTAL-ARCH: forward dojo_type for routing AND
+                    # client_context so the response only goes back to the
+                    # originating socket (parent vs DOJO iframe). Without ctx,
+                    # _send broadcasts to both and the iframe shows duplicates.
+                    _origin_ctx = getattr(websocket, "_eviction_context", "main")
+                    await cortex.process_interaction(current_profile, coaching_prompt, dojo_type=d.get("dojo_type"), client_context=_origin_ctx)
 
             # =================================================================
             # HELP & FAQ — Little Nate as Platform Guide (stateless, no memory)
@@ -24633,7 +24764,7 @@ Coach Reflection on Session {session_id}:
                             f"Here is what I'm referring to:\n\n{_mp_context}\n\n"
                             f"Can we pick up from there?"
                         )
-                        await cortex.process_interaction(current_profile, _mp_prompt)
+                        await cortex.process_interaction(current_profile, _mp_prompt, client_context=getattr(websocket, "_eviction_context", "main"))
                         print(f">>> [MEMORY PUSH] Pushed {len(_mp_entries)} entries to Nate for {uid}")
                         if db_pool:
                             try:
@@ -24992,7 +25123,7 @@ Coach Reflection on Session {session_id}:
                             )
                             
                             # Send to Nate
-                            await cortex.process_interaction(current_profile, coaching_prompt)
+                            await cortex.process_interaction(current_profile, coaching_prompt, client_context=getattr(websocket, "_eviction_context", "main"))
                             
                             await websocket.send(json.dumps({
                                 "type": "search_complete",
@@ -25044,7 +25175,7 @@ Coach Reflection on Session {session_id}:
                                 f"earlier, acknowledge the correction honestly."
                             )
                             await cortex.process_interaction(
-                                current_profile, _synth_prompt)
+                                current_profile, _synth_prompt, client_context=getattr(websocket, "_eviction_context", "main"))
                         else:
                             await websocket.send(json.dumps({"type": "nate_response",
                                 "text": "I wasn't able to find anything definitive "

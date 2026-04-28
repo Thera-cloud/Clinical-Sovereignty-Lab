@@ -71,12 +71,14 @@ Future<LargeVideoUploadResult> uploadLargeVideoDirectToR2({
 }) async {
   final client = httpClient ?? http.Client();
   final ownsClient = httpClient == null;
+  // Avoid double-slash paths (e.g. base ending with /) that can 404 on some stacks.
+  final apiBase = apiBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
 
   String? videoId;
   try {
     // Step 1 — init
     final initResp = await client.post(
-      Uri.parse('$apiBaseUrl/api/classroom/upload-video/init'),
+      Uri.parse('$apiBase/api/classroom/upload-video/init'),
       headers: {
         'Content-Type': 'application/json',
         if (bearerToken.isNotEmpty) 'Authorization': 'Bearer $bearerToken',
@@ -137,7 +139,7 @@ Future<LargeVideoUploadResult> uploadLargeVideoDirectToR2({
 
     // Step 3 — complete
     final completeResp = await client.post(
-      Uri.parse('$apiBaseUrl/api/classroom/upload-video/complete'),
+      Uri.parse('$apiBase/api/classroom/upload-video/complete'),
       headers: {
         'Content-Type': 'application/json',
         if (bearerToken.isNotEmpty) 'Authorization': 'Bearer $bearerToken',
@@ -160,7 +162,7 @@ Future<LargeVideoUploadResult> uploadLargeVideoDirectToR2({
       // Best-effort abort so R2 doesn't keep paying for staged parts.
       try {
         await client.post(
-          Uri.parse('$apiBaseUrl/api/classroom/upload-video/abort'),
+          Uri.parse('$apiBase/api/classroom/upload-video/abort'),
           headers: {
             'Content-Type': 'application/json',
             if (bearerToken.isNotEmpty)

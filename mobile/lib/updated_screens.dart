@@ -4157,6 +4157,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   Timer? _classroomVideoPollTimer;
   bool _classroomVideoPipelineActive = false;
   int _classroomVideoStageIndex = 0;
+  /// Server-reported live stage (from pipeline_stage in classroom_sessions) while processing video.
+  String? _classroomServerPipelineLabel;
+  int? _classroomServerPipelineIndex;
   static const List<String> _classroomVideoStages = [
     "Extracting audio...",
     "Transcribing session...",
@@ -6400,36 +6403,55 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ? Map<String, dynamic>.from(data['analysis'] as Map)
               : null;
           analysis = _flattenClassroomAnalysis(analysis);
-          setState(() {
-            _classroomVideoPipelineActive = false;
-            _classroomAnalyzing = false;
-            _classroomAnalysis = analysis;
-            if (analysis != null) {
-              // Update history
-              _classroomHistory.insert(0, analysis);
-              // Initialize reflection controllers
-              _classroomReflectionControllers = {};
-              final questions = List<String>.from(analysis['reflection_questions'] ?? []);
-              for (int i = 0; i < questions.length; i++) {
-                _classroomReflectionControllers['q_$i'] = TextEditingController();
+          final err = analysis != null
+              ? '${analysis['error'] ?? ''}'
+              : '';
+          final hasErr = err.isNotEmpty;
+          if (!hasErr) {
+            setState(() {
+              _classroomServerPipelineLabel = null;
+              _classroomServerPipelineIndex = null;
+              _classroomVideoPipelineActive = false;
+              _classroomAnalyzing = false;
+              _classroomAnalysis = analysis;
+              if (analysis != null) {
+                _classroomHistory.insert(0, analysis);
+                _classroomReflectionControllers = {};
+                final questions = List<String>.from(analysis['reflection_questions'] ?? []);
+                for (int i = 0; i < questions.length; i++) {
+                  _classroomReflectionControllers['q_$i'] = TextEditingController();
+                }
               }
+            });
+            if (analysis != null) {
+              final tps = (analysis['therapeutic_presence_score'] is num)
+                  ? (analysis['therapeutic_presence_score'] as num).toDouble()
+                  : 0.0;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Analysis complete! Therapeutic presence: ${tps.toStringAsFixed(1)}/10"),
+                  backgroundColor: const Color(0xFF4ECDC4),
+                  duration: const Duration(seconds: 4),
+                ),
+              );
             }
-          });
-          if (analysis != null) {
-            final tps = (analysis['therapeutic_presence_score'] is num)
-                ? (analysis['therapeutic_presence_score'] as num).toDouble()
-                : 0.0;
+            _requestClassroomSessions();
+          } else {
+            setState(() {
+              _classroomServerPipelineLabel = null;
+              _classroomServerPipelineIndex = null;
+              _classroomVideoPipelineActive = false;
+              _classroomAnalyzing = false;
+            });
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text("Analysis complete! Therapeutic presence: ${tps.toStringAsFixed(1)}/10"),
-                backgroundColor: const Color(0xFF4ECDC4),
-                duration: const Duration(seconds: 4),
+                content: Text("Video analysis failed: $err"),
+                backgroundColor: const Color(0xFFEF4444),
+                duration: const Duration(seconds: 5),
               ),
             );
+            _requestClassroomSessions();
           }
-          // Re-pull the dropdown so the just-analyzed video flips from
-          // pending to ready (transcript_location now set, status=analyzed).
-          _requestClassroomSessions();
         }
       }
       else if (data['type'] == 'classroom_analysis') {
@@ -6438,18 +6460,42 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ? Map<String, dynamic>.from(data['analysis'] as Map)
               : null;
           analysis = _flattenClassroomAnalysis(analysis);
-          if (analysis != null && analysis.isNotEmpty) {
+          final done = _isClassroomSessionAnalysisComplete(analysis);
+          if (done) {
             _cancelClassroomVideoPoll();
           }
           setState(() {
-            _classroomAnalysis = analysis;
-            if (analysis != null && analysis.isNotEmpty) {
+            if (done) {
+              _classroomServerPipelineLabel = null;
+              _classroomServerPipelineIndex = null;
               _classroomVideoPipelineActive = false;
               _classroomAnalyzing = false;
+              _classroomAnalysis = analysis;
               _classroomReflectionControllers = {};
-              final questions = List<String>.from(analysis['reflection_questions'] ?? []);
+              final questions = List<String>.from(analysis?['reflection_questions'] ?? []);
               for (int i = 0; i < questions.length; i++) {
                 _classroomReflectionControllers['q_$i'] = TextEditingController();
+              }
+            } else {
+              final pl = analysis?['pipeline_stage']?.toString();
+              if (pl != null && pl.isNotEmpty) {
+                _classroomServerPipelineLabel = pl;
+                final pi = analysis!['pipeline_stage_index'];
+                if (pi is int) {
+                  _classroomServerPipelineIndex = pi;
+                } else if (pi is num) {
+                  _classroomServerPipelineIndex = pi.toInt();
+                } else {
+                  _classroomServerPipelineIndex = null;
+                }
+                if (_classroomServerPipelineIndex != null) {
+                  _classroomVideoStageIndex = _classroomServerPipelineIndex!.clamp(
+                    0,
+                    _classroomVideoStages.length - 1,
+                  );
+                }
+                _classroomVideoPipelineActive = true;
+                _classroomAnalyzing = true;
               }
             }
           });
@@ -13669,9 +13715,11 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
   
   Widget _buildAnalyzingState() {
-    final stage = _classroomVideoPipelineActive && _classroomVideoStages.isNotEmpty
+    final fromServer = _classroomServerPipelineLabel?.trim();
+    final fromUi = _classroomVideoPipelineActive && _classroomVideoStages.isNotEmpty
         ? _classroomVideoStages[_classroomVideoStageIndex.clamp(0, _classroomVideoStages.length - 1)]
         : null;
+    final stage = (fromServer != null && fromServer.isNotEmpty) ? fromServer : fromUi;
     return Container(
       padding: const EdgeInsets.all(40),
       decoration: BoxDecoration(
@@ -13696,6 +13744,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey[500], fontSize: 12),
           ),
+          if (_classroomServerPipelineIndex != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              "Stage ${(_classroomServerPipelineIndex! + 1)}/5",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600], fontSize: 11),
+            ),
+          ],
           if (_classroomVideoPipelineActive) ...[
             const SizedBox(height: 20),
             ..._classroomVideoStages.asMap().entries.map((e) {
@@ -15032,6 +15088,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _classroomVideoPollTimer = null;
   }
 
+  /// Distinguish finished session analysis from in-flight rows (status=analyzing) or empty metadata.
+  bool _isClassroomSessionAnalysisComplete(Map<String, dynamic>? a) {
+    if (a == null || a.isEmpty) return false;
+    final err = '${a['error'] ?? ''}';
+    if (err.isNotEmpty) return false;
+    final st = (a['status'] ?? '').toString().toLowerCase();
+    if (st == 'analyzing') return false;
+    if (st == 'analyzed' || st == 'complete') return true;
+    if (a['therapeutic_presence_score'] != null) return true;
+    return false;
+  }
+
   /// Merge nested `analysis` (device-upload records) into one map for the results UI.
   Map<String, dynamic>? _flattenClassroomAnalysis(Map<String, dynamic>? raw) {
     if (raw == null) return null;
@@ -15051,6 +15119,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _cancelClassroomVideoPoll();
     if (!mounted) return;
     setState(() {
+      _classroomServerPipelineLabel = null;
+      _classroomServerPipelineIndex = null;
       _classroomVideoPipelineActive = true;
       _classroomVideoStageIndex = 0;
       _classroomAnalyzing = true;
@@ -15074,6 +15144,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       if (ticks * 5 > 1800) {
         _cancelClassroomVideoPoll();
         setState(() {
+          _classroomServerPipelineLabel = null;
+          _classroomServerPipelineIndex = null;
           _classroomVideoPipelineActive = false;
           _classroomAnalyzing = false;
         });
@@ -15089,7 +15161,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         return;
       }
       setState(() {
-        _classroomVideoStageIndex = ticks % _classroomVideoStages.length;
+        if (_classroomServerPipelineLabel == null) {
+          _classroomVideoStageIndex = ticks % _classroomVideoStages.length;
+        }
       });
       _loadSessionAnalysis(videoSessionId);
     });

@@ -59,6 +59,95 @@ services:
       - nate_network
 
   # ---------------------------------------------------------------------------
+  # PgBouncer — Connection Pooler (SESSION mode, deployed 2026-04-26)
+  #
+  # Routes the FastAPI backend's DB traffic through a single shared pool to
+  # protect PostgreSQL from connection storms during burst load. SESSION mode
+  # was chosen over TRANSACTION mode because the codebase has four hard
+  # blockers that incompatible with transaction-scoped pooling. See
+  # .cursor/rules/pgbouncer-session-mode.mdc for the full migration plan.
+  #
+  # CURRENT ROUTING (2026-04-26):
+  #   backend → pgbouncer:6432 → postgres:5432  ✅ pooled
+  #   bridge  → postgres:5432  (direct)         ❌ bypasses pgbouncer
+  #
+  # The bridge is intentionally NOT routed through pgbouncer because
+  # bridge_server.py (a protected file, lines 29197-29199) hardcodes
+  # `_pg_host = "postgres"` and reverts any other value. Touching this
+  # without a feature flag and review is forbidden by `.cursorrules`. The
+  # bridge runs a small fixed pool (min_size=2, max_size=40) so pooling
+  # gives marginal benefit there anyway — see load-test-performance-baseline.mdc.
+  #
+  # FOUR BLOCKERS for switching to POOL_MODE: transaction (DO NOT toggle yet):
+  #   1. db_encryption_middleware.py uses SESSION-scoped `SET app.pii_key`.
+  #      Under transaction pooling, pgcrypto triggers (migration 105) lose
+  #      the GUC between transactions and start emitting NULL/garbage on
+  #      every INSERT/UPDATE that touches encrypted columns. Must convert
+  #      to `SET LOCAL app.pii_key` inside an explicit BEGIN/COMMIT wrapper
+  #      around each query that needs PII access — every single one.
+  #   2. asyncpg pools default to statement_cache_size=100 (server-side
+  #      prepared statements). Transaction pooling rotates the underlying
+  #      server connection between client transactions, so prepared
+  #      statement IDs go stale and fail with
+  #      `prepared statement "__asyncpg_stmt_NNN__" does not exist`.
+  #      Every `asyncpg.create_pool(...)` call site (50+ across backend)
+  #      must add `statement_cache_size=0` before transaction mode flips on.
+  #   3. backend/app/main.py (PROTECTED) infers DB host from a `@postgres:`
+  #      substring of DATABASE_URL, falling back to settings.POSTGRES_HOST.
+  #      We work around this today by setting POSTGRES_HOST=pgbouncer below.
+  #      Transaction mode would not change this requirement, but cleaning it
+  #      up belongs in the same migration.
+  #   4. backend/app/websocket/bridge_server.py (PROTECTED) hardcodes
+  #      `_pg_host = "postgres"`. Bridge cannot route through pgbouncer
+  #      until this override is gated behind a feature flag with a
+  #      # SOVEREIGN-VOICE comment per .cursorrules.
+  #
+  # Estimated migration effort to TRANSACTION mode: 1–2 weeks of careful
+  # refactoring + a dedicated load-test pass. Do NOT start that work as a
+  # side effect of any unrelated change.
+  # ---------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: nate_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      # edoburu/pgbouncer defaults listen_port to 5432; force the canonical
+      # pgbouncer port so healthcheck and clients can reach it at :6432.
+      LISTEN_PORT: 6432
+      POOL_MODE: session
+      DEFAULT_POOL_SIZE: 100
+      MAX_CLIENT_CONN: 500
+      RESERVE_POOL_SIZE: 20
+      RESERVE_POOL_TIMEOUT: 5
+      SERVER_LIFETIME: 3600
+      SERVER_IDLE_TIMEOUT: 600
+      AUTH_TYPE: scram-sha-256
+      # STATS_USERS grants read-only access to the pgbouncer admin DB (-d pgbouncer)
+      # for SHOW STATS / SHOW POOLS / SHOW SERVERS only — no RELOAD/SHUTDOWN/PAUSE.
+      # Required by the 48h monitoring cron (pgbouncer-48h-monitor.log). Without
+      # this, `psql -d pgbouncer` returns `FATAL: not allowed`. Added 2026-04-26.
+      STATS_USERS: ${POSTGRES_USER:-nate_admin}
+    # No ports exposed — only reachable by backend via nate_network (pgbouncer:6432)
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "${POSTGRES_USER:-nate_admin}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+    networks:
+      - nate_network
+
+  # ---------------------------------------------------------------------------
   # Backend API Server (FastAPI) — bind to localhost; Nginx terminates TLS
   # ---------------------------------------------------------------------------
   backend:
@@ -72,8 +161,20 @@ services:
     # CRITICAL: These override .env values with Docker-internal hostnames.
     # .env contains LAN IPs (10.0.0.81) unreachable inside the container network.
     # Do NOT remove — see learned-integration-patterns rule #14.
+    #
+    # PgBouncer routing (2026-04-26): Backend connects through pgbouncer:6432
+    # in SESSION mode. We set DATABASE_URL *and* POSTGRES_HOST/PORT because
+    # backend/app/main.py (PROTECTED) infers the asyncpg host via a
+    # `@postgres:` substring of DATABASE_URL — any other value falls back to
+    # settings.POSTGRES_HOST. Setting both env vars makes both code paths
+    # deterministically land on pgbouncer. See pgbouncer-session-mode.mdc.
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-little_nate}
+      - POSTGRES_HOST=pgbouncer
+      - POSTGRES_PORT=6432
+      - POSTGRES_USER=${POSTGRES_USER:-nate_admin}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-little_nate}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -110,11 +211,13 @@ services:
       # endpoints. Generate once with `openssl rand -hex 32` and set on
       # all three nodes. Empty = no auth (only safe over WireGuard/tunnel).
       - CLASSROOM_REMOTE_AUTH_TOKEN=${CLASSROOM_REMOTE_AUTH_TOKEN:-}
-      - CLASSROOM_REMOTE_TIMEOUT_SEC=${CLASSROOM_REMOTE_TIMEOUT_SEC:-1800}
+      - CLASSROOM_REMOTE_TIMEOUT_SEC=${CLASSROOM_REMOTE_TIMEOUT_SEC:-300}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8000}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -152,6 +255,13 @@ services:
       - .env
     # CRITICAL: These override .env values with Docker-internal hostnames.
     # Do NOT remove — see learned-integration-patterns rule #14.
+    #
+    # PgBouncer routing (2026-04-26): Bridge connects DIRECTLY to postgres,
+    # NOT through pgbouncer. This is intentional. backend/app/websocket/
+    # bridge_server.py (PROTECTED) hardcodes `_pg_host = "postgres"` at
+    # lines 29197-29199 and reverts any other value, so pointing this env
+    # at pgbouncer would have no effect and would silently drift the YAML
+    # away from runtime reality. See pgbouncer-session-mode.mdc.
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nate_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-little_nate}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379

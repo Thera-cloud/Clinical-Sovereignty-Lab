@@ -236,7 +236,7 @@ async def _log_export(pool, user_id: str):
     try:
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO skyeye_activity (action, platform, details, timestamp)
+                INSERT INTO skyeye_activity (type, platform, content, created_at)
                 VALUES ('data_export', 'system', $1, NOW())
             """, f"User {user_id} exported their data")
     except Exception as e:

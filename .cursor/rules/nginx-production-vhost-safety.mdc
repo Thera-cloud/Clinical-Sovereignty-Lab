@@ -1,0 +1,49 @@
+---
+description: Production API host uses sites-enabled vhosts + conf.d — never replace with repo monolith nginx.conf; no backups in sites-enabled; CORS map/snippet pattern for api.sovereignsanctuary.net
+alwaysApply: true
+---
+
+# Nginx Production VHost Safety (GREEN / 68.183.168.75)
+
+## The Problem
+
+The repo’s `nginx/nginx.conf` is a **Docker-oriented** monolith (`user nginx`, `upstream api_servers { server backend:8000; }`, full `server { }` blocks). **Production** on the DigitalOcean VPS uses **Ubuntu-style** nginx:
+
+- Short main file: `/etc/nginx/nginx.conf` → `include /etc/nginx/sites-enabled/*;`
+- **User** is `www-data`, not `nginx`.
+- Upstreams are **`127.0.0.1:8000`** (backend) and **`127.0.0.1:8765`** (bridge).
+
+**Copying the repo `nginx/nginx.conf` over `/etc/nginx/nginx.conf` will break** `nginx -t` / reload (e.g. `getpwnam("nginx") failed`) or point traffic at non-existent hostnames.
+
+## API vhost: Real Paths on the Server
+
+| Purpose | Path |
+|--------|------|
+| API + WS for `api.sovereignsanctuary.net` | `/etc/nginx/sites-enabled/api.sovereignsanctuary.net` (often mirrored in `sites-available/`) |
+| CORS `map` (http context) | `/etc/nginx/conf.d/00-cors-origins-map.conf` |
+| CORS `proxy_hide_header` + `add_header` for responses from FastAPI | `/etc/nginx/snippets/api-cors-proxy-headers.conf` |
+
+**Cross-origin** browser calls (e.g. coach web → `https://api.sovereignsanctuary.net/api/...`) need `Access-Control-Allow-Origin` on the **API** TLS response. If FastAPI CORS and env (e.g. spaced `CORS_ORIGINS`) are wrong, **nginx** can still set CORS on the proxy response using the map + snippet above. Do not use `if ($request_method = 'OPTIONS') { return 204; }` inside a location without the same CORS headers — nginx will not apply surrounding `add_header` to that `return` (known pitfall; see repo `nginx/nginx.conf` comment).
+
+## Rule
+
+1. **Do not** deploy the repo’s monolithic `nginx/nginx.conf` as the production main config unless the server is intentionally switched to that layout (Docker-in-host is not the current design).
+2. **Edit** the live vhost under `/etc/nginx/sites-enabled/` (and sync `sites-available` if the site is managed there), then `nginx -t` and `systemctl reload nginx`.
+3. **Never** leave backup or scratch files in `/etc/nginx/sites-enabled/` — `include ... sites-enabled/*` loads **every** file. A file like `api.sovereignsanctuary.net.bak.*` **duplicates** `server_name` and triggers *conflicting server name … ignored* and wrong defaults.
+4. **Backups** belong under `/root/`, `/etc/nginx/backups/`, or similar — **not** in `sites-enabled/`.
+
+## Quick Checks
+
+```bash
+# Duplicate server_name (look for .bak, .old, or accidental copies in sites-enabled)
+ssh root@68.183.168.75 'ls /etc/nginx/sites-enabled/; nginx -t 2>&1'
+
+# Who defines api vhost
+ssh root@68.183.168.75 'grep -l "server_name api.sovereignsanctuary.net" /etc/nginx/sites-enabled/*'
+# Expect: only the real vhost (e.g. `api.sovereignsanctuary.net`), not backups.
+```
+
+## Relation to `nginx-host-vs-docker.mdc`
+
+- **Host nginx** is the TLS edge for app/coach/command/api. Flutter web and dashboard deploys must still rsync to `/var/www/*` and reload host nginx as described there.
+- This rule is specifically about **not** conflating the **repo Docker nginx template** with the **live split vhost** layout and about **CORS / sites-enabled hygiene**.

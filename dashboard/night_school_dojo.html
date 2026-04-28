@@ -696,6 +696,29 @@ _recoverAuth();
         var socket = null;
         var currentPersona = "HOSTILE";
         var currentMode = "therapist";
+
+        // QUANTUM-CRYSTAL-ARCH: Resolve dojo_type for backend per-type model-tier routing.
+        // Maps (mode, persona) → key in _DOJO_TYPE_MODEL_TIER on the bridge. Returns null
+        // for unknown modes so the bridge falls through to ODPE classification.
+        function resolveDojoType(mode, persona) {
+            if (!mode) return null;
+            var m = String(mode).toLowerCase();
+            // therapist personas: HOSTILE/CRISIS map to free tier; rest map to "therapist" (premium)
+            if (m === "therapist") {
+                var p = String(persona || "").toUpperCase().split(",")[0];
+                if (p === "HOSTILE") return "hostile";
+                if (p === "CRISIS") return "crisis";
+                return "therapist";
+            }
+            // business personas: each persona is its own routing key (PITCH_PRACTICE → pitch_practice)
+            if (m === "business") {
+                var bp = String(persona || "").toLowerCase().split(",")[0];
+                if (!bp) return null;
+                return bp;
+            }
+            // judge/mcat/project_pm/cnc/teacher: mode itself is the routing key
+            return m;
+        }
         var currentTestId = null;
         var messages = [];
         var latencies = [];
@@ -1262,7 +1285,8 @@ _recoverAuth();
                     socket.send(JSON.stringify({
                         type: "auth",
                         token: tokenParam,
-                        hardware_id: hwParam
+                        hardware_id: hwParam,
+                        client_context: "dojo"
                     }));
                     return;
                 }
@@ -1272,12 +1296,19 @@ _recoverAuth();
                 socket.send(JSON.stringify({
                     type: "auth",
                     token: (sessionStorage.getItem("token") || localStorage.getItem("sc_token")),
-                    hardware_id: profile.hardware_id || "WEB_ADMIN"
+                    hardware_id: profile.hardware_id || "WEB_ADMIN",
+                    client_context: "dojo"
                 }));
             };
             socket.onmessage = handleMessage;
             socket.onerror = function(e) { console.warn('DOJO WS error:', e); };
-            socket.onclose = function() {
+            socket.onclose = function(ev) {
+                // QUANTUM-CRYSTAL-ARCH: never auto-reconnect on session-replaced
+                // eviction — would create a parent-vs-iframe ping-pong loop.
+                if (ev && ev.code === 4001) {
+                    console.warn(">>> Dojo socket evicted (session_replaced_by_new_login) — staying closed");
+                    return;
+                }
                 var attempt = Math.min(_dojoReconnectAttempts, 10);
                 var baseMs = Math.min(1000 * Math.pow(2, attempt), 30000);
                 var jitter = Math.floor(baseMs * 0.2 * Math.random());
@@ -1991,6 +2022,7 @@ _recoverAuth();
                     client_id: "SIMULATION",
                     mode: currentMode,
                     persona: currentPersona,
+                    dojo_type: resolveDojoType(currentMode, currentPersona),
                     wants_pdf: true
                 }));
                 
@@ -2018,7 +2050,8 @@ _recoverAuth();
                 query: queryText,
                 client_id: "SIMULATION",
                 mode: currentMode,
-                persona: currentPersona
+                persona: currentPersona,
+                dojo_type: resolveDojoType(currentMode, currentPersona)
             }));
         }
         

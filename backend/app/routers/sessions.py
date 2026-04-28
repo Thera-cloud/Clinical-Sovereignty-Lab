@@ -1715,7 +1715,20 @@ async def upload_classroom_video_init(request: Request, body: _MultipartInitRequ
         "status": "uploading",
         "created_at": str(datetime.now()),
     })
-    save_json(classroom_sessions_file, sessions)
+    try:
+        save_json(classroom_sessions_file, sessions)
+    except OSError as e:
+        # Avoid orphaned R2 multipart uploads if bind-mounted /app/data is not writable.
+        r2_storage.abort_multipart_upload(key=key, upload_id=upload_id, bucket=bucket)
+        _logger.error(
+            "upload_classroom_video_init: cannot write %s: %s",
+            classroom_sessions_file,
+            e,
+        )
+        raise HTTPException(
+            503,
+            "Cannot persist classroom session metadata (check DATA_DIR permissions on the host).",
+        ) from e
 
     return {
         "video_id": video_id,

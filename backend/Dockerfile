@@ -1,32 +1,33 @@
 # =============================================================================
-# LITTLE NATE — Backend API Server
+# LITTLE NATE — Backend API Server (GREEN / Orchestration-Only)
+#
+# Heavy ML packages (torch, opencv, mediapipe, librosa, moviepy) are
+# excluded — they run on ORANGE/BLUE via remote dispatch.
+# See .cursor/rules/three-node-sync-discipline.mdc
 # =============================================================================
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# System dependencies — only what the orchestration layer needs.
+# libsndfile1 kept for parselmouth; ffmpeg kept for lightweight audio
+# format conversion. opencv/mediapipe X11 libs (libgl1, libsm6, etc.)
+# are removed — visual analysis runs on BLUE.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
     libmagic1 \
     libsndfile1 \
     tesseract-ocr \
-    ffmpeg \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (better caching)
-COPY requirements.txt .
+# Copy lightweight requirements (no torch/opencv/mediapipe/librosa)
+COPY requirements-light.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements-light.txt
 
 # Copy application code
 COPY app/ ./app/
@@ -48,8 +49,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gosu \
     && rm -rf /var/lib/apt/lists/*
 
-RUN printf '#!/bin/sh\nchown -R nate:nate /app/data /app/logs 2>/dev/null || true\nexec gosu nate "$@"\n' > /usr/local/bin/entrypoint.sh \
-    && chmod +x /usr/local/bin/entrypoint.sh
+# See entrypoint.sh: ensure /app/data/classroom_sessions.json exists ([]) and nate (uid 1000) can write
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Note: USER stays root so the entrypoint can chown; gosu drops to nate
 # before exec'ing the CMD.
