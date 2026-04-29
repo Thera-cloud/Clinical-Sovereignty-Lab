@@ -2392,13 +2392,29 @@ def hash_password(password: str) -> str:
     return result
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored hash. No plaintext fallback."""
+    """Verify password against stored hash. No plaintext fallback.
+
+    Format: <32-char hex salt>:<64-char hex pbkdf2-sha256 100k> (97 chars total).
+    Logs format violations so credential drift (e.g. bcrypt hashes set via
+    direct SQL) becomes visible instead of failing silently as 'wrong password'.
+    """
+    # SOVEREIGN-VOICE: hash format guard added 2026-04-28 after zacks99 bcrypt drift incident.
+    if not stored_hash or not isinstance(stored_hash, str):
+        print(f"[VERIFY_PASSWORD] INVALID_HASH_FORMAT empty_or_non_string")
+        return False
+    if ":" not in stored_hash:
+        prefix = stored_hash[:8] if stored_hash else ""
+        print(f"[VERIFY_PASSWORD] INVALID_HASH_FORMAT no_colon_separator len={len(stored_hash)} prefix={prefix!r}")
+        return False
     try:
-        salt, hash_hex = stored_hash.split(':')
+        salt, hash_hex = stored_hash.split(':', 1)
+        if len(salt) != 32 or len(hash_hex) != 64:
+            print(f"[VERIFY_PASSWORD] INVALID_HASH_FORMAT bad_lengths salt_len={len(salt)} hash_len={len(hash_hex)} prefix={stored_hash[:8]!r}")
+            return False
         hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
         return hmac.compare_digest(hashed.hex(), hash_hex)
-    except (ValueError, AttributeError):
-        # Hash format invalid — reject. Never compare plaintext.
+    except (ValueError, AttributeError) as e:
+        print(f"[VERIFY_PASSWORD] INVALID_HASH_FORMAT exception={type(e).__name__} prefix={stored_hash[:8]!r}")
         return False
 
 def generate_session_id() -> str:
