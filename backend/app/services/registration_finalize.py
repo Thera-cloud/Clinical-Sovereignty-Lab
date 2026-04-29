@@ -10,6 +10,17 @@ import secrets
 from pathlib import Path
 from typing import Tuple
 
+from app.constants.tiers import (
+    TIER_COACH,
+    TIER_COACH_ONLY,
+    TIER_DEPENDENT,
+    TIER_STANDARD,
+    TIER_TOP_TIER,
+    TIER_TRIAL,
+    initial_grant_tokens,
+    normalize_tier,
+)
+
 logger = logging.getLogger(__name__)
 
 DOJO_PRICES = {
@@ -48,18 +59,61 @@ def _build_dojo_subscriptions(selected_dojos: list, discount_pct: int = 0) -> di
 def _tier_mapping(role: str, registration_type: str):
     """Return (tier, plan, sub_status, can_access_nate, token_balance, trial_end)."""
     if role == "COACH":
-        return "COACH", "COACH", "PENDING_VERIFICATION", True, 50000, ""
+        return (
+            TIER_COACH,
+            "COACH",
+            "PENDING_VERIFICATION",
+            True,
+            initial_grant_tokens(TIER_COACH),
+            "",
+        )
 
-    rt = (registration_type or "TRIAL").upper()
-    if rt == "COACH_ONLY":
-        return "COACH_ONLY", "COACH_ONLY", "ACTIVE", False, 0, ""
-    elif rt == "STANDARD":
-        return "STANDARD", "STANDARD", "ACTIVE", True, 50000, ""
-    elif rt == "TOP_TIER":
-        return "TOP_TIER", "TOP_TIER", "ACTIVE", True, 200000, ""
-    else:
-        trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
-        return "STANDARD", "TRIAL", "TRIAL_ACTIVE", True, 10000, trial_end
+    rt = normalize_tier(registration_type or "TRIAL")
+    if rt == TIER_COACH_ONLY:
+        return (
+            TIER_COACH_ONLY,
+            "COACH_ONLY",
+            "ACTIVE",
+            False,
+            initial_grant_tokens(TIER_COACH_ONLY),
+            "",
+        )
+    if rt == TIER_STANDARD:
+        return (
+            TIER_STANDARD,
+            TIER_STANDARD,
+            "ACTIVE",
+            True,
+            initial_grant_tokens(TIER_STANDARD),
+            "",
+        )
+    if rt == TIER_TOP_TIER:
+        return (
+            TIER_TOP_TIER,
+            TIER_TOP_TIER,
+            "ACTIVE",
+            True,
+            initial_grant_tokens(TIER_TOP_TIER),
+            "",
+        )
+    if rt == TIER_DEPENDENT:
+        return (
+            TIER_DEPENDENT,
+            "DEPENDENT",
+            "ACTIVE",
+            True,
+            initial_grant_tokens(TIER_DEPENDENT),
+            "",
+        )
+    trial_end = str((datetime.datetime.now() + datetime.timedelta(days=7)).date())
+    return (
+        TIER_TRIAL,
+        "TRIAL",
+        "TRIAL_ACTIVE",
+        True,
+        initial_grant_tokens(TIER_TRIAL),
+        trial_end,
+    )
 
 
 async def finalize_signup(
@@ -75,6 +129,7 @@ async def finalize_signup(
     discount_code: str = "",
     stripe_customer_id: str = "",
     stripe_checkout_session_id: str = "",
+    stripe_subscription_id: str = "",
 ) -> Tuple[bool, str]:
     """Create a user from a completed Stripe checkout.
 
@@ -103,6 +158,16 @@ async def finalize_signup(
         role, registration_type
     )
 
+    _ALLOWED_TIER_COL = frozenset({
+        TIER_TRIAL, TIER_STANDARD, TIER_TOP_TIER, TIER_DEPENDENT,
+        TIER_COACH_ONLY, TIER_COACH,
+    })
+    valid_tier = tier_val if tier_val in _ALLOWED_TIER_COL else TIER_STANDARD
+
+    sub_amt = int(token_balance or 0)
+    purch_amt = 0
+    total_tokens = sub_amt + purch_amt
+
     hardware_id = f"{role}_{username.upper()}_ID"
     now = datetime.datetime.now()
     today = str(now.date())
@@ -115,7 +180,7 @@ async def finalize_signup(
         "hardware_id": hardware_id,
         "family_id": f"FAM_{secrets.token_hex(4).upper()}",
         "joined_date": today,
-        "tier": tier_val,
+        "tier": valid_tier,
         "registration_type": registration_type if role == "CLIENT" else None,
         "dob": profile_fields.get("dob"),
         "consent_version": profile_fields.get("consent_version", "v13.0_2026"),
@@ -127,10 +192,13 @@ async def finalize_signup(
         "subscription_status": sub_status,
         "subscription_plan": plan,
         "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": stripe_subscription_id or profile_fields.get("stripe_subscription_id", ""),
         "subscription_start_date": today,
         "trial_end_date": trial_end,
         "total_sessions_count": 0,
-        "token_balance": token_balance,
+        "token_balance": total_tokens,
+        "subscription_token_balance": sub_amt,
+        "purchased_token_balance": purch_amt,
         "token_usage_today": 0,
         "token_usage_month": 0,
         "last_token_reset": today,
@@ -205,9 +273,6 @@ async def finalize_signup(
             dob_date = None
     consent_version = profile_fields.get("consent_version", "v13.0_2026")
 
-    valid_tier = tier_val if tier_val in (
-        "MASTER", "SUPERVISOR", "TOP", "TOP_TIER", "STANDARD", "TRIAL", "DEPENDENT"
-    ) else "STANDARD"
     valid_status = sub_status if sub_status in (
         "ACTIVE", "TRIAL_ACTIVE", "PENDING_VERIFICATION", "FAMILY_PLAN_ACTIVE",
     ) else "ACTIVE"
@@ -219,13 +284,15 @@ async def finalize_signup(
                 INSERT INTO users (
                     username, role, password_hash, name, email, phone, dob,
                     tier, subscription_status, token_balance,
+                    subscription_token_balance, purchased_token_balance,
                     consent_version, consent_date,
                     stripe_customer_id, hardware_id, profile_data
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, $9, $10,
-                    $11, NOW(),
-                    $12, $13, $14::jsonb
+                    $11, $12,
+                    $13, NOW(),
+                    $14, $15, $16::jsonb
                 )
                 ON CONFLICT (username) DO NOTHING
                 """,
@@ -238,7 +305,9 @@ async def finalize_signup(
                 dob_date,
                 valid_tier,
                 valid_status,
-                token_balance,
+                total_tokens,
+                sub_amt,
+                purch_amt,
                 consent_version,
                 stripe_customer_id or None,
                 hardware_id,
@@ -250,6 +319,26 @@ async def finalize_signup(
             )
             if not inserted:
                 return False, "USERNAME_TAKEN"
+
+            if sub_amt > 0:
+                await conn.execute(
+                    """
+                    INSERT INTO token_transactions (
+                        username, action, amount, balance_before, balance_after,
+                        reason, initiated_by, source,
+                        subscription_balance_before, subscription_balance_after
+                    ) VALUES (
+                        $1, 'reward', $2, 0, $3,
+                        $4, 'system', 'initial_grant',
+                        0, $5
+                    )
+                    """,
+                    username,
+                    sub_amt,
+                    total_tokens,
+                    f"initial_grant tier={valid_tier}",
+                    sub_amt,
+                )
 
     except Exception as e:
         logger.error("finalize_signup INSERT failed for %s: %s", username, e)
@@ -438,7 +527,9 @@ def _build_dependent_profile(
             None if paid_ordinal == 0 else _family_tier_env_key(paid_ordinal)
         ),
         "total_sessions_count": 0,
-        "token_balance": 50000,
+        "token_balance": initial_grant_tokens(TIER_DEPENDENT),
+        "subscription_token_balance": initial_grant_tokens(TIER_DEPENDENT),
+        "purchased_token_balance": 0,
         "token_usage_today": 0,
         "token_usage_month": 0,
         "last_token_reset": today,
@@ -474,11 +565,14 @@ async def _insert_dependent_user(
     # guardian skips it; fall back to username instead of NULL-violating.
     _dep_name = str(profile_fields.get("name") or "").strip() or username
     _dep_phone = str(profile_fields.get("phone") or "").strip()
+    _dep_sub = initial_grant_tokens(TIER_DEPENDENT)
+    _dep_total = _dep_sub  # purchased bucket starts at 0
     return await conn.fetchval(
         """
         INSERT INTO users (
             username, role, password_hash, name, email, phone, dob,
             tier, subscription_status, token_balance,
+            subscription_token_balance, purchased_token_balance,
             family_id, guardian_id, is_minor,
             family_role, linked_by, linked_at,
             consent_version, consent_date,
@@ -486,10 +580,11 @@ async def _insert_dependent_user(
         ) VALUES (
             $1, 'CLIENT', $2, $3, $4, $5, $6,
             'DEPENDENT', 'FAMILY_PLAN_ACTIVE', $7,
-            $8, $9, $10,
-            'dependent', $9, NOW(),
-            $11, NOW(),
-            $12::jsonb, $13, $14::jsonb
+            $8, $9,
+            $10, $11, $12,
+            'dependent', $11, NOW(),
+            $13, NOW(),
+            $14::jsonb, $15, $16::jsonb
         )
         RETURNING id
         """,
@@ -499,7 +594,9 @@ async def _insert_dependent_user(
         email or None,
         _dep_phone or None,
         dob_date,
-        50000,
+        _dep_total,
+        _dep_sub,
+        0,
         family_id,
         parent["id"],
         is_minor,

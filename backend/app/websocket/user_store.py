@@ -247,6 +247,23 @@ class UserStore:
                 except (ValueError, TypeError):
                     token_balance = None
 
+            def _pi(val, default=None):
+                if val is None:
+                    return default
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return default
+
+            purch_bal = _pi(profile.get("purchased_token_balance"), 0) or 0
+            sub_bal = _pi(profile.get("subscription_token_balance"), None)
+            if sub_bal is None and token_balance is not None:
+                sub_bal = max(0, int(token_balance) - purch_bal)
+            elif sub_bal is None:
+                sub_bal = 0
+            if token_balance is None:
+                token_balance = sub_bal + purch_bal
+
             login_count = profile.get("login_count")
             if login_count is not None:
                 try:
@@ -270,12 +287,20 @@ class UserStore:
                     INSERT INTO users (
                         username, password_hash, role, tier, name, email,
                         hardware_id, consent_version, subscription_status,
-                        family_id, profile_data, token_balance, login_count,
+                        family_id, profile_data, token_balance,
+                        subscription_token_balance, purchased_token_balance,
+                        login_count,
                         updated_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-                              COALESCE($12, 0), COALESCE($13, 0), NOW())
+                              COALESCE($12, 0), COALESCE($13, 0), COALESCE($14, 0),
+                              COALESCE($15, 0), NOW())
                     ON CONFLICT (username) DO UPDATE SET
-                        password_hash = EXCLUDED.password_hash,
+                        -- SOVEREIGN-VOICE 2026-04-28: never let bridge cache overwrite a
+                        -- DB-set password_hash with empty/null. Mitigates bridge-cache
+                        -- clobber risk when admin/reset paths or external SQL update creds.
+                        -- Note: stale-but-non-empty cache values can still overwrite; always
+                        -- restart nate_bridge after any external password_hash UPDATE.
+                        password_hash = COALESCE(NULLIF(EXCLUDED.password_hash, ''), users.password_hash),
                         role = EXCLUDED.role,
                         tier = COALESCE(users.tier, EXCLUDED.tier),
                         name = EXCLUDED.name,
@@ -307,16 +332,23 @@ class UserStore:
                                      'free_month_start', 'free_month_end',
                                      'token_usage_today', 'token_usage_month',
                                      'last_token_reset',
-                                     'qb_connected', 'qb_realm_id'
+                                     'qb_connected', 'qb_realm_id',
+                                     'subscription_token_balance', 'purchased_token_balance'
                                  ])),
                                 '{}'::jsonb
                             ),
                         token_balance = COALESCE(users.token_balance, EXCLUDED.token_balance, 0),
+                        subscription_token_balance = COALESCE(
+                            users.subscription_token_balance, EXCLUDED.subscription_token_balance, 0
+                        ),
+                        purchased_token_balance = COALESCE(
+                            users.purchased_token_balance, EXCLUDED.purchased_token_balance, 0
+                        ),
                         login_count = COALESCE(EXCLUDED.login_count, users.login_count),
                         updated_at = NOW()
                 """, username, password_hash, role, tier, name, email or None,
                     hardware_id, consent_version, sub_status, family_uuid, profile_data,
-                    token_balance, login_count)
+                    token_balance, sub_bal, purch_bal, login_count)
             return True
         except Exception as e:
             logger.warning(f"[UserStore] upsert_user failed for {registry_key}: {e}")
@@ -484,6 +516,10 @@ class UserStore:
         # Numeric / timestamp columns — overlay only if the DB value is set
         if row.get("token_balance") is not None:
             profile["token_balance"] = row["token_balance"]
+        if row.get("subscription_token_balance") is not None:
+            profile["subscription_token_balance"] = row["subscription_token_balance"]
+        if row.get("purchased_token_balance") is not None:
+            profile["purchased_token_balance"] = row["purchased_token_balance"]
         if row.get("login_count") is not None:
             profile["login_count"] = row["login_count"]
         if row.get("last_login"):

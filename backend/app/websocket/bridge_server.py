@@ -5930,33 +5930,52 @@ class BillingSystem:
         return transaction
     
     def use_tokens(self, user_id: str, tokens_used: int, source: str = None) -> Tuple[bool, int]:
-        """Deduct tokens from user's balance. source tags the consumption point."""
+        """Deduct tokens from user's balance. Purchased bucket first, then subscription."""
+        # SOVEREIGN-VOICE: subscription/purchased token bucket split (Phase 2, migration 194).
+        from app.services.token_balance_policy import (
+            apply_deduction,
+            split_balances_from_profile,
+            total_balance,
+        )
+
         registry = load_registry()
-        
+
         for k, v in registry.items():
             profile = v.get("profile", {})
             if profile.get("hardware_id") == user_id:
-                current_balance = profile.get("token_balance", 0)
-                
+                sub, purch = split_balances_from_profile(profile)
+                current_balance = total_balance(sub, purch)
+
                 if current_balance < tokens_used:
                     return False, current_balance
-                
-                profile["token_balance"] = current_balance - tokens_used
+
+                new_sub, new_purch = apply_deduction(sub, purch, tokens_used)
+                new_total = total_balance(new_sub, new_purch)
+                profile["subscription_token_balance"] = new_sub
+                profile["purchased_token_balance"] = new_purch
+                profile["token_balance"] = new_total
                 profile["token_usage_today"] = profile.get("token_usage_today", 0) + tokens_used
                 profile["token_usage_month"] = profile.get("token_usage_month", 0) + tokens_used
-                
+
                 save_registry(registry, changed_keys=[k])
 
                 username = profile.get("username", k)
                 if source:
                     self._log_token_transaction(
-                        username, "deduct", -tokens_used,
-                        current_balance, profile["token_balance"], source
+                        username,
+                        "deduct",
+                        -tokens_used,
+                        current_balance,
+                        new_total,
+                        source,
+                        sub_before=sub,
+                        sub_after=new_sub,
                     )
 
-                if hasattr(self, 'db_pool') and self.db_pool:
+                if hasattr(self, "db_pool") and self.db_pool:
                     try:
                         import asyncio
+
                         loop = asyncio.get_event_loop()
                         if loop.is_running():
                             loop.create_task(self._atomic_deduct(username, tokens_used))
@@ -5964,8 +5983,8 @@ class BillingSystem:
                     except Exception:
                         pass
 
-                return True, profile["token_balance"]
-        
+                return True, new_total
+
         return False, 0
 
     async def _report_meter_usage(self, username: str, tokens: int, source: str = None):
@@ -5978,13 +5997,45 @@ class BillingSystem:
             _logger.debug("Stripe meter report skipped for %s: %s", username, e)
 
     async def _atomic_deduct(self, username: str, amount: int):
-        """Atomic SQL deduction to prevent race conditions."""
+        """Atomic deduction: purchased bucket first, then subscription; token_balance = sum."""
+        # SOVEREIGN-VOICE: bucket-aware atomic deduction (Phase 2, migration 194).
         try:
             async with self.db_pool.acquire() as conn:
-                await conn.execute("""
-                    UPDATE users SET token_balance = GREATEST(COALESCE(token_balance, 0) - $1, 0)
+                await conn.execute(
+                    """
+                    UPDATE users SET
+                      purchased_token_balance = GREATEST(
+                          0,
+                          COALESCE(purchased_token_balance, 0)
+                          - LEAST(COALESCE(purchased_token_balance, 0), $1)
+                      ),
+                      subscription_token_balance = GREATEST(
+                          0,
+                          COALESCE(subscription_token_balance, 0)
+                          - GREATEST(
+                              0,
+                              $1 - LEAST(COALESCE(purchased_token_balance, 0), $1)
+                          )
+                      ),
+                      token_balance =
+                          GREATEST(
+                              0,
+                              COALESCE(subscription_token_balance, 0)
+                              - GREATEST(
+                                  0,
+                                  $1 - LEAST(COALESCE(purchased_token_balance, 0), $1)
+                              )
+                          )
+                        + GREATEST(
+                              0,
+                              COALESCE(purchased_token_balance, 0)
+                              - LEAST(COALESCE(purchased_token_balance, 0), $1)
+                          )
                     WHERE username = $2 AND COALESCE(token_balance, 0) >= $1
-                """, amount, username)
+                    """,
+                    amount,
+                    username,
+                )
         except Exception as e:
             _logger = logging.getLogger("bridge")
             _logger.warning("Atomic token deduct failed for %s: %s", username, e)
@@ -5997,19 +6048,27 @@ class BillingSystem:
         - Optionally decrements token_balance when deduct_balance=True.
         - source tags the consumption point (ai_chat, sanctuary_ai, etc.)
         Returns (success, resulting_balance).
+
+        # SOVEREIGN-VOICE: bucket-aware usage + optional deduction (Phase 2, migration 194).
         """
+        from app.services.token_balance_policy import (
+            apply_deduction,
+            split_balances_from_profile,
+            total_balance,
+        )
+
         try:
             tokens_used = int(tokens_used or 0)
         except Exception:
             tokens_used = 0
 
         if tokens_used <= 0:
-            # Nothing to record; still return current balance if possible.
             registry = load_registry()
             for _, v in (registry or {}).items():
                 p = (v or {}).get("profile", {}) or {}
                 if p.get("hardware_id") == user_id:
-                    return True, int(p.get("token_balance", 0) or 0)
+                    sub, purch = split_balances_from_profile(p)
+                    return True, total_balance(sub, purch)
             return True, 0
 
         registry = load_registry()
@@ -6020,66 +6079,122 @@ class BillingSystem:
                 continue
             matched_key = rk
 
-            current_balance = int(profile.get("token_balance", 0) or 0)
+            sub, purch = split_balances_from_profile(profile)
+            current_balance = total_balance(sub, purch)
+
             if deduct_balance:
                 if current_balance < tokens_used:
                     return False, current_balance
-                profile["token_balance"] = current_balance - tokens_used
+                new_sub, new_purch = apply_deduction(sub, purch, tokens_used)
+                new_total = total_balance(new_sub, new_purch)
+                profile["subscription_token_balance"] = new_sub
+                profile["purchased_token_balance"] = new_purch
+                profile["token_balance"] = new_total
+                sub_before, sub_after = sub, new_sub
+            else:
+                new_total = current_balance
+                sub_before = sub_after = None
 
             profile["token_usage_today"] = int(profile.get("token_usage_today", 0) or 0) + tokens_used
             profile["token_usage_month"] = int(profile.get("token_usage_month", 0) or 0) + tokens_used
             save_registry(registry, changed_keys=[matched_key] if matched_key else None)
 
-            if source and hasattr(self, '_log_token_transaction'):
+            if source and hasattr(self, "_log_token_transaction"):
                 try:
-                    amount = -tokens_used if deduct_balance else tokens_used
+                    amt = -tokens_used if deduct_balance else tokens_used
                     self._log_token_transaction(
-                        profile.get("username", ""), "usage", amount,
-                        current_balance, int(profile.get("token_balance", 0) or 0), source
+                        profile.get("username", ""),
+                        "usage",
+                        amt,
+                        current_balance,
+                        new_total,
+                        source,
+                        sub_before=sub_before if deduct_balance else None,
+                        sub_after=sub_after if deduct_balance else None,
                     )
                 except Exception:
                     pass
 
-            if hasattr(self, 'db_pool') and self.db_pool and source:
+            if hasattr(self, "db_pool") and self.db_pool and source:
                 try:
                     import asyncio
+
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
-                        loop.create_task(self._report_meter_usage(
-                            profile.get("username", ""), tokens_used, source
-                        ))
+                        loop.create_task(self._report_meter_usage(profile.get("username", ""), tokens_used, source))
+                        if deduct_balance:
+                            loop.create_task(self._atomic_deduct(profile.get("username", ""), tokens_used))
                 except Exception:
                     pass
 
-            return True, int(profile.get("token_balance", 0) or 0)
+            return True, int(new_total)
 
         return False, 0
 
-    def _log_token_transaction(self, username, action, amount, before, after, source=None):
+    # SOVEREIGN-VOICE: subscription bucket fields added (Phase 2, migration 194).
+    def _log_token_transaction(
+        self,
+        username,
+        action,
+        amount,
+        before,
+        after,
+        source=None,
+        sub_before=None,
+        sub_after=None,
+    ):
         """Fire-and-forget async logging of token transaction to PostgreSQL."""
         try:
             import asyncio
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                loop.create_task(self._async_log_token_tx(username, action, amount, before, after, source))
+                loop.create_task(
+                    self._async_log_token_tx(
+                        username, action, amount, before, after, source, sub_before, sub_after
+                    )
+                )
         except Exception as e:
             logging.getLogger("bridge").warning("Token tx log dispatch failed: %s", e)
 
-    async def _async_log_token_tx(self, username, action, amount, before, after, source):
+    # SOVEREIGN-VOICE: writes subscription_balance_before/after columns (Phase 2, migration 194).
+    async def _async_log_token_tx(
+        self,
+        username,
+        action,
+        amount,
+        before,
+        after,
+        source,
+        sub_before=None,
+        sub_after=None,
+    ):
         """Write token transaction row to PostgreSQL with 1 retry."""
-        if not hasattr(self, 'db_pool') or not self.db_pool:
+        if not hasattr(self, "db_pool") or not self.db_pool:
             return
         import re
-        clean_username = re.sub(r'^(client_|coach_|admin_)', '', username)
+
+        clean_username = re.sub(r"^(client_|coach_|admin_)", "", username)
         for attempt in range(2):
             try:
                 async with self.db_pool.acquire() as conn:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         INSERT INTO token_transactions
                             (username, action, amount, balance_before, balance_after,
-                             source, initiated_by, target_scope)
-                        VALUES ($1, $2, $3, $4, $5, $6, 'system', 'individual')
-                    """, clean_username, action, amount, before, after, source)
+                             source, initiated_by, target_scope,
+                             subscription_balance_before, subscription_balance_after)
+                        VALUES ($1, $2, $3, $4, $5, $6, 'system', 'individual', $7, $8)
+                    """,
+                        clean_username,
+                        action,
+                        amount,
+                        before,
+                        after,
+                        source,
+                        sub_before,
+                        sub_after,
+                    )
                 return
             except Exception as e:
                 if attempt == 0:

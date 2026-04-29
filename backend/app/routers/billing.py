@@ -129,10 +129,10 @@ async def billing_config():
 PLAN_DETAILS = {
     "COACH_ONLY": {"name": "Coach Only", "tokens": 0, "ai_minutes": 0, "coach_sessions": -1, "price_monthly": 0, "price_yearly": 0, "can_access_nate": False},
     "TRIAL": {
-        "name": "Threshold (Trial)", "tokens": 50000, "ai_minutes": 300, "coach_sessions": 0,
+        "name": "Threshold (Trial)", "tokens": 10000, "ai_minutes": 300, "coach_sessions": 0,
         "price_monthly": 0, "price_yearly": 0, "trial_days": 14,
-        "trial_week1": {"ai_minutes": 300, "tokens": 50000},
-        "trial_week2": {"ai_minutes_per_day": 30, "tokens": 50000, "coherence_prompt": True},
+        "trial_week1": {"ai_minutes": 300, "tokens": 10000},
+        "trial_week2": {"ai_minutes_per_day": 30, "tokens": 10000, "coherence_prompt": True},
     },
     "STANDARD": {
         "name": "Inner Chamber", "tokens": 50000, "ai_minutes": 300, "coach_sessions": 4,

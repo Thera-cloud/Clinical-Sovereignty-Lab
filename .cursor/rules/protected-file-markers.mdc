@@ -1,0 +1,101 @@
+# Protected-File Change Markers
+
+## Purpose
+
+Production-critical files have a hard line-change limit per commit (currently **100** in `.git/hooks/pre-commit`). Larger changes require an explicit human-approved marker. This makes "I touched a lot of bridge code today" a deliberate, reviewable event instead of a silent slide.
+
+## Protected Files
+
+These files are gated by the local pre-commit hook (`.git/hooks/pre-commit`):
+
+- `backend/app/websocket/bridge_server.py`
+- `backend/app/main.py`
+- `backend/app/services/littlenate_inference.py`
+- `backend/app/services/nate_memory_crystallizer.py`
+
+`.cursorrules` lists additional production-critical files (e.g. `backend/app/services/twilio_grok_xtts_pipeline.py`, `crystal_graph.py`, `crystal_recall_bridge.py`, `backend/app/websocket/main.py`, `backend/app/routers/voice_billing_api.py`). Those are policy-protected even though the hook does not currently enforce them — the marker rule below applies to them too if you choose to ship a large change. Add them to the hook's `PROTECTED` variable when you want machine-enforced gating.
+
+## Limit
+
+**100 line changes (insertions + deletions) per file per commit.**
+
+Counted from `git diff --cached --stat -- "*/<file>"`.
+
+## Approval Markers
+
+Two literal comment strings are recognized as explicit approval for an over-limit change:
+
+- `# SOVEREIGN-VOICE`
+- `# QUANTUM-CRYSTAL-ARCH`
+
+`SOVEREIGN-VOICE` is the conventional marker for voice / billing / bridge auth / token-bucket work. `QUANTUM-CRYSTAL-ARCH` is the conventional marker for crystal memory / inference / orchestrator work. Either marker satisfies the hook — pick whichever matches the change's domain.
+
+### Placement
+
+Put the marker as a comment line immediately before, or as the first line inside, **each modified function or method that contributes to the over-limit count**. One marker per function, not one marker per file. The point is that a future reader scrolling through the file sees the marker right next to the unusual-sized change and knows it was reviewed.
+
+```python
+def use_tokens(self, user_id, tokens_used, source=None):
+    """Deduct tokens from user's balance."""
+    # SOVEREIGN-VOICE: bucket-aware deduction (Phase 2, migration 194).
+    ...
+```
+
+```python
+# SOVEREIGN-VOICE: writes subscription_balance_before/after columns (Phase 2, migration 194).
+async def _async_log_token_tx(self, ...):
+    ...
+```
+
+The hook scans the **added** lines of the staged diff (`^+` lines, excluding the `+++ ` header). Markers in deleted lines or in unchanged context do not count.
+
+## Hook Behavior (2026-04-28)
+
+| Staged diff | Marker present | Result |
+|---|---|---|
+| <= 100 lines | n/a | Proceeds silently |
+| > 100 lines | yes | Logs `[pre-commit] <file>: <N> line changes (limit 100). Approved via marker: <marker>` and proceeds |
+| > 100 lines | no | Logs `BLOCKED` with remediation guidance and exits non-zero |
+
+The hook is **non-interactive**. It never prompts. It either approves (marker present) or blocks (marker absent). This works identically in interactive terminals, agent environments, and CI.
+
+### Why the hook was patched
+
+Before 2026-04-28, the hook used `read -p "Continue? (y/n)"` to ask for confirmation. Git detaches the hook's stdin from the parent process in non-tty environments (Cursor agent, CI, scripted commits), so the prompt would silently fail-closed (`exit 1`) with no way to feed `y` short of `--no-verify`. The marker check replaces the prompt with a deterministic, scriptable signal that still requires human intent (someone has to type the marker into the diff).
+
+## Commit Message Justification
+
+When you ship an over-limit change with a marker, **also** include a short paragraph in the commit message body explaining why the change must ship as one commit. Example:
+
+```
+Intentional multi-method change for token bucket split. Deduction
++ PG sync + token_transactions columns must ship together to maintain
+consistency. See audits/onboarding-billing-audit-2026-04-28.md for
+full context.
+```
+
+The marker tells the hook the change is approved. The commit message tells the next human reviewer (or you, six months from now) **why**.
+
+## Rules
+
+1. **Never bypass the hook with `--no-verify`** unless the user explicitly requests it. The marker mechanism exists so you don't have to.
+2. **Never add a marker to satisfy the hook without actually writing a justification line in the commit message body.** A marker without a "why" is cargo culting.
+3. **Prefer splitting** when the change touches genuinely unrelated concerns. Markers are for changes that are large but coherent (e.g. token bucket plumbing across 5 BillingSystem methods). They are not a license to ship a 600-line refactor.
+4. **One marker per modified function** in the over-limit file, placed at the top of that function (after the docstring or as the first comment).
+5. **The hook lives in `.git/hooks/pre-commit`**, which is **not** version-controlled. If you change the hook, update this rule file in the same commit so other developers can replicate it locally. Consider mirroring the hook to `.githooks/pre-commit` and setting `git config core.hooksPath .githooks` if the team wants the hook tracked in git.
+
+## Adding a New Protected File
+
+1. Edit `.git/hooks/pre-commit` and append the file's basename to `PROTECTED`.
+2. Update the **Protected Files** list above.
+3. Note the addition in the next commit message.
+
+## Removing the Hook (Emergency Only)
+
+If the hook itself is broken and blocking unrelated commits:
+
+```bash
+mv .git/hooks/pre-commit .git/hooks/pre-commit.disabled
+```
+
+Fix the hook, then restore. Do **not** silently delete it — leaving the disabled file in place is a visible reminder.

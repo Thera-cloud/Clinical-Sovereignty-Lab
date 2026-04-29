@@ -39,6 +39,15 @@ import asyncpg
 import json
 
 from app.auth import get_current_user_id
+from app.constants.tiers import (
+    TIER_STANDARD,
+    TIER_TOP_TIER,
+    TIER_TRIAL,
+    initial_grant_tokens,
+    monthly_cap_tokens,
+    normalize_tier,
+    tier_rank,
+)
 
 # =============================================================================
 # CONFIGURATION
@@ -112,6 +121,36 @@ TOKEN_PACKS = {
     "power":    {"tokens": 150000,   "price_cents": 2000,  "label": "Power Pack"},
     "ultimate": {"tokens": 1000000,  "price_cents": 12500, "label": "Ultimate Pack"},
 }
+
+
+def _tier_from_stripe_price_id(price_id: Optional[str]) -> str:
+    """Map Stripe Price ID to canonical users.tier for client subscriptions."""
+    if not price_id:
+        return TIER_TRIAL
+    pairs = (
+        (PRICES.get("STANDARD"), TIER_STANDARD),
+        (PRICES.get("TOP_TIER"), TIER_TOP_TIER),
+        (PRICES.get("INNER_CHAMBER_ANNUAL"), TIER_STANDARD),
+        (PRICES.get("SOVEREIGN_CIRCLE_ANNUAL"), TIER_TOP_TIER),
+    )
+    for pid, tier in pairs:
+        if pid and price_id == pid:
+            return tier
+    return TIER_TRIAL
+
+
+def _tier_from_subscription_payload(sub: Dict[str, Any]) -> str:
+    """Resolve tier from Stripe Subscription object (metadata or first price)."""
+    md = (sub.get("metadata") or {}).get("tier")
+    if md:
+        return normalize_tier(md)
+    items = (sub.get("items") or {}).get("data") or []
+    if not items:
+        return TIER_TRIAL
+    price_obj = items[0].get("price") or {}
+    pid = price_obj.get("id") if isinstance(price_obj, dict) else None
+    return _tier_from_stripe_price_id(pid)
+
 
 # =============================================================================
 # CORPORATE TIERS (Hybrid: flat platform fee + employee subsidy)
@@ -1446,6 +1485,140 @@ class StripeWebhookHandler:
                 pass
         return self._fortress
     
+    async def _apply_subscription_grant(
+        self,
+        username: str,
+        tier_norm: str,
+        grant_mode: str,
+        stripe_event_id: Optional[str],
+        billing_period_start,
+        billing_period_end,
+        reason: str,
+        source: str,
+        *,
+        sync_tier: bool = False,
+    ) -> int:
+        """Top-up subscription_token_balance (purchased bucket unchanged). Returns grant amount."""
+        # SOVEREIGN-VOICE: Phase 2 subscription vs purchased buckets + audit columns.
+        if source == "monthly_grant" and stripe_event_id:
+            exists = await self.db.fetchval(
+                "SELECT 1 FROM token_transactions WHERE stripe_event_id = $1 AND source = 'monthly_grant'",
+                stripe_event_id,
+            )
+            if exists:
+                return 0
+
+        async with self.db.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(subscription_token_balance, 0) AS s,
+                           COALESCE(purchased_token_balance, 0) AS p
+                    FROM users WHERE username = $1 FOR UPDATE
+                    """,
+                    username,
+                )
+                if not row:
+                    return 0
+                sub_before = int(row["s"] or 0)
+                purch = int(row["p"] or 0)
+                if grant_mode == "monthly_cap":
+                    cap = monthly_cap_tokens(tier_norm)
+                    grant = max(0, cap - sub_before)
+                elif grant_mode == "initial_floor":
+                    floor = initial_grant_tokens(tier_norm)
+                    grant = max(0, floor - sub_before)
+                else:
+                    grant = 0
+                if grant <= 0:
+                    if sync_tier:
+                        await conn.execute(
+                            """
+                            UPDATE users SET tier = $1, subscription_status = 'ACTIVE',
+                                profile_data = COALESCE(profile_data, '{}'::jsonb)
+                                  || jsonb_build_object('tier', $2::text)
+                            WHERE username = $3
+                            """,
+                            tier_norm,
+                            tier_norm,
+                            username,
+                        )
+                    return 0
+
+                sub_after = sub_before + grant
+                total_after = sub_after + purch
+                total_before = sub_before + purch
+
+                if sync_tier:
+                    await conn.execute(
+                        """
+                        UPDATE users SET
+                            tier = $1,
+                            subscription_status = 'ACTIVE',
+                            subscription_token_balance = $2,
+                            token_balance = $3,
+                            profile_data = COALESCE(profile_data, '{}'::jsonb)
+                              || jsonb_build_object(
+                                   'token_balance', $3::int,
+                                   'subscription_token_balance', $2::int,
+                                   'tier', $4::text
+                                 )
+                        WHERE username = $5
+                        """,
+                        tier_norm,
+                        sub_after,
+                        total_after,
+                        tier_norm,
+                        username,
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE users SET
+                            subscription_token_balance = $1,
+                            token_balance = $2,
+                            profile_data = COALESCE(profile_data, '{}'::jsonb)
+                              || jsonb_build_object(
+                                   'token_balance', $2::int,
+                                   'subscription_token_balance', $1::int
+                                 )
+                        WHERE username = $3
+                        """,
+                        sub_after,
+                        total_after,
+                        username,
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO token_transactions (
+                        username, action, amount,
+                        balance_before, balance_after,
+                        subscription_balance_before, subscription_balance_after,
+                        reason, initiated_by, source,
+                        stripe_event_id, billing_period_start, billing_period_end
+                    ) VALUES (
+                        $1, 'reward', $2,
+                        $3, $4,
+                        $5, $6,
+                        $7, 'stripe', $8,
+                        $9, $10, $11
+                    )
+                    """,
+                    username,
+                    grant,
+                    total_before,
+                    total_after,
+                    sub_before,
+                    sub_after,
+                    reason,
+                    source,
+                    stripe_event_id,
+                    billing_period_start,
+                    billing_period_end,
+                )
+        return grant
+
     async def handle_webhook(self, payload: bytes, sig_header: str) -> Dict[str, str]:
         """Process Stripe webhook event with 3-cord verification via WebhookFortress."""
         
@@ -1501,7 +1674,7 @@ class StripeWebhookHandler:
         handler = handlers.get(event_type)
         if handler:
             try:
-                await handler(data)
+                await handler(data, event_id)
             except Exception as e:
                 print(f">>> [STRIPE WEBHOOK] Handler error for {event_type}: {e}")
                 # Return 200 to prevent Stripe from retrying infinitely
@@ -1533,7 +1706,7 @@ class StripeWebhookHandler:
 
         return {"status": "processed", "event_type": event_type}
     
-    async def _handle_checkout_completed(self, session: Dict):
+    async def _handle_checkout_completed(self, session: Dict, event_id: str = ""):
         """Handle successful checkout."""
         
         metadata = session.get('metadata', {})
@@ -1554,7 +1727,7 @@ class StripeWebhookHandler:
         # --- Stripe-first registration: pending_signup flow --- # QUANTUM-CRYSTAL-ARCH
         pending_signup_id = metadata.get("pending_signup_id")
         if pending_signup_id:
-            await self._handle_pending_signup(session, pending_signup_id)
+            await self._handle_pending_signup(session, pending_signup_id, event_id)
             return
 
         # --- Client-to-Coach upgrade flow --- # QUANTUM-CRYSTAL-ARCH
@@ -1568,13 +1741,11 @@ class StripeWebhookHandler:
             return
         
         if session['mode'] == 'subscription':
-            # Subscription checkout
-            tier = metadata.get('tier', 'STANDARD')
+            tier_norm = normalize_tier(metadata.get('tier', 'STANDARD'))
             subscription_id = session.get('subscription')
-            
-            # Get subscription details
+
             sub = stripe.Subscription.retrieve(subscription_id)
-            
+
             await self.db.execute(
                 """
                 INSERT INTO subscriptions (user_id, stripe_subscription_id, stripe_customer_id, tier, status, current_period_start, current_period_end)
@@ -1586,15 +1757,30 @@ class StripeWebhookHandler:
                     current_period_start = EXCLUDED.current_period_start,
                     current_period_end = EXCLUDED.current_period_end
                 """,
-                user_id, subscription_id, session['customer'], tier,
-                sub['current_period_start'], sub['current_period_end']
+                user_id,
+                subscription_id,
+                session['customer'],
+                tier_norm,
+                sub['current_period_start'],
+                sub['current_period_end'],
             )
-            
-            # Update user tier
-            await self.db.execute(
-                "UPDATE users SET tier = $1, subscription_status = 'ACTIVE' WHERE id = $2",
-                tier, user_id
+
+            uname = await self.db.fetchval(
+                "SELECT username FROM users WHERE id = $1",
+                user_id,
             )
+            if uname:
+                await self._apply_subscription_grant(
+                    uname,
+                    tier_norm,
+                    "initial_floor",
+                    event_id or None,
+                    None,
+                    None,
+                    "checkout.session.completed subscription",
+                    "subscription_checkout",
+                    sync_tier=True,
+                )
 
             # Promo redemption is counted only after a successful checkout completion.
             # This prevents codes being consumed on abandoned or expired sessions.
@@ -1626,15 +1812,12 @@ class StripeWebhookHandler:
                 from app.services.api_server import _get_auth_redis
                 r = await _get_auth_redis()
                 if r:
-                    uname = await self.db.fetchval(
-                        "SELECT username FROM users WHERE id = $1", user_id
-                    )
                     if uname:
                         await r.publish(
                             "nate:user_reload",
                             json.dumps({"username": uname}),
                         )
-                        await self._notify_payment_confirmed(uname, "plan_upgrade", plan=tier)
+                        await self._notify_payment_confirmed(uname, "plan_upgrade", plan=tier_norm)
             except Exception:
                 pass
 
@@ -1675,28 +1858,60 @@ class StripeWebhookHandler:
                     try:
                         async with self.db.acquire() as conn:
                             async with conn.transaction():
-                                before = await conn.fetchval(
-                                    "SELECT COALESCE(token_balance, 0) FROM users WHERE username = $1",
+                                row = await conn.fetchrow(
+                                    """
+                                    SELECT COALESCE(subscription_token_balance, 0) AS sub,
+                                           COALESCE(purchased_token_balance, 0) AS purch,
+                                           COALESCE(token_balance, 0) AS tot
+                                    FROM users WHERE username = $1 FOR UPDATE
+                                    """,
                                     username,
-                                ) or 0
-                                after = before + tokens
-                                await conn.execute("""
-                                    UPDATE users
-                                    SET token_balance = $1,
-                                        profile_data = jsonb_set(
-                                            COALESCE(profile_data, '{}'::jsonb),
-                                            '{token_balance}',
-                                            to_jsonb($1::int)
-                                        )
-                                    WHERE username = $2
-                                """, after, username)
-                                await conn.execute("""
-                                    INSERT INTO token_transactions
-                                        (username, action, amount, balance_before, balance_after,
-                                         reason, source, initiated_by, target_scope)
-                                    VALUES ($1, 'purchase', $2, $3, $4, $5, 'token_pack', 'stripe', 'individual')
-                                """, username, tokens, before, after,
-                                    f"{pack_id} pack ({tokens:,} tokens)")
+                                )
+                                if not row:
+                                    raise ValueError("user_not_found")
+                                sub_b = int(row["sub"] or 0)
+                                purch_b = int(row["purch"] or 0)
+                                total_before = int(row["tot"] or 0)
+                                purch_a = purch_b + tokens
+                                total_after = sub_b + purch_a
+                                await conn.execute(
+                                    """
+                                    UPDATE users SET
+                                        purchased_token_balance = $1,
+                                        token_balance = $2,
+                                        profile_data = COALESCE(profile_data, '{}'::jsonb)
+                                          || jsonb_build_object(
+                                               'token_balance', $2::int,
+                                               'purchased_token_balance', $1::int
+                                             )
+                                    WHERE username = $3
+                                    """,
+                                    purch_a,
+                                    total_after,
+                                    username,
+                                )
+                                await conn.execute(
+                                    """
+                                    INSERT INTO token_transactions (
+                                        username, action, amount, balance_before, balance_after,
+                                        subscription_balance_before, subscription_balance_after,
+                                        reason, source, initiated_by, target_scope,
+                                        stripe_event_id
+                                    ) VALUES (
+                                        $1, 'purchase', $2, $3, $4, $5, $6,
+                                        $7, 'token_pack', 'stripe', 'individual',
+                                        $8
+                                    )
+                                    """,
+                                    username,
+                                    tokens,
+                                    total_before,
+                                    total_after,
+                                    sub_b,
+                                    sub_b,
+                                    f"{pack_id} pack ({tokens:,} tokens)",
+                                    event_id or None,
+                                )
                         print(f">>> [STRIPE] Token pack purchased: {username} +{tokens:,} ({pack_id})")
                         try:
                             from app.services.api_server import _get_auth_redis
@@ -1704,7 +1919,7 @@ class StripeWebhookHandler:
                             if r:
                                 await r.publish(
                                     "nate:balance_sync",
-                                    json.dumps({"username": username, "token_balance": after}),
+                                    json.dumps({"username": username, "token_balance": total_after}),
                                 )
                                 await r.publish(
                                     "nate:user_reload",
@@ -1780,44 +1995,82 @@ class StripeWebhookHandler:
                     session['payment_intent'], expires_at
                 )
 
-    async def _handle_invoice_paid(self, invoice: Dict):
-        """Handle successful invoice payment."""
-        
-        subscription_id = invoice.get('subscription')
+    async def _handle_invoice_paid(self, invoice: Dict, event_id: str = ""):
+        """Handle successful invoice payment — subscription monthly cap top-up."""
+
+        subscription_id = invoice.get("subscription")
         if not subscription_id:
             return
-        
-        # Record payment
-        customer_id = invoice['customer']
+
+        customer_id = invoice.get("customer")
         user_id = await self.db.fetchval(
             "SELECT id FROM users WHERE stripe_customer_id = $1",
-            customer_id
+            customer_id,
         )
-        
-        if user_id:
-            await self.db.execute(
-                """
-                INSERT INTO payment_history (user_id, stripe_invoice_id, amount_cents, status, event_type)
-                VALUES ($1, $2, $3, 'SUCCEEDED', 'invoice.paid')
-                """,
-                user_id, invoice['id'], invoice['amount_paid']
+
+        if not user_id:
+            return
+
+        await self.db.execute(
+            """
+            INSERT INTO payment_history (user_id, stripe_invoice_id, amount_cents, status, event_type)
+            VALUES ($1, $2, $3, 'SUCCEEDED', 'invoice.paid')
+            """,
+            user_id,
+            invoice["id"],
+            invoice["amount_paid"],
+        )
+
+        sub = stripe.Subscription.retrieve(subscription_id)
+        await self.db.execute(
+            """
+            UPDATE subscriptions
+            SET current_period_start = to_timestamp($1), current_period_end = to_timestamp($2), status = 'ACTIVE'
+            WHERE stripe_subscription_id = $3
+            """,
+            sub["current_period_start"],
+            sub["current_period_end"],
+            subscription_id,
+        )
+
+        sub_row = await self.db.fetchrow(
+            "SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1",
+            subscription_id,
+        )
+        if sub_row and sub_row["tier"]:
+            tier_norm = normalize_tier(sub_row["tier"])
+        else:
+            db_tier = await self.db.fetchval("SELECT tier FROM users WHERE id = $1", user_id)
+            tier_norm = normalize_tier(db_tier or TIER_TRIAL)
+
+        lines = invoice.get("lines", {}).get("data") or []
+        period_start = None
+        period_end = None
+        if lines and isinstance(lines[0], dict):
+            per = lines[0].get("period") or {}
+            if per.get("start"):
+                period_start = datetime.fromtimestamp(per["start"], tz=timezone.utc)
+            if per.get("end"):
+                period_end = datetime.fromtimestamp(per["end"], tz=timezone.utc)
+
+        uname = await self.db.fetchval("SELECT username FROM users WHERE id = $1", user_id)
+        if uname:
+            await self._apply_subscription_grant(
+                uname,
+                tier_norm,
+                "monthly_cap",
+                event_id or None,
+                period_start,
+                period_end,
+                f"invoice.paid id={invoice.get('id')}",
+                "monthly_grant",
+                sync_tier=False,
             )
-            
-            # Update subscription period
-            sub = stripe.Subscription.retrieve(subscription_id)
-            await self.db.execute(
-                """
-                UPDATE subscriptions 
-                SET current_period_start = to_timestamp($1), current_period_end = to_timestamp($2), status = 'ACTIVE'
-                WHERE stripe_subscription_id = $3
-                """,
-                sub['current_period_start'], sub['current_period_end'], subscription_id
-            )
-    
-    async def _handle_payment_failed(self, invoice: Dict):
+
+    async def _handle_payment_failed(self, invoice: Dict, event_id: str = ""):
         """Handle failed payment."""
-        
-        customer_id = invoice['customer']
+
+        customer_id = invoice["customer"]
         user_id = await self.db.fetchval(
             "SELECT id FROM users WHERE stripe_customer_id = $1",
             customer_id
@@ -1884,7 +2137,7 @@ class StripeWebhookHandler:
             except Exception as watchlist_err:
                 print(f">>> [STRIPE] Watchlist integration error: {watchlist_err}")
     
-    async def _handle_pending_signup(self, session: Dict, pending_signup_id: str):
+    async def _handle_pending_signup(self, session: Dict, pending_signup_id: str, event_id: str = ""):
         """Finalize a Stripe-first registration after payment.""" # QUANTUM-CRYSTAL-ARCH
         import uuid as _uuid
         try:
@@ -1969,6 +2222,7 @@ class StripeWebhookHandler:
                     discount_code=row["discount_code"] or "",
                     stripe_customer_id=session.get("customer", ""),
                     stripe_checkout_session_id=session.get("id", ""),
+                    stripe_subscription_id=session.get("subscription") or "",
                 )
         except Exception as e:
             print(f">>> [STRIPE] finalize_signup exception: {e}")
@@ -1980,6 +2234,40 @@ class StripeWebhookHandler:
                 signup_uuid,
             )
             print(f">>> [STRIPE] Registration finalized for {row['username']}")
+            if not is_dependent:
+                uid = await self.db.fetchval(
+                    "SELECT id FROM users WHERE username = $1", row["username"]
+                )
+                sid = session.get("subscription")
+                cust = session.get("customer") or ""
+                if uid and sid:
+                    try:
+                        stripe_sub = stripe.Subscription.retrieve(sid)
+                        tier_norm = normalize_tier(row.get("tier") or "")
+                        await self.db.execute(
+                            """
+                            INSERT INTO subscriptions (
+                                user_id, stripe_subscription_id, stripe_customer_id,
+                                tier, status, current_period_start, current_period_end
+                            )
+                            VALUES ($1, $2, $3, $4, 'ACTIVE', to_timestamp($5), to_timestamp($6))
+                            ON CONFLICT (user_id) DO UPDATE SET
+                                stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+                                stripe_customer_id = EXCLUDED.stripe_customer_id,
+                                tier = EXCLUDED.tier,
+                                status = 'ACTIVE',
+                                current_period_start = EXCLUDED.current_period_start,
+                                current_period_end = EXCLUDED.current_period_end
+                            """,
+                            uid,
+                            sid,
+                            cust,
+                            tier_norm,
+                            stripe_sub["current_period_start"],
+                            stripe_sub["current_period_end"],
+                        )
+                    except Exception as _sub_err:
+                        print(f">>> [STRIPE] subscriptions row after pending_signup failed: {_sub_err}")
             await self._send_registration_receipt(row)
         else:
             await self.db.execute(
@@ -2065,14 +2353,30 @@ class StripeWebhookHandler:
         except Exception as e:
             print(f">>> [STRIPE] Coach upgrade processing failed for {username}: {e}")
 
-    async def _handle_subscription_updated(self, subscription: Dict):
-        """Handle subscription changes."""
-        
-        subscription_id = subscription['id']
-        
-        tier = subscription.get('metadata', {}).get('tier', 'STANDARD')
-        new_status = 'ACTIVE' if subscription['status'] == 'active' else subscription['status'].upper()
-        
+    async def _handle_subscription_updated(self, subscription: Dict, event_id: str = ""):
+        """Handle subscription changes — tier sync + upgrade token floor."""
+
+        subscription_id = subscription["id"]
+        tier_norm = _tier_from_subscription_payload(subscription)
+        new_status = (
+            "ACTIVE"
+            if subscription["status"] == "active"
+            else subscription["status"].upper()
+        )
+
+        old_row = await self.db.fetchrow(
+            """
+            SELECT u.tier AS old_tier, u.username, u.role
+            FROM users u
+            JOIN subscriptions s ON s.user_id = u.id
+            WHERE s.stripe_subscription_id = $1
+            """,
+            subscription_id,
+        )
+        old_tier = normalize_tier(old_row["old_tier"]) if old_row else TIER_TRIAL
+        uname = old_row["username"] if old_row else None
+        is_client = old_row and (old_row.get("role") == "CLIENT")
+
         await self.db.execute(
             """
             UPDATE subscriptions SET
@@ -2082,26 +2386,40 @@ class StripeWebhookHandler:
                 cancel_at_period_end = $4
             WHERE stripe_subscription_id = $5
             """,
-            tier, new_status,
-            subscription['current_period_end'],
-            subscription['cancel_at_period_end'],
-            subscription_id
+            tier_norm,
+            new_status,
+            subscription["current_period_end"],
+            subscription["cancel_at_period_end"],
+            subscription_id,
         )
-        
-        uname = await self.db.fetchval(
-            """SELECT u.username FROM users u
-               JOIN subscriptions s ON s.user_id = u.id
-               WHERE s.stripe_subscription_id = $1""",
-            subscription_id
-        )
+
         if uname:
             await self.db.execute(
-                "UPDATE users SET tier = $1, subscription_status = $2 WHERE username = $3",
-                tier, new_status, uname
+                """
+                UPDATE users SET tier = $1, subscription_status = $2,
+                    profile_data = COALESCE(profile_data, '{}'::jsonb)
+                      || jsonb_build_object('tier', $1::text)
+                WHERE username = $3
+                """,
+                tier_norm,
+                new_status,
+                uname,
             )
+            if is_client and tier_rank(tier_norm) > tier_rank(old_tier):
+                await self._apply_subscription_grant(
+                    uname,
+                    tier_norm,
+                    "initial_floor",
+                    event_id or None,
+                    None,
+                    None,
+                    "customer.subscription.updated tier upgrade",
+                    "tier_upgrade",
+                    sync_tier=False,
+                )
             await self._notify_bridge_reload(uname)
-    
-    async def _handle_subscription_deleted(self, subscription: Dict):
+
+    async def _handle_subscription_deleted(self, subscription: Dict, event_id: str = ""):
         """Handle subscription cancellation."""
         
         subscription_id = subscription['id']

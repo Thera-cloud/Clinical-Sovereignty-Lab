@@ -115,16 +115,42 @@ async def _get_balance(conn, username: str) -> int:
 
 
 async def _set_balance(conn, username: str, new_balance: int):
-    await conn.execute("""
-        UPDATE users
-        SET token_balance = $1,
+    """Admin-set total balance; subscription bucket absorbs change, purchased unchanged."""
+    row = await conn.fetchrow(
+        """
+        SELECT COALESCE(purchased_token_balance, 0) AS purch
+        FROM users WHERE username = $1
+        """,
+        username,
+    )
+    purch = int(row["purch"]) if row else 0
+    new_total = max(0, int(new_balance))
+    new_sub = max(0, new_total - purch)
+    await conn.execute(
+        """
+        UPDATE users SET
+            subscription_token_balance = $1,
+            token_balance = $2,
             profile_data = jsonb_set(
-                COALESCE(profile_data, '{}'::jsonb),
-                '{token_balance}',
-                to_jsonb($1::int)
+                jsonb_set(
+                    jsonb_set(
+                        COALESCE(profile_data, '{}'::jsonb),
+                        '{token_balance}',
+                        to_jsonb($2::int)
+                    ),
+                    '{subscription_token_balance}',
+                    to_jsonb($1::int)
+                ),
+                '{purchased_token_balance}',
+                to_jsonb($3::int)
             )
-        WHERE username = $2
-    """, new_balance, username)
+        WHERE username = $4
+        """,
+        new_sub,
+        new_total,
+        purch,
+        username,
+    )
 
 
 # ---------------------------------------------------------------------------
