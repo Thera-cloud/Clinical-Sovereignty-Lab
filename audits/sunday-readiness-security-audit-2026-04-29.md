@@ -25,7 +25,7 @@ No evidence in this pass of live **authentication bypass**, **unauthenticated ad
 **Top 3 risks**
 
 1. **PII / `users.email` (reclassified)** — **Architectural debt + residual risk**, not a missing encryption layer in the sense of migration 105. Plaintext **`users.email`** coexists with **pgcrypto `email_enc`**; Fernet-shaped values in **`email`** on some rows reflect **application inconsistency**, not the primary 105 design. See clarification doc above. **P1-1** text below retained for audit trail; **verdict:** not a Sunday blocker; backlog Options A–C documented in clarification.
-2. **Dependency CVEs** — **Phase 7 complete** (**§10**): **52** `pip-audit` rows / **9** packages; **1 CRITICAL** (aiohttp CVE-2026-34520), **27 HIGH** (NVD CVSS v3.1 row classification), **20 MEDIUM**, **4 GHSA-only** pypdf rows. Upgrade planning still required (**no packages bumped** in this audit).
+2. **Dependency CVEs** — **Phase 7 complete** (**§10**); **targeted remediation applied 2026-04-29** (**§11**): backend + bridge images rebuilt with **aiohttp ≥3.13.4**, **starlette ≥0.49.1**, **FastAPI 0.125.x**, **PyJWT ≥2.12**, **pypdf 6.10.2**, **Pillow ≥12.2**, **orjson ≥3.11.6**. **MEDIUM** and residual **GHSA-only** rows remain **backlog** (pytest, python-dotenv, scikit-learn, etc.).
 3. **CSP uses `'unsafe-inline'` and `'unsafe-eval'`** on api/app/command vhosts — common for legacy dashboards but **weakens XSS containment** if any stored/reflected XSS appears in HTML/JS.
 
 ---
@@ -69,9 +69,9 @@ No evidence in this pass of live **authentication bypass**, **unauthenticated ad
 
 **Evidence:** `pip-audit -r /app/requirements-light.txt` executed inside production `nate_backend`; findings summarized in **§10 Phase 7 Completion** (NVD CVSS v3.1 enrichment for severity).
 
-**Risk:** CRITICAL/HIGH issues present in **aiohttp**, **PyJWT**, **pypdf**, **Pillow**, **starlette**, **orjson**, and others until requirements are bumped (not done during this read-only audit).
+**Risk (historical — pre-patch):** CRITICAL/HIGH issues were present in **aiohttp**, **PyJWT**, **pypdf**, **Pillow**, **starlette**, and **orjson** until requirements were bumped.
 
-**Fix:** Plan coordinated upgrades (FastAPI/starlette/aiohttp compatibility) starting with **aiohttp ≥3.13.4** and **starlette ≥0.49.1**.
+**Fix (applied 2026-04-29):** Coordinated upgrades deployed per **§11** (backend `requirements-light.txt` + bridge `requirements.txt`, images rebuilt, smoke/regression checks passed).
 
 ---
 
@@ -201,7 +201,7 @@ No evidence in this pass of live **authentication bypass**, **unauthenticated ad
 | Priority | Action | Est. | Regression risk |
 |----------|--------|------|------------------|
 | 1 | **Reconcile `users.email` encryption** — inventory plaintext rows, plan encrypt/backfill or document waiver | 4–24h eng + DBA | Medium (triggers, app reads) |
-| 2 | **Complete `pip-audit` / image scan**; patch CRITICAL/HIGH if any | 1–4h | Low–medium |
+| 2 | **`pip-audit` CRITICAL/HIGH (six runtime packages + FastAPI/starlette)** — **DONE** (§11); follow-up for MEDIUM backlog | 1–4h | Low–medium |
 | 3 | **Verify Cloudflare vs origin headers** on `api` for HSTS/CSP on all HTML/error routes | 1–2h | Low |
 | 4 | **CORS spot-check** on command dashboard for reflected Origin | 1h | Low |
 | 5 | **SSH posture audit** (password auth off, keys only) | <1h | Low |
@@ -217,7 +217,7 @@ No evidence in this pass of live **authentication bypass**, **unauthenticated ad
 **Can be accepted as known risk (documented):**
 
 - CSP with `unsafe-inline` / `unsafe-eval` until refactor.
-- Residual dependency upgrade work is **documented in §10** (fixes not applied during this read-only audit).
+- Residual **MEDIUM** / non-target dependency work remains **backlog** (§10 + §11.4); **CRITICAL + listed HIGHs** for the six runtime packages are **addressed** in **§11**.
 
 ---
 
@@ -243,7 +243,7 @@ No evidence in this pass of live **authentication bypass**, **unauthenticated ad
 **When:** 2026-04-29 (UTC)  
 **Where:** `docker exec nate_backend …` on primary production host (`nate_backend` image, Python 3.11).  
 **Scope:** `pip-audit` pip-install in container, then `pip-audit -r /app/requirements-light.txt` (resolves the same pins the backend image installs from).  
-**Packages changed:** None (scanner only).  
+**Packages changed (historical note):** Original Phase 7 run was scanner-only; **§11** records the **post-audit** dependency pins applied to production images.  
 
 ### 10.1 pip-audit summary
 
@@ -293,5 +293,53 @@ Priority is **compatibility-tested** bumps—not raw `pip install -U` on product
 
 ---
 
-**End of report.**  
-**Remediation waits for stakeholder review per engagement rules.**
+## 11. Security Patch Application (2026-04-29 UTC)
+
+**Scope:** Surgical bump of the **six HIGH/CRITICAL runtime packages** called out in §10.3 (plus **FastAPI** aligned to **starlette**), on **GREEN** only. **No** changes to protected application modules (`main.py`, `bridge_server.py`). **MEDIUM**-only and non-listed **GHSA** findings **deferred to backlog**.
+
+### 11.1 Packages updated (pins → resolved in container)
+
+| Package | Minimum (advisory) | Pin / constraint | Resolved (`nate_backend` / `nate_bridge`) |
+|--------|---------------------|------------------|-------------------------------------------|
+| **aiohttp** | ≥ 3.13.4 (CVE-2026-34520 CRITICAL) | `~=3.13.4` | **3.13.5** |
+| **starlette** | ≥ 0.49.1 (CVE-2025-62727 HIGH) | `>=0.49.1,<0.51.0` | **0.50.0** |
+| **fastapi** | (compat with starlette 0.49+) | `~=0.125.0` | **0.125.0** |
+| **PyJWT** | ≥ 2.12.0 (CVE-2026-32597 HIGH) | `[crypto]~=2.12.0` | **2.12.1** |
+| **pypdf** | ≥ 6.10.2 (multiple HIGH / GHSA) | `~=6.10.2` | **6.10.2** |
+| **Pillow** | ≥ 12.2.0 (HIGH bundle) | `~=12.2.0` | **12.2.0** |
+| **orjson** | ≥ 3.11.6 (CVE-2025-67221 HIGH) | `~=3.11.6` | **3.11.8** |
+
+**Files:** `backend/requirements-light.txt` (API image), `backend/requirements.txt` (bridge image). **pydantic** kept on **2.5.x** (FastAPI **0.125.x** chosen to avoid forced **pydantic ≥2.9**).
+
+### 11.2 Build / deploy timeline (primary host 68.183.168.75)
+
+| Step | Time (UTC, approx.) | Evidence |
+|------|---------------------|----------|
+| Backend image build | 2026-04-29 ~19:19 | `/tmp/security-patch-build.log` — `Image clinical-sovereignty-lab-backend Built` |
+| Backend recreate + health | same window | `GET /health` → `healthy`; startup **113/113** services healthy |
+| Bridge image build | 2026-04-29 ~19:23–19:33 | `docker compose -f docker-compose.prod.yml build bridge` exit 0 |
+| Bridge recreate | ~19:34–19:35 | `nate_bridge` **Bridge Online**; `pip list` shows patched **aiohttp** / **PyJWT** / **starlette** / **fastapi** |
+
+### 11.3 Phase 3 regression / smoke (post-deploy)
+
+| Check | Result |
+|-------|--------|
+| **GET** `/health` + **jq** | **200**, JSON well-formed |
+| **Admin REST** `GET /api/skyeye/pulse` with `SKYEYE_AUDIT_TOKEN` | **200** |
+| **Admin REST** without auth (sample `GET /api/admin/webauthn/keys`) | **401** |
+| **WebSocket login** (`client1` / `test123`, `expected_role`: **CLIENT**) | **`login_success`** + 32-char token (pre- and post-bridge rebuild) |
+| **pypdf / Pillow / orjson** (in-container **PdfWriter** roundtrip, **Image** PNG, **orjson.dumps**) | **OK** |
+| **ORANGE** `10.13.13.5` in backend logs (5m window) | **No lines** (no dispatch traffic in window; not a failure) |
+| **Bridge** logs after recreate | **Bridge Online**, **Database pool**, **UserStore** path unchanged |
+
+**Note:** **`POST /api/auth/login`** is not used for production auth (bridge **WebSocket** + REST bearer); REST probes above validate **FastAPI/starlette** stack behavior.
+
+### 11.4 Deferred / backlog (not in this deploy)
+
+- **pytest**, **python-dotenv**, **scikit-learn**, and other **§10** **MEDIUM** rows — schedule separate CI/pass with broader test burn-in.
+- **pypdf** GHSA-only rows without CVE on the same record — covered by **6.10.2** pin per pip-audit fix column; re-run **`pip-audit`** on next maintenance window to confirm row count drop.
+- **PII / email architecture** — remains **P1-1** documentation track (**not** blocked by this patch train).
+
+---
+
+**End of report (updated 2026-04-29 with §11 — security patch train complete for listed packages).**
