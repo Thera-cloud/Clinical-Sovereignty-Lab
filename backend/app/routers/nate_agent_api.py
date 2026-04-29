@@ -3470,6 +3470,13 @@ async def crystal_network_status(request: Request):
         "clinical_dna_crystals": 0,
         "knowledge_exaflops": round(total_crystals * 0.00008, 4),
         "wisdom_exaflops": 0.0,
+        # Growth-rate fields (Wisdom Growth Rate widget). Wisdom defined as
+        # the deduplicated union: user_id IS NOT NULL OR origin_surface IN lived_set.
+        "wisdom_total": 0,
+        "wisdom_24h": 0,
+        "wisdom_prev_24h": 0,
+        "wisdom_rate_per_hour": 0.0,
+        "wisdom_trend_pct": 0.0,
     }
     try:
         async with db_pool.acquire() as wm_conn:
@@ -3482,7 +3489,28 @@ async def crystal_network_status(request: Request):
                          'growth_engine','clinical_edge_seed')) AS lived_origin,
                     COUNT(*) FILTER (WHERE origin_surface IN
                         ('growth_engine','clinical_edge_seed')) AS clinical_dna,
-                    AVG(confidence) FILTER (WHERE user_id IS NOT NULL) AS avg_user_conf
+                    AVG(confidence) FILTER (WHERE user_id IS NOT NULL) AS avg_user_conf,
+                    COUNT(*) FILTER (WHERE
+                        user_id IS NOT NULL OR origin_surface IN
+                        ('bridge_chat','voice_call','family_sanctuary',
+                         'group_coaching','private_coaching','coached_response',
+                         'growth_engine','clinical_edge_seed')
+                    ) AS wisdom_total,
+                    COUNT(*) FILTER (WHERE
+                        created_at > NOW() - INTERVAL '24 hours'
+                        AND (user_id IS NOT NULL OR origin_surface IN
+                            ('bridge_chat','voice_call','family_sanctuary',
+                             'group_coaching','private_coaching','coached_response',
+                             'growth_engine','clinical_edge_seed'))
+                    ) AS wisdom_24h,
+                    COUNT(*) FILTER (WHERE
+                        created_at > NOW() - INTERVAL '48 hours'
+                        AND created_at <= NOW() - INTERVAL '24 hours'
+                        AND (user_id IS NOT NULL OR origin_surface IN
+                            ('bridge_chat','voice_call','family_sanctuary',
+                             'group_coaching','private_coaching','coached_response',
+                             'growth_engine','clinical_edge_seed'))
+                    ) AS wisdom_prev_24h
                 FROM nate_intelligence_crystals
                 WHERE scope != 'archived' AND superseded_by IS NULL
             """)
@@ -3498,6 +3526,21 @@ async def crystal_network_status(request: Request):
                 wisdom_metrics["wisdom_exaflops"] = round(
                     _wisdom_base * _avg_conf * 0.00008, 4
                 )
+                _w_total = _wm_row["wisdom_total"] or 0
+                _w_24h = _wm_row["wisdom_24h"] or 0
+                _w_prev = _wm_row["wisdom_prev_24h"] or 0
+                wisdom_metrics["wisdom_total"] = _w_total
+                wisdom_metrics["wisdom_24h"] = _w_24h
+                wisdom_metrics["wisdom_prev_24h"] = _w_prev
+                wisdom_metrics["wisdom_rate_per_hour"] = round(_w_24h / 24.0, 2)
+                if _w_prev > 0:
+                    wisdom_metrics["wisdom_trend_pct"] = round(
+                        ((_w_24h - _w_prev) / _w_prev) * 100.0, 1
+                    )
+                elif _w_24h > 0:
+                    wisdom_metrics["wisdom_trend_pct"] = 100.0
+                else:
+                    wisdom_metrics["wisdom_trend_pct"] = 0.0
     except Exception:
         pass
 

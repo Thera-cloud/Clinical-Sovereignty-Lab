@@ -1978,6 +1978,15 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
         <div class="ci-stat"><div class="ci-stat-val" id="ci-st-rate" style="color:#d4a84b">—</div><div class="ci-stat-lbl">Crystal Rate</div></div>
       </div>
 
+      <!-- Wisdom Growth Rate -->
+      <div class="ci-stats" style="margin-top:-8px" title="Wisdom = crystals from real interactions (user-scoped or lived-experience origin). Refreshes every 30s.">
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-wg-total" style="color:#4ECDC4">—</div><div class="ci-stat-lbl">Wisdom Total</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-wg-24h" style="color:#4ECDC4">—</div><div class="ci-stat-lbl">Wisdom Last 24h</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-wg-prev" style="color:#8a8678">—</div><div class="ci-stat-lbl">Prior 24h</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-wg-rate" style="color:#4ECDC4">—</div><div class="ci-stat-lbl">Wisdom Rate (/hr)</div></div>
+        <div class="ci-stat"><div class="ci-stat-val" id="ci-wg-trend" style="color:#8a8678">—</div><div class="ci-stat-lbl">Trend vs Prior 24h</div></div>
+      </div>
+
       <!-- Nevedal Formula -->
       <div class="ci-formula">
         <div>
@@ -6082,6 +6091,28 @@ function ciRenderStatus(d) {
       '<span>Knowledge: <span style="color:#C9A962">' + (wm.knowledge_exaflops || 0).toFixed(3) + '</span> ExaFLOPS (' + _ciNum(total - (wm.user_scoped_crystals || 0)) + ' crystals)</span>' +
       '<span>Wisdom: <span style="color:#4ECDC4">' + (wm.wisdom_exaflops || 0).toFixed(4) + '</span> ExaFLOPS (' + _ciNum(wm.lived_origin_crystals || 0) + ' lived-experience)</span>' +
       '<span>Clinical DNA: <span style="color:#9D4EDD">' + _ciNum(wm.clinical_dna_crystals || 0) + '</span></span>';
+  }
+
+  // Wisdom Growth Rate widget — uses wisdom-scoped fields from /crystal-network/status
+  var wgTotalEl = document.getElementById('ci-wg-total');
+  if (wgTotalEl) {
+    var wTotal = wm.wisdom_total || 0;
+    var w24 = wm.wisdom_24h || 0;
+    var wPrev = wm.wisdom_prev_24h || 0;
+    var wRate = (typeof wm.wisdom_rate_per_hour === 'number') ? wm.wisdom_rate_per_hour : (w24 / 24);
+    var wTrend = (typeof wm.wisdom_trend_pct === 'number') ? wm.wisdom_trend_pct : 0;
+    wgTotalEl.textContent = _ciNum(wTotal);
+    document.getElementById('ci-wg-24h').textContent = _ciNum(w24);
+    document.getElementById('ci-wg-prev').textContent = _ciNum(wPrev);
+    document.getElementById('ci-wg-rate').textContent = wRate.toFixed(2);
+    var trendEl = document.getElementById('ci-wg-trend');
+    var trendArrow = '●';
+    var trendColor = '#8a8678';
+    if (wTrend > 1) { trendArrow = '▲'; trendColor = '#1d9e75'; }
+    else if (wTrend < -1) { trendArrow = '▼'; trendColor = '#ef4444'; }
+    var trendSign = wTrend > 0 ? '+' : '';
+    trendEl.textContent = trendArrow + ' ' + trendSign + wTrend.toFixed(1) + '%';
+    trendEl.style.color = trendColor;
   }
 
   var nodes = d.nodes || [];
