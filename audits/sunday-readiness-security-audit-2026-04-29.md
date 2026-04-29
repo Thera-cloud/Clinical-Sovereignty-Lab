@@ -340,6 +340,12 @@ Priority is **compatibility-tested** bumps—not raw `pip install -U` on product
 - **pypdf** GHSA-only rows without CVE on the same record — covered by **6.10.2** pin per pip-audit fix column; re-run **`pip-audit`** on next maintenance window to confirm row count drop.
 - **PII / email architecture** — remains **P1-1** documentation track (**not** blocked by this patch train).
 
+### 11.5 Post-patch pip-audit verification (~20:03 UTC, 2026-04-29)
+
+**Command:** `docker exec nate_backend sh -c 'pip-audit -r /app/requirements-light.txt'` (after Phase 2 image).
+
+**Result:** **4** vulnerability rows in **3** packages — **python-dotenv** 1.0.1 (CVE-2026-28684, fix ≥1.2.2), **pytest** 7.4.4 (CVE-2025-71176, fix ≥9.0.3), **scikit-learn** 1.3.2 (PYSEC-2024-110, fix ≥1.5.0). **No** findings for **aiohttp**, **starlette**, **fastapi**, **PyJWT**, **pypdf**, **Pillow**, or **orjson** — the **six** Phase-2 runtime targets plus FastAPI/starlette alignment are **cleared** at pinned versions; remainder matches §11.4 backlog.
+
 ---
 
 **End of report (updated 2026-04-29 with §11 — security patch train complete for listed packages).**
