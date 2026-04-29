@@ -223,3 +223,80 @@ Planned work after approval (reference only):
 
 **End of Phase 1 diagnostic report.**  
 **Next step:** Stakeholder **approval** of Phase 2 scope + **monthly grant policy (a/b/c)** → then implementation + Phase 3 verification.
+
+---
+
+## Phase 2 Deploy Note (2026-04-28)
+
+Phase 2 shipped on `main` via:
+
+- `6e09f80` — `verify_password` hardening + migration 193 CHECK constraint
+- `e41a888` — token bucket split (subscription vs purchased) + migration 194 + canonical tiers + Stripe grant paths
+
+GREEN deploy verified:
+
+- Migration 194 backfilled all 43 users (`subscription_token_balance` = legacy `token_balance`, `purchased_token_balance` = 0).
+- 43/43 rows: `token_balance == subscription_token_balance + purchased_token_balance`.
+- Backend `113/113 services healthy — ALL SYSTEMS NOMINAL`.
+- `ENVIRONMENT=production` matches on backend and bridge.
+- Read-only audit script (`backend/scripts/monthly_token_backfill_audit.py`): 0 mismatches.
+
+---
+
+## Phase 4 Backlog — Legacy Subscriber Backfill for `subscriptions` Table
+
+**Status:** Open. Not blocking. Defer to next billing review session.
+
+**Observed state (2026-04-28 post-deploy):**
+
+- The `subscriptions` table currently returns **0 rows** for `status='ACTIVE' AND users.role='CLIENT'` when queried by `monthly_token_backfill_audit.py`.
+- All known paying customers have a Stripe subscription, but the `subscriptions` row was never populated for accounts created before commit `e41a888`. The new `_handle_checkout_completed` finalize path (Phase 2) writes that row going forward; existing subscribers will only get a row on their next `customer.subscription.updated` or `invoice.paid` webhook.
+
+**Consequence:**
+
+- `_handle_invoice_paid` reads tier from `subscriptions` first, falls back to `users.tier`. The fallback is fine for `monthly_grant`, so existing customers WILL get the monthly top-up on their next `invoice.paid` regardless.
+- However, any code path that joins on `subscriptions.user_id` (auditor queries, accounting reports, the `monthly_token_backfill_audit.py` "ACTIVE Stripe subscriptions" section) will under-count until the table is populated.
+
+### Option A — Passive (recommended baseline)
+
+- Wait for natural Stripe webhook turnover.
+- Each customer's `subscriptions` row is populated on their next `customer.subscription.updated` or `invoice.paid` event (worst case ~30 days).
+- `monthly_grant` works from then on via the `users.tier` fallback even before the row exists.
+- **Risk:** Customers in the early days of a billing cycle won't show up in audit/reporting queries until their cycle turns over. Unlikely to generate user-visible support tickets because the grant fallback path covers them; primarily a reporting completeness gap.
+- **Effort:** Zero. Self-heals over one billing cycle.
+
+### Option B — Active backfill
+
+1. Query Stripe for all active subscriptions:
+   - `stripe.Subscription.list(status='active', limit=100)` paginated.
+2. For each subscription:
+   - Look up `users.id` by `users.profile_data->>'stripe_customer_id'` or matching email.
+   - Skip if `subscriptions.stripe_subscription_id` already exists (deduplication).
+   - `INSERT` row with `current_period_start/end` from the Stripe payload, `tier` resolved via `_tier_from_subscription_payload`, `status='ACTIVE'`.
+3. **Optional** one-time catch-up grant:
+   - For each newly-inserted row where `users.subscription_token_balance < TIER_MONTHLY_TOKENS[tier]`, call `_apply_subscription_grant(..., mode='monthly_cap', source='catchup_backfill')`.
+   - Use a synthetic `stripe_event_id = f"backfill_{subscription_id}_{period_end}"` so the unique index `idx_token_tx_monthly_grant_invoice` deduplicates against any later natural `invoice.paid` event.
+4. Idempotency:
+   - Wrap in a single migration script (`backend/scripts/legacy_subscription_backfill.py`).
+   - Dry-run mode (`--dry-run`) prints the plan without writing.
+   - Live mode logs every insert and grant to `token_transactions` with `source='catchup_backfill'`.
+- **Risk:**
+  - Stripe API rate limits (mitigated by paginated lists + sleep between pages).
+  - Email-to-user matching ambiguity for accounts with `email` reused across roles (per `learned-integration-patterns.mdc` #32). Use `stripe_customer_id` as the primary join key; only fall back to email when customer ID is missing on the user row.
+  - Double-grant risk if natural `invoice.paid` fires concurrently — eliminated by the `stripe_event_id` unique index already in place from migration 194.
+- **Effort:** ~1 day to write + dry-run review + execute.
+
+### Decision Pending
+
+| Choice | Pick when |
+|---|---|
+| **A** | Reporting completeness gap is acceptable for ~30 days; don't want to touch Stripe API for backfill. |
+| **B** | Want clean reporting + audit immediately; willing to spend ~1 day on the migration script. |
+| **A then B** | Passive for the first 7 days; then run B for any subscriber whose `subscriptions` row is still missing. Hybrid catches the long-tail. |
+
+**Owner:** Nathan / billing review session.  
+**Trigger:** Next billing review or first user-visible reporting issue, whichever comes first.
+
+---
+
+**End of Phase 2 deploy + Phase 4 backlog entry.**
