@@ -24,9 +24,9 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 2G
         reservations:
-          memory: 256M
+          memory: 512M
     networks:
       - nate_network
 
