@@ -77,3 +77,20 @@ GREEN is **orchestration only**. The 6 GB DigitalOcean VPS runs PostgreSQL, Redi
 4. Wire the env-var hooks into `docker-compose.prod.yml` so the GREEN container can dispatch.
 5. Update this rule's table.
 6. Deploy the server first, flip the GREEN env var second.
+
+## ORANGE Public Exposure Policy (Ollama)
+
+**Effective 2026-04-29:** Ollama on ORANGE (`10.13.13.5`) is **not** reachable from the public Internet on TCP `11434`.
+
+| Layer | What |
+|---|---|
+| **Bind** | `OLLAMA_HOST=10.13.13.5:11434` — listens only on WireGuard (production uses `/etc/systemd/system/ollama.service.d/override.conf` on ORANGE). |
+| **Host firewall** | `ufw` allows `11434/tcp` only from `10.13.13.0/24`; SSH `22/tcp` and WireGuard `51820/udp` remain allowed. |
+| **Cloudflare LB health** | Do **not** probe `http://37.27.244.80:11434`. Use **`https://api.sovereignsanctuary.net/health/sovereign-inference`** (GREEN nginx proxies to ORANGE over WG). |
+| **Consumers** | GREEN backend uses **`SOVEREIGN_INFERENCE_URL=http://10.13.13.5:11434`** (WireGuard). BLUE Mac Home GPU uses **`HOME_GPU_URL`** / Twin tunnel — not Hetzner `:11434`. |
+
+**Policy lock:** Any change to **`OLLAMA_HOST`**, **host firewall rules for `11434`**, or the **`/health/sovereign-inference`** proxy on GREEN must keep this posture: Ollama listens on WireGuard only, public `37.27.244.80:11434` stays closed, and Cloudflare load balancer health checks use **`https://api.sovereignsanctuary.net/health/sovereign-inference`** — never raw **`http://37.27.244.80:11434`**.
+
+**Regression criteria:** Any change that exposes `:11434` on ORANGE’s public IP (`37.27.244.80`), removes the GREEN health proxy, or points load balancer monitors back at the raw Hetzner URL without review is treated as a **security regression**.
+
+**Rollback:** Restore `OLLAMA_HOST=0.0.0.0:11434` in the override, `systemctl daemon-reload && systemctl restart ollama`, and `ufw disable` only if production inference breaks — document incidents.
