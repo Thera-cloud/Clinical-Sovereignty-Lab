@@ -357,21 +357,24 @@ Priority is **compatibility-tested** bumps—not raw `pip install -U` on product
 | Item | Detail |
 |------|--------|
 | **Compose** | `pgbouncer.ports`: `10.13.13.2:6432:6432` only (production `wg0` per `wireguard/production/wg0.conf`). |
-| **UFW** | `ufw allow from 10.13.13.5 to any port 6432 proto tcp` (Hetzner ORANGE); `ufw deny 6432/tcp` as defense-in-depth — confirm rule order (`ufw status numbered`). |
-| **Hetzner `.env`** | `PRODUCTION_DB_URL=postgresql://nate_admin:<POSTGRES_PASSWORD>@10.13.13.2:6432/little_nate` — use same password as GREEN `.env`; never commit. |
+| **UFW** | GREEN already has **`ALLOW IN 10.13.13.0/24`** (full mesh). Optional: explicit allow from `10.13.13.5` to `6432/tcp` before any future broad deny — **do not** add `ufw deny 6432` without ordering checks (could block WG). |
+| **Hetzner `.env`** | **`/opt/crystal-factory/.env`** (systemd `EnvironmentFile=`) — `PRODUCTION_DB_URL=postgresql://nate_admin:<POSTGRES_PASSWORD>@10.13.13.2:6432/little_nate` (URL-encode special chars in password). Patched from GREEN via **`scripts/green_patch_crystal_factory_db_url.py`** (reads GREEN `.env`, no secret in git). |
 | **Restart** | `docker compose -f docker-compose.prod.yml up -d --force-recreate pgbouncer` then `systemctl restart crystal-factory` on Hetzner. |
 
-**Verify PgBouncer admin (use `nate_admin` / `STATS_USERS`, not `stats_user`):**
+**Applied ~2026-04-30 01:34–01:38 UTC:** `ss` shows `LISTEN 10.13.13.2:6432`; Hetzner `nc -zv 10.13.13.2 6432` **succeeded**; after URL patch + restart, journal: **Connected to PostgreSQL**, harvest cycles (earlier failure: `:5432` refused before **6432**/PgBouncer).
+
+**Verify PgBouncer admin:** SCRAM requires password — use `PGPASSWORD` from GREEN `.env`:
 
 ```bash
-docker exec nate_pgbouncer psql -h localhost -p 6432 -U nate_admin -d pgbouncer -c "SHOW SERVERS;"
+PW=$(grep ^POSTGRES_PASSWORD= /opt/clinical-sovereignty-lab/.env | cut -d= -f2-)
+docker exec -e PGPASSWORD="$PW" nate_pgbouncer psql -h 127.0.0.1 -p 6432 -U nate_admin -d pgbouncer -c "SHOW SERVERS;"
 ```
 
-**Public exposure check:** `curl -v --connect-timeout 5 http://68.183.168.75:6432` → expect **connection refused** or timeout (nothing on `0.0.0.0:6432`).
+**Public exposure check:** `curl -v --connect-timeout 5 http://68.183.168.75:6432` → **timeout** observed (no public listener; acceptable).
 
 ### 12.2 ffmpeg in backend image
 
-`backend/Dockerfile` installs **`ffmpeg`** via `apt-get` (slim image). After any change: rebuild backend on GREEN, `up -d --force-recreate backend`, then `docker exec nate_backend ffmpeg -version | head -1`. Expect **113/113** `STARTUP COMPLETE` (current `main.py` service count).
+`backend/Dockerfile` installs **`ffmpeg`** via `apt-get` (slim image). **Applied 2026-04-30 ~01:44 UTC:** image rebuilt on GREEN; `nate_backend` recreated — `ffmpeg` **7.1.3**, `/health` **healthy**, **`STARTUP COMPLETE: 113/113`**.
 
 ### 12.3 BLUE harvester (operator — Mac)
 
@@ -397,8 +400,8 @@ tail -20 ~/blue_harvest.log
 2. Classroom / video: re-upload test clip — Whisper fallback uses **ffmpeg** if present.  
 3. After BLUE starts: harvester heartbeats / recent activity in monitoring.
 
-**Deploy log (fill after GREEN pull + apply):** _[timestamp]_ — `git pull`, pgbouncer recreate, UFW, Hetzner `PRODUCTION_DB_URL` + `crystal-factory` restart, optional backend rebuild for Dockerfile comment-only sync.
+**Deploy log:** **2026-04-30** — `git pull` **958eb69** on GREEN; PgBouncer WG bind + recreate; Hetzner `PRODUCTION_DB_URL` → `10.13.13.2:6432` (`/opt/crystal-factory/.env`); `crystal-factory` restart; backend image rebuild + recreate (**ffmpeg 7.1.3**, **113/113** healthy).
 
 ---
 
-**End of report (updated 2026-04-29 through §12 — Phase 3 restoration playbook).**
+**End of report (updated through §12 — Phase 3 restoration applied 2026-04-30 UTC).**
