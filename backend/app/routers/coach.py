@@ -111,11 +111,11 @@ async def get_my_clients(request: Request, user_id: str = Depends(get_current_us
     does not need to know the coach's hardware_id. Reuses the canonical
     /clients/{coach_id} logic with the caller's identity.
     """
-    return await get_assigned_clients(user_id, request)
+    return await get_assigned_clients(user_id, request, user_id)
 
 
 @router.get("/clients/{coach_id}")
-async def get_assigned_clients(coach_id: str, request: Request):
+async def get_assigned_clients(coach_id: str, request: Request, caller_hw_id: str = Depends(get_current_user_id)):
     """Get all clients assigned to this coach"""
     shield = _get_coach_shield(request)
     if shield:
@@ -124,6 +124,10 @@ async def get_assigned_clients(coach_id: str, request: Request):
             asyncio.ensure_future(shield.detect_off_session_access(coach_id))
         except Exception as _e:
             _logger.debug("CoachIntegrityShield access check non-blocking: %s", _e)
+
+    # IDOR guard: path coach_id must match authenticated caller hardware_id.
+    if str(coach_id) != str(caller_hw_id):
+        raise HTTPException(status_code=403, detail="Cannot view another coach's clients")
 
     db_pool = getattr(request.app.state, "db_pool", None)
 
@@ -590,7 +594,7 @@ async def mark_homework_complete(homework_id: int, client_id: str, notes: str = 
     raise HTTPException(404, "Homework not found")
 
 @router.get("/stats/{coach_id}")
-async def get_coach_stats(coach_id: str, request: Request):
+async def get_coach_stats(coach_id: str, request: Request, caller_hw_id: str = Depends(get_current_user_id)):
     """Get statistics for a coach"""
     shield = _get_coach_shield(request)
     if shield:
@@ -599,6 +603,10 @@ async def get_coach_stats(coach_id: str, request: Request):
             asyncio.ensure_future(shield.track_attrition(coach_id))
         except Exception as _e:
             _logger.debug("CoachIntegrityShield attrition non-blocking: %s", _e)
+
+    # IDOR guard: path coach_id must match authenticated caller hardware_id.
+    if str(coach_id) != str(caller_hw_id):
+        raise HTTPException(status_code=403, detail="Cannot view another coach's clients")
 
     db_pool = getattr(request.app.state, "db_pool", None)
 
