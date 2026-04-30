@@ -10,12 +10,20 @@ historical checklists or .cursor/plans/.
 
 | Item | Category | Severity | File:Line | Added |
 |---|---|---|---|---|
+| Coach Classroom WebSocket error leaves UI stuck (analyzing flag never resets) | UX | HIGH | mobile/lib/updated_screens.dart:6725 | 2026-04-30 |
 | Sovereign Mind master key rotation procedure unimplemented | SECURITY | MEDIUM | backend/app/services/identity_chain.py:37 | 2026-04-30 |
-| _Awaiting reconciliation report from comprehensive checklist audit_ | — | — | — | 2026-04-30 |
+| Wire lived wisdom extraction on sanctuary_complete to Night School | FEATURE | MEDIUM | backend/app/websocket/bridge_server.py:26814 + lived_wisdom.py | 2026-04-30 |
+| Exit feeling_scale capture + Nevedal C_emo delta | FEATURE | MEDIUM | backend/app/websocket/bridge_server.py + sanctuary_engine | 2026-04-30 |
+| Coach notification when sanctuary needs_review (beyond flag) | UX | MEDIUM | backend/app/websocket/bridge_server.py:27017 | 2026-04-30 |
 
 ## Deferred (acknowledged, not actionable now)
 
-[empty initially]
+| Item | Category | Severity | Location | Notes |
+|---|---|---|---|---|
+| The Eye sanctuary effectiveness dashboard + wisdom analytics | FEATURE | LOW | dashboard/the_eye.html | Product scoping needed |
+| Edge firmware scaffolding (fragment reassembly, mesh routing, OTA) | INFRA | LOW | edge/ | Pending ZEFCP ship |
+| SSE / Sovereign Command remaining media pipeline | FEATURE | LOW | backend/app/sse/ + studio | Large product scope |
+| Manual UX/QA verification of feature checklist items | QA | LOW | UX_AUDIT_FEATURE_CHECKLIST.md | Needs device QA session |
 
 ## Done (kept for traceability, prune quarterly)
 
@@ -60,5 +68,5 @@ into these files:
 - edge/README.md (TODO section only)
 - .cursor/plans/ (entire directory — historical planning)
 
-A reconciliation pass on 2026-04-30 will extract any STILL OPEN 
-items from these files into this Active table.
+A reconciliation pass on 2026-04-30 extracted high-value STILL OPEN 
+items into the Active and Deferred tables above.
