@@ -1,0 +1,60 @@
+---
+description: backend + bridge are separate images; rebuild both when Python deps change; verify pip versions in both containers
+alwaysApply: false
+---
+
+# Dual-Container Dependency Patching (`nate_backend` + `nate_bridge`)
+
+**`nate_backend`** and **`nate_bridge`** are **separate Docker images** built from **`backend/Dockerfile`** and **`backend/Dockerfile.bridge`**. They **do not** share a single image layer — updating one container **does not** update the other.
+
+## Requirement files (do not confuse)
+
+| Image | Dockerfile | Installs from |
+|-------|------------|---------------|
+| **Backend** | `backend/Dockerfile` | **`requirements-light.txt`** |
+| **Bridge** | `backend/Dockerfile.bridge` | **`requirements.txt`** |
+
+Many **runtime** packages appear in **both** files (e.g. **aiohttp**, **PyJWT**, **asyncpg**). A **CRITICAL** or **HIGH** CVE in a shared dependency remains exploitable on **whichever image you forgot to rebuild**.
+
+## When ANY production Python dependency is updated
+
+1. **Edit** the correct `requirements*.txt`(s) so pins stay consistent for overlapping packages where both processes need the fix.  
+2. **Rebuild both images** on production (GREEN):
+
+```bash
+cd /opt/clinical-sovereignty-lab
+docker compose -f docker-compose.prod.yml build backend bridge
+```
+
+3. **Force-recreate both** (pick up new layers and env):
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --force-recreate backend bridge
+```
+
+4. **Verify** the same fixed version in **both** containers:
+
+```bash
+docker exec nate_backend pip show aiohttp
+docker exec    nate_bridge pip show aiohttp
+```
+
+5. **Re-run** **`pip-audit`** inside **`nate_backend`** per **`security-patch-cadence.mdc`**; spot-check bridge if it installs overlapping transitive deps.
+
+## 2026-04-29 near-miss (Phase 2)
+
+- **Backend** was rebuilt first with patched **aiohttp** (and related pins).  
+- **Bridge** initially kept running an older image (**e.g. aiohttp 3.9.5**) — still vulnerable until **bridge** was rebuilt **~14 minutes** later.  
+- **Lesson:** After any security bump, **always** confirm **`pip show`** / **`pip-audit`** (or image digests) on **both** `nate_backend` and `nate_bridge`.
+
+## Never Do
+
+- **Never** rebuild only **`backend`** for a fix to a package that **bridge** also imports — both must roll forward.  
+- **Never** assume `git pull` on GREEN updates running containers — **build + recreate** per **`git-production-deployment.mdc`**.
+
+## Related rules
+
+- **`security-patch-cadence.mdc`** — SLA and `pip-audit` command.  
+- **`docker-compose-prod-file.mdc`** — `-f docker-compose.prod.yml` only.  
+- **`bridge-postgres-connectivity.mdc`** — bridge env and Postgres.  
+- **`build-deploy-ux-verification.mdc`** — post-deploy health and **`ENVIRONMENT`** match.

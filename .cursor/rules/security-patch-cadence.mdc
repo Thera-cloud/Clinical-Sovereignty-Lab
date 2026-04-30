@@ -1,0 +1,67 @@
+---
+description: pip-audit cadence, CRITICAL/HIGH/MEDIUM SLAs, production container-only scans, post-patch verification
+alwaysApply: false
+---
+
+# Security Dependency Patch Cadence
+
+Cadence and severity handling established with **2026-04-29 Sunday-readiness** / Phase 2 (`pip-audit` remediation). See also **`dual-container-dependency-patching.mdc`** — backend **and** bridge must be rebuilt for shared vulnerable packages.
+
+## When to run `pip-audit`
+
+| Trigger | Minimum frequency |
+|--------|-------------------|
+| **Quarterly** | At least once per calendar quarter on **production-shaped** deps. |
+| **Major exposure** | Before **radio / press / large marketing / product launch** windows. |
+| **After incidents** | When a CVE is disclosed for a runtime dependency already in use. |
+
+## Severity → response time
+
+| Severity | Action |
+|----------|--------|
+| **CRITICAL** | Patch within **7 days** (sooner if exploit in the wild). |
+| **HIGH** | Patch within **30 days**. |
+| **MEDIUM** | Next **quarterly** cycle, **unless** exploitation evidence or auditor mandate — then treat as HIGH. |
+
+## How to run `pip-audit` (authoritative environment)
+
+- Run **`pip-audit` inside `nate_backend`**, which matches **Python 3.11** and installed pins from **`/app/requirements-light.txt`**:
+
+```bash
+docker exec nate_backend sh -c 'pip install -q pip-audit 2>/dev/null; pip-audit -r /app/requirements-light.txt'
+```
+
+- **Do not** rely on host `pip-audit` alone (e.g. old system Python **3.9**) — versions and resolution differ from the shipping image.
+
+## Post-patch workflow
+
+1. Bump pins in **`backend/requirements-light.txt`** (and **`backend/requirements.txt`** where the bridge shares the package).  
+2. **Rebuild** and **force-recreate** **`nate_backend`** **and** **`nate_bridge`** when shared packages change — see **`dual-container-dependency-patching.mdc`**.  
+3. **Verify:** Re-run **`pip-audit`** in **`nate_backend`**; confirmed fixes should **no longer list** the patched CVE rows for those packages.  
+4. Optional: confirm **`pip show <package>`** in **both** containers matches intended versions.
+
+## Baseline — patched runtime stack (post-2026-04-29)
+
+| Package | Resolved version (example) |
+|---------|---------------------------|
+| aiohttp | 3.13.5 |
+| starlette | 0.50.0 |
+| fastapi | 0.125.0 |
+| PyJWT | 2.12.1 |
+| pypdf | 6.10.2 |
+| Pillow | 12.2.0 |
+| orjson | 3.11.8 |
+
+## Backlog (deferred next cycle — do not forget)
+
+| Package | Example finding | Fix version (advisory) |
+|---------|-----------------|------------------------|
+| python-dotenv | CVE-2026-28684 | ≥ 1.2.2 |
+| pytest | CVE-2025-71176 | ≥ 9.0.3 |
+| scikit-learn | PYSEC-2024-110 | ≥ 1.5.0 |
+
+## Related rules
+
+- **`dual-container-dependency-patching.mdc`** — bridge + backend image parity.  
+- **`learned-integration-patterns.mdc`** / **`old-code-hygiene.mdc`** — env and import pitfalls after deploys.  
+- **`trust-100-percent.mdc`** — regressions from missing deploy units.

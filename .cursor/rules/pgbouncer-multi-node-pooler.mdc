@@ -1,0 +1,47 @@
+---
+description: PgBouncer as shared pooler for GREEN backend + WireGuard consumers (Hetzner crystal-factory); WG-only bind, UFW, session-mode blockers
+alwaysApply: false
+---
+
+# PgBouncer Multi-Node Pooler (GREEN + WireGuard)
+
+**PgBouncer** (listening on **6432** inside the container) is the **shared connection pool** in front of PostgreSQL for:
+
+| Consumer | Path | Notes |
+|----------|------|--------|
+| **`nate_backend`** | `pgbouncer:6432` on Docker `nate_network` | Primary API; see `DATABASE_URL` in `docker-compose.prod.yml`. |
+| **Hetzner crystal-factory** | **`10.13.13.2:6432`** over WireGuard | Production `wg0` address on GREEN per `wireguard/production/wg0.conf`. |
+
+The **`nate_bridge`** connects **directly** to `postgres:5432` and does **not** use PgBouncer (protected-file constraint in `bridge_server.py`). See **`pgbouncer-session-mode.mdc`**.
+
+## WireGuard exposure (2026-04-29 Phase 3.1)
+
+- **Compose:** `pgbouncer.ports` MUST remain **`10.13.13.2:6432:6432`** — bind **only** to the WG interface IP on GREEN.
+- **NEVER** publish **`0.0.0.0:6432`** for PgBouncer on production.
+- **UFW:** **6432** must **not** be reachable from the public internet. Allow the WireGuard mesh subnet **`10.13.13.0/24`** to reach **tcp/6432** (either a dedicated rule for `6432` from that net, or an existing mesh-wide allow — **do not** open `6432` to `Anywhere`). When adding consumers, document and tighten rules as needed.
+- **Hetzner `PRODUCTION_DB_URL`:** `postgresql://nate_admin:***@10.13.13.2:6432/little_nate` in **`/opt/crystal-factory/.env`**. Password URL-encoding: run on GREEN — **`scripts/green_patch_crystal_factory_db_url.py`**.
+
+## Adding a new PgBouncer consumer (checklist)
+
+1. **Capacity:** Confirm **`DEFAULT_POOL_SIZE`** (currently **100**) and **`MAX_CLIENT_CONN`** (currently **500**) in `docker-compose.prod.yml` still fit the new client’s concurrency; raise only after postgres `max_connections` headroom review.
+2. **Network:** Consumer must reach **`10.13.13.2:6432`** over WG (or `pgbouncer:6432` if another Docker service on GREEN).
+3. **UFW:** If policy is tightened beyond `10.13.13.0/24`, **add** an explicit `allow from <consumer WG IP> to port 6432 proto tcp` before any deny that could block WG.
+4. **Docs:** Add the consumer to **this rule** and to **`pgbouncer-session-mode.mdc`** if routing changes.
+
+## Session mode (not transaction) — do not flip casually
+
+PgBouncer stays in **`POOL_MODE: session`** until **four blockers** are resolved (see **`pgbouncer-session-mode.mdc`**):
+
+1. **pgcrypto** — session GUC `app.pii_key` vs transaction pooling.  
+2. **asyncpg** — `statement_cache_size` / prepared statements vs transaction pooling.  
+3. **`main.py`** — host inference from `DATABASE_URL` (protected file).  
+4. **`bridge_server.py`** — hardcoded `postgres` host for bridge (protected file).
+
+**Migration to transaction mode is a 1–2 week engineering project** — not a drive-by compose change.
+
+## Related rules
+
+- **`pgbouncer-session-mode.mdc`** — blockers, verification commands, Never Do list.  
+- **`docker-compose-prod-file.mdc`** — always use `-f docker-compose.prod.yml`.  
+- **`three-node-sync-discipline.mdc`** — GREEN vs ORANGE; WG IPs.  
+- **`bridge-postgres-connectivity.mdc`** — bridge remains direct to Postgres.
