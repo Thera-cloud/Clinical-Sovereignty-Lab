@@ -90,6 +90,76 @@ async def _resolve_hw_id(request: Request, user_id: str) -> str:
     return row["hardware_id"] if row else user_id
 
 
+def _caller_role(request: Request) -> str:
+    return str(getattr(request.state, "user_role", None) or "")
+
+
+async def _require_path_is_self_or_admin(request: Request, path_coach_hw_id: str) -> None:
+    """IDOR guard: path coach/hardware id must match authenticated caller, unless admin."""
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
+    caller_hw = await _resolve_hw_id(request, user_id)
+    if str(path_coach_hw_id) != str(caller_hw) and _caller_role(request) != "ADMIN":
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot view another coach's hierarchy",
+        )
+
+
+async def _require_master_or_self_for_assistant(
+    request: Request, pool, assistant_hw_id: str
+) -> None:
+    """Authorization: caller is the assistant themself, their supervising master (active hierarchy), or admin."""
+    if _caller_role(request) == "ADMIN":
+        return
+    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
+    caller_hw = await _resolve_hw_id(request, user_id)
+    if str(assistant_hw_id) == str(caller_hw):
+        return
+    async with pool.acquire() as conn:
+        ok = await conn.fetchval(
+            """SELECT 1 FROM coach_hierarchy
+               WHERE master_coach_id = $1 AND assistant_id = $2
+                 AND status IN ('active', 'accepted')
+               LIMIT 1""",
+            caller_hw,
+            assistant_hw_id,
+        )
+    if not ok:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to view this assistant's data",
+        )
+
+
+async def _require_mesh_session_access(request: Request, pool, session_id: str) -> None:
+    """IDOR guard: mesh session detail/scores require master, participant, or admin."""
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow(
+            "SELECT master_coach_id FROM coaching_mesh_sessions WHERE session_id = $1",
+            session_id,
+        )
+        if not session:
+            raise HTTPException(404, "Session not found")
+        if _caller_role(request) == "ADMIN":
+            return
+        user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
+        caller_hw = await _resolve_hw_id(request, user_id)
+        if str(session["master_coach_id"]) == str(caller_hw):
+            return
+        ok = await conn.fetchval(
+            """SELECT 1 FROM coaching_mesh_participants
+               WHERE session_id = $1 AND user_id = $2
+               LIMIT 1""",
+            session_id,
+            caller_hw,
+        )
+    if not ok:
+        raise HTTPException(
+            status_code=403,
+            detail="Not authorized to view this mesh session",
+        )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # PART A: Coach Hierarchy Endpoints (10)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -142,6 +212,7 @@ async def accept_invitation(body: AcceptRequest, request: Request):
 async def list_assistants(coach_id: str, request: Request):
     """List assistants for a master coach."""
     pool = _get_db(request)
+    await _require_path_is_self_or_admin(request, coach_id)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT ch.assistant_id, ch.status, ch.invited_at, ch.accepted_at,
@@ -206,6 +277,7 @@ async def log_hours(body: LogHoursRequest, request: Request):
 async def get_hours(assistant_id: str, request: Request):
     """Get supervised hours for an assistant."""
     pool = _get_db(request)
+    await _require_master_or_self_for_assistant(request, pool, assistant_id)
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT id, master_coach_id, activity_type, dojo_type,
@@ -238,6 +310,7 @@ async def get_hours(assistant_id: str, request: Request):
 async def export_hours(assistant_id: str, request: Request):
     """Export supervised hours summary for an assistant."""
     pool = _get_db(request)
+    await _require_master_or_self_for_assistant(request, pool, assistant_id)
     async with pool.acquire() as conn:
         total = await conn.fetchval(
             "SELECT COALESCE(SUM(duration_minutes), 0) FROM supervised_hours WHERE assistant_id = $1",
@@ -427,28 +500,20 @@ async def get_assistant_metrics(request: Request, days: int = 30):
 async def get_assistant_clients(coach_username: str, request: Request):
     """List all clients assigned to an assistant (master coach view)."""
     pool = _get_db(request)
-    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
-    master_hw = await _resolve_hw_id(request, user_id)
 
     async with pool.acquire() as conn:
         a_row = await conn.fetchrow(
-            "SELECT hardware_id FROM users WHERE username = $1 AND role = 'COACH'",
+            """SELECT hardware_id FROM users
+               WHERE username = $1 AND role = 'COACH' AND deleted_at IS NULL""",
             coach_username,
         )
         if not a_row:
             raise HTTPException(404, "Assistant coach not found")
         a_hw = a_row["hardware_id"]
 
-        hierarchy = await conn.fetchrow(
-            """SELECT 1 FROM coach_hierarchy
-               WHERE master_coach_id = $1 AND assistant_id = $2
-                 AND status IN ('active', 'accepted')""",
-            master_hw, a_hw,
-        )
-        user_role = getattr(request.state, "user_role", None)
-        if not hierarchy and user_role != "ADMIN":
-            raise HTTPException(403, "No hierarchy relationship")
+    await _require_master_or_self_for_assistant(request, pool, a_hw)
 
+    async with pool.acquire() as conn:
         clients = await conn.fetch(
             """SELECT username, hardware_id,
                       profile_data->>'name' as name,
@@ -492,28 +557,21 @@ async def get_assistant_sessions(
 ):
     """Master coach views coaching session outcomes for an assistant's clients."""
     pool = _get_db(request)
-    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
-    master_hw = await _resolve_hw_id(request, user_id)
 
     async with pool.acquire() as conn:
         assistant_row = await conn.fetchrow(
-            "SELECT id, hardware_id FROM users WHERE username = $1", coach_username
+            """SELECT id, hardware_id FROM users
+               WHERE username = $1 AND deleted_at IS NULL""",
+            coach_username,
         )
         if not assistant_row:
             raise HTTPException(404, "Coach not found")
         assistant_hw = assistant_row["hardware_id"]
         assistant_uuid = assistant_row["id"]
 
-        hierarchy = await conn.fetchrow(
-            """SELECT 1 FROM coach_hierarchy
-               WHERE master_coach_id = $1 AND assistant_id = $2 AND status = 'active'""",
-            master_hw, assistant_hw,
-        )
-        if not hierarchy:
-            user_role = getattr(request.state, "user_role", None)
-            if user_role != "ADMIN":
-                raise HTTPException(403, "Not authorized — no hierarchy relationship")
+    await _require_master_or_self_for_assistant(request, pool, assistant_hw)
 
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT cs.session_id, cs.client_id::text, cs.client_name, cs.status,
                       cs.scheduled_at, cs.actual_start, cs.actual_end,
@@ -593,6 +651,8 @@ async def create_mesh_session(body: MeshCreateRequest, request: Request):
 @router.get("/mesh/sessions/{coach_id}")
 async def list_mesh_sessions(coach_id: str, request: Request, limit: int = 20):
     """List mesh sessions for a coach (as master or participant)."""
+    _get_db(request)
+    await _require_path_is_self_or_admin(request, coach_id)
     engine = _get_mesh_engine(request)
     return await engine.get_sessions_for_coach(coach_id, limit=limit)
 
@@ -600,10 +660,11 @@ async def list_mesh_sessions(coach_id: str, request: Request, limit: int = 20):
 @router.get("/mesh/session/{session_id}")
 async def get_mesh_session_detail(session_id: str, request: Request):
     """Get session detail with participants and transcript."""
+    pool = _get_db(request)
+    await _require_mesh_session_access(request, pool, session_id)
     engine = _get_mesh_engine(request)
     participants = await engine.get_session_participants(session_id)
     transcript = await engine.get_session_transcript(session_id)
-    pool = _get_db(request)
     async with pool.acquire() as conn:
         session = await conn.fetchrow(
             """SELECT session_id, master_coach_id, session_type, title,
@@ -633,6 +694,8 @@ async def get_mesh_session_detail(session_id: str, request: Request):
 @router.get("/mesh/session/{session_id}/scores")
 async def get_mesh_scores(session_id: str, request: Request):
     """Get per-participant scores for a mesh session."""
+    pool = _get_db(request)
+    await _require_mesh_session_access(request, pool, session_id)
     engine = _get_mesh_engine(request)
     return await engine.get_session_scores(session_id)
 
@@ -718,27 +781,19 @@ async def get_my_nate_progress(request: Request):
 async def get_assistant_nate_progress(coach_username: str, request: Request):
     """Master coach views an assistant's Coach Nate progress (requires hierarchy)."""
     pool = _get_db(request)
-    user_id = request.state.user_id if hasattr(request.state, "user_id") else "unknown"
-    master_hw = await _resolve_hw_id(request, user_id)
 
     async with pool.acquire() as conn:
         assistant_hw = await conn.fetchval(
-            "SELECT hardware_id FROM users WHERE username = $1", coach_username
+            """SELECT hardware_id FROM users
+               WHERE username = $1 AND deleted_at IS NULL""",
+            coach_username,
         )
         if not assistant_hw:
             raise HTTPException(404, "Coach not found")
 
-        hierarchy = await conn.fetchrow(
-            """SELECT 1 FROM coach_hierarchy
-               WHERE master_coach_id = $1 AND assistant_id = $2
-                 AND status = 'active'""",
-            master_hw, assistant_hw,
-        )
-        if not hierarchy:
-            user_role = getattr(request.state, "user_role", None)
-            if user_role != "ADMIN":
-                raise HTTPException(403, "Not authorized — no hierarchy relationship")
+    await _require_master_or_self_for_assistant(request, pool, assistant_hw)
 
+    async with pool.acquire() as conn:
         rows = await conn.fetch(
             """SELECT skill_area, session_count, average_score, best_score,
                       total_score, dimension_averages, last_session_at
