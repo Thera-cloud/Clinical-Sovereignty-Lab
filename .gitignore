@@ -170,7 +170,9 @@ deploy-web.sh
 # Local agent heartbeat (machine-specific)
 data/mac_agent_alive.json
 
-# Block bypass / backdoor patterns that should never enter the repo
-dashboard/admin_bypass*
-dashboard/*bypass*.html
-dashboard/*_bypass.html
+# Block bypass patterns in any directory under dashboard/ and mobile/
+dashboard/**/admin_bypass*
+dashboard/**/*bypass*.html
+dashboard/**/*_bypass.html
+mobile/**/admin_bypass*
+mobile/**/*bypass*.html
