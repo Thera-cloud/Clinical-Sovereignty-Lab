@@ -176,11 +176,11 @@ my_clients   presession_  calendar   night_school   crisis_
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           ADMIN USER JOURNEY                                     │
-│                         (Admin - admin1/password)                               │
+│                      (Admin — DrNevedal1 / command portal)                       │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
                               🏠 LOGIN
-                          index.html / admin_bypass.html
+                              index.html
                                  │
                                  ▼
                     ┌────────────────────────┐
@@ -231,6 +231,8 @@ my_clients   presession_  calendar   night_school   crisis_
 │  night_school_versions.html  │ Version history tracking                         │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **Removed 2026-04-30:** A former dev-only `admin_bypass.html` page is **fully purged** from the repo and production web roots (commit `ca8b3ef`, tag `admin-bypass-full-purge-2026-04-30`). Do not restore; use the normal Sovereign Command (`command.html`) login path.
 
 ---
 
@@ -498,12 +500,11 @@ my_clients   presession_  calendar   night_school   crisis_
                             │ ├─ night_school_notes.html                         │
                             │ └─ night_school_versions.html                      │
                             │                                                    │
-                            │ COMMAND & ADMIN (6 dashboards)                     │
+                            │ COMMAND & ADMIN (5 dashboards)                     │
                             │ ├─ command.html                                    │
                             │ ├─ index.html                                      │
                             │ ├─ system.html                                     │
                             │ ├─ users.html                                      │
-                            │ ├─ admin_bypass.html                               │
                             │ └─ coach_approvals.html                            │
                             │                                                    │
                             │ CLIENT TOOLS (5 dashboards)                        │

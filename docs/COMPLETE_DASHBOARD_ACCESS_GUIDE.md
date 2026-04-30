@@ -97,7 +97,6 @@ open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/night_school_notes.html
 | **Main Index** | `index.html` | Dashboard hub/login |
 | **System Status** | `system.html` | System health |
 | **User Management** | `users.html` | User administration |
-| **Admin Bypass** | `admin_bypass.html` | Emergency access |
 | **Coach Approvals** | `coach_approvals.html` | Pending approvals |
 
 ```bash
@@ -106,9 +105,10 @@ open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/command.html
 open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/index.html
 open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/system.html
 open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/users.html
-open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/admin_bypass.html
 open ~/Desktop/Clinical-Sovereignty-Lab-2/dashboard/coach_approvals.html
 ```
+
+*Removed 2026-04-30:* `admin_bypass.html` was a dev backdoor and is **purged** everywhere (`ca8b3ef`). Use `command.html` and normal admin auth only.
 
 ---
 
@@ -256,7 +256,6 @@ open "$BASE/crisis_center.html"
 ### `/dashboard/` Directory (Main Dashboards)
 | File | Category |
 |------|----------|
-| `admin_bypass.html` | Admin |
 | `ask_nate.html` | Little Nate |
 | `calendar.html` | Scheduling |
 | `check_session.html` | Debug |
