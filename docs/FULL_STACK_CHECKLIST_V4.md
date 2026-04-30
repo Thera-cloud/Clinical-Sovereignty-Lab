@@ -1,7 +1,12 @@
-> **HISTORICAL — READ ONLY as of 2026-04-30.** New open items go 
-> in `docs/OPEN_TODOS.md`, not here. This file is preserved for 
-> historical reference and pending reconciliation. See 
-> docs/OPEN_TODOS.md for active work.
+> **SUPERSEDED — DO NOT FOLLOW THIS GUIDE.** This document references 
+> architecture that has been replaced (main_hybrid.dart → main.dart, 
+> bridge_server_hybrid.py → bridge_server.py, CoachPortalScreen → 
+> CoachDashboardScreenV2 in updated_screens.dart, etc). 
+> 
+> Confirmed superseded by reconciliation audit 2026-04-30. 
+> Kept only for historical reference. See docs/OPEN_TODOS.md for 
+> current open work and current production architecture for 
+> integration patterns.
 
 # Little Nate — Full Stack Implementation Checklist
 ## Complete Integration Guide for Production Deployment
