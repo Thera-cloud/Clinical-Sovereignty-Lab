@@ -147,9 +147,32 @@ async def generate_daily_panels(sid: str, db_pool, skip_check=None) -> dict[str,
 
 async def generate_weekly_clips(sid: str, db_pool) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    if (now.day - 1) // 7 + 1 >= 4:
-        return {"storyboard_id": sid, "clips_generated": 0,
-                "clips_failed": 0, "substitutions": 0, "cost": 0}
+    week_of_month = (now.day - 1) // 7 + 1
+    if week_of_month >= 4:
+        logger.info(
+            "SSE weekly_clip skip: storyboard=%s week_of_month=%d "
+            "(week 4 reserved for monthly_recap)",
+            sid, week_of_month,
+        )
+        try:
+            async with db_pool.acquire() as c:
+                await _log(
+                    c, sid, "_storyboard_level", "weekly_clip", "",
+                    "skipped_week4", 0.0, 0.0, "skipped",
+                    f"week_of_month={week_of_month} deferred to monthly_recap",
+                )
+        except Exception as e:
+            logger.warning("Could not log weekly_clip skip: %s", e)
+        return {
+            "storyboard_id": sid,
+            "clips_generated": 0,
+            "clips_failed": 0,
+            "substitutions": 0,
+            "cost": 0,
+            "status": "skipped_week4",
+            "week_of_month": week_of_month,
+            "reason": "deferred to monthly recap",
+        }
     gen = fail = subs = 0; cost = 0.0
     ws = (now - timedelta(days=7)).date()
     we = now.date()
