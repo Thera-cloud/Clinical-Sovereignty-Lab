@@ -768,10 +768,20 @@ class _CoachChatMessage(BaseModel):
 
 
 @router.post("/nate-chat")
-async def coach_nate_chat(body: _CoachChatMessage, request: Request):
+async def coach_nate_chat(
+    body: _CoachChatMessage,
+    request: Request,
+    caller_hw_id: str = Depends(get_current_user_id),
+):
     """Coach-accessible Little Nate chat for coaching insights."""
     from app.services.skyeye_chat import SkyEyeChatService
     from app.services.api_server import get_current_user as _get_user
+
+    # SECURITY: The is_master_coach flag and assistant_details previously
+    # came from the Flutter client and were trusted. This server-side check
+    # prevents privilege escalation by re-deriving master status from
+    # coach_hierarchy. Future work: recompute assistant_details from DB
+    # too, rather than just stripping.
 
     coach_username = "unknown_coach"
     try:
@@ -781,11 +791,33 @@ async def coach_nate_chat(body: _CoachChatMessage, request: Request):
         pass
 
     db_pool = getattr(request.app.state, "db_pool", None)
+    is_master_verified = False
+    if db_pool:
+        try:
+            async with db_pool.acquire() as conn:
+                is_master_verified = bool(
+                    await conn.fetchval(
+                        """SELECT 1 FROM coach_hierarchy
+                           WHERE master_coach_id = $1 AND status IN ('active', 'accepted')
+                           LIMIT 1""",
+                        caller_hw_id,
+                    )
+                )
+        except Exception:
+            is_master_verified = False
+
+    ctx = dict(body.context) if isinstance(body.context, dict) else {}
+    ctx["is_master_coach"] = is_master_verified
+    if not is_master_verified:
+        ctx.pop("assistant_details", None)
+        ctx.pop("focused_assistant", None)
+        ctx.pop("focused_assistant_clients", None)
+
     service = SkyEyeChatService(db_pool)
     mode = body.mode if body.mode else "inquiry"
     return await service.send_coach_message(
         user_message=body.message,
         coach_username=coach_username,
-        context=body.context,
+        context=ctx,
         mode_override=mode,
     )
