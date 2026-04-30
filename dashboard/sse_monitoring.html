@@ -216,7 +216,7 @@ body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:
     <div class="glass-header"><div class="glass-title">📋 Active Storyboards</div></div>
     <div class="glass-body" style="padding:0;overflow-x:auto">
       <table class="tbl" id="storyboardTable">
-        <thead><tr><th>Storyboard</th><th>Enrolled</th><th>Last Panel</th><th>Last Clip</th><th>Last Recap</th><th>Gap Status</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Storyboard</th><th title="Users in workbook/video delivery pipeline. Journey panels go to all active clients separately.">WORKBOOK ENROLLED</th><th>Last Panel</th><th>Last Clip</th><th>Last Recap</th><th>Gap Status</th><th>Actions</th></tr></thead>
         <tbody id="storyboardBody"><tr><td colspan="7" class="empty"><div class="empty-icon">📋</div><div class="empty-text">Loading…</div></td></tr></tbody>
       </table>
     </div>
@@ -302,6 +302,7 @@ function _statusBadge(s) {
   if (s === 'success') return '<span class="badge badge-green">success</span>';
   if (s === 'failed') return '<span class="badge badge-red">failed</span>';
   if (s === 'fallback' || s === 'substituted') return '<span class="badge badge-amber">' + s + '</span>';
+  if (s === 'skipped') return '<span class="badge badge-amber">skipped</span>';
   return '<span class="badge badge-gray">' + s + '</span>';
 }
 
