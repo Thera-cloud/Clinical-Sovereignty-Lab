@@ -32,6 +32,34 @@ class _VaultDesign {
   static const border = Color(0xFF252525);
 }
 
+const _kKnownSseDeliveryTypes = {
+  'weekly_clip',
+  'weekly_recap',
+  'monthly_recap',
+  'monthly_clip',
+  'daily_panel',
+};
+
+/// True when grid/list should show a video play tile instead of [Image.network] on the URL.
+bool _vaultThumbnailIsVideo(String? thumbUrl, Map<String, dynamic> item) {
+  if (thumbUrl != null && thumbUrl.isNotEmpty) {
+    final urlPath = thumbUrl.split('?').first.toLowerCase();
+    if (urlPath.endsWith('.mp4') || urlPath.endsWith('.webm') || urlPath.endsWith('.mov')) {
+      return true;
+    }
+  }
+  final raw = item['_sse'];
+  if (raw is Map) {
+    final pt = (raw['panel_tone'] ?? '').toString().toLowerCase();
+    final py = (raw['panel_type'] ?? '').toString().toLowerCase();
+    if (pt.contains('clip') || pt.contains('recap') || pt.contains('weekly') || pt.contains('monthly')) {
+      return true;
+    }
+    if (py.contains('clip') || py.contains('recap')) return true;
+  }
+  return false;
+}
+
 class VaultBrowserScreen extends StatefulWidget {
   final Map<String, dynamic> profile;
 
@@ -172,9 +200,13 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
         final archetype = data['archetype'] as Map? ?? {};
         final mapped = panels.map<Map<String, dynamic>>((p) {
           final m = Map<String, dynamic>.from(p as Map);
+          final panelTone = (m['panel_tone'] ?? '').toString();
+          final panelType = (m['panel_type'] ?? 'panel').toString();
+          final realType =
+              panelTone.isNotEmpty && _kKnownSseDeliveryTypes.contains(panelTone) ? panelTone : panelType;
           return {
-            'id': m['panel_id'] ?? '',
-            'display_name': '${(m['panel_type'] ?? 'panel').toString().replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
+            'id': m['id'] ?? m['panel_id'] ?? '',
+            'display_name': '${realType.replaceAll('_', ' ')} — ${_fmtDate(m['generated_at'])}',
             'content_type': 'sse_panel',
             'created_at': m['generated_at'],
             'thumbnail_url': m['r2_url'],
@@ -793,7 +825,19 @@ class _VaultBrowserScreenState extends State<VaultBrowserScreen> {
     final tone = sse['panel_tone']?.toString() ?? '';
     final panelId = item['id']?.toString() ?? '';
     final pType = sse['panel_type']?.toString() ?? '';
-    final isVideo = imgUrl.endsWith('.mp4') || pType.contains('clip') || pType.contains('recap');
+    // Strip query string before extension check (R2 presigned URLs have ?X-Amz-...)
+    final urlPath = imgUrl.split('?').first.toLowerCase();
+    final pTone = tone.toLowerCase();
+    final pTypeLower = pType.toLowerCase();
+    final isVideo = urlPath.endsWith('.mp4') ||
+        urlPath.endsWith('.webm') ||
+        urlPath.endsWith('.mov') ||
+        pTypeLower.contains('clip') ||
+        pTypeLower.contains('recap') ||
+        pTone.contains('clip') ||
+        pTone.contains('recap') ||
+        pTone.contains('weekly') ||
+        pTone.contains('monthly');
     // Mark as viewed
     if (panelId.isNotEmpty && panelId != 'archetype') {
       http.post(Uri.parse('$_baseUrl/api/sse-client/panel/$panelId/viewed'), headers: _authHeaders);
@@ -914,8 +958,19 @@ class _VaultItemCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                if (isImage && thumb != null)
-                  ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(thumb, width: 32, height: 32, fit: BoxFit.cover))
+                if (isImage && thumb != null && thumb.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: _vaultThumbnailIsVideo(thumb, item)
+                        ? Container(
+                            width: 32,
+                            height: 32,
+                            color: Colors.black87,
+                            alignment: Alignment.center,
+                            child: const Icon(Icons.play_circle_filled, color: Colors.white70, size: 22),
+                          )
+                        : Image.network(thumb, width: 32, height: 32, fit: BoxFit.cover),
+                  )
                 else
                   Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 32),
                 const Spacer(),
@@ -999,8 +1054,19 @@ class _VaultItemTile extends StatelessWidget {
     final thumb = item['thumbnail_url']?.toString();
 
     return ListTile(
-      leading: (isImage && thumb != null)
-          ? ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(thumb, width: 48, height: 48, fit: BoxFit.cover))
+      leading: (isImage && thumb != null && thumb.isNotEmpty)
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: _vaultThumbnailIsVideo(thumb, item)
+                  ? Container(
+                      width: 48,
+                      height: 48,
+                      color: Colors.black87,
+                      alignment: Alignment.center,
+                      child: const Icon(Icons.play_circle_filled, color: Colors.white70, size: 32),
+                    )
+                  : Image.network(thumb, width: 48, height: 48, fit: BoxFit.cover),
+            )
           : Icon(isImage ? Icons.image : Icons.description, color: _VaultDesign.gold, size: 28),
       title: Text(
         name,
