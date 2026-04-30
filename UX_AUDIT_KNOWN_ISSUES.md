@@ -1,3 +1,8 @@
+> **HISTORICAL — READ ONLY as of 2026-04-30.** New open items go 
+> in `docs/OPEN_TODOS.md`, not here. This file is preserved for 
+> historical reference and pending reconciliation. See 
+> docs/OPEN_TODOS.md for active work.
+
 # Known Technical Issues That May Affect UX Audit
 **Reference for audit_student_1 testing**
 
@@ -187,6 +192,13 @@ If you see ANY of these during testing, they are CRITICAL bugs:
    - Browser console logs (F12 → Console tab)
    - Network tab (F12 → Network → filter for failed requests)
    - Exact steps to reproduce
+
+---
+
+## 📋 Engineering backlog (not audit-blocking)
+
+### Coach Classroom — bridge `{"type":"error"}` handling
+When the bridge returns a generic WebSocket `error` during classroom video analysis, `updated_screens.dart` coach handler (`~6725`) clears `_dojoBusy` / `_notesLoading` but does **not** reset `_classroomAnalyzing`, `_classroomVideoPipelineActive`, or cancel the classroom poll. **Expected:** show SnackBar with `message`/`detail`, set `_classroomAnalyzing = false`, cancel poll, optionally `_requestClassroomSessions()`.
 
 ---
 

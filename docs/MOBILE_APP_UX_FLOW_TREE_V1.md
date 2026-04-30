@@ -1,3 +1,8 @@
+> **HISTORICAL — READ ONLY as of 2026-04-30.** New open items go 
+> in `docs/OPEN_TODOS.md`, not here. This file is preserved for 
+> historical reference and pending reconciliation. See 
+> docs/OPEN_TODOS.md for active work.
+
 # CLINICAL SOVEREIGNTY LAB - MOBILE APP UX FLOW TREE V1.0
 ## Complete Flutter/Dart + WebSocket Protocol Reference
 

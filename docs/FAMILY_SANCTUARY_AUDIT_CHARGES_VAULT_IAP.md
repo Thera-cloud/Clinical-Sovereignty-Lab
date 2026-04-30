@@ -1,3 +1,8 @@
+> **HISTORICAL — READ ONLY as of 2026-04-30.** New open items go 
+> in `docs/OPEN_TODOS.md`, not here. This file is preserved for 
+> historical reference and pending reconciliation. See 
+> docs/OPEN_TODOS.md for active work.
+
 # Family Sanctuary + Family Tab + Vault + IAP Audit
 
 Audit scope: save conversation, exit/complete sanctuary, four charges ($5, $3, $20, $20), client Settings → Subscriptions → Family tab billing, Browse Vault (saved conversation + final summary), Stripe verification, and in-app purchase testing. Use **client1** and **client1b** for vault/summary checks.

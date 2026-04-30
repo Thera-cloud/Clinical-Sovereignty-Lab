@@ -1,3 +1,8 @@
+> **HISTORICAL — READ ONLY as of 2026-04-30.** New open items go 
+> in `docs/OPEN_TODOS.md`, not here. This file is preserved for 
+> historical reference and pending reconciliation. See 
+> docs/OPEN_TODOS.md for active work.
+
 # LITTLE NATE LIVED WISDOM - UPDATED PROGRESS CHECKLIST
 ## January 29, 2026 - End of Session Status
 
