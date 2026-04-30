@@ -10,6 +10,7 @@ historical checklists or .cursor/plans/.
 
 | Item | Category | Severity | File:Line | Added |
 |---|---|---|---|---|
+| Sovereign Mind master key rotation procedure unimplemented | SECURITY | MEDIUM | backend/app/services/identity_chain.py:37 | 2026-04-30 |
 | _Awaiting reconciliation report from comprehensive checklist audit_ | — | — | — | 2026-04-30 |
 
 ## Deferred (acknowledged, not actionable now)
