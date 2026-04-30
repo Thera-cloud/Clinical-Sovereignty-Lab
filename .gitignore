@@ -176,3 +176,15 @@ dashboard/**/*bypass*.html
 dashboard/**/*_bypass.html
 mobile/**/admin_bypass*
 mobile/**/*bypass*.html
+
+# Block dev/test HTML in any dashboard/mobile location (local tools only; must not ship)
+dashboard/**/check_session*
+dashboard/**/debug.html
+dashboard/**/test_*.html
+dashboard/**/ws_test*
+dashboard/**/Untitled
+mobile/**/check_session*
+mobile/**/debug.html
+mobile/**/test_*.html
+mobile/**/ws_test*
+mobile/**/Untitled
