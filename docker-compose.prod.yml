@@ -128,7 +128,10 @@ services:
       # Required by the 48h monitoring cron (pgbouncer-48h-monitor.log). Without
       # this, `psql -d pgbouncer` returns `FATAL: not allowed`. Added 2026-04-26.
       STATS_USERS: ${POSTGRES_USER:-nate_admin}
-    # No ports exposed — only reachable by backend via nate_network (pgbouncer:6432)
+    # WireGuard IP only (GREEN wg0). Hetzner crystal-factory reaches pooled DB here.
+    # Never bind 0.0.0.0:6432 — pair with UFW: allow 10.13.13.5/32 only, deny others.
+    ports:
+      - "10.13.13.2:6432:6432"
     depends_on:
       postgres:
         condition: service_healthy

@@ -97,6 +97,16 @@ Resolving all four blockers + load-test pass: **1–2 weeks** of careful refacto
 
 Until those steps are all done, **do not change `POOL_MODE` to `transaction`**. The damage modes (silent NULL writes to encrypted columns, intermittent prepared-statement-not-found errors under load) are exactly the kind that take days to diagnose and require database restoration to recover from.
 
+## Hetzner crystal-factory — PgBouncer over WireGuard (2026-04-29)
+
+ORANGE (`10.13.13.5`) may connect to PostgreSQL **through PgBouncer** on GREEN at **`10.13.13.2:6432`** (production `wg0` address per `wireguard/production/wg0.conf`). This is **not** the same as exposing 6432 on the public internet:
+
+- `docker-compose.prod.yml` binds **`10.13.13.2:6432:6432`** only (never `0.0.0.0`).
+- Host **UFW**: allow **`from 10.13.13.5 to port 6432`**, deny broad 6432 as defense-in-depth.
+- Hetzner **`PRODUCTION_DB_URL`**: `postgresql://nate_admin:***@10.13.13.2:6432/little_nate` (pooled session mode).
+
+Backend/bridge on Docker still use `pgbouncer:6432` and `postgres:5432` as before; this bind is **only** for cross-host WG clients.
+
 ## Operational Reality
 
 - **Why pool at 100/500?** Even in session mode, having pgbouncer in front gives us `MAX_CLIENT_CONN=500` queue protection during connection storms. PostgreSQL itself caps at `max_connections=200` (per `load-test-performance-baseline.mdc` H3 context). Without pgbouncer, a connection-burst event from the backend can OOM postgres' worker pool. With pgbouncer, those clients queue on pgbouncer instead of being rejected by postgres.
@@ -127,4 +137,4 @@ ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'STARTU
 - **Never** route the clone VPS through pgbouncer — it would create a cross-DC funnel and a single point of failure.
 - **Never** lower `MAX_CLIENT_CONN` below 200; the backend + bridge together can spike past that under load.
 - **Never** lower `DEFAULT_POOL_SIZE` below 50; PostgreSQL `max_connections=200` minus headroom for bridge (25) and admin tooling (~10) leaves comfortable room for 100, but going below 50 starves backend concurrency.
-- **Never** expose pgbouncer's port 6432 to the public internet. It must remain on the `nate_network` Docker bridge only.
+- **Never** bind pgbouncer's port **6432** to **`0.0.0.0`**. WG-only bind `10.13.13.2:6432` for approved ORANGE peers plus UFW is allowed; see **Hetzner crystal-factory** above.

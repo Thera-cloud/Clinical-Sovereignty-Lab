@@ -11,15 +11,15 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # System dependencies — only what the orchestration layer needs.
-# libsndfile1 kept for parselmouth; ffmpeg kept for lightweight audio
-# format conversion. opencv/mediapipe X11 libs (libgl1, libsm6, etc.)
-# are removed — visual analysis runs on BLUE.
+# libsndfile1 for parselmouth; ffmpeg for Whisper STT fallback / classroom audio.
+# opencv/mediapipe X11 libs (libgl1, libsm6, etc.) are removed — visual runs on BLUE.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
     libmagic1 \
     libsndfile1 \
+    ffmpeg \
     tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 

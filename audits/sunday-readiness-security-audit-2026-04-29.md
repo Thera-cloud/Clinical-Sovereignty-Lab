@@ -348,4 +348,57 @@ Priority is **compatibility-tested** bumps—not raw `pip install -U` on product
 
 ---
 
-**End of report (updated 2026-04-29 with §11 — security patch train complete for listed packages).**
+## 12. Phase 3 — Knowledge / classroom restoration (2026-04-29 UTC)
+
+**Goals:** (3.1) Hetzner crystal-factory → GREEN DB via **PgBouncer on WireGuard only**; (3.2) **ffmpeg** in `nate_backend` image for Whisper/classroom; (3.3) **BLUE** harvester — operator steps on Mac (Cursor cannot start remotely).
+
+### 12.1 PgBouncer WG bind + UFW (GREEN)
+
+| Item | Detail |
+|------|--------|
+| **Compose** | `pgbouncer.ports`: `10.13.13.2:6432:6432` only (production `wg0` per `wireguard/production/wg0.conf`). |
+| **UFW** | `ufw allow from 10.13.13.5 to any port 6432 proto tcp` (Hetzner ORANGE); `ufw deny 6432/tcp` as defense-in-depth — confirm rule order (`ufw status numbered`). |
+| **Hetzner `.env`** | `PRODUCTION_DB_URL=postgresql://nate_admin:<POSTGRES_PASSWORD>@10.13.13.2:6432/little_nate` — use same password as GREEN `.env`; never commit. |
+| **Restart** | `docker compose -f docker-compose.prod.yml up -d --force-recreate pgbouncer` then `systemctl restart crystal-factory` on Hetzner. |
+
+**Verify PgBouncer admin (use `nate_admin` / `STATS_USERS`, not `stats_user`):**
+
+```bash
+docker exec nate_pgbouncer psql -h localhost -p 6432 -U nate_admin -d pgbouncer -c "SHOW SERVERS;"
+```
+
+**Public exposure check:** `curl -v --connect-timeout 5 http://68.183.168.75:6432` → expect **connection refused** or timeout (nothing on `0.0.0.0:6432`).
+
+### 12.2 ffmpeg in backend image
+
+`backend/Dockerfile` installs **`ffmpeg`** via `apt-get` (slim image). After any change: rebuild backend on GREEN, `up -d --force-recreate backend`, then `docker exec nate_backend ffmpeg -version | head -1`. Expect **113/113** `STARTUP COMPLETE` (current `main.py` service count).
+
+### 12.3 BLUE harvester (operator — Mac)
+
+Cursor cannot start processes on the operator Mac. On **BLUE**:
+
+```bash
+cd ~/Desktop/Clinical-Sovereignty-Lab-2/backend
+
+# Already running?
+ps aux | grep blue_harvester | grep -v grep
+
+# Start if needed:
+nohup python3 blue_harvester.py --all > ~/blue_harvest.log 2>&1 &
+echo $! > ~/blue_harvest.pid
+
+sleep 10
+tail -20 ~/blue_harvest.log
+```
+
+### 12.4 Post-restoration checks (SkyEye / ops)
+
+1. Crystal Factory rate **> ~80/hr** when Hetzner harvest is healthy.  
+2. Classroom / video: re-upload test clip — Whisper fallback uses **ffmpeg** if present.  
+3. After BLUE starts: harvester heartbeats / recent activity in monitoring.
+
+**Deploy log (fill after GREEN pull + apply):** _[timestamp]_ — `git pull`, pgbouncer recreate, UFW, Hetzner `PRODUCTION_DB_URL` + `crystal-factory` restart, optional backend rebuild for Dockerfile comment-only sync.
+
+---
+
+**End of report (updated 2026-04-29 through §12 — Phase 3 restoration playbook).**
