@@ -17130,6 +17130,9 @@ async def handle_client(websocket, path=None):
                             session_client_ids = set()
                             session_client_meta = {}
 
+                    # NOTE: master_coach_ids fetch retained but no longer used in
+                    # assigned_ok check (inheritance removed). Future cleanup may drop
+                    # this block entirely.
                     # Resolve master coach IDs if this coach is an assistant
                     master_coach_ids = set()
                     if not is_admin and db_pool:
@@ -17167,16 +17170,16 @@ async def handle_client(websocket, path=None):
                         # Assignment rules:
                         # - For COACH: allow if client profile points to this coach (username or hardware id)
                         # - For ADMIN: return all clients (optionally filterable later)
-                        # - For ASSISTANT: also include clients of master coach(es)
                         assigned_ok = is_admin
                         if not is_admin:
-                            client_coach = p.get("coach_id") or p.get("assigned_coach_id") or ""
+                            # Removed assistant→master inheritance: assistants no longer see
+                            # the master coach's clients. Direct primary assignment + scheduled
+                            # session fallback only.
                             assigned_ok = (
                                 (p.get("coach_id") and p.get("coach_id") == coach_id)
                                 or (p.get("assigned_coach_id") and p.get("assigned_coach_id") == coach_id)
                                 or (p.get("assigned_coach") and coach_username and p.get("assigned_coach") == coach_username)
                                 or (p.get("hardware_id") in session_client_ids)
-                                or (client_coach in master_coach_ids)
                             )
                         if not assigned_ok:
                             continue
