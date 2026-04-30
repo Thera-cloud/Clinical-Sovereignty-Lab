@@ -698,12 +698,45 @@ class TwilioMediaSession:
 
         if vb_uid:
             self._voice_billing_user_id = vb_uid
+
+            pool = getattr(self._app_state, "db_pool", None)
+            # Defense in depth: re-verify admin role from DB even though
+            # TwiML parameters come from our own server.
+            if vb_bypass and pool:
+                try:
+                    async with pool.acquire() as conn:
+                        admin_check = await conn.fetchval(
+                            """SELECT 1 FROM users
+                               WHERE (username = $1 OR hardware_id = $1)
+                                 AND role = 'ADMIN'
+                                 AND deleted_at IS NULL
+                               LIMIT 1""",
+                            vb_uid,
+                        )
+                    if not admin_check:
+                        logger.warning(
+                            "admin_bypass=true in stream but %s is not ADMIN in DB — forcing bypass=false",
+                            vb_uid,
+                        )
+                        vb_bypass = False
+                except Exception as e:
+                    logger.warning(
+                        "admin_bypass DB re-verify failed for %s: %s — forcing bypass=false",
+                        vb_uid,
+                        e,
+                    )
+                    vb_bypass = False
+            elif vb_bypass and not pool:
+                logger.warning(
+                    "admin_bypass=true but no db_pool for verification — forcing bypass=false",
+                )
+                vb_bypass = False
+
             self._admin_bypass = vb_bypass
             self._voice_billing_session_id = vb_session or vb_resume or ""
             if not vb_bypass:
                 self._billing_active = True
 
-            pool = getattr(self._app_state, "db_pool", None)
             if pool and vb_uid and not vb_resume:
                 try:
                     crystal = await pool.fetchrow(
