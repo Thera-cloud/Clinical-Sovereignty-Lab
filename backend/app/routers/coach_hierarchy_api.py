@@ -219,7 +219,8 @@ async def list_assistants(coach_id: str, request: Request):
                       u.username, u.profile_data->>'name' as display_name
                FROM coach_hierarchy ch
                LEFT JOIN users u ON u.hardware_id = ch.assistant_id
-               WHERE ch.master_coach_id = $1 AND ch.status IN ('pending', 'active', 'accepted')
+               WHERE ch.master_coach_id = $1
+                 AND ch.status IN ('pending', 'pending_admin', 'active', 'accepted')
                ORDER BY ch.invited_at DESC""",
             coach_id,
         )
@@ -431,7 +432,8 @@ async def get_assistant_metrics(request: Request, days: int = 30):
                       ch.status, ch.accepted_at
                FROM coach_hierarchy ch
                LEFT JOIN users u ON u.hardware_id = ch.assistant_id
-               WHERE ch.master_coach_id = $1 AND ch.status IN ('pending', 'active', 'accepted')
+               WHERE ch.master_coach_id = $1
+                 AND ch.status IN ('pending', 'pending_admin', 'active', 'accepted')
                ORDER BY ch.accepted_at DESC NULLS LAST""",
             master_hw,
         )
