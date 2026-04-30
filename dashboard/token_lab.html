@@ -409,8 +409,15 @@ var _ykVerified = false;
 try { _ykVerified = sessionStorage.getItem('sc_yubikey_verified') === 'true'; } catch(e) {}
 if (!_ykVerified) { window.location.href = 'command.html'; }
 
-var API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:8000' : 'https://api.sovereignsanctuary.net';
+// Dashboard vhosts proxy /api/ to FastAPI; same-origin keeps bridge Bearer auth working (cross-origin api.* was 401).
+var API = (function () {
+    var h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8000';
+    if (h === 'command.sovereignsanctuary.net' ||
+        h === 'app.sovereignsanctuary.net' ||
+        h === 'coach.sovereignsanctuary.net') return '';
+    return 'https://api.sovereignsanctuary.net';
+})();
 
 function _authHeaders(ct) {
     var h = {};
