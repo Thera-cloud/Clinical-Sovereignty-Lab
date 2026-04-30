@@ -5568,9 +5568,9 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
             "panel_tone, generated_at, crystal_domains_used, viewed_at "
             "FROM sse_panel_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
         rows_w = await conn.fetch(
-            "SELECT log_id::text as id, 'workbook' as panel_type, r2_url, "
+            "SELECT log_id::text as id, generation_type::text as panel_type, r2_url, "
             "prompt_used as narrative_text, storyboard_id::text as biome, "
-            "generation_type as panel_tone, generated_at, NULL::timestamptz as viewed_at "
+            "generation_type::text as panel_tone, generated_at, NULL::timestamptz as viewed_at "
             "FROM sse_delivery_generation_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
         uid = hw_id or uname
         j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
