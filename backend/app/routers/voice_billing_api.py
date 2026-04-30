@@ -14,10 +14,15 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Request, HTTPException, Form
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import Response
+
+from app.services.voice_twilio_security import (
+    public_webhook_url_for_signature,
+    twilio_signature_valid,
+)
 
 logger = logging.getLogger("nate.voice_billing_api")
 
@@ -32,6 +37,35 @@ RECHARGE_BASE_URL = os.getenv(
     "VOICE_RECHARGE_URL",
     "https://app.sovereignsanctuary.net/voice-recharge",
 )
+
+
+def _twilio_form_dict(form: Any) -> Dict[str, str]:
+    """Build str→str map for RequestValidator (Twilio voice webhooks are form-only)."""
+    out: Dict[str, str] = {}
+    for key, value in form.multi_items():
+        if isinstance(value, str):
+            out[key] = value
+        else:
+            out[key] = str(value)
+    return out
+
+
+def _twilio_signature_url(request: Request, *, route: str) -> str:
+    """
+    route: "inbound" | "call_status" — must match the URL configured on the Twilio webhook.
+    """
+    if route == "inbound":
+        explicit = (
+            os.getenv("TWILIO_VOICE_INBOUND_WEBHOOK_URL", "").strip()
+            or os.getenv("TWILIO_VOICE_WEBHOOK_URL", "").strip()
+        )
+    else:
+        # Do not fall back to TWILIO_VOICE_WEBHOOK_URL — it is often inbound-only and would break validation.
+        explicit = os.getenv("TWILIO_VOICE_CALL_STATUS_WEBHOOK_URL", "").strip()
+    return public_webhook_url_for_signature(
+        request,
+        explicit if explicit else None,
+    )
 
 
 def _twiml_connect(params: Dict[str, str]) -> str:
@@ -67,7 +101,7 @@ def _twiml_say(message: str) -> str:
 
 
 @router.post("/inbound")
-async def inbound_call(request: Request, From: str = Form("")):
+async def inbound_call(request: Request):
     """
     Twilio inbound call webhook. Called when someone dials +1 (656) 231-8192.
 
@@ -81,6 +115,23 @@ async def inbound_call(request: Request, From: str = Form("")):
     7. If not found anywhere → capture lead, send signup SMS
     """
     from app.services.voice_phone import phone_digits_only
+
+    form = await request.form()
+    form_str = _twilio_form_dict(form)
+    sig_url = _twilio_signature_url(request, route="inbound")
+    if not twilio_signature_valid(
+        request,
+        form_str,
+        auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        request_url=sig_url,
+    ):
+        logger.warning(
+            "Rejected webhook with invalid/missing Twilio signature: path=%s",
+            request.url.path,
+        )
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    From = form_str.get("From", "")
 
     billing: Optional[object] = getattr(request.app.state, "voice_billing", None)
     if not billing:
@@ -194,13 +245,26 @@ async def inbound_call(request: Request, From: str = Form("")):
 
 
 @router.post("/call-status")
-async def voice_call_status(
-    request: Request,
-    CallSid: str = Form(""),
-    CallStatus: str = Form(""),
-    CallDuration: str = Form("0"),
-):
+async def voice_call_status(request: Request):
     """Twilio call status callback — acknowledge and log."""
+    form = await request.form()
+    form_str = _twilio_form_dict(form)
+    sig_url = _twilio_signature_url(request, route="call_status")
+    if not twilio_signature_valid(
+        request,
+        form_str,
+        auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        request_url=sig_url,
+    ):
+        logger.warning(
+            "Rejected webhook with invalid/missing Twilio signature: path=%s",
+            request.url.path,
+        )
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    CallSid = form_str.get("CallSid", "")
+    CallStatus = form_str.get("CallStatus", "")
+    CallDuration = form_str.get("CallDuration", "0")
     logger.info("call-status: sid=%s status=%s duration=%ss", CallSid[:12] if CallSid else "?", CallStatus, CallDuration)
     return {"status": "received"}
 
