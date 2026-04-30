@@ -713,6 +713,15 @@ async def generate_journey_panel(user_id: str, db_pool) -> dict:
 
     panel_id = str(uuid.uuid4())
     _panel_saved = False
+    if not r2_url:
+        logger.warning(
+            "SSE journey panel inserted with NULL r2_url: user_id=%s journey_id=%s biome=%s character_manifest=%s "
+            "(image generation and reserve fallback both failed)",
+            user_id,
+            journey.get("journey_id"),
+            current_biome_name,
+            character[0],
+        )
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
