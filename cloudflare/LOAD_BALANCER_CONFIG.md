@@ -42,10 +42,14 @@ Any droplet in SFO2 can reach any droplet in NYC1 via private IP (and vice versa
 | # | Monitor | Type | Path | Port | Response Body | Host Header |
 |---|---|---|---|---|---|---|
 | 1 | `sovereign-core-health` | HTTPS | `/health` | 443 | `healthy` | `api.sovereignsanctuary.net` |
-| 2 | `sovereign-inference-health` | HTTP | `/api/tags` | 11434 | `models` | (none) |
+| 2 | `sovereign-inference-health` | HTTPS | `/health/sovereign-inference` | 443 | `models` | `api.sovereignsanctuary.net` |
 | 3 | `sovereign-voice-health` | HTTP | `/health` | 8100 | (none) | (none) |
 
 All monitors: Interval 60s, Timeout 5s, Retries 2, Expected Code 200, Follow Redirects off.
+
+**2026-04-29 (ORANGE lockdown):** Monitor **2** MUST use HTTPS to **`https://api.sovereignsanctuary.net/health/sovereign-inference`** (GET). GREEN host nginx proxies to `http://10.13.13.5:11434/api/tags` over WireGuard. **Deprecated:** probing `http://37.27.244.80:11434` directly — ORANGE no longer exposes public `:11434`.
+
+**Dashboard migration:** Traffic **Load Balancing** → **Health Monitors** → `sovereign-inference-health` → set Type **HTTPS**, Path **`/health/sovereign-inference`**, Port **443**, Host **`api.sovereignsanctuary.net`**, expected substring **`models`**. API automation requires a token with **Account → Load Balancers → Edit** (worker tokens often lack this scope).
 
 `sovereign-core-health` has "Don't verify SSL/TLS certificates" checked (origin cert is hostname-based, health check connects by IP).
 
@@ -109,6 +113,27 @@ docker run --rm --network host -e PGPASSWORD=$PG_PW postgres:15-alpine \
 
 ---
 
+## Nginx — Sovereign inference health (primary VPS)
+
+File: `/etc/nginx/sites-enabled/api.sovereignsanctuary.net` (443 `server` block).
+
+Exact match location proxies Cloudflare LB probes to ORANGE over WG:
+
+```nginx
+location = /health/sovereign-inference {
+    proxy_pass http://10.13.13.5:11434/api/tags;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 10s;
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+}
+```
+
+`nginx -t && systemctl reload nginx` after edits. Not duplicated in this repo — sync ops changes back to BLUE documentation when touched.
+
+---
+
 ## Nginx Health Proxy (Primary VPS — legacy)
 
 Config file: `/etc/nginx/sites-enabled/lb-health-monitors`
@@ -141,7 +166,7 @@ These proxy ports were used in Phase 1 for granular service monitoring. They can
 
 ### Hetzner (37.27.244.80)
 
-**Hetzner Cloud Firewall**: TCP 22 (SSH), TCP 11434 (Ollama), TCP 8100 (XTTS), UDP 51820 (WireGuard).
+**Hetzner Cloud Firewall:** TCP 22 (SSH), TCP 8100 (XTTS), UDP 51820 (WireGuard). **Remove public TCP 11434** when convenient — Ollama is WG-only on-host (`OLLAMA_HOST=10.13.13.5:11434` + `ufw`). Inference reachability for ops is `curl https://api.sovereignsanctuary.net/health/sovereign-inference` or `curl http://10.13.13.5:11434/api/tags` from GREEN over WireGuard.
 
 ---
 
@@ -300,7 +325,7 @@ This rule ensures all WebSocket upgrade requests (`/ws`) are routed exclusively 
 # All active endpoints
 curl -s --max-time 5 -o /dev/null -w "Primary: %{http_code}\n" https://68.183.168.75/health -k -H "Host: api.sovereignsanctuary.net"
 curl -s --max-time 5 -o /dev/null -w "Clone:   %{http_code}\n" https://159.65.108.25/health -k -H "Host: api.sovereignsanctuary.net"
-curl -s --max-time 5 -o /dev/null -w "Ollama:  %{http_code}\n" http://37.27.244.80:11434/api/tags
+curl -s --max-time 5 -o /dev/null -w "Ollama:  %{http_code}\n" https://api.sovereignsanctuary.net/health/sovereign-inference
 curl -s --max-time 5 -o /dev/null -w "XTTS:    %{http_code}\n" http://37.27.244.80:8100/health
 
 # Confirm LB is routing

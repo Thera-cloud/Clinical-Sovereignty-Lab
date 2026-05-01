@@ -43,10 +43,12 @@ alwaysApply: true
 | Monitor | Type | Path | Port | Response Body | Host Header |
 |---|---|---|---|---|---|
 | `sovereign-core-health` | HTTPS | `/health` | 443 | `healthy` | `api.sovereignsanctuary.net` |
-| `sovereign-inference-health` | HTTP | `/api/tags` | 11434 | `models` | (none) |
+| `sovereign-inference-health` | HTTPS | `/health/sovereign-inference` | 443 | `models` | `api.sovereignsanctuary.net` |
 | `sovereign-voice-health` | HTTP | `/health` | 8100 | (none) | (none) |
 
 All monitors: Interval 60s, Retries 2, Expected Code 200, Follow Redirects off.
+
+**2026-04-29:** `sovereign-inference-health` probes **GREEN** nginx, which reverse-proxies to ORANGE Ollama at `http://10.13.13.5:11434/api/tags` over WireGuard. Do **not** point this monitor at `http://37.27.244.80:11434` — ORANGE no longer accepts public `:11434`.
 
 `sovereign-core-health` has "Don't verify SSL/TLS certificates" checked.
 
