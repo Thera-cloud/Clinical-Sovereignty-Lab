@@ -226,6 +226,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app:ro    # Mount source code so scp+restart picks up changes
+      - ./backend/scripts:/app/scripts:ro  # QUANTUM-CRYSTAL-ARCH backfill / audit scripts (docker exec)
       - ./backend/assets:/app/assets:ro  # Backchannel clips + static assets
       - ./data/backend:/app/data
       - ./data/bridge:/app/bridge_data:ro  # Bridge metrics (PMB, Nevedal state) for dashboard read

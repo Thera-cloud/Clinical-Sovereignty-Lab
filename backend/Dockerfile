@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements-light.txt
 COPY app/ ./app/
 COPY migrations/ ./migrations/
 COPY assets/ ./assets/
+COPY scripts/ ./scripts/
 
 # Create logs + data dirs and the non-root runtime user.
 RUN mkdir -p /app/logs /app/data \
