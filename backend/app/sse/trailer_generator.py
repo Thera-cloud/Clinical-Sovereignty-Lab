@@ -398,6 +398,49 @@ def _casting_lock_hints(character_ids: list[str], doc: dict) -> str:
     return " CASTING LOCK (authoritative likeness): " + " | ".join(chunks)
 
 
+# Compressed likeness block for Grok Video only (4096-char API cap). Keeps key constraints without
+# duplicating the lengthy casting_locksheet + inline_desc stack used for still generation.
+_FAMILY_SANCTUARY_VIDEO_CAST_COMPRESSED = {
+    "mother": (
+        "AA woman late 30s–early 40s, warm umber; braid/twist-out crown; terracotta+sage gown, subtle mudcloth/"
+        "kente at cuffs/hem contemporary; protective matriarch, senses mirror tension first."
+    ),
+    "daughter": (
+        "Girl 10–12 (school-age proportions, not toddler); twin Afro puffs+beads; bright yellow pocket dress; "
+        "waist-up; wonder→fear leaning toward ripple."
+    ),
+    "son": (
+        "AA boy 13–15; fade/twists; graphic tee + half-open earth overshirt, dark denim+sneaks; guarding sister "
+        "then startling into courage."
+    ),
+    "father": (
+        "AA father ~early 40s, deep umber, cropped hair, beard with temple salt ONLY (match henley ref; not "
+        "silver-fox/old); fitted navy/charcoal henley, dark pants, boots — shock→quiet RESOLVE to follow family "
+        "into mercury glass (never coward/hesitating)."
+    ),
+}
+
+_FS_GROK_VIDEO_STYLE_PREFIX = (
+    "Painterly cinematic fantasy hero (NOT anime): jewel volumetric warmth, grain, sanctuary awe — "
+    "Black/African American skin warm umber/amber (never flat gray monochrome); quartet reads as one biological "
+    "family consistent bone/jaw/eye harmony. "
+    "16:9 cinematic — "
+)
+
+
+def _family_sanctuary_grok_video_casting_lock(character_ids: list[str]) -> str:
+    if not character_ids:
+        return ""
+    chunks = []
+    for c in character_ids:
+        prose = _FAMILY_SANCTUARY_VIDEO_CAST_COMPRESSED.get(c)
+        if prose:
+            chunks.append(f"{c}: {prose}")
+    if not chunks:
+        return ""
+    return "CAST LOCK — " + " | ".join(chunks) + " "
+
+
 def preset_character_keys(preset_id: str | None = None) -> list[str]:
     """Public helper for budgeting / UX — ordered keys of CHARACTER_REFERENCES for a preset bundle."""
     return list(_char_refs(preset_id).keys())
@@ -478,12 +521,20 @@ def _build_video_prompt(
 ) -> str:
     """Assemble the full video prompt: style prefix, casting lock, character enforcement, motion."""
     pid = preset_id or DEFAULT_PRESET_ID
-    prefix = _get_style_prefix(scene_num, pid)
     doc = _load_preset_document(pid)
 
     scene_def = next((s for s in doc.get("scenes", []) or [] if s.get("scene") == scene_num), {})
     scene_chars = scene_def.get("characters") or []
 
+    # Family Sanctuary (Grok Video): condensed fuse + CAST LOCK avoids duplicating lengthy
+    # CRITICAL-inline + full casting_locksheet (still used for Steps 3–4 still generation elsewhere).
+    if pid == FAMILY_SANCTUARY_PRESET_ID:
+        fuse = _FS_GROK_VIDEO_STYLE_PREFIX
+        vlock = _family_sanctuary_grok_video_casting_lock(scene_chars)
+        assembled = fuse + vlock + motion_text
+        return _append_dragon_negative_if_applicable(assembled, scene_num, pid)
+
+    prefix = _get_style_prefix(scene_num, pid)
     refs = _char_refs(pid)
     parts: list[str] = []
     for char in scene_chars:
@@ -1812,25 +1863,23 @@ def _family_sanctuary_outdoor_throughline_sentence() -> str:
 
 
 _FAMILY_SANCT_MOTION_INDOOR_WORLD_BIBLE_1_10 = (
-    "MOTION WORLD BIBLE scenes 1–10: INTERIOR mirror-chamber continuity ONLY — same fogged stone sanctum, monumental mercury "
-    "glass, hearth-amber bounce; choreography and camera evolve inside this volume — do not cut to open sky, vista, or unrelated "
-    "biome until later sanctioned scenes."
+    "INTERIOR ONLY: fogged stone chamber, monumental mercury mirror, hearth amber — camera evolves inside THIS sanctum volume; "
+    "NO cuts to exterior sky vistas or unrelated biomes until later sanctioned scenes."
 )
 
 _FAMILY_SANCT_MOTION_SCENE11_OUTDOOR_VISTA = (
-    "MOTION WORLD BIBLE scene 11 — ACT 3 SANCTUARY REVEAL EXTERIOR: golden-hour luminous landscape scale, awe pullback, serene "
-    "invitation; distinct geography from enclosed chamber of scenes 1–10."
+    "ACT3 EXTERIOR: golden-hour wide landscape pullback awe scale serene invitation geography distinct "
+    "from Acts 1–10 enclosed chamber."
 )
 
 _FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT = (
-    "MOTION scene 12 LOCK: do NOT generate readable words, letters, logos, or subtitle typography in-frame — keep title band "
-    "clean for FFmpeg drawtext composite; silhouettes, ember motes, dusk-gold tableau, painterly negative space only."
+    "SCENE12: NO readable text logos subtitles captions in-frame — clean lower-third for FFmpeg drawtext; dusk-gold painterly "
+    "silhouettes embers negative space."
 )
 
 _FAMILY_SANCT_MOTION_FATHER_ARC_7_9 = (
-    "FATHER RESOLVE TRIPTYCH scenes 7→8→9: slow intimate camera weight — three sequential clips are three held emotional "
-    "beats of one arc; NEVER time-compressed frantic montage — preserve legible micro-performance for post so the combined "
-    "father beat survives full ~3 seconds in the final timeline (do NOT collapse resolve into hurried motion)."
+    "TRIPTYCH 7→8→9: slow-held intimate framing three sequential emotional beats ONE arc NEVER rushed montage; combined father "
+    "micro-performance survives ≥~3s in final edit DO NOT hurry resolve."
 )
 
 
@@ -1847,7 +1896,7 @@ def _family_sanctuary_motion_prompt_layers(scene_num: int) -> str:
         parts.append(_FAMILY_SANCT_MOTION_FATHER_ARC_7_9)
     if not parts:
         return ""
-    return "[Family Sanctuary motion composite] " + " ".join(parts)
+    return " ".join(parts)
 
 
 def _family_sanctuary_priority_suffix(scene_def: dict) -> str:
