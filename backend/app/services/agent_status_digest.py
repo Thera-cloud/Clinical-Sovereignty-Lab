@@ -6,7 +6,7 @@ System-wide health reporter that sends an HTML email digest 3x daily
 Covers EVERY agent and background worker in the system (17 sections):
   - Token Management (3), SkyEye / Social (3), Content Ops (1),
     Token Lifecycle (1), Intelligence / Wisdom (3), Clinical Safety (3),
-    Billing / Accounts (3), Trust Auditors (22), Trust Enforcer (1),
+    Billing / Accounts (3), Trust Auditors (29), Trust Enforcer (1),
     Coaching Subsystem (5), Liminal Presence (3), Data Integrity (2),
     Hive Defense Workers (16), Application Workers (23),
     Database Maintenance (1), Infrastructure (3), Hive Defense Services (27)
@@ -254,6 +254,7 @@ class AgentStatusDigest:
             ("Wisdom Pipeline Auditor", "wisdom_pipeline_auditor"),
             ("Settings Tab Auditor", "settings_tab_auditor"),
             ("Coach Hierarchy Auditor", "coach_hierarchy_auditor"),
+            ("Classroom Learning Auditor", "classroom_learning_auditor"),
             ("Liminal Presence Auditor", "liminal_presence_auditor"),
             ("PMB Command Center Auditor", "pmb_command_center_auditor"),
             ("Token Lab Auditor", "token_lab_auditor"),
@@ -263,13 +264,14 @@ class AgentStatusDigest:
             ("Nate Check-In Auditor", "nate_checkin_auditor"),
             ("QuickBooks Auditor", "quickbooks_auditor"),
             ("Corporate Command Auditor", "corporate_command_auditor"),
+            ("Voice Infrastructure Auditor", "voice_infra_auditor"),
         ]
         rows = []
         for name, attr in auditors:
             agent = getattr(self.app, attr, None)
             status, detail = self._check_agent(agent, name)
             rows.append((status, name, detail))
-        return {"title": "Trust Auditors (26)", "rows": rows}
+        return {"title": "Trust Auditors (29)", "rows": rows}
 
     async def _section_trust_enforcer(self) -> dict:
         agent = getattr(self.app, "trust_enforcer", None)

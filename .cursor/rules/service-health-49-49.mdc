@@ -1,5 +1,5 @@
 ---
-description: All 112 services must remain healthy at startup. Never introduce changes that break the 112/112 health check.
+description: All 113 services must remain healthy at startup. Never introduce changes that break the 113/113 health check.
 alwaysApply: true
 ---
 
@@ -99,6 +99,7 @@ The backend reports `STARTUP COMPLETE: N/112 services healthy` on boot. The targ
 | 83 | cycle_detection_engine | Therapeutic cycle detection |
 | 84 | exa_crystallization_hook | Exa research crystallization |
 | 85 | sse_orchestrator | SSE delivery pipeline scheduler |
+| 86 | classroom_learning_auditor | ClassroomLearningAuditor — 15-check classroom / lived-wisdom DB scorecard (3x daily, stagger 283s) |
 
 ### Hive Defense Services (27)
 
@@ -112,7 +113,7 @@ webhook_fortress, guardian_fibre, sentinel_mesh, pipeline_drum, hepa_filter, bil
 
 3. **Singletons require constructor args** — `SessionMemoryStore(storage_root)`, `NotificationSystem(data_dir, api_key)`, etc. Never instantiate these bare. Reuse the instance from `app.state` when available.
 
-4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `112/112 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
+4. **After any `main.py` change, verify health** — deploy, restart, and confirm the startup log shows `113/113 services healthy` and `ALL SYSTEMS NOMINAL`. If degraded, fix before considering the deploy complete.
 
 5. **Agent Status Digest emails 3x daily** to `support@sovereignsanctuary.net`. If the digest reports any agent as FAILED or WARNING, investigate — it means a live process is not running as expected.
 

@@ -1,6 +1,6 @@
 """
 LITTLE NATE — Trust Enforcer
-Meta-agent that aggregates results from all 14 auditors, compares against
+Meta-agent that aggregates results from all tab/DB auditors, compares against
 the governed trust baseline, enforces solutions when trust drops below 100%,
 and gates parameter changes through admin approval.
 
@@ -9,7 +9,7 @@ after all auditors have completed).
 
 Email model (2 emails max per window):
   Email #1 — Sovereign Trust Report (ALWAYS sent)
-    Full breakdown: pre-flight, 14 auditor scorecards, enforcement actions,
+    Full breakdown: pre-flight, auditor scorecards, enforcement actions,
     pending proposals. Goes out every audit window.
   Email #2 — Trust Alert (ONLY sent when NOT 100% GREEN)
     Concise alert: only failing pre-flights, failing auditors, enforcement
@@ -77,6 +77,7 @@ AUDITOR_ACTIVITY_TYPES = [
     "quickbooks_audit_sent",
     "corporate_command_audit_sent",
     "voice_infra_audit_sent",
+    "classroom_learning_audit_sent",
 ]
 
 AUDITOR_LABELS = {
@@ -107,6 +108,7 @@ AUDITOR_LABELS = {
     "quickbooks_audit_sent": "QuickBooks Sync",
     "corporate_command_audit_sent": "Corporate Command",
     "voice_infra_audit_sent": "Voice Infrastructure",
+    "classroom_learning_audit_sent": "Classroom Learning",
 }
 
 REMEDIATION_CATEGORIES = {
@@ -552,6 +554,7 @@ class TrustEnforcer:
             "quickbooks_audit_sent": "quickbooks_check_count",
             "corporate_command_audit_sent": "corporate_command_check_count",
             "voice_infra_audit_sent": "voice_infra_check_count",
+            "classroom_learning_audit_sent": "classroom_learning_check_count",
         }
         return mapping.get(activity_type, "")
 

@@ -1,11 +1,11 @@
 ---
-description: All 112 services must remain healthy at startup. Never introduce changes that break the service health count.
+description: All 113 services must remain healthy at startup. Never introduce changes that break the service health count.
 alwaysApply: true
 ---
 
-# 112/112 Service Health Requirement
+# 113/113 Service Health Requirement
 
-The backend reports `STARTUP COMPLETE: N/112 services healthy` on boot. The target is **112/112 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
+The backend reports `STARTUP COMPLETE: N/113 services healthy` on boot. The target is **113/113 — ALL SYSTEMS NOMINAL**. Any change that reduces this count is a regression and must be fixed before deploying.
 
 ## What Causes Service Count Drops
 
@@ -47,7 +47,7 @@ When modifying a service that's already in `_service_checks`:
 ```bash
 # Health count
 ssh root@68.183.168.75 "docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'"
-# Expected: 112/112 services healthy
+# Expected: 113/113 services healthy
 
 # Schema errors (must be empty)
 ssh root@68.183.168.75 "docker logs nate_backend --since 60s 2>&1 | grep -E 'does not exist|No module' | sort -u"
@@ -58,7 +58,7 @@ ssh root@68.183.168.75 "docker logs nate_backend --since 60s 2>&1 | grep 'No mod
 
 ## Non-Blocking Warnings (Expected, Not Failures)
 
-These appear in logs but do NOT affect the 112/112 count:
+These appear in logs but do NOT affect the 113/113 count:
 
 | Warning | Reason |
 |---|---|

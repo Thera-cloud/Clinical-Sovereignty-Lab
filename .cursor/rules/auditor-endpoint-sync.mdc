@@ -38,7 +38,13 @@ for t in TAB_ENDPOINTS:
 "
 ```
 
-## Current Auditor Registry (26 Auditors, 499 Total Checks)
+## Classroom Learning (DB auditor — migration `197_classroom_learning_trust_baseline.sql`)
+
+| Auditor | Activity Type | Baseline Key | Expected | Stagger |
+|---|---|---|---|---|
+| Classroom Learning | `classroom_learning_audit_sent` | `classroom_learning_check_count` | 15 | 283s |
+
+## Stagger reference (partial — HTTP tab auditors)
 
 | Auditor | Activity Type | Baseline Key | Expected | Stagger |
 |---|---|---|---|---|

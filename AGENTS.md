@@ -1,6 +1,6 @@
 # Autonomous Trust Verification Agents
 
-These agents can be invoked by Cursor background agents to maintain 100% trust (499/499 checks, 26 auditors, 5 pre-flight).
+These agents can be invoked by Cursor background agents to maintain 100% trust (524/524 checks, 28 auditors, 5 pre-flight).
 
 ---
 
@@ -49,7 +49,7 @@ These agents can be invoked by Cursor background agents to maintain 100% trust (
    ssh root@68.183.168.75 "docker ps --format '{{.Names}}\t{{.Status}}'"
    ```
 
-2. **Service Health** — 112/112 healthy:
+2. **Service Health** — 113/113 healthy:
    ```bash
    ssh root@68.183.168.75 "docker logs nate_backend --since 2m 2>&1 | grep 'STARTUP COMPLETE'"
    ```
@@ -75,7 +75,7 @@ These agents can be invoked by Cursor background agents to maintain 100% trust (
    ssh root@68.183.168.75 'TOKEN=$(grep SKYEYE_AUDIT_TOKEN /opt/clinical-sovereignty-lab/.env | cut -d= -f2); curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/admin/skyeye-audit/send'
    ```
 
-7. **Wait 5 minutes**, then verify 499/499:
+7. **Wait 5 minutes**, then verify 524/524:
    ```bash
    ssh root@68.183.168.75 "docker exec nate_postgres psql -U nate_admin -d little_nate -c \"SELECT content FROM skyeye_activity WHERE type = 'trust_enforcer_sent' ORDER BY created_at DESC LIMIT 1\""
    ```
@@ -179,7 +179,7 @@ These agents can be invoked by Cursor background agents to maintain 100% trust (
 
 | Variable | Pre-flight Check | Used By |
 |---|---|---|
-| `SKYEYE_AUDIT_TOKEN` | Audit Token | All 23 auditors |
+| `SKYEYE_AUDIT_TOKEN` | Audit Token | All tab/DB auditors |
 | `AZURE_API_KEY` | Azure Env | AI Pipeline auditor |
 | `AZURE_OPENAI_ENDPOINT` | Azure Env | AI Pipeline auditor |
 | `AZURE_OPENAI_CHAT_DEPLOYMENT` | Azure Env | AI Pipeline auditor |

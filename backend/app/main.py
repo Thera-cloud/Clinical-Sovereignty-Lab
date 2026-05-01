@@ -2388,6 +2388,21 @@ async def lifespan(app: FastAPI):
     except Exception as cha_err:
         print(f"   ⚠️  CoachHierarchyAuditor init failed: {cha_err}")
 
+    # ── Classroom Learning Auditor — classroom / lived-wisdom DB scorecard (15 checks)
+    _classroom_learning_auditor = None
+    try:
+        from app.services.classroom_learning_auditor import ClassroomLearningAuditor
+        _classroom_learning_auditor = ClassroomLearningAuditor(
+            db_pool=db_pool,
+            notification_system=_notify_sys if _token_renewal_agent else None,
+            app_state=app.state,
+        )
+        await _classroom_learning_auditor.start()
+        app.state.classroom_learning_auditor = _classroom_learning_auditor
+        print("   ✅ ClassroomLearningAuditor started (3x daily, stagger 283s)")
+    except Exception as _cla_err:
+        print(f"   ⚠️  ClassroomLearningAuditor init failed: {_cla_err}")
+
     # ── Coaching Mesh Engine — BLE group training sessions ──
     _coaching_mesh = None
     try:
@@ -2967,6 +2982,7 @@ async def lifespan(app: FastAPI):
         ("dojo_mentor_engine", _dojo_mentor is not None),
         ("dojo_mentor_zoom", _dojo_zoom is not None),
         ("coach_hierarchy_auditor", _coach_hierarchy_auditor is not None),
+        ("classroom_learning_auditor", _classroom_learning_auditor is not None),
         ("coaching_mesh_engine", _coaching_mesh is not None),
         ("call_coaching_engine", _call_coaching is not None),
         ("trust_enforcer", _trust_enforcer is not None),
@@ -3056,6 +3072,13 @@ async def lifespan(app: FastAPI):
             print("   ✅ VoiceInfrastructureAuditor stopped")
         except Exception as _via_stop:
             print(f"   ⚠️  VoiceInfrastructureAuditor shutdown: {_via_stop}")
+    _classroom_learning_auditor = getattr(app.state, "classroom_learning_auditor", None)
+    if _classroom_learning_auditor:
+        try:
+            await _classroom_learning_auditor.stop()
+            print("   ✅ ClassroomLearningAuditor stopped")
+        except Exception as _cla_stop:
+            print(f"   ⚠️  ClassroomLearningAuditor shutdown: {_cla_stop}")
     if _sse_orchestrator:
         try:
             await _sse_orchestrator.stop()

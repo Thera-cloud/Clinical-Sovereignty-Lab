@@ -1,11 +1,11 @@
 ---
-description: Rules for sustaining 509/509 TRUSTED (100%) GREEN across all 27 auditors and 5 pre-flight checks.
+description: Rules for sustaining 524/524 TRUSTED (100%) GREEN across all 28 auditors and 5 pre-flight checks.
 alwaysApply: true
 ---
 
 # Trust 100% Sustainment Protocol
 
-The Trust Enforcer reports `509/509 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
+The Trust Enforcer reports `524/524 TRUSTED (100%) — Pre-flight 5/5 — GREEN — 0 actions` three times daily (5:10 AM, 5:10 PM, 11:10 PM UTC). Any change that drops this below 100% is a regression.
 
 ## Trust Architecture
 
@@ -18,7 +18,7 @@ Trust Enforcer (meta-agent)
 │   ├── Azure Env — 5 Azure vars set (ENDPOINT, API_KEY, CHAT_DEPLOYMENT, DEPLOYMENT, MINI_TTS_DEPLOYMENT)
 │   └── Redis — responds to PING
 │
-└── 27 Auditors (509 total checks)
+└── 28 Auditors (524 total checks)
     ├── SkyEye Dashboard ........... 61 endpoints
     ├── Sovereign Command .......... 25 endpoints
     ├── The Eye ..................... 21 endpoints
@@ -45,7 +45,8 @@ Trust Enforcer (meta-agent)
     ├── Nate Check-In ............. 8 checks
     ├── QuickBooks Sync ........... 10 checks
     ├── Corporate Command ........ 25 checks
-    └── Voice Infrastructure ...... 10 checks
+    ├── Voice Infrastructure ...... 10 checks
+    └── Classroom Learning ....... 15 checks (DB)
 ```
 
 ## Timing Discipline
@@ -54,7 +55,7 @@ All auditors fire at the **top** of audit hours (5:00, 17:00, 23:00 UTC) with st
 
 | Component | Fires at | Stagger |
 |-----------|----------|---------|
-| Auditors | HH:00 | 85–295s startup delay |
+| Auditors | HH:00 | 85–295s startup delay (Classroom Learning 283s) |
 | Trust Enforcer | HH:10+ | Reads auditor results from DB |
 
 **Rule**: Never change the Trust Enforcer to fire at minute < 10. This causes it to read stale results from the previous audit window and report phantom failures.
@@ -161,9 +162,9 @@ After deploying any backend, database, or infrastructure change:
    # Wait 60s for auditors to finish
    curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/trust-enforcer/trigger
    ```
-5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `509/509 TRUSTED (100%) — GREEN — 0 actions`
+5. **Verify 100%**: Check `skyeye_activity` for the latest `trust_enforcer_sent` entry — must show `524/524 TRUSTED (100%) — GREEN — 0 actions`
 
-## Current Trust Baseline (509 Total — 27 Active Auditors)
+## Current Trust Baseline (524 Total — 28 Active Auditors)
 
 | Auditor | Expected | Baseline Key |
 |---------|----------|-------------|
@@ -194,3 +195,4 @@ After deploying any backend, database, or infrastructure change:
 | QuickBooks Sync | 10 | `quickbooks_check_count` |
 | Corporate Command | 25 | `corporate_command_check_count` |
 | Voice Infrastructure | 10 | `voice_infra_check_count` |
+| Classroom Learning | 15 | `classroom_learning_check_count` |
