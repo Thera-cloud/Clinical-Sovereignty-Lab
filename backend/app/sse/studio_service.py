@@ -241,39 +241,71 @@ async def break_into_scenes(script_text: str) -> dict:
 #  Image / Video / Narration generation
 # ---------------------------------------------------------------------------
 
-async def generate_scene_image(description: str, project_id: str, scene_num: int, redis=None, characters: list[str] | None = None) -> str:
+async def generate_scene_image(
+    description: str,
+    project_id: str,
+    scene_num: int,
+    redis=None,
+    characters: list[str] | None = None,
+    preset_id: str | None = None,
+) -> str:
     """Generate image via LoRA (if trained) or Grok Imagine, upload to R2. Returns R2 URL."""
     await _check_cost_budget(COST_PER_IMAGE_CENTS, redis)
 
     from app.sse.infrastructure.grok_imagine_client import GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_image
     from app.sse.trailer_generator import (
-        _get_style_prefix, _generate_image_with_lora_or_grok,
-        _load_trained_loras, _build_consistent_prompt,
+        _get_style_prefix,
+        _generate_image_with_lora_or_grok,
+        _load_trained_loras,
+        _build_consistent_prompt,
+        _load_manifest_from_r2,
+        _manifest_preset_id,
     )
 
     chars = characters or []
+    proj = await _load_manifest_from_r2(project_id) or {}
+    pid = preset_id or _manifest_preset_id(proj)
     trained_loras = await _load_trained_loras(project_id)
-    prefix = _get_style_prefix(scene_num)
-    styled_description = _build_consistent_prompt(description, chars, scene_num=scene_num) if chars else prefix + description
+    prefix = _get_style_prefix(scene_num, pid)
+    styled_description = (
+        _build_consistent_prompt(description, chars, scene_num=scene_num, preset_id=pid)
+        if chars else prefix + description
+    )
 
     async with GROK_IMAGINE_LOCK:
-        image_bytes = await _generate_image_with_lora_or_grok(styled_description, chars, trained_loras)
+        image_bytes = await _generate_image_with_lora_or_grok(
+            styled_description, chars, trained_loras,
+            scene_num=scene_num, preset_id=pid,
+        )
     r2_key = f"sse/studio/projects/{project_id}/{scene_num}.png"
     r2_url = await store_image(image_bytes, r2_key)
     await _track_cost(COST_PER_IMAGE_CENTS, redis)
     return r2_url
 
 
-async def generate_scene_video(image_url: str, motion_prompt: str, project_id: str, scene_num: int, redis=None) -> str:
+async def generate_scene_video(
+    image_url: str,
+    motion_prompt: str,
+    project_id: str,
+    scene_num: int,
+    redis=None,
+    preset_id: str | None = None,
+) -> str:
     """Generate video via Grok Video and upload to R2. Returns R2 URL."""
     await _check_cost_budget(COST_PER_VIDEO_CENTS, redis)
 
     from app.sse.infrastructure.grok_imagine_client import generate_video, poll_video_status, GROK_IMAGINE_LOCK
     from app.sse.infrastructure.r2_storage import store_video
-    from app.sse.trailer_generator import _build_video_prompt
+    from app.sse.trailer_generator import (
+        _build_video_prompt,
+        _load_manifest_from_r2,
+        _manifest_preset_id,
+    )
 
-    styled_motion = _build_video_prompt(scene_num, motion_prompt)
+    proj = await _load_manifest_from_r2(project_id) or {}
+    pid = preset_id or _manifest_preset_id(proj)
+    styled_motion = _build_video_prompt(scene_num, motion_prompt, preset_id=pid)
     async with GROK_IMAGINE_LOCK:
         video_id = await generate_video(styled_motion, source_image_url=image_url)
 
@@ -619,13 +651,25 @@ async def get_daily_cost(redis=None) -> dict:
 #  Phase 2: Batch Orchestrators (wiring trailer_generator into Studio)
 # ---------------------------------------------------------------------------
 
-async def generate_character_refs(project_id: str, redis=None) -> dict:
+async def generate_character_refs(
+    project_id: str,
+    redis=None,
+    preset_id: str | None = None,
+) -> dict:
     """Generate character reference images for a project. Returns ref map."""
-    from app.sse.trailer_generator import generate_character_references, CHARACTER_REFERENCES
-    num_chars = len(CHARACTER_REFERENCES)
+    from app.sse.trailer_generator import (
+        generate_character_references,
+        _load_manifest_from_r2,
+        _manifest_preset_id,
+        preset_character_keys,
+    )
+
+    proj = await _load_manifest_from_r2(project_id) or {}
+    pid = preset_id or _manifest_preset_id(proj)
+    num_chars = len(preset_character_keys(pid))
     await _check_cost_budget(COST_PER_IMAGE_CENTS * num_chars, redis)
 
-    refs = await generate_character_references(project_id)
+    refs = await generate_character_references(project_id, preset_id=pid)
     await _track_cost(COST_PER_IMAGE_CENTS * sum(1 for v in refs.values() if v), redis)
     return refs
 

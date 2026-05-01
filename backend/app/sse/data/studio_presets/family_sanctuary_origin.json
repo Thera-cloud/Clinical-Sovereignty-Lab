@@ -1,0 +1,242 @@
+{
+  "id": "family_sanctuary_origin",
+  "preset_id": "family_sanctuary_origin",
+  "title": "Family Sanctuary — Thera-World Hero (Four Acts, 25s)",
+  "description": "Cinematic landing hero: African American family of four, mirror chamber → father's resolve → falling together → sanctuary vista → golden fire title. Distinct from thera_world_origin narrative. Use interpolated Studio pipeline; cel-animation composite plates encouraged.",
+  "output": {
+    "filename": "hero_video_family_sanctuary.mp4",
+    "duration_target_seconds": 25,
+    "duration_max_if_seg1_long_seconds": 25,
+    "aspect": "16:9",
+    "resolution": "1920x1080",
+    "video_codec_hints": {"vcodec": "libx264", "video_bitrate_k": 2500, "audio_codec": "aac", "audio_bitrate_k": 192},
+    "r2_bucket_key": "sovereign-vault/marketing/hero_video_family_sanctuary.mp4",
+    "r2_character_prefix": "sse/trailer/family_sanctuary/characters/",
+    "local_work_dir_hint": "/tmp/family_sanctuary/",
+    "max_file_mb_hint": 18
+  },
+  "visual_style_anchor": {
+    "look": "Cinematic painterly fantasy illustration matching existing Thera-World hero marketing — NOT anime. Deep jewel-environment depth, volumetric warm light, subtle film grain, epic awe, sanctuary tone (no battle choreography on screen).",
+    "skin_lighting_mandate": "Warm cinematic lighting on richly rendered Black/African American skin — luminous warmth, amber and umber tonal complexity, deliberate gold fill accents, NEVER flat grayscale or desaturated monochrome skin tones. Preserve dignity and color depth.",
+    "family_identity_mandate": "All four must read unmistakably as one blood-related family — shared facial-structure cues across generations, plausible natural melanin variation, consistent eye and cheekbone family resemblance across every frame."
+  },
+  "casting_locksheet": {
+    "mother": "African American woman late 30s to early 40s. Warm umber skin, natural coily or curly hair in twist-out or braided crown. Long flowing earth-toned dress terracotta deep amber or sage green with subtle West African textile cue (kente or mudcloth at hem or cuffs) reads contemporary not costume. Expression: protective steady matriarch, gravitational center. She notices the mirror tension first.",
+    "daughter": "11-year-old African American girl pre-teen (must read age 10–12 not younger). Same warm skin-tone family slightly lighter acceptable. Hair: two natural Afro puffs with small colorful beads. Bright sunflower-yellow dress with small visible pockets (keep this look). Waist-up hero framing like her father and brother refs — pre-teen body proportions as in real school photographs of Black girls age 10–12 not toddler not picture-book cute. Expression: wonder turning toward fear conscious curiosity leaning slightly forward as if drawn toward something unseen.",
+    "son": "African American boy 13–15 slightly older than sister. Slightly deeper skin than mother sister showing plausible variation. Short fade or short twists. Graphic tee under unbuttoned earth-toned overshirt dark jeans sneakers. Expression: protector of sister then surprise courage as pulled in emerging man choosing bravery.",
+    "father": "African American man early to mid 40s deep umber skin close cropped hair trimmed beard touches of dignified gray. Tall grounded build fitted henley deep navy forest green or charcoal dark pants leather boots. CRITICAL CHARACTER BEAT ACT 2: first shock registering children and wife vanished into mirror THEN crystallizing UNSHAKABLE RESOLUTE CHOICE NOT HESITATION NOT COWARDICE — deliberate follow into unknown one breath deliberate charge mercury surface arms reaching for family line."
+  },
+  "music_brief": {
+    "genre": "Hopeful cinematic orchestral underscore — warm strings cello viola restrained violin lifts soft piano distant single brass tone at vista reveal only sanctuary not battle swell through Act 3 resolve under Act 4 title no electronic drums percussion bed",
+    "mix_notes": [
+      "During narration: music ~12–15% perceived level vs narration RMS never competing",
+      "In 1s interstitial silences between VO segments briefly lift orchestration toward 25–30%",
+      "Fire-title hold tail 18–20s if no narration: allow 30–35% orchestral hold then gentle taper last 0.5s",
+      "If voice clarity suffers in QC reduce music another 30% before final mux"
+    ],
+    "generation_prompt": "hopeful cinematic strings swelling warmth gentle piano distant soft horn motif no drums no electronic no percussion painterly orchestral score twenty-five second arc builds to luminous sanctuary climax peaks mid-reveal resolves softly under fire title fades",
+    "search_paths_if_stock": ["assets/audio/cinematic/", "tmp/music_library/", "sovereign-vault/marketing/audio/"]
+  },
+  "step5_motion": {
+    "cost_ceiling_usd": 5.5,
+    "grok_video_usd_per_clip_estimate": 4.0,
+    "timecode_guide_baseline_end_seconds": 20,
+    "preview_crossfade_seconds": 0.2,
+    "preview_scale_width": 854,
+    "inter_scene_delay_seconds_default": 8,
+    "force_grok": false,
+    "note": "Slot duration = (timecode_guide t1-t0) × (output.duration_target_seconds / timecode_guide_baseline_end_seconds). Ceiling 5.5 forces Ken Burns unless FAMILY_SANCTUARY_STEP5_USE_GROK=1 or force_grok true."
+  },
+  "narration_voice": {
+    "engine": "azure_mini_tts",
+    "speech_rate_numeric": 1.0,
+    "voice": "ash",
+    "voice_lock_note": "Same Azure gpt-4o-mini-TTS voice as hero_video_thera_world_NARRATED.mp4 — THERA_HERO_NARRATED_TTS_VOICE (ash) in trailer_generator.py, used by hero_narration_mix._generate_tts. Do not substitute onyx or other voices for Family Sanctuary hero VO.",
+    "instructions": "Speak in a warm, calm, grounded male voice with gentle authority — same lineage as the Thera-World narrated hero (wise companion, not announcer). Pace: natural conversational ~150 wpm equivalent, constant rhythm, never rushed, NEVER time-compressed, NEVER speech_rate above 1.0. Little Nate presence: gentle, present, grounded. Silence padding in post only; no artificial compression.",
+    "approval_gate_note": "Step 4 actual WAV durations (ash): seg1≈10.45s seg2≈7.55s seg3≈4.9s. Final hero 25s — mux uses wallclock below; do not compress speech.",
+    "segments": [
+      {
+        "id": "nar_seg_acts_12",
+        "label": "Acts 1–2 VO",
+        "text": "There comes a moment when those you love most are pulled into something you cannot see. And in that moment — you discover what you would follow them into.",
+        "wallclock_voice_start_seconds": 1,
+        "wallclock_voice_end_seconds": 11.45,
+        "nominal_visual_start_seconds": 1,
+        "nominal_approx_duration_hint_seconds": [10, 11],
+        "following_pause_seconds_after_speech_end": 1,
+        "pause_wallclock_start_seconds": 11.45,
+        "pause_wallclock_end_seconds": 12.45,
+        "acts_covered_timeline_wallclock": [[1, 11.45]]
+      },
+      {
+        "id": "nar_seg_act3",
+        "label": "Act 3 VO — Family Sanctuary ethos",
+        "text": "This is Family Sanctuary. Where the bonds you carry become the world that carries you.",
+        "wallclock_voice_start_seconds": 12.45,
+        "wallclock_voice_end_seconds": 20,
+        "nominal_visual_start_seconds": 12.45,
+        "nominal_approx_duration_hint_seconds": [7, 8],
+        "following_pause_seconds_after_speech_end": 1,
+        "pause_wallclock_start_seconds": 20,
+        "pause_wallclock_end_seconds": 21,
+        "acts_covered_timeline_wallclock": [[12.45, 20]]
+      },
+      {
+        "id": "nar_seg_act4",
+        "label": "Act 4 VO — fire-title alignment",
+        "text": "Where every family finds its way home — together.",
+        "wallclock_voice_start_seconds": 21,
+        "wallclock_voice_end_seconds": 25.9,
+        "mux_hard_end_seconds": 25,
+        "mux_note": "Gentle VO tail may extend slightly past title; hard-end video/audio at 25.0s in final mux.",
+        "nominal_visual_start_seconds": 21,
+        "nominal_approx_duration_hint_seconds": [4, 5],
+        "following_pause_seconds_after_speech_end": 0,
+        "acts_covered_timeline_wallclock": [[21, 25]]
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "scene": 1,
+      "title": "chamber_wide_family_before_mirror",
+      "characters": ["mother", "daughter", "son", "father"],
+      "prompt": "Cinematic painterly fantasy illustration widescreen 16:9 volumetric atmospheric ancient fog-filled stone ceremonial chamber softened by offscreen hearth fire amber bounce light. Monumental ornate floor mirror dominates frame mercury-rippled reflective glass galaxies and starfield depth visible inside NEVER readable text overlays. SAME SHOT VISUAL CAST — MOTHER centered late thirties warm umber luminous skin natural crown braid twists terracotta-sage patterned contemporary floor dress steady protective gravitational gaze. Daughter her left gripping dress hem age ten to twelve beaded braids or twin puffs bright yellow-coral turquoise pocket dress sneakers SON her right thirteen to fifteen faded graphic tee layered open earth-tone overshirt dark denim sneakers protective sideways lean toward sister. FATHER right-rear towering grounded henley charcoal-navy beard salt hint warm hand grounding son shoulder watchful cohesion all four unmistakably related facial bone structure harmony. Dramatic luminous Black skin rendition warm gold directional fill rich shadow roll NOT flat monochrome. Quiet awe charged stillness prelude hand reach next beat.",
+      "dialogue": [],
+      "duration": 3,
+      "mood": "charged_stillness",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 0, "t1_seconds": 1}
+    },
+    {
+      "scene": 2,
+      "title": "daughter_advances_mirror_ripple",
+      "characters": ["mother", "daughter", "father", "son"],
+      "prompt": "Continuing lens language same chamber mirror family SAME LOCKED CAST APPEARANCES daughter steps forward captivated small hand nearing mirror mercury surface bulges luminous tendril-like ripple toward fingertips mother instinctively tightening protective stance beside son tightening father leaning watch micro shock curiosity wonder fear blend daughter eyes wide reflection fractal shards hinting cosmos warm gold skin painting.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "wonder_precipice",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 1, "t1_seconds": 2}
+    },
+    {
+      "scene": 3,
+      "title": "daughter_pulled_through_mercury",
+      "characters": ["mother", "daughter", "son", "father"],
+      "prompt": "Dynamic frozen-action beat liquid mirror clasps daughters forearm dissipating silhouette she stretches mother lunges too late ribbons of star-fractured light swallowed daughter fading wonder-to-fear face half in glass half dissipating SON pivots horrified Fathers eyes flare motion blur warm emotional lighting kinetic painterly ribbons NO explicit gore wholesome PG fantasy peril.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "separation_snap",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 2, "t1_seconds": 3}
+    },
+    {
+      "scene": 4,
+      "title": "mother_launches_follows_child",
+      "characters": ["mother", "father", "son"],
+      "prompt": "Mother never hesitates diving forward swallowed by swirling mercury arms outstretched after vanished daughter braid crown whipping luminous spray father and son recoiling kinetic mirror wake warm dramatic sidelight emphasizing muscle tension resolve terror mix empty dress hem flutter dissolving shards.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "maternal_sacrifice_drive",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 3, "t1_seconds": 4}
+    },
+    {
+      "scene": 5,
+      "title": "son_protective_follow",
+      "characters": ["son", "father"],
+      "prompt": "Teen brother sees mother vanish leaps forward fearless arc silhouette stretching into shimmering portal overshirt billow sneakers kinetic painterly ribbons father gasp foreground motion blur boy consumed by stars warm dramatic palette emotional clarity.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "courage_burst",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 4, "t1_seconds": 5}
+    },
+    {
+      "scene": 6,
+      "title": "father_alone_wide_mirror_residuals",
+      "characters": ["father"],
+      "prompt": "Wide tableau father alone mirrored chamber now silent swirling residual constellations in glass HIS ENTIRE LINE VANISHED He stands squared to mirror oversize negative space emphasizing isolation warm torchlight rake across deep umber skin tension jaw muscle breath visible prelude emotional centerpiece beat beginning DO NOT caricature desperation hold dignity shock loading resolve transition next frames.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "solitary_aftershock",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 5, "t1_seconds": 6}
+    },
+    {
+      "scene": 7,
+      "title": "father_close_shock_wide_eyes",
+      "characters": ["father"],
+      "prompt": "Tighter portrait father eyes widened stunned reading impossible loss ripple light painting cheekbones cinematic shallow depth mercury bokeh softly strobing behind him beard salt detail micro tremble lip warm lens flares restrained tasteful heroic Black male vulnerability without mockery FIRST BEAT THREE SECOND EMOTIONAL ARC START.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "processing_loss",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 6, "t1_seconds": 7}
+    },
+    {
+      "scene": 8,
+      "title": "father_resolve_transition_not_hesitation",
+      "characters": ["father"],
+      "prompt": "Same father extreme emotional pivot micro expressions ONLY shock melting into HARD QUIET DECISION narrowed eyes steady jaw uplifted chin subtle moisture but controlled breath chest rise shoulders squaring unmistakable CHOICE to follow deliberate NOT panic NOT coward mercury mirror beckons warm sculpting light emphasizing dignity purposeful masculinity heroic grounded father archetype READY next frame charge.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "resolve_lock",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 7, "t1_seconds": 8},
+      "editor_note": "APPROVAL CRITICAL FRAME — regenerate if hesitation fear-default stereotype slips in"
+    },
+    {
+      "scene": 9,
+      "title": "father_breath_deliberate_plunge",
+      "characters": ["father"],
+      "prompt": "Full-body lyrical charge father launches controlled powerful stride arms opening toward portal mercury surface exploding forward swallowing silhouette trails constellations across fabric intentional courage composition motion blur purposeful NOT flailing concluding Act2 beat mirror surface closing ripple after entry warm gold rim light victorious tragic hope hybrid.",
+      "dialogue": [],
+      "duration": 2,
+      "mood": "chosen_charge",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 8, "t1_seconds": 9},
+      "stitch_protect": "+0p3_extend_in_timeline_ffmpeg_if_father_beat_reads_short — never compress below three aggregate seconds emotional arc scenes 7-9"
+    },
+    {
+      "scene": 10,
+      "title": "familial_fall_linked_hands_fractals",
+      "characters": ["mother", "daughter", "son", "father"],
+      "prompt": "All four reunited mid void tumbling luminous painterly cosmos spiral shattered mirror shards refracting mirrored doubles hands GRABBING interlocked chain Fathers grip on Sons wrist Mothers arms encircling Daughter hair and cloth whipping speed lines warm stellar rim light ecstatic terror resolved into unity ribbons of hearth-gold cosmic indigo jewel depth NO combat imagery pure relational salvation motion.",
+      "dialogue": [],
+      "duration": 3,
+      "mood": "reunion_fall",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 9, "t1_seconds": 11}
+    },
+    {
+      "scene": 11,
+      "title": "sanctuary_world_reveal_golden_hour",
+      "characters": ["mother", "daughter", "son", "father"],
+      "prompt": "Explosive wide aerial vista Thera-family-sanctuary world painterly grandeur gentle golden-hour haze drifting toward enormous stylized sanctum motif — luminous great tree ringed mossy standing stones glowing windows OR hillside bastion lanterns NO armies clashing serene invitation landscape rivers mist forests tilt drone pullback family miniaturized plummet resolving toward illuminated refuge emotional awe strings-friendly composition depth layers god-rays soft.",
+      "dialogue": [],
+      "duration": 4,
+      "mood": "sanctuary_awe",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 11, "t1_seconds": 15}
+    },
+    {
+      "scene": 12,
+      "title": "silhouette_pan_then_fire_title",
+      "characters": [],
+      "prompt": "Final ultra-wide dusk-gold tableau tiny linked family silhouette along ridge line against vast luminous sanctuary panorama atmospheric particles drift transition lower third reserved clean space THEN elegant golden flame-formed serif title lines MATERIALIZE reading exactly two lines FIRST LINE WORDS CAPITALIZED FAMILY SANCTUARY second subtitle smaller BY SOVEREIGN SANCTUARY matching prior hero-fire-text styling subtle ember motes orchestral swell visual implication NO crude fonts painterly cinematic 16:9 marketing endplate moment.",
+      "dialogue": [],
+      "duration": 5,
+      "mood": "title_resolve",
+      "tone": "warm_sacred",
+      "timecode_guide": {"t0_seconds": 15, "t1_seconds": 20}
+    }
+  ],
+  "generation_runbook_notes": [
+    "Do not mutate or overwrite hero_video_thera_world_FINAL.mp4 sibling asset only alongside in marketing prefix.",
+    "Character reference renders should land sse/trailer/family_sanctuary/characters/*.png BEFORE scene hero composites when using Studio Library workflow.",
+    "Step4_TTS_BLOCKED_UNTIL_USER_APPROVES_MEASURED WAV lengths — drift schedule do not warp speech.",
+    "Step5 motion interpolation — supply low-bitrate ffmpeg preview stitched BEFORE final grade narration music.",
+    "Cel-animation composite discipline when enabled: LEFT vertical strip stacking up to THREE character refs CENTER hero storyboard RIGHT optional previous-last-frame continuity."
+  ]
+}

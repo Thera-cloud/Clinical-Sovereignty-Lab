@@ -11,12 +11,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import aiohttp
 
@@ -26,7 +27,7 @@ from app.sse.infrastructure.grok_imagine_client import (
     generate_video,
     poll_video_status,
 )
-from app.sse.infrastructure.r2_storage import store_bytes, store_image
+from app.sse.infrastructure.r2_storage import download_bytes, presigned_url, store_bytes, store_image
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,13 @@ async def _apply_faststart(vid_bytes: bytes) -> bytes:
 R2_TRAILER_PREFIX = "sse/trailer/scenes"
 _PRESETS_DIR = Path(__file__).parent / "data" / "studio_presets"
 
+DEFAULT_PRESET_ID = "thera_world_origin"
+FAMILY_SANCTUARY_PRESET_ID = "family_sanctuary_origin"
+# Locks marketing hero narration to hero_video_thera_world_NARRATED.mp4 pipeline:
+# backend/app/sse/hero_narration_mix.py → _generate_tts(..., voice=THERA_HERO_NARRATED_TTS_VOICE, ...)
+THERA_HERO_NARRATED_TTS_VOICE = "ash"
+
+
 # ---------------------------------------------------------------------------
 #  Character Reference System
 # ---------------------------------------------------------------------------
@@ -68,7 +76,14 @@ _GHIBLI_PREFIX = (
     "expressive large emotive eyes, hand-drawn animation aesthetic, "
 )
 
-CHARACTER_REFERENCES = {
+_THERA_FAMILY_REF_BASE = (
+    "Cinematic painterly fantasy character reference model sheet, widescreen 16:9, "
+    "volumetric warm gold and amber cinematic lighting honoring luminous melanin-rich skin, "
+    "full tonal color depth — never flat monochrome or desaturated gray skin surfaces — "
+    "epic heartfelt fantasy illustration not anime — "
+)
+
+THERA_WORLD_CHARACTER_REFERENCES = {
     "boy": {
         "ref_prompt": (
             f"{_GHIBLI_PREFIX}"
@@ -169,6 +184,77 @@ CHARACTER_REFERENCES = {
     },
 }
 
+FAMILY_SANCTUARY_CHARACTER_REFERENCES = {
+    "mother": {
+        "ref_prompt": (
+            f"{_THERA_FAMILY_REF_BASE}"
+            "African American woman late thirties to early forties warm umber skin natural coily or "
+            "curly hair twist-out or braided crown long flowing terracotta sage or amber earth-tone "
+            "dress subtle West African kente or mudcloth textile hint at sleeves or hem contemporary elegance "
+            "protective steady matriarch expression neutral front three-quarter and profile rotations "
+            "consistent proportions locking identity plate."
+        ),
+        "inline_desc": (
+            "African American mother late 30s–early 40s warm umber skin natural coily or crown-braided "
+            "hair long earth-toned dress with subtle mudcloth accent steady protective matriarch"
+        ),
+    },
+    "daughter": {
+        "ref_prompt": (
+            f"{_THERA_FAMILY_REF_BASE}"
+            "Exactly one 11-year-old African American girl pre-teen realistic school-age proportions "
+            "NOT toddler NOT preschool documented-photo natural head-to-body ratio bright yellow dress "
+            "with small pockets two natural puffs colorful beads waist-up portrait wonder turning toward fear "
+            "curious lean-forward expression."
+        ),
+        "inline_desc": (
+            "11-year-old African American girl pre-teen twin puffs with beads yellow pocket dress "
+            "wonder-to-fear expression waist-up"
+        ),
+    },
+    "son": {
+        "ref_prompt": (
+            f"{_THERA_FAMILY_REF_BASE}"
+            "African American teen brother thirteen through fifteen subtle deeper complexion short fade "
+            "or twists graphic tee layered unbuttoned earth overshirt dark jeans sneakers watchful courageous "
+            "proto-man bearing multiple rotation reference sheet cohesive family facial harmony."
+        ),
+        "inline_desc": (
+            "African American son age 13–15 faded graphic tee open earth-tone overshirt fade haircut "
+            "protective attentive brother courageous emerging poise"
+        ),
+    },
+    "father": {
+        "ref_prompt": (
+            f"{_THERA_FAMILY_REF_BASE}"
+            "African American father early forties tall grounded deep umber skin close cropped hair trimmed "
+            "beard faint dignified gray flecks charcoal or forest henley layered dark pants leather boots "
+            "magnetic commanding calm eyes capable of snapping from stunned loss to luminous resolve without "
+            "cowardice multiple angles emphasizing familial likeness to daughter and son."
+        ),
+        "inline_desc": (
+            "African American father early 40s deep umber skin henley and boots close beard steel-trim "
+            "composure shocks then steels into deliberate protector resolve"
+        ),
+    },
+}
+
+
+CHARACTER_REFERENCES_BY_PRESET: dict[str, dict[str, dict]] = {
+    DEFAULT_PRESET_ID: THERA_WORLD_CHARACTER_REFERENCES,
+    FAMILY_SANCTUARY_PRESET_ID: FAMILY_SANCTUARY_CHARACTER_REFERENCES,
+}
+
+
+def _char_refs(preset_id: str | None = None) -> dict[str, dict]:
+    """Return CHARACTER_REFERENCES for a preset bundle (backward compat defaults to Thera World)."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    return CHARACTER_REFERENCES_BY_PRESET.get(pid, THERA_WORLD_CHARACTER_REFERENCES)
+
+
+# Backward-compat export: canonical Thera-World character map (historic import sites / LoRA tooling).
+CHARACTER_REFERENCES = THERA_WORLD_CHARACTER_REFERENCES
+
 STYLE_PREFIX_WARM = (
     "Studio Ghibli anime art style, Makoto Shinkai inspired, "
     "warm watercolor sky backgrounds with soft golden atmospheric light, "
@@ -205,9 +291,6 @@ NEGATIVE_PROMPT_DARK = (
     "Neither creature should appear small, friendly, cute, or bright green."
 )
 
-
-def _get_style_prefix(scene_num: int) -> str:
-    return STYLE_PREFIX_DARK if SCENE_TONE.get(scene_num, "warm") == "dark" else STYLE_PREFIX_WARM
 
 CHARACTER_VOICES = {
     "serpent": {
@@ -251,52 +334,192 @@ SCENE_MOTION_PROMPTS = [
 ]
 
 
-def _build_video_prompt(scene_num: int, motion_text: str) -> str:
-    """Assemble the full video prompt with tone-appropriate style, character enforcement, and negative constraints."""
-    prefix = _get_style_prefix(scene_num)
+# ---------------------------------------------------------------------------
+#  Preset document & motion map (preset_id-scoped refs + scene motion)
+# ---------------------------------------------------------------------------
 
-    preset_scenes = _load_preset("thera_world_origin") if (_PRESETS_DIR / "thera_world_origin.json").exists() else []
-    scene_def = next((s for s in preset_scenes if s.get("scene") == scene_num), {})
-    scene_chars = scene_def.get("characters", [])
+def _load_preset_document(preset_id: str | None = None) -> dict:
+    """Load full preset JSON (scenes + casting_locksheet + output hints)."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    preset_path = _PRESETS_DIR / f"{pid}.json"
+    if not preset_path.exists():
+        raise FileNotFoundError(f"Preset '{pid}' not found at {preset_path}")
+    with open(preset_path, encoding="utf-8") as f:
+        return json.load(f)
 
-    char_enforcement = ""
-    if scene_chars:
-        parts = []
-        for char in scene_chars:
-            ref = CHARACTER_REFERENCES.get(char)
-            if ref:
-                parts.append(ref["inline_desc"])
-        if parts:
-            char_enforcement = "CRITICAL — maintain exact character appearance: " + ". ".join(parts) + ". "
 
-    prompt = prefix + char_enforcement + motion_text
+def _load_preset(preset_id: str | None = None) -> list[dict]:
+    """Scene list only; default preserves historic thera_world_origin behavior."""
+    return _load_preset_document(preset_id).get("scenes", [])
 
+
+def _manifest_preset_id(manifest: dict | None, fallback_preset: str | None = None) -> str:
+    if not manifest:
+        return fallback_preset or DEFAULT_PRESET_ID
+    raw = manifest.get("preset_id")
+    if isinstance(raw, str) and raw in CHARACTER_REFERENCES_BY_PRESET:
+        return raw
+    doc_id = manifest.get("preset_bundle_id")  # optional explicit bundle id if ever needed
+    if isinstance(doc_id, str) and doc_id in CHARACTER_REFERENCES_BY_PRESET:
+        return doc_id
+    # Merged preset root (id matches filename bundle) — never treat arbitrary UUIDs as presets
+    root_id = manifest.get("id")
+    if isinstance(root_id, str) and root_id in CHARACTER_REFERENCES_BY_PRESET:
+        return root_id
+    return fallback_preset or DEFAULT_PRESET_ID
+
+
+def _r2_character_png_key(project_id: str, char_name: str, preset_id: str, doc: dict) -> str:
+    out = doc.get("output") or {}
+    prefix = out.get("r2_character_prefix")
+    if isinstance(prefix, str) and prefix.strip():
+        return prefix.rstrip("/") + f"/{char_name}.png"
+    return f"sse/studio/projects/{project_id}/refs/{char_name}_ref.png"
+
+
+def _r2_character_refs_manifest_key(project_id: str, doc: dict) -> str:
+    out = doc.get("output") or {}
+    prefix = out.get("r2_character_prefix")
+    if isinstance(prefix, str) and prefix.strip():
+        return prefix.rstrip("/") + "/manifest.json"
+    return f"sse/studio/projects/{project_id}/refs/manifest.json"
+
+
+def _casting_lock_hints(character_ids: list[str], doc: dict) -> str:
+    """Cel-animation / motion lock strings from preset casting_locksheet (authoritative)."""
+    lock = doc.get("casting_locksheet") or {}
+    chunks: list[str] = []
+    for c in character_ids:
+        v = lock.get(c)
+        if isinstance(v, str) and v.strip():
+            chunks.append(f"{c}: {v.strip()}")
+    if not chunks:
+        return ""
+    return " CASTING LOCK (authoritative likeness): " + " | ".join(chunks)
+
+
+def preset_character_keys(preset_id: str | None = None) -> list[str]:
+    """Public helper for budgeting / UX — ordered keys of CHARACTER_REFERENCES for a preset bundle."""
+    return list(_char_refs(preset_id).keys())
+
+
+def _motion_prompts_map(preset_id: str | None = None) -> dict[int, dict]:
+    """Scene number → {\"scene\", \"motion\"}; Family preset derives motion from JSON (motion or prompt excerpt)."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    if pid == DEFAULT_PRESET_ID:
+        return {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+
+    doc = _load_preset_document(pid)
+    out: dict[int, dict] = {}
+    max_prompt_motion = 1200
+    for s in doc.get("scenes", []) or []:
+        sn = int(s.get("scene", 0) or 0)
+        motion = (s.get("motion") or "").strip()
+        if not motion:
+            ptxt = (s.get("prompt") or "").strip().replace("\n", " ")
+            motion = (ptxt[:max_prompt_motion] + ("…" if len(ptxt) > max_prompt_motion else "")) if ptxt else ""
+        if pid == FAMILY_SANCTUARY_PRESET_ID:
+            layered = _family_sanctuary_motion_prompt_layers(sn)
+            if layered:
+                motion = f"{layered} — {motion}" if motion else layered
+        out[sn] = {"scene": sn, "motion": motion}
+    return out
+
+
+def _branch_points_for_preset(preset_id: str | None = None) -> list[int]:
+    doc = _load_preset_document(preset_id)
+    bp = doc.get("branch_points")
+    if isinstance(bp, list) and bp:
+        return sorted({int(x) for x in bp})
+    pid = preset_id or DEFAULT_PRESET_ID
+    if pid == DEFAULT_PRESET_ID:
+        return [1, 8, 15]
+    return [1]
+
+
+def _get_style_prefix(scene_num: int, preset_id: str | None = None) -> str:
+    """Warm/dark Studio Ghibli prefix for Thera-World; visual_style_anchor fuse for other presets."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    if pid == DEFAULT_PRESET_ID:
+        return STYLE_PREFIX_DARK if SCENE_TONE.get(scene_num, "warm") == "dark" else STYLE_PREFIX_WARM
+
+    doc = _load_preset_document(pid)
+    scene_def = next((x for x in doc.get("scenes", []) or [] if x.get("scene") == scene_num), {})
+    anchor = doc.get("visual_style_anchor") or {}
+    fused = " ".join(
+        s.strip()
+        for s in (
+            anchor.get("look"),
+            anchor.get("skin_lighting_mandate"),
+            anchor.get("family_identity_mandate"),
+        )
+        if isinstance(s, str) and s.strip()
+    )
+    if fused.strip():
+        return fused.strip() + " — cinematic 16:9 framing — "
+    tone = str(scene_def.get("tone") or "").lower()
+    return STYLE_PREFIX_DARK if "dark" in tone else STYLE_PREFIX_WARM
+
+
+def _append_dragon_negative_if_applicable(prompt: str, scene_num: int, preset_id: str | None = None) -> str:
+    """Thera-world dark scenes only — avoid polluting unrelated hero presets."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    if pid != DEFAULT_PRESET_ID:
+        return prompt
     if SCENE_TONE.get(scene_num, "warm") == "dark":
-        prompt += " " + NEGATIVE_PROMPT_DARK
-
+        return prompt + " " + NEGATIVE_PROMPT_DARK
     return prompt
+
+
+def _build_video_prompt(
+    scene_num: int,
+    motion_text: str,
+    preset_id: str | None = None,
+) -> str:
+    """Assemble the full video prompt: style prefix, casting lock, character enforcement, motion."""
+    pid = preset_id or DEFAULT_PRESET_ID
+    prefix = _get_style_prefix(scene_num, pid)
+    doc = _load_preset_document(pid)
+
+    scene_def = next((s for s in doc.get("scenes", []) or [] if s.get("scene") == scene_num), {})
+    scene_chars = scene_def.get("characters") or []
+
+    refs = _char_refs(pid)
+    parts: list[str] = []
+    for char in scene_chars:
+        ref = refs.get(char)
+        if ref:
+            parts.append(ref["inline_desc"])
+    char_enforcement = ""
+    if parts:
+        char_enforcement = "CRITICAL — maintain exact character appearance: " + ". ".join(parts) + ". "
+
+    lock = _casting_lock_hints(scene_chars, doc)
+    assembled = prefix + char_enforcement + lock + motion_text
+    return _append_dragon_negative_if_applicable(assembled, scene_num, pid)
 
 
 # ---------------------------------------------------------------------------
 #  Helpers
 # ---------------------------------------------------------------------------
 
-def _load_preset(name: str) -> list[dict]:
-    """Load scene list from a preset JSON file."""
-    preset_path = _PRESETS_DIR / f"{name}.json"
-    if not preset_path.exists():
-        raise FileNotFoundError(f"Preset '{name}' not found at {preset_path}")
-    with open(preset_path) as f:
-        data = json.load(f)
-    return data.get("scenes", [])
-
-
-def _build_consistent_prompt(scene_prompt: str, characters: list[str], scene_num: int = 0) -> str:
+def _build_consistent_prompt(
+    scene_prompt: str,
+    characters: list[str],
+    scene_num: int = 0,
+    preset_id: str | None = None,
+) -> str:
     """Prepend tone-aware style prefix and inline character descriptions for visual consistency."""
-    prefix = _get_style_prefix(scene_num) if scene_num else STYLE_PREFIX
-    char_descs = []
+    pid = preset_id or DEFAULT_PRESET_ID
+    if scene_num:
+        prefix = _get_style_prefix(scene_num, pid)
+    else:
+        prefix = STYLE_PREFIX if pid == DEFAULT_PRESET_ID else _get_style_prefix(1, pid)
+
+    refs_map = _char_refs(pid)
+    char_descs: list[str] = []
     for char in characters:
-        ref = CHARACTER_REFERENCES.get(char)
+        ref = refs_map.get(char)
         if ref:
             char_descs.append(ref["inline_desc"])
 
@@ -305,30 +528,44 @@ def _build_consistent_prompt(scene_prompt: str, characters: list[str], scene_num
         char_block = "Characters in scene (maintain exact appearance): " + "; ".join(char_descs) + ". "
 
     resolved = scene_prompt
-    for char_name, ref in CHARACTER_REFERENCES.items():
+    for char_name, ref in refs_map.items():
         resolved = resolved.replace(f"{{{char_name}}}", ref["inline_desc"])
 
-    prompt = prefix + char_block + resolved
-    if scene_num and SCENE_TONE.get(scene_num, "warm") == "dark":
-        prompt += " " + NEGATIVE_PROMPT_DARK
-    return prompt
+    doc = _load_preset_document(pid)
+    lock = _casting_lock_hints(characters, doc)
+    prompt = prefix + char_block + lock + resolved
+    if not scene_num:
+        return prompt
+    return _append_dragon_negative_if_applicable(prompt, scene_num, pid)
 
 
-def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: dict[str, dict], scene_num: int = 0) -> str:
+def _build_lora_prompt(
+    scene_prompt: str,
+    characters: list[str],
+    trained_loras: dict[str, dict],
+    scene_num: int = 0,
+    preset_id: str | None = None,
+) -> str:
     """Build prompt for LoRA generation with trigger words replacing character descriptions."""
-    prefix = _get_style_prefix(scene_num) if scene_num else STYLE_PREFIX
-    trigger_parts = []
+    pid = preset_id or DEFAULT_PRESET_ID
+    if scene_num:
+        prefix = _get_style_prefix(scene_num, pid)
+    else:
+        prefix = STYLE_PREFIX if pid == DEFAULT_PRESET_ID else _get_style_prefix(1, pid)
+
+    refs_map = _char_refs(pid)
+    trigger_parts: list[str] = []
     for char in characters:
         lora_info = trained_loras.get(char)
         if lora_info:
             trigger_parts.append(lora_info["trigger_word"])
         else:
-            ref = CHARACTER_REFERENCES.get(char)
+            ref = refs_map.get(char)
             if ref:
                 trigger_parts.append(ref["inline_desc"])
 
     resolved = scene_prompt
-    for char_name, ref in CHARACTER_REFERENCES.items():
+    for char_name, ref in refs_map.items():
         lora_info = trained_loras.get(char_name)
         if lora_info:
             resolved = resolved.replace(f"{{{char_name}}}", lora_info["trigger_word"])
@@ -340,15 +577,17 @@ def _build_lora_prompt(scene_prompt: str, characters: list[str], trained_loras: 
         char_block = "Characters: " + ", ".join(trigger_parts) + ". "
 
     prompt = prefix + char_block + resolved
-    if scene_num and SCENE_TONE.get(scene_num, "warm") == "dark":
-        prompt += " " + NEGATIVE_PROMPT_DARK
-    return prompt
+    if not scene_num:
+        return prompt
+    return _append_dragon_negative_if_applicable(prompt, scene_num, pid)
 
 
 async def _generate_image_with_lora_or_grok(
     prompt: str,
     characters: list[str],
     trained_loras: dict[str, dict],
+    scene_num: int = 0,
+    preset_id: str | None = None,
 ) -> bytes:
     """Generate an image using trained LoRAs if available, else fall back to Grok Imagine.
 
@@ -362,7 +601,13 @@ async def _generate_image_with_lora_or_grok(
         try:
             from app.sse.infrastructure.replicate_client import generate_with_loras
             lora_urls = [info["lora_url"] for info in relevant_loras.values()]
-            lora_prompt = _build_lora_prompt(prompt, characters, trained_loras)
+            lora_prompt = _build_lora_prompt(
+                prompt,
+                characters,
+                trained_loras,
+                scene_num=scene_num,
+                preset_id=preset_id,
+            )
             logger.info("[LORA-GEN] Using %d LoRA(s) for characters: %s", len(lora_urls), list(relevant_loras.keys()))
             image_urls = await generate_with_loras(lora_prompt, lora_urls, width=1024, height=576)
             if image_urls:
@@ -439,16 +684,164 @@ async def save_trained_lora(project_id: str, character_key: str, lora_url: str) 
 #  Character Reference Generation
 # ---------------------------------------------------------------------------
 
-async def generate_character_references(project_id: str) -> dict[str, Optional[str]]:
-    """Generate reference images for all characters. Returns {name: r2_url}."""
+_FAMILY_REF_LIGHTING_APPENDIX = (
+    " Lighting and skin: cinematic warm gold key-and-fill on richly rendered Black/African "
+    "American skin — luminous umber tonal complexity, Bradford Young– or Ava DuVernay–inspired "
+    "color discipline; NEVER flat monochrome, muddy desaturated skin, or lifeless gray shadow. "
+    "Contemporary wardrobe only — mother's West African textile accents read as elegant modern dress, "
+    "not theatrical costume."
+)
+_FAMILY_REF_SOLITARY_APPENDIX = (
+    " HARD CONSTRAINT — exactly one living human in frame; ZERO other family members spectators twins "
+    "stand-ins body doubles or partial second faces at frame edge; ZERO group shots TWO subjects or "
+    "crowds ZERO mirrors showing another figure; NEVER render screenplay notes stage directions subtitles "
+    "loglines quotes brand marks watermarks captions UI typography or spelled-out prompts as visible pixels."
+)
+
+
+_FAMILY_REF_STUDIO_FRAMING_APPENDIX = (
+    " Format: SINGLE studio portrait waist-up centered subject softly lit warm gold fill with rich saturated "
+    "shadows NEVER murky monochrome skin; serene neutral matte backdrop seamless; gaze slightly past lens "
+    "left or right NOT staring intensity; dignified relaxed mouth; painterly cinematic illustration NOT collage "
+    "NOT multi-panel NO diptych NO comic strip panels NO turnaround contact sheet ONE composition only."
+)
+
+
+def _fuse_visual_style_anchor(doc: dict) -> str:
+    anchor = doc.get("visual_style_anchor") or {}
+    return " ".join(
+        s.strip()
+        for s in (
+            anchor.get("look"),
+            anchor.get("skin_lighting_mandate"),
+            anchor.get("family_identity_mandate"),
+        )
+        if isinstance(s, str) and s.strip()
+    )
+
+
+def _lock_text_visual_only(lock_text: str, char_name: str) -> str:
+    """Drop screenplay shout lines (often ALL CAPS) that models paint as typography — father's sheet triggers this."""
+    t = lock_text.strip()
+    if char_name == "father":
+        parts = re.split(r"\bcritical\b", t, maxsplit=1, flags=re.IGNORECASE)
+        t = parts[0].strip()
+    return t
+
+
+def _family_character_ref_prompt_from_preset(
+    doc: dict,
+    char_name: str,
+    fallback: dict,
+) -> str:
+    """Authoritative likeness text from preset casting_locksheet (no Python duplicate prose)."""
+    lock = doc.get("casting_locksheet") or {}
+    lock_raw = lock.get(char_name)
+    if not isinstance(lock_raw, str) or not lock_raw.strip():
+        logger.warning("[TRAILER-REF] Missing casting_locksheet[%s] — using fallback ref_prompt", char_name)
+        return fallback.get("ref_prompt", "")
+
+    lock_use = _lock_text_visual_only(lock_raw, char_name)
+
+    fused = _fuse_visual_style_anchor(doc)
+    extra_father = ""
+    if char_name == "father":
+        extra_father = (
+            " Emotional read: deliberate grounded resolve after a silent decision steady eyes jaw set squared "
+            "shoulders inhalation of readiness — never anxious never hesitant never boyish slump ONE adult "
+            "man waist-up solitary frame."
+        )
+    extra_daughter = ""
+    if char_name == "daughter":
+        extra_daughter = (
+            " AGE LOCK — she is exactly one 10–12-year-old African American pre-teen girl (state as "
+            "11-year-old African American girl); fifth–sixth-grade school age; visibly old enough for "
+            "purposeful curiosity and readable fear NOT an infant NOT a preschooler NOT age 4–7. "
+            "PROPORTIONS — match real documentary or school-photo reference of African American girls "
+            "age 10–12 natural anatomical ratios NOT storybook toddler NOT chibi NOT anime big-head cute "
+            "NOT illustrated picture-book children. FRAMING — strict waist-up portrait crop consistent with "
+            "father and son companion refs cropped at waist NO full-length NO legs NO feet NO distant "
+            "wide shot. KEEP costume: bright sunflower-yellow dress small visible pockets sleeves optional "
+            "two natural Afro puffs with colorful beads. EXPRESSION subtle wonder edging into fear leaning "
+            "slightly forward as if reaching toward curiosity one subject only."
+        )
+
+    head = [_THERA_FAMILY_REF_BASE.strip()]
+    if fused:
+        head.append(fused)
+    head_joined = " ".join(head)
+
+    plate = (
+        f"{head_joined} "
+        f"{lock_use} "
+        f"{_FAMILY_REF_STUDIO_FRAMING_APPENDIX}"
+        f"{_FAMILY_REF_LIGHTING_APPENDIX}{_FAMILY_REF_SOLITARY_APPENDIX}{extra_father}{extra_daughter}"
+    )
+    return " ".join(plate.split())
+
+
+def _character_ref_generation_prompt(
+    preset_id: str,
+    doc: dict,
+    char_name: str,
+    char_fallback: dict,
+) -> str:
+    if preset_id == FAMILY_SANCTUARY_PRESET_ID:
+        return _family_character_ref_prompt_from_preset(doc, char_name, char_fallback)
+    return str(char_fallback.get("ref_prompt") or "")
+
+
+async def _merge_character_ref_manifest(
+    mkey: str,
+    partial: dict[str, Optional[str]],
+) -> dict[str, Optional[str]]:
+    """Preserve existing URLs when regenerating a subset (e.g. daughter only)."""
+    raw = await download_bytes(mkey)
+    base: dict[str, Optional[str]] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw.decode())
+            if isinstance(parsed, dict):
+                base = {str(k): (v if v is None else str(v)) for k, v in parsed.items()}
+        except Exception:
+            logger.warning("[TRAILER-REF] existing manifest unreadable — partial keys only: %s", mkey)
+    merged = dict(base)
+    merged.update(partial)
+    return merged
+
+
+async def generate_character_references(
+    project_id: str,
+    preset_id: str | None = None,
+    only_characters: Sequence[str] | None = None,
+) -> dict[str, Optional[str]]:
+    """Generate reference images for characters in one preset bundle. Returns {name: r2_url}.
+
+    If *only_characters* is set, only those roles are generated and uploaded; existing entries in
+    the preset's character manifest on R2 are merged so approved siblings are not dropped.
+    """
+    pid = preset_id or DEFAULT_PRESET_ID
+    doc = _load_preset_document(pid)
+    refs_map = _char_refs(pid)
     refs: dict[str, Optional[str]] = {}
+    only_set: set[str] | None = None
+    if only_characters:
+        only_set = {x.strip().lower() for x in only_characters if isinstance(x, str) and x.strip()}
+        unknown = only_set - {k.lower() for k in refs_map}
+        if unknown:
+            raise ValueError(f"only_characters: unknown roles {unknown!r}")
 
     async with GROK_IMAGINE_LOCK:
-        for char_name, char_data in CHARACTER_REFERENCES.items():
-            logger.info("[TRAILER-REF] Generating reference: %s", char_name)
+        for char_name, char_data in refs_map.items():
+            if only_set is not None and char_name.lower() not in only_set:
+                continue
+            logger.info("[TRAILER-REF] preset=%s Generating reference: %s", pid, char_name)
             try:
-                image_bytes = await generate_image(char_data["ref_prompt"])
-                r2_key = f"sse/studio/projects/{project_id}/refs/{char_name}_ref.png"
+                gen_prompt = _character_ref_generation_prompt(pid, doc, char_name, char_data)
+                if not gen_prompt.strip():
+                    raise ValueError("empty character ref prompt")
+                image_bytes = await generate_image(gen_prompt)
+                r2_key = _r2_character_png_key(project_id, char_name, pid, doc)
                 r2_url = await store_image(image_bytes, r2_key)
                 refs[char_name] = r2_url
                 logger.info("[TRAILER-REF] %s done", char_name)
@@ -457,8 +850,13 @@ async def generate_character_references(project_id: str) -> dict[str, Optional[s
                 refs[char_name] = None
             await asyncio.sleep(5)
 
-    ref_manifest = json.dumps(refs).encode()
-    await store_bytes(ref_manifest, f"sse/studio/projects/{project_id}/refs/manifest.json", "application/json")
+    mkey = _r2_character_refs_manifest_key(project_id, doc)
+    if only_set is not None:
+        merged = await _merge_character_ref_manifest(mkey, refs)
+        await store_bytes(json.dumps(merged).encode(), mkey, "application/json")
+        return merged
+
+    await store_bytes(json.dumps(refs).encode(), mkey, "application/json")
     return refs
 
 
@@ -466,20 +864,25 @@ async def generate_character_references(project_id: str) -> dict[str, Optional[s
 #  Hero Image Generation (Phase 2 — character-consistent)
 # ---------------------------------------------------------------------------
 
-async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None) -> list[dict]:
+async def generate_all_scenes(
+    project_id: str,
+    scenes: list[dict] | None = None,
+    preset_id: str | None = None,
+) -> list[dict]:
     """Generate hero images with character consistency.
 
     If trained LoRA weights exist in the project manifest, uses Replicate Flux
     with those LoRAs for character-locked images. Falls back to Grok Imagine.
-    If scenes is None, loads the thera_world_origin preset.
+    If scenes is None, loads preset scenes for *preset_id* (defaults to thera_world_origin).
     """
+    pid = preset_id or DEFAULT_PRESET_ID
     if scenes is None:
-        scenes = _load_preset("thera_world_origin")
+        scenes = _load_preset(pid)
 
     os.makedirs(TRAILER_OUTPUT_DIR, exist_ok=True)
 
-    logger.info("[TRAILER] Generating character references for project %s", project_id)
-    refs = await generate_character_references(project_id)
+    logger.info("[TRAILER] Generating character references for project %s preset=%s", project_id, pid)
+    refs = await generate_character_references(project_id, preset_id=pid)
 
     trained_loras = await _load_trained_loras(project_id)
     if trained_loras:
@@ -494,12 +897,15 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
             title = scene.get("title", f"scene_{num}")
             characters = scene.get("characters", [])
 
-            consistent_prompt = _build_consistent_prompt(scene["prompt"], characters, scene_num=num)
+            consistent_prompt = _build_consistent_prompt(
+                scene["prompt"], characters, scene_num=num, preset_id=pid,
+            )
 
             logger.info("[TRAILER] Scene %d: %s", num, title)
             try:
                 image_bytes = await _generate_image_with_lora_or_grok(
                     consistent_prompt, characters, trained_loras,
+                    scene_num=num, preset_id=pid,
                 )
                 r2_key = f"sse/studio/projects/{project_id}/{num}.png"
                 r2_url = await store_image(image_bytes, r2_key)
@@ -519,13 +925,14 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
 
     manifest = {
         "project_id": project_id,
+        "preset_id": pid,
         "generated_at": datetime.utcnow().isoformat(),
         "character_refs": refs,
         "scenes": results,
         "total": total,
         "success": sum(1 for r in results if r.get("status") == "success"),
         "total_cost": sum(r.get("cost", 0) for r in results),
-        "style_prefix": STYLE_PREFIX,
+        "style_prefix": STYLE_PREFIX if pid == DEFAULT_PRESET_ID else _get_style_prefix(1, pid),
     }
     await _save_manifest_to_r2(project_id, manifest)
 
@@ -538,7 +945,7 @@ async def generate_all_scenes(project_id: str, scenes: list[dict] | None = None)
 #  Ken Burns Fallback (static image → slow zoom video)
 # ---------------------------------------------------------------------------
 
-async def _ken_burns_fallback(image_source: str, output_path: str, duration: int = 8) -> bool:
+async def _ken_burns_fallback(image_source: str, output_path: str, duration: float = 8.0) -> bool:
     """Generate a slow-zoom Ken Burns clip from a static image using FFmpeg.
 
     image_source can be an R2 key (no protocol) or a URL. R2 keys are
@@ -652,8 +1059,9 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
         logger.warning("[TRAILER-VIDEO] No manifest or images found for project %s", project_id)
         return []
 
+    preset_id = _manifest_preset_id(manifest)
     successful_scenes = [s for s in manifest["scenes"] if s.get("status") == "success"]
-    motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+    motion_map = _motion_prompts_map(preset_id)
     results: list[dict] = []
 
     async with GROK_IMAGINE_LOCK:
@@ -663,7 +1071,7 @@ async def generate_motion_clips(project_id: str) -> list[dict]:
             if not motion:
                 continue
 
-            motion_prompt = _build_video_prompt(scene_num, motion["motion"])
+            motion_prompt = _build_video_prompt(scene_num, motion["motion"], preset_id=preset_id)
 
             logger.info("[TRAILER-VIDEO] Scene %d: %s", scene_num, scene_data["title"])
 
@@ -833,6 +1241,7 @@ async def _generate_video_from_image(
 #  Last-Frame Extraction (FFmpeg)
 # ---------------------------------------------------------------------------
 
+# Exported for scripts; chain trailer uses `_branch_points_for_preset(preset_id)` at runtime.
 BRANCH_POINTS = [1, 8, 15]
 
 
@@ -883,10 +1292,12 @@ async def generate_interpolated_trailer(
         logger.warning("[INTERPOLATE] No manifest or images for project %s", project_id)
         return []
 
+    preset_id = _manifest_preset_id(manifest)
+
     if regenerate_with_lora and resume_from is None:
         trained_loras = await _load_trained_loras(project_id)
         if trained_loras:
-            preset_scenes = _load_preset("thera_world_origin") if _PRESETS_DIR.exists() else []
+            preset_scenes = _load_preset(preset_id) if _PRESETS_DIR.exists() else []
             preset_map = {s["scene"]: s for s in preset_scenes}
             for scene_data in manifest["scenes"]:
                 if scene_data.get("status") != "success":
@@ -898,8 +1309,19 @@ async def generate_interpolated_trailer(
                 if not relevant:
                     continue
                 try:
-                    prompt = _build_consistent_prompt(pdef.get("prompt", scene_data.get("title", "")), chars, scene_num=snum)
-                    img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
+                    prompt = _build_consistent_prompt(
+                        pdef.get("prompt", scene_data.get("title", "")),
+                        chars,
+                        scene_num=snum,
+                        preset_id=preset_id,
+                    )
+                    img = await _generate_image_with_lora_or_grok(
+                        prompt,
+                        chars,
+                        trained_loras,
+                        scene_num=snum,
+                        preset_id=preset_id,
+                    )
                     key = f"sse/studio/projects/{project_id}/{snum}.png"
                     new_url = await store_image(img, key)
                     scene_data["r2_url"] = new_url
@@ -930,7 +1352,7 @@ async def generate_interpolated_trailer(
             sc["r2_url"] = fresh
             logger.debug("[INTERPOLATE] Refreshed presigned URL for scene %d", sc["scene"])
 
-    motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+    motion_map = _motion_prompts_map(preset_id)
 
     results: list[dict] = []
     start_idx = 0
@@ -954,7 +1376,9 @@ async def generate_interpolated_trailer(
 
             video_result = await _generate_video_from_image(
                 image_url=start_scene["r2_url"],
-                motion_prompt=_build_video_prompt(start_scene["scene"], motion["motion"]),
+                motion_prompt=_build_video_prompt(
+                    start_scene["scene"], motion["motion"], preset_id=preset_id,
+                ),
                 end_frame_url=end_scene["r2_url"],
             )
 
@@ -1139,15 +1563,18 @@ async def generate_chain_trailer(
     if not manifest or not manifest.get("scenes"):
         return []
 
+    preset_id = _manifest_preset_id(manifest)
+
     scenes = sorted(
         [s for s in manifest["scenes"] if s.get("status") == "success"],
         key=lambda s: s["scene"],
     )
-    motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+    motion_map = _motion_prompts_map(preset_id)
     trained_loras = await _load_trained_loras(project_id)
 
-    preset_scenes = _load_preset("thera_world_origin") if (_PRESETS_DIR / "thera_world_origin.json").exists() else []
+    preset_scenes = _load_preset(preset_id) if (_PRESETS_DIR / f"{preset_id}.json").exists() else []
     preset_map = {s["scene"]: s for s in preset_scenes}
+    branches = _branch_points_for_preset(preset_id)
 
     chain_state = manifest.get("chain_state", {})
     results: list[dict] = chain_state.get("completed_clips", [])
@@ -1166,14 +1593,25 @@ async def generate_chain_trailer(
             scene_num = scene_data["scene"]
             motion = motion_map.get(scene_num, {"motion": "Smooth cinematic motion"})
 
-            if scene_num in BRANCH_POINTS or previous_last_frame_url is None:
+            if scene_num in branches or previous_last_frame_url is None:
                 if trained_loras and scene_num in preset_map:
                     chars = preset_map[scene_num].get("characters", [])
                     relevant = {c: trained_loras[c] for c in chars if c in trained_loras}
                     if relevant:
-                        prompt = _build_consistent_prompt(preset_map[scene_num]["prompt"], chars, scene_num=scene_num)
+                        prompt = _build_consistent_prompt(
+                            preset_map[scene_num]["prompt"],
+                            chars,
+                            scene_num=scene_num,
+                            preset_id=preset_id,
+                        )
                         try:
-                            img = await _generate_image_with_lora_or_grok(prompt, chars, trained_loras)
+                            img = await _generate_image_with_lora_or_grok(
+                                prompt,
+                                chars,
+                                trained_loras,
+                                scene_num=scene_num,
+                                preset_id=preset_id,
+                            )
                             branch_key = f"sse/studio/projects/{project_id}/chain/branch_{scene_num:02d}.png"
                             hero_url = await store_image(img, branch_key)
                             logger.info("[CHAIN] Branch %d: LoRA-generated hero image", scene_num)
@@ -1191,7 +1629,7 @@ async def generate_chain_trailer(
 
             video_result = await _generate_video_from_image(
                 image_url=hero_url,
-                motion_prompt=_build_video_prompt(scene_num, motion["motion"]),
+                motion_prompt=_build_video_prompt(scene_num, motion["motion"], preset_id=preset_id),
             )
 
             if video_result and video_result.get("video_url"):
@@ -1236,7 +1674,7 @@ async def generate_chain_trailer(
             manifest["chain_state"] = chain_state
 
             next_scene = scenes[i + 1]["scene"] if i + 1 < len(scenes) else None
-            if next_scene and next_scene in BRANCH_POINTS:
+            if next_scene and next_scene in branches:
                 chain_state["awaiting_approval"] = True
                 chain_state["branch_scene"] = next_scene
                 chain_state["branch_preview_url"] = hero_url
@@ -1300,6 +1738,379 @@ async def approve_branch_point(project_id: str, action: str = "approve") -> dict
 #  Cel Animation Compositing
 # ---------------------------------------------------------------------------
 
+FAMILY_SANCTUARY_SCENE_R2_PREFIX = "sse/trailer/family_sanctuary/scenes"
+FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD = 0.07
+# Canonical left-strip order — always stacked for Step 3 identity pinning.
+FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER: tuple[str, ...] = ("mother", "daughter", "son", "father")
+
+
+def _family_sanctuary_scene_png_key(scene_num: int) -> str:
+    return f"{FAMILY_SANCTUARY_SCENE_R2_PREFIX}/scene_{int(scene_num):02d}.png"
+
+
+def _neutral_storyboard_placeholder_png(width: int = 1152, height: int = 648) -> bytes:
+    """Center column slate for cel plate (16:9). Model replaces with final hero in output."""
+    import io
+    from PIL import Image
+
+    img = Image.new("RGB", (width, height), (48, 44, 52))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _solid_rgb_png_bytes(width: int, height: int, rgb: tuple[int, int, int] = (28, 26, 30)) -> bytes:
+    """Placeholder strip when an R2 ref download fails."""
+    import io
+    from PIL import Image
+
+    img = Image.new("RGB", (max(16, width), max(16, height)), rgb)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+_FAMILY_SANCTUARY_COSTUME_LOCK = (
+    "COSTUME LOCK — reference portraits are LAW; never freestyle wardrobe: Mother terracotta and sage-green "
+    "floor-length contemporary wrap dress subtle West African mudcloth/kente cues at hem and cuffs ONLY — "
+    "NO ceremonial robes NO alternate formal outfits NO veil changes hairstyle must match puff-out crown twist "
+    "aesthetic consistent with MOTHER portrait. Daughter bright yellow SHORT-SLEEVE pocket dress small textile-accent "
+    "pocket trim TWO natural Afro puffs subtle gold/color beads sneakers. Son graphic tee UNDER unbuttoned earth-tone "
+    "overshirt dark jeans sneakers. Father DARK NAVY fitted HENLEY (never polo collar never dress shirt lavender) "
+    "plus dark cargos/trousers and leather boots silhouette — SAME garments every beat."
+)
+
+_FAMILY_SANCTUARY_EXACT_FAMILY_LOCK = (
+    "CAST HARD COUNT — ONLY these four fictional kin exist here: Mother; Daughter aged 10–12; Son 13–15; Father "
+    "early-to-mid-40s. NO extra kids NO nieces NO nephews NO mirrored duplicate children reflections showing extra "
+    "bodies crowd silhouettes procession — if mirror glow only abstract cosmos NOT additional human forms."
+)
+
+
+def _father_age_lock_sentence() -> str:
+    return (
+        "Father read: African American man early-to-mid-40s close-cropped hair trimmed beard touched with FIRST FILIGREE "
+        "salt at temples ONLY — NOT silver fox NOT sixty-year-old NOT fully-gray hair or beard; match approved HENLEY father ref age."
+    )
+
+
+def _family_sanctuary_chamber_throughline_sentence() -> str:
+    return (
+        "CONTINUOUS INDOOR VOLUME beats 1–10 — SAME fogged ancient ceremonial STONE sanctum ornate ceiling SAME monumental "
+        "mercury-floor-mirror centerpiece warm offscreen hearth bounce umber amber fog-gray palette painterly cinematic "
+        "depth Bradford Young Ava DuVernay luminous melanin NEVER purple void cathedral NEVER stained glass forest "
+        "NEVER gray seamless cyclorama NEVER toy galaxy skybox — ONLY lens distance angle rack focus evolves."
+    )
+
+
+def _family_sanctuary_outdoor_throughline_sentence() -> str:
+    return (
+        "OUTDOOR THERA continuum beats 11–12 SHARED vista language: luminous painterly golden-hour haze drifting particulate "
+        "soft god-rays SAME sanctuary silhouette scale language both frames — dusk-gold NOT crystal waterfall interior NOT "
+        "confetti nebula radically different biome between 11 vs 12."
+    )
+
+
+_FAMILY_SANCT_MOTION_INDOOR_WORLD_BIBLE_1_10 = (
+    "MOTION WORLD BIBLE scenes 1–10: INTERIOR mirror-chamber continuity ONLY — same fogged stone sanctum, monumental mercury "
+    "glass, hearth-amber bounce; choreography and camera evolve inside this volume — do not cut to open sky, vista, or unrelated "
+    "biome until later sanctioned scenes."
+)
+
+_FAMILY_SANCT_MOTION_SCENE11_OUTDOOR_VISTA = (
+    "MOTION WORLD BIBLE scene 11 — ACT 3 SANCTUARY REVEAL EXTERIOR: golden-hour luminous landscape scale, awe pullback, serene "
+    "invitation; distinct geography from enclosed chamber of scenes 1–10."
+)
+
+_FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT = (
+    "MOTION scene 12 LOCK: do NOT generate readable words, letters, logos, or subtitle typography in-frame — keep title band "
+    "clean for FFmpeg drawtext composite; silhouettes, ember motes, dusk-gold tableau, painterly negative space only."
+)
+
+_FAMILY_SANCT_MOTION_FATHER_ARC_7_9 = (
+    "FATHER RESOLVE TRIPTYCH scenes 7→8→9: slow intimate camera weight — three sequential clips are three held emotional "
+    "beats of one arc; NEVER time-compressed frantic montage — preserve legible micro-performance for post so the combined "
+    "father beat survives full ~3 seconds in the final timeline (do NOT collapse resolve into hurried motion)."
+)
+
+
+def _family_sanctuary_motion_prompt_layers(scene_num: int) -> str:
+    """Pre-Step 5: prepend-only composite locks for Grok-video motion prompts (preset-local)."""
+    parts: list[str] = []
+    if 1 <= scene_num <= 10:
+        parts.append(_FAMILY_SANCT_MOTION_INDOOR_WORLD_BIBLE_1_10)
+    if scene_num == 11:
+        parts.append(_FAMILY_SANCT_MOTION_SCENE11_OUTDOOR_VISTA)
+    if scene_num == 12:
+        parts.append(_FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT)
+    if 7 <= scene_num <= 9:
+        parts.append(_FAMILY_SANCT_MOTION_FATHER_ARC_7_9)
+    if not parts:
+        return ""
+    return "[Family Sanctuary motion composite] " + " ".join(parts)
+
+
+def _family_sanctuary_priority_suffix(scene_def: dict) -> str:
+    """User-approved narrative boosts for fragile story beats."""
+    n = int(scene_def.get("scene") or -1)
+    lines: dict[int, str] = {
+        1: (
+            "ACT1 OPEN quartet before mirror mother centered gravitational anchor daughter at her side gripping "
+            "dress hem adolescent son subtly protective flank father grounding hand on teenage son shoulder "
+            "four visibly one kin group chamber scale mirror ornate."
+        ),
+        2: (
+            "Daughter body's language forward captivated toward mirror ripple micro reach mother tensing beside wonder-to-fear."
+        ),
+        3: (
+            "Mercury clasp beat daughter silhouette dissolving toward glass mother lunges reach desperation "
+            "wonder→fear legible teenage son recoiling father's eyes igniting kinetic PG fantasy."
+        ),
+        8: (
+            "FATHER CLOSE RESOLUTE CHOSEN FOLLOW — hardness under eyes squared jaw inhale-before-charge NOT slack "
+            "NOT panic NOT hesitating coward NOT stereotype fright DEFAULT steel-quiet decision to plunge after vanished family."
+        ),
+        10: (
+            "VOID FALL interlocked familial rescue chain wrists hands fingers linking mother father son daughter tumble "
+            "together luminous ribbons proof bonds did not rupture painterly cosmos."
+        ),
+        11: (
+            "TINY SILHOUETTED quartet against vast luminous Thera sanctuary painterly panorama golden-hour haze serene invitation scale."
+        ),
+        12: (
+            "ACT4 SILHOUETTE ENDPLATE — linked family of four tiny along distant ridge beholding painterly Thera sanctuary "
+            "vast golden-hour vista emotional awe lower third UNLIT clean negative space reserved for post."
+        ),
+    }
+    return lines.get(n, "").strip()
+
+
+def _build_family_sanctuary_cel_composite_plate(
+    four_ref_images: list[bytes],
+    storyboard_bytes: bytes,
+    previous_frame_bytes: bytes | None,
+    world_bible_bytes: bytes | None,
+) -> bytes:
+    """Left strip: optional scene-1 WORLD BIBLE (top), then four identity refs (mother→father). Center + right unchanged."""
+    import io
+    from PIL import Image
+
+    storyboard_img = Image.open(io.BytesIO(storyboard_bytes)).convert("RGB")
+    sw, sh = storyboard_img.size
+
+    ref_strip_width = sw // 3
+    has_prev = previous_frame_bytes is not None
+    canvas_width = ref_strip_width + sw + (ref_strip_width if has_prev else 0)
+    canvas = Image.new("RGB", (canvas_width, sh), (0, 0, 0))
+
+    y_cursor = 0
+    if world_bible_bytes:
+        bible_h = int(sh * 0.38)
+        bible_h = min(bible_h, sh - 4 * 24)
+        bible_h = max(bible_h, ref_strip_width // 2)
+        bib = Image.open(io.BytesIO(world_bible_bytes)).convert("RGB")
+        bib = bib.resize((ref_strip_width, bible_h), Image.LANCZOS)
+        canvas.paste(bib, (0, y_cursor))
+        y_cursor += bible_h
+
+    remaining = sh - y_cursor
+    nstack = max(len(four_ref_images), 1)
+    slice_h = remaining // nstack
+    for i, ref_bytes in enumerate(four_ref_images):
+        ri = Image.open(io.BytesIO(ref_bytes)).convert("RGB")
+        ri = ri.resize((ref_strip_width, slice_h), Image.LANCZOS)
+        canvas.paste(ri, (0, y_cursor + i * slice_h))
+
+    canvas.paste(storyboard_img, (ref_strip_width, 0))
+
+    if previous_frame_bytes:
+        prev_img = Image.open(io.BytesIO(previous_frame_bytes)).convert("RGB")
+        prev_img = prev_img.resize((ref_strip_width, sh), Image.LANCZOS)
+        canvas.paste(prev_img, (ref_strip_width + sw, 0))
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+def _family_sanctuary_cel_hero_prompt(scene_def: dict, doc: dict) -> str:
+    characters = list(scene_def.get("characters") or [])
+    scene_num = int(scene_def.get("scene") or 0)
+    base = _build_consistent_prompt(
+        scene_def.get("prompt") or "",
+        characters,
+        scene_num=scene_num,
+        preset_id=FAMILY_SANCTUARY_PRESET_ID,
+    )
+
+    prio = _family_sanctuary_priority_suffix(scene_def)
+
+    locks: list[str] = [_FAMILY_SANCTUARY_EXACT_FAMILY_LOCK, _FAMILY_SANCTUARY_COSTUME_LOCK]
+    if 1 <= scene_num <= 10:
+        locks.append(_family_sanctuary_chamber_throughline_sentence())
+    if scene_num >= 11:
+        locks.append(_family_sanctuary_outdoor_throughline_sentence())
+    if "father" in characters or scene_num in (11, 12):
+        locks.append(_father_age_lock_sentence())
+    if scene_num == 12:
+        locks.append(
+            "SCENE12 TEXT BAN — render ZERO typography title logo subtitle watermark glyphs letters words flames shaped "
+            "as text forbidden; luminous painterly dusk vista ONLY — vector title will composite in FFmpeg later."
+        )
+
+    bible_note = ""
+    if 2 <= scene_num <= 10:
+        bible_note = (
+            "REFERENCE TOP-LEFT sliver preserves SCENE ONE chamber photograph — extrapolate SAME stone volumetrics palette "
+            "ornate mercury mirror hearth warmth for EVERY indoor beat before portal."
+        )
+
+    cel = (
+        "INPUT = single WIDE FILMMAKER'S CEL PLATE reading left-to-right — TOP-LEFT (when present miniature still) is WORLD "
+        "BIBLE continuity still for SAME sacred sanctum ambiance; STACKED BELOW FOUR IDENTICAL CHARACTER PORTRAITS ALWAYS "
+        "mother daughter son father REGARDLESS of who's large in-final composition — replicate EXACT likeness hairlines "
+        "wardrobe palettes from THESE four tiles when each appears; CENTER large neutral gray matte is SOLE imaginative "
+        "canvas; OPTIONAL RIGHT strip PRIOR FINAL FRAME hues only continuity not layout photocopy."
+        + (" " + bible_note if bible_note else "")
+        + " FINAL OUTPUT solitary widescreen heroic frame NEVER triptych chrome borders bezel seams placeholder gray box "
+        "visible — painterly luminous Black skin fidelity Bradford Young Ava DuVernay discipline."
+    )
+    return " ".join(p for p in (base, prio, " ".join(locks), cel) if p).strip()
+
+
+async def generate_family_sanctuary_hero_scenes(
+    project_id: str,
+    *,
+    cost_ceiling_usd: float | None = 3.0,
+) -> list[dict]:
+    """Step 3 — cel hero stills: always 4 ref tiles + optional scene-1 world bible (indoor 2–10)."""
+    doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
+    scenes = sorted(doc.get("scenes") or [], key=lambda s: int(s.get("scene") or 0))
+    out_chars = doc.get("output") or {}
+    char_prefix_raw = str(out_chars.get("r2_character_prefix") or "").strip()
+    char_prefix = char_prefix_raw if char_prefix_raw.endswith("/") else (char_prefix_raw + "/" if char_prefix_raw else "")
+
+    canonical_ref_urls: dict[str, str] = {}
+    for role in FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER:
+        k = f"{char_prefix.rstrip('/')}/{role}.png"
+        canonical_ref_urls[role] = presigned_url(k) or k
+
+    results: list[dict] = []
+    prev_hero_png: bytes | None = None
+    world_bible_png: bytes | None = None
+    running_cost = 0.0
+
+    async with GROK_IMAGINE_LOCK:
+        for scene in scenes:
+            num = int(scene.get("scene") or 0)
+            title = str(scene.get("title") or f"scene_{num}")
+            characters = list(scene.get("characters") or [])
+
+            if cost_ceiling_usd is not None and running_cost + FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD > cost_ceiling_usd:
+                logger.warning(
+                    "[FAMILY-HERO] Stopping — next scene would exceed cost ceiling $%.2f", cost_ceiling_usd,
+                )
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "r2_url": None,
+                        "r2_key": None,
+                        "status": "stopped_cost_ceiling",
+                        "cost": 0,
+                    },
+                )
+                break
+
+            four_refs: list[bytes] = []
+            for role in FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER:
+                key_png = f"{char_prefix.rstrip('/')}/{role}.png"
+                blob = await download_bytes(key_png)
+                if blob:
+                    four_refs.append(blob)
+                else:
+                    logger.warning("[FAMILY-HERO] Missing R2 ref for role=%s — solid pad", role)
+                    bh = max(64, (648 - int(648 * 0.38)) // 4)
+                    four_refs.append(_solid_rgb_png_bytes(strip_w, bh))
+
+            use_bible = world_bible_png is not None and 2 <= num <= 10
+
+            center_png = _neutral_storyboard_placeholder_png()
+            composite_jpg = _build_family_sanctuary_cel_composite_plate(
+                four_refs,
+                center_png,
+                prev_hero_png,
+                world_bible_png if use_bible else None,
+            )
+            composite_key = f"sse/studio/projects/{project_id}/step3/cel_scene_{num:02d}.jpg"
+
+            hero_prompt = _family_sanctuary_cel_hero_prompt(scene, doc)
+            try:
+                composite_url = await store_bytes(composite_jpg, composite_key, "image/jpeg")
+                if composite_url.startswith("mock://"):
+                    raise RuntimeError("R2 unavailable — composite upload mocked")
+
+                hero_bytes = await generate_image(hero_prompt, source_image_url=composite_url)
+                hero_key = _family_sanctuary_scene_png_key(num)
+                hero_url = await store_image(hero_bytes, hero_key)
+                prev_hero_png = hero_bytes
+                if num == 1:
+                    world_bible_png = hero_bytes
+                    logger.info("[FAMILY-HERO] World bible locked from scene 1 (%d bytes)", len(world_bible_png))
+                running_cost += FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "scene_characters": characters,
+                        "cel_strip_roles": list(FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER),
+                        "world_bible_in_composite": bool(use_bible),
+                        "r2_url": hero_url,
+                        "r2_key": hero_key,
+                        "composite_r2_key": composite_key,
+                        "status": "success",
+                        "cost": FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD,
+                    },
+                )
+                logger.info("[FAMILY-HERO] scene %d done $%.2f running", num, running_cost)
+            except Exception as e:
+                logger.warning("[FAMILY-HERO] scene %d failed: %s", num, e)
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "r2_url": None,
+                        "r2_key": _family_sanctuary_scene_png_key(num),
+                        "status": f"error: {str(e)[:120]}",
+                        "cost": 0,
+                    },
+                )
+
+            await asyncio.sleep(5)
+
+    manifest = {
+        "project_id": project_id,
+        "preset_id": FAMILY_SANCTUARY_PRESET_ID,
+        "generated_at": datetime.utcnow().isoformat(),
+        "pipeline": "family_sanctuary_step3_cel_hero_v2_bible_four_strip",
+        "character_ref_keys_prefix": char_prefix.rstrip("/"),
+        "character_ref_urls": canonical_ref_urls,
+        "scene_hero_prefix": FAMILY_SANCTUARY_SCENE_R2_PREFIX,
+        "scenes": results,
+        "total": len(scenes),
+        "success": sum(1 for r in results if r.get("status") == "success"),
+        "total_cost_usd": round(sum(float(r.get("cost") or 0) for r in results), 4),
+    }
+    await _save_manifest_to_r2(project_id, manifest)
+    logger.info(
+        "[FAMILY-HERO] Complete %d/%d scenes $%.2f",
+        manifest["success"],
+        len(scenes),
+        manifest["total_cost_usd"],
+    )
+    return results
+
+
 def _build_composite_plate(
     character_ref_images: list[bytes],
     storyboard_bytes: bytes,
@@ -1345,29 +2156,37 @@ async def generate_cel_animation_clip(
     storyboard_url: str,
     previous_last_frame_url: str | None,
     motion_prompt: str,
+    preset_id: str | None = None,
 ) -> dict:
     """Generate a single scene using cel animation composite method.
 
     If trained LoRAs exist, generates fresh character reference images via LoRA
     instead of using the Grok-generated reference PNGs.
     """
+    pid = preset_id or DEFAULT_PRESET_ID
+    doc = _load_preset_document(pid)
     scene_def = next(
-        (s for s in (_load_preset("thera_world_origin") if _PRESETS_DIR.exists() else [])
-         if s.get("scene") == scene_num),
+        (s for s in _load_preset(pid) if s.get("scene") == scene_num),
         {},
     )
     scene_characters = scene_def.get("characters", [])
 
     trained_loras = await _load_trained_loras(project_id)
+    refs_bundle = _char_refs(pid)
 
     ref_images: list[bytes] = []
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
         for char in scene_characters[:3]:
             if char in trained_loras and trained_loras[char].get("lora_url"):
                 try:
-                    ref = CHARACTER_REFERENCES.get(char, {})
-                    prompt = f"{STYLE_PREFIX}{ref.get('ref_prompt', char)}, full body reference sheet"
-                    img = await _generate_image_with_lora_or_grok(prompt, [char], trained_loras)
+                    ref = refs_bundle.get(char, {})
+                    prompt = (
+                        f"{_get_style_prefix(scene_num, pid)}"
+                        f"{ref.get('ref_prompt', char)}, full body reference sheet"
+                    )
+                    img = await _generate_image_with_lora_or_grok(
+                        prompt, [char], trained_loras, scene_num=scene_num, preset_id=pid,
+                    )
                     ref_images.append(img)
                     continue
                 except Exception as e:
@@ -1405,20 +2224,23 @@ async def generate_cel_animation_clip(
     composite_url = await store_image(composite_bytes, composite_r2_key)
 
     char_names = [
-        CHARACTER_REFERENCES[c]["inline_desc"] for c in scene_characters if c in CHARACTER_REFERENCES
+        refs_bundle[c]["inline_desc"]
+        for c in scene_characters
+        if c in refs_bundle
     ]
-    _cel_prefix = _get_style_prefix(scene_num)
+    _cel_prefix = _get_style_prefix(scene_num, pid)
+    casting = _casting_lock_hints(scene_characters, doc)
     animation_prompt = (
         f"{_cel_prefix}"
         f"ANIMATE the center panel of this reference plate. "
         f"The left panel shows the exact character design to use — "
         f"maintain these exact proportions, clothing, and features. "
         f"{'The right panel shows what just happened — continue smoothly from that motion. ' if prev_bytes else ''}"
+        f"{casting} "
         f"Characters in scene: {'; '.join(char_names)}. "
         f"Action: {motion_prompt}"
     )
-    if SCENE_TONE.get(scene_num, "warm") == "dark":
-        animation_prompt += " " + NEGATIVE_PROMPT_DARK
+    animation_prompt = _append_dragon_negative_if_applicable(animation_prompt, scene_num, pid)
 
     video_result = await _generate_video_from_image(
         image_url=composite_url,
@@ -1681,18 +2503,20 @@ async def generate_congruent_trailer(
         manifest = await _load_manifest_from_r2(project_id)
         if not manifest or not manifest.get("scenes"):
             return []
+        preset_id = _manifest_preset_id(manifest)
         scenes = sorted(
             [s for s in manifest["scenes"] if s.get("status") == "success"],
             key=lambda s: s["scene"],
         )
         refs = manifest.get("character_refs", {})
-        motion_map = {m["scene"]: m for m in SCENE_MOTION_PROMPTS}
+        motion_map = _motion_prompts_map(preset_id)
+        branches = _branch_points_for_preset(preset_id)
         results: list[dict] = []
         previous_last_frame: str | None = None
 
         for scene_data in scenes:
             scene_num = scene_data["scene"]
-            if scene_num in BRANCH_POINTS:
+            if scene_num in branches:
                 previous_last_frame = None
             motion = motion_map.get(scene_num, {"motion": "Smooth cinematic motion"})
             result = await generate_cel_animation_clip(
@@ -1702,6 +2526,7 @@ async def generate_congruent_trailer(
                 storyboard_url=scene_data["r2_url"],
                 previous_last_frame_url=previous_last_frame,
                 motion_prompt=motion["motion"],
+                preset_id=preset_id,
             )
             results.append(result)
             if result.get("status") == "success" and result.get("last_frame_url"):
@@ -1731,8 +2556,19 @@ async def generate_congruent_trailer(
 #  Narration Generation (Azure Mini TTS)
 # ---------------------------------------------------------------------------
 
-async def _azure_tts(text: str, voice: str = "onyx", instructions: str = "") -> Optional[bytes]:
-    """Generate TTS audio via Azure gpt-4o-mini-tts."""
+async def _azure_tts(
+    text: str,
+    voice: str = "onyx",
+    instructions: str = "",
+    *,
+    response_format: str | None = None,
+) -> Optional[bytes]:
+    """Generate TTS audio via Azure gpt-4o-mini-tts.
+
+    Thera-World narrated hero (``hero_video_thera_world_NARRATED.mp4``) uses
+    ``voice=THERA_HERO_NARRATED_TTS_VOICE`` (“ash”) from ``hero_narration_mix``.
+    Family Sanctuary Step 4 must match that voice, not a different preset voice.
+    """
     api_key = os.getenv("AZURE_API_KEY", "").strip()
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
     deployment = os.getenv("AZURE_OPENAI_MINI_TTS_DEPLOYMENT", "gpt-4o-mini-tts")
@@ -1744,6 +2580,8 @@ async def _azure_tts(text: str, voice: str = "onyx", instructions: str = "") -> 
     payload: dict = {"model": deployment, "input": text, "voice": voice}
     if instructions:
         payload["instructions"] = instructions
+    if response_format:
+        payload["response_format"] = response_format
 
     async with aiohttp.ClientSession() as sess:
         async with sess.post(url, json=payload,
@@ -1754,6 +2592,491 @@ async def _azure_tts(text: str, voice: str = "onyx", instructions: str = "") -> 
             body = await resp.text()
             logger.warning("[TTS] HTTP %d: %s", resp.status, body[:200])
             return None
+
+
+FAMILY_SANCTUARY_NARRATION_R2_PREFIX = "sse/trailer/family_sanctuary/narration"
+FAMILY_SANCTUARY_MOTION_R2_PREFIX = "sse/trailer/family_sanctuary/motion"
+_GROK_FS_MOTION_COST_EST_USD_DEFAULT = 4.0
+_FAMILY_SANCT_NARRATION_FILES: tuple[tuple[str, str], ...] = (
+    ("nar_seg_acts_12", "segment_1_acts_1_2.wav"),
+    ("nar_seg_act3", "segment_2_act_3.wav"),
+    ("nar_seg_act4", "segment_3_act_4.wav"),
+)
+
+
+def _ffprobe_audio_duration_seconds(path: str) -> float | None:
+    try:
+        r = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if r.returncode == 0 and (r.stdout or "").strip():
+            return float(r.stdout.strip())
+    except Exception as e:
+        logger.warning("[FS-NARR] ffprobe failed for %s: %s", path, e)
+    return None
+
+
+async def generate_family_sanctuary_narration_segments(
+    *,
+    local_dir: str | None = None,
+    upload_r2: bool = True,
+) -> dict:
+    """Family Sanctuary Step 4: three Azure Mini-TTS WAVs (preset narration_voice voice + instructions).
+
+    Writes ``segment_*.wav`` under workspace ``tmp/family_sanctuary_step4_narration/`` by default and
+    optionally uploads to ``sse/trailer/family_sanctuary/narration/``.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    out_dir = local_dir or str(repo_root / "tmp" / "family_sanctuary_step4_narration")
+    os.makedirs(out_dir, exist_ok=True)
+
+    doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
+    nv = doc.get("narration_voice") or {}
+    voice = str(nv.get("voice") or THERA_HERO_NARRATED_TTS_VOICE).strip()
+    instructions = str(nv.get("instructions") or "").strip()
+    by_id = {str(s.get("id")): s for s in (nv.get("segments") or []) if isinstance(s, dict)}
+    rows: list[dict] = []
+
+    for seg_id, filename in _FAMILY_SANCT_NARRATION_FILES:
+        seg = by_id.get(seg_id)
+        if not seg:
+            rows.append({"segment_id": seg_id, "filename": filename, "status": "missing_preset_segment"})
+            continue
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            rows.append({"segment_id": seg_id, "filename": filename, "status": "empty_text"})
+            continue
+
+        audio = await _azure_tts(
+            text=text,
+            voice=voice,
+            instructions=instructions,
+            response_format="wav",
+        )
+        if not audio:
+            rows.append({"segment_id": seg_id, "filename": filename, "status": "tts_failed"})
+            continue
+
+        local_path = os.path.join(out_dir, filename)
+        with open(local_path, "wb") as f:
+            f.write(audio)
+        dur = _ffprobe_audio_duration_seconds(local_path)
+
+        r2_key = f"{FAMILY_SANCTUARY_NARRATION_R2_PREFIX}/{filename}"
+        r2_url: str | None = None
+        if upload_r2:
+            try:
+                r2_url = await store_bytes(audio, r2_key, "audio/wav")
+            except Exception as e:
+                logger.warning("[FS-NARR] R2 upload failed %s: %s", r2_key, e)
+
+        rows.append(
+            {
+                "segment_id": seg_id,
+                "label": seg.get("label"),
+                "filename": filename,
+                "local_path": local_path,
+                "duration_seconds": dur,
+                "voice": voice,
+                "r2_key": r2_key if upload_r2 else None,
+                "r2_url": r2_url,
+                "status": "success" if dur else "success_no_duration",
+            },
+        )
+        await asyncio.sleep(1.5)
+
+    seg1_dur = next((r["duration_seconds"] for r in rows if r.get("filename") == "segment_1_acts_1_2.wav"), None)
+    report = {
+        "preset_id": FAMILY_SANCTUARY_PRESET_ID,
+        "voice_used": voice,
+        "local_dir": out_dir,
+        "segments": rows,
+        "segment_1_over_8s_extend_video_to_21s_recommended": bool(seg1_dur and seg1_dur > 8.0),
+        "note_if_segment_1_long": "If segment 1 > 8s, extend total hero to 21s per preset — do not compress speech.",
+    }
+    rep_path = os.path.join(out_dir, "step4_ffprobe_report.json")
+    with open(rep_path, "w") as f:
+        json.dump(report, f, indent=2)
+    logger.info("[FS-NARR] Step 4 report → %s", rep_path)
+    return report
+
+
+def _family_sanctuary_step5_motion_slot_duration(scene_num: int, doc: dict) -> float:
+    """Hero scene seconds on the scaled timeline (timecode_guide × hero/20s baseline)."""
+    out = doc.get("output") or {}
+    hero_t = float(out.get("duration_target_seconds") or 25)
+    baseline = float((doc.get("step5_motion") or {}).get("timecode_guide_baseline_end_seconds") or 20)
+    factor = hero_t / baseline if baseline > 0 else 1.25
+    s = next((x for x in (doc.get("scenes") or []) if int(x.get("scene", 0) or 0) == scene_num), None)
+    if not s:
+        return max(0.35, hero_t / 12.0)
+    tg = s.get("timecode_guide") or {}
+    t0 = float(tg.get("t0_seconds", 0))
+    t1 = float(tg.get("t1_seconds", t0))
+    if t1 <= t0:
+        t1 = t0 + float(s.get("duration") or 2)
+    return max(0.35, (t1 - t0) * factor)
+
+
+def _family_sanctuary_step5_grok_policy(doc: dict) -> dict[str, float | bool]:
+    s5 = doc.get("step5_motion") or {}
+    ceiling = float(s5.get("cost_ceiling_usd") or (_GROK_FS_MOTION_COST_EST_USD_DEFAULT + 1.5))
+    est = float(s5.get("grok_video_usd_per_clip_estimate") or _GROK_FS_MOTION_COST_EST_USD_DEFAULT)
+    force_env = os.getenv("FAMILY_SANCTUARY_STEP5_USE_GROK", "").strip().lower() in ("1", "true", "yes")
+    force_preset = bool(s5.get("force_grok", False))
+    force = force_env or force_preset
+    ken_burns_only = bool((not force) and ceiling + 1e-6 < est * 12)
+    return {
+        "ceiling": ceiling,
+        "est_per_clip": est,
+        "force_grok": force,
+        "ken_burns_only": ken_burns_only,
+    }
+
+
+def _ffmpeg_trim_video_seconds(src: str, dst: str, max_seconds: float) -> bool:
+    if max_seconds <= 0:
+        shutil.copyfile(src, dst)
+        return True
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", src,
+            "-t", f"{max_seconds:.4f}",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-an",
+            dst,
+        ],
+        capture_output=True,
+        timeout=120,
+    )
+    return proc.returncode == 0 and os.path.isfile(dst)
+
+
+def _ffmpeg_mux_two_video_xfade(
+    path_a: str, path_b: str, outp: str,
+    xfade_seconds: float,
+    scale_w: int,
+) -> tuple[bool, Optional[float]]:
+    da = _ffprobe_audio_duration_seconds(path_a)
+    if not da:
+        return False, None
+    offset = max(0.05, float(da) - xfade_seconds)
+    if scale_w and scale_w > 0:
+        filt = (
+            f"[0:v]scale={scale_w}:-2:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS[va];"
+            f"[1:v]scale={scale_w}:-2:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS[vb];"
+            f"[va][vb]xfade=transition=fade:duration={xfade_seconds:.4f}:offset={offset:.4f}[vout]"
+        )
+    else:
+        filt = (
+            "[0:v]format=yuv420p,setpts=PTS-STARTPTS[va];"
+            "[1:v]format=yuv420p,setpts=PTS-STARTPTS[vb];"
+            f"[va][vb]xfade=transition=fade:duration={xfade_seconds:.4f}:offset={offset:.4f}[vout]"
+        )
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", path_a, "-i", path_b,
+            "-filter_complex", filt,
+            "-map", "[vout]", "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "34", "-pix_fmt", "yuv420p",
+            outp,
+        ],
+        capture_output=True,
+        timeout=300,
+    )
+    if proc.returncode != 0:
+        logger.warning(
+            "[FS-MOTION-PREV] xfade ffmpeg failed: %s",
+            proc.stderr.decode(errors="replace")[:480],
+        )
+        return False, None
+    probe = _ffprobe_audio_duration_seconds(outp)
+    return True, float(probe) if probe else None
+
+
+def _family_sanctuary_build_lowres_xfade_preview(
+    clip_paths: list[str],
+    output_path: str,
+    *,
+    xfade_seconds: float = 0.2,
+    scale_w: int = 854,
+) -> bool:
+    """Motion-only QC chain: scale + pairwise xfade, no audio."""
+    paths = [p for p in clip_paths if p and os.path.isfile(p)]
+    if not paths:
+        return False
+    if len(paths) == 1:
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", paths[0],
+                "-vf", f"scale={scale_w}:-2:flags=lanczos",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "34",
+                "-pix_fmt", "yuv420p", "-an",
+                output_path,
+            ],
+            capture_output=True,
+            timeout=300,
+        )
+        return proc.returncode == 0 and os.path.isfile(output_path)
+
+    tmp_root = tempfile.mkdtemp(prefix="fs_prev_xf_")
+    try:
+        cur = paths[0]
+        scaled0 = os.path.join(tmp_root, "s000.mp4")
+        r0 = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", cur,
+                "-vf", f"scale={scale_w}:-2:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "30", "-pix_fmt", "yuv420p",
+                "-an",
+                scaled0,
+            ],
+            capture_output=True,
+            timeout=300,
+        )
+        if r0.returncode != 0:
+            return False
+        cur = scaled0
+
+        for idx in range(1, len(paths)):
+            sx = os.path.join(tmp_root, f"s{idx:03d}.mp4")
+            rn = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", paths[idx],
+                    "-vf", f"scale={scale_w}:-2:flags=lanczos,format=yuv420p,setpts=PTS-STARTPTS",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "30",
+                    "-pix_fmt", "yuv420p", "-an",
+                    sx,
+                ],
+                capture_output=True,
+                timeout=300,
+            )
+            if rn.returncode != 0:
+                return False
+
+            outp = (
+                output_path if idx == len(paths) - 1
+                else os.path.join(tmp_root, f"m{idx:03d}.mp4")
+            )
+            ok, _ = _ffmpeg_mux_two_video_xfade(
+                cur, sx, outp, float(xfade_seconds), 0,
+            )
+            if not ok:
+                return False
+            cur = outp
+        return os.path.isfile(output_path)
+    finally:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+async def generate_family_sanctuary_step5_motion(
+    *,
+    local_dir: str | None = None,
+    preview_path: str | None = None,
+    inter_scene_delay_seconds: float = 8.0,
+) -> dict:
+    """Step 5: twelve motion clips from FS hero PNGs → local disk + ``sse/trailer/family_sanctuary/motion/``.
+
+    Slot duration = ``(timecode_guide span) × (duration_target_seconds / baseline)`` — father 7–9 sums ≥ ~3s at 25/20 scale.
+
+    Budget: preset ``step5_motion.cost_ceiling_usd``. When ``ceiling < 12 × estimate`` ⇒ Ken Burns only unless
+    ``FAMILY_SANCTUARY_STEP5_USE_GROK=1`` or ``step5_motion.force_grok``: true.
+
+    Builds ``tmp/family_sanctuary_step5_preview.mp4`` (low-res motion-only crossfades).
+
+    GATE: Caller must pause for user approval before Step 6 narration/music/remux (~\$ spend).
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
+    policy = _family_sanctuary_step5_grok_policy(doc)
+    s5 = doc.get("step5_motion") or {}
+    xd = float(s5.get("preview_crossfade_seconds") or 0.2)
+    prv_w = int(s5.get("preview_scale_width") or 854)
+
+    motion_dir = local_dir or str(repo_root / "tmp" / "family_sanctuary_step5_motion")
+    os.makedirs(motion_dir, exist_ok=True)
+    preview_out = preview_path or str(repo_root / "tmp" / "family_sanctuary_step5_preview.mp4")
+
+    motion_map = _motion_prompts_map(FAMILY_SANCTUARY_PRESET_ID)
+    results: list[dict] = []
+    running_cost = 0.0
+
+    async with GROK_IMAGINE_LOCK:
+        for scene_num in range(1, 13):
+            slot = round(_family_sanctuary_step5_motion_slot_duration(scene_num, doc), 4)
+            hero_key = _family_sanctuary_scene_png_key(scene_num)
+            img_uri = presigned_url(hero_key, expires_in=7200)
+
+            motion = motion_map.get(scene_num, {"motion": "Smooth cinematic painterly motion"})
+            motion_prompt = _build_video_prompt(scene_num, motion["motion"], preset_id=FAMILY_SANCTUARY_PRESET_ID)
+
+            raw_local = os.path.join(motion_dir, f"_raw_scene_{scene_num:02d}.mp4")
+            final_mp4 = os.path.join(motion_dir, f"scene_{scene_num:02d}.mp4")
+            vid_bytes_opt: Optional[bytes] = None
+            cost_this = 0.0
+            method = "ken_burns"
+
+            try_grok = bool(
+                policy["force_grok"] or (
+                    not policy["ken_burns_only"]
+                    and running_cost + policy["est_per_clip"] <= float(policy["ceiling"]) + 1e-6
+                ),
+            )
+
+            if try_grok and not img_uri:
+                logger.warning(
+                    "[FS-MOTION] Grok path needs presigned URL; missing for %s — Ken Burns fallback",
+                    hero_key,
+                )
+
+            if try_grok and img_uri:
+                logger.info("[FS-MOTION] Scene %d Grok (running ~\$%.2f / ceiling \$%.2f)", scene_num, running_cost, policy["ceiling"])
+                try:
+                    video_id = await generate_video(motion_prompt, source_image_url=img_uri)
+                    video_url_remote: str | None = None
+                    for attempt in range(60):
+                        await asyncio.sleep(5)
+                        poll = await poll_video_status(video_id)
+                        if poll["status"] == "completed" and poll.get("url"):
+                            video_url_remote = poll["url"]
+                            break
+                        if poll["status"] == "failed":
+                            break
+                        if attempt % 6 == 0:
+                            logger.info("[FS-MOTION] Poll %s prog=%s%%", video_id, poll.get("progress", "?"))
+                    if video_url_remote:
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180)) as sess:
+                            async with sess.get(video_url_remote) as vr:
+                                if vr.status == 200:
+                                    vid_bytes_opt = await vr.read()
+                                    method = "grok_video"
+                                    cost_this = float(policy["est_per_clip"])
+                except Exception as e:
+                    logger.warning("[FS-MOTION] Grok scene %d error: %s", scene_num, e)
+
+            if vid_bytes_opt is None:
+                work_kb = tempfile.mkdtemp(prefix="fs_kb_")
+                try:
+                    kb_path = os.path.join(work_kb, f"scene_{scene_num:02d}.mp4")
+                    ok_kb = await _ken_burns_fallback(hero_key, kb_path, duration=max(0.4, float(slot)))
+                    if ok_kb and os.path.isfile(kb_path):
+                        with open(kb_path, "rb") as f:
+                            vid_bytes_opt = f.read()
+                        method = "ken_burns"
+                        cost_this = 0.0
+                finally:
+                    shutil.rmtree(work_kb, ignore_errors=True)
+
+            status = "failed"
+            uploaded_url: str | None = None
+            motion_r2_k = f"{FAMILY_SANCTUARY_MOTION_R2_PREFIX.rstrip('/')}/scene_{scene_num:02d}.mp4"
+            probe_d: float | None = None
+
+            if vid_bytes_opt:
+                with open(raw_local, "wb") as f:
+                    f.write(vid_bytes_opt)
+                trimmed_ok = False
+                if method == "grok_video" and slot > 0:
+                    trimmed_ok = _ffmpeg_trim_video_seconds(raw_local, final_mp4, float(slot))
+                if trimmed_ok:
+                    try:
+                        os.remove(raw_local)
+                    except OSError:
+                        pass
+                else:
+                    if os.path.abspath(raw_local) != os.path.abspath(final_mp4):
+                        if os.path.exists(final_mp4):
+                            os.remove(final_mp4)
+                        os.replace(raw_local, final_mp4)
+                    elif os.path.isfile(raw_local):
+                        shutil.copy(raw_local, final_mp4)
+
+                probe_d_d = _ffprobe_audio_duration_seconds(final_mp4)
+                probe_d = float(probe_d_d) if probe_d_d else None
+
+                try:
+                    with open(final_mp4, "rb") as f:
+                        uploaded_url = await store_bytes(f.read(), motion_r2_k, "video/mp4")
+                    status = "success"
+                    running_cost += cost_this
+                except Exception as e:
+                    logger.warning("[FS-MOTION] R2 upload failed scene %d: %s", scene_num, e)
+                    status = "success_local_only"
+
+            results.append(
+                {
+                    "scene": scene_num,
+                    "status": status,
+                    "method": method,
+                    "cost_usd_logged": cost_this,
+                    "target_slot_seconds": slot,
+                    "duration_seconds_probed": probe_d,
+                    "local_path": final_mp4,
+                    "r2_key": motion_r2_k,
+                    "r2_motion_url": uploaded_url,
+                },
+            )
+
+            logger.info(
+                "[FS-MOTION] scene=%d method=%s slot=%.3fs probe=%s status=%s",
+                scene_num, method, slot, probe_d, status,
+            )
+
+            await asyncio.sleep(inter_scene_delay_seconds)
+
+    d7 = next((x.get("duration_seconds_probed") for x in results if x.get("scene") == 7), None)
+    d8 = next((x.get("duration_seconds_probed") for x in results if x.get("scene") == 8), None)
+    d9 = next((x.get("duration_seconds_probed") for x in results if x.get("scene") == 9), None)
+    father_sum: Optional[float] = None
+    if all(isinstance(x, (int, float)) for x in (d7, d8, d9)):
+        father_sum = float(d7) + float(d8) + float(d9)
+
+    report: dict[str, object] = {
+        "preset_id": FAMILY_SANCTUARY_PRESET_ID,
+        "step": "family_sanctuary_step5_motion",
+        "grok_budget_policy": policy,
+        "total_cost_usd_assumed_running": running_cost,
+        "motion_local_dir": motion_dir,
+        "clips": results,
+        "per_clip_durations": {
+            str(r.get("scene")): r.get("duration_seconds_probed") for r in results
+        },
+        "father_triptych_scenes_7_8_9_sum_seconds": father_sum,
+        "father_triptych_target_min_seconds": 3.0,
+        "father_triptych_meets_min": bool(father_sum is not None and father_sum >= 2.99),
+        "preview_output": preview_out,
+        "preview_crossfade_seconds": xd,
+    }
+
+    ordered_clips = [os.path.join(motion_dir, f"scene_{i:02d}.mp4") for i in range(1, 13)]
+    all_clips_exist = all(os.path.isfile(p) for p in ordered_clips)
+    report["all_twelve_motion_clips_present"] = all_clips_exist
+    prev_ok = False
+    if all_clips_exist:
+        prev_ok = _family_sanctuary_build_lowres_xfade_preview(
+            ordered_clips,
+            preview_out,
+            xfade_seconds=xd,
+            scale_w=prv_w,
+        )
+    else:
+        logger.warning("[FS-MOTION] Preview skipped — missing one or more scene_01..12.mp4 under %s", motion_dir)
+    report["preview_built_ok"] = prev_ok
+    prv_d = _ffprobe_audio_duration_seconds(preview_out) if prev_ok else None
+    report["preview_duration_seconds_probed"] = float(prv_d) if prv_d else None
+
+    rep_path = os.path.join(motion_dir, "step5_motion_report.json")
+    with open(rep_path, "w") as f:
+        json.dump(report, f, indent=2, default=str)
+    logger.info("[FS-MOTION] Step 5 complete report → %s", rep_path)
+
+    return report
 
 
 def _concat_audio_files(file_paths: list[str], output_path: str) -> None:
@@ -1794,9 +3117,14 @@ async def set_voice_override(project_id: str, character: str, voice: str, instru
     return overrides[character]
 
 
-async def _generate_all_narration(project_id: str, work_dir: str) -> dict[int, str]:
+async def _generate_all_narration(
+    project_id: str,
+    work_dir: str,
+    preset_id: str | None = None,
+) -> dict[int, str]:
     """Generate TTS audio for all dialogue scenes. Returns {scene_num: r2_url}."""
-    preset_scenes = _load_preset("thera_world_origin")
+    pid = preset_id or DEFAULT_PRESET_ID
+    preset_scenes = _load_preset(pid)
     dialogue_map = {s["scene"]: s.get("dialogue", []) for s in preset_scenes if s.get("dialogue")}
     voice_map = await get_voice_config(project_id)
 
@@ -1959,6 +3287,10 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
         return None
 
     video_manifest = json.loads(video_manifest_bytes.decode())
+
+    proj_manifest_for_preset = await _load_manifest_from_r2(project_id)
+    narr_preset = _manifest_preset_id(proj_manifest_for_preset)
+
     raw_clips = [c for c in video_manifest.get("clips", []) if c.get("status") in ("success", "ken_burns")]
     for c in raw_clips:
         if "scene" not in c and "from_scene" in c:
@@ -2023,7 +3355,7 @@ async def stitch_trailer(project_id: str, options: dict | None = None) -> Option
         narration_mode = options.get("narration_mode", "per_scene")
         if include_narration:
             logger.info("[STITCH] Generating narration...")
-            narration_files = await _generate_all_narration(project_id, work_dir)
+            narration_files = await _generate_all_narration(project_id, work_dir, preset_id=narr_preset)
 
         # --- Per-scene narration overlay (default) ---
         narrated_dir = os.path.join(work_dir, "narrated")

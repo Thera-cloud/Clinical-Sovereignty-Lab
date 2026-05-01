@@ -149,8 +149,13 @@ def _generate_ambient(duration: float, output_path: str) -> bool:
 
 
 async def _generate_tts(text: str, instructions: str, output_path: str) -> bool:
-    from app.sse.trailer_generator import _azure_tts
-    audio = await _azure_tts(text=text, voice="ash", instructions=instructions)
+    from app.sse.trailer_generator import THERA_HERO_NARRATED_TTS_VOICE, _azure_tts
+
+    audio = await _azure_tts(
+        text=text,
+        voice=THERA_HERO_NARRATED_TTS_VOICE,
+        instructions=instructions,
+    )
     if not audio:
         logger.error("TTS generation failed for %s", output_path)
         return False
