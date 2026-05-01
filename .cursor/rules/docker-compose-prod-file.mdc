@@ -37,6 +37,7 @@ docker compose -f docker-compose.prod.yml restart backend
 | Setting | `docker-compose.yml` | `docker-compose.prod.yml` |
 |---|---|---|
 | Backend `/app/data` | `data/bridge:ro` | `data/backend` (rw) |
+| Backend `/app/scripts` | Not mounted | `./backend/scripts:/app/scripts:ro` (maintenance runners) |
 | Bridge data cross-ref | Not available | `data/bridge:/app/bridge_data:ro` |
 | Nginx container | Not included | Included (`nate_nginx`) |
 | Health check deps | Basic | Full chain with `condition: service_healthy` |
@@ -55,13 +56,34 @@ Fix with:
 docker network prune -f && docker compose -f docker-compose.prod.yml up -d
 ```
 
+## Backend scripts inside `nate_backend`
+
+The prod backend image includes `COPY scripts/` and the compose file bind-mounts `./backend/scripts:/app/scripts:ro`. Run one-off Python tools **inside the container** so `DATABASE_URL`, `pgbouncer`, and `import app.*` match production:
+
+```bash
+# On GREEN from repo root — container already has DATABASE_URL via compose.
+# Replace VAULT_PARENT with the directory that CONTAINS session_memories/ (discover first):
+#   find /opt/clinical-sovereignty-lab -type d -name session_memories | head -5
+#   → parent of that path is --vault-root
+
+docker compose -f docker-compose.prod.yml exec -T backend \
+  python /app/scripts/backfill_classroom_session_analyses.py \
+  --vault-root VAULT_PARENT \
+  --classroom-sessions-file /app/data/classroom_sessions.json
+```
+
+Do **not** use `/app/scripts/...` until the bind mount exists (compose pulled + `backend` recreated). Do **not** pass a host-expanded `DATABASE_URL=...` through SSH quotes unless you intend that shell to substitute it—the container already has `DATABASE_URL` from compose.
+
 ## Verification After Any Compose Operation
 
 ```bash
 # Confirm correct mount (must show data/backend, NOT data/bridge)
 docker inspect nate_backend --format '{{range .Mounts}}{{.Destination}} -> {{.Source}} ({{.Mode}}){{println}}{{end}}' | grep /app/data
 
+# Confirm scripts mount (optional)
+docker inspect nate_backend --format '{{range .Mounts}}{{.Destination}} -> {{.Source}}{{"\n"}}{{end}}' | grep /app/scripts
+
 # Confirm full health
 docker logs nate_backend --since 30s 2>&1 | grep 'STARTUP COMPLETE'
-# Expected: 112/112 services healthy — ALL SYSTEMS NOMINAL
+# Expected: 114/114 services healthy — ALL SYSTEMS NOMINAL
 ```
