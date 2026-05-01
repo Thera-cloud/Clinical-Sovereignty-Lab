@@ -4499,6 +4499,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     // Classroom: Fetch sessions and progress for the Classroom tab
     _requestClassroomSessions();
     _requestClassroomProgress();
+    _loadAssistantMetrics();
   }
 
   void _refreshMyAvailability() {
@@ -4715,6 +4716,33 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Archive transcript failed: $e")));
+      }
+    }
+  }
+
+  Future<void> _resendSessionLink(String sessionId) async {
+    try {
+      final uri = _apiUri('/api/sessions/$sessionId/resend-link');
+      final resp = await http.post(uri, headers: _restHeaders());
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        throw Exception("HTTP ${resp.statusCode}: ${resp.body}");
+      }
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      final sent = body['sent'] == true;
+      final channels = (body['notification']?['channels'] as List?)?.join(', ') ?? '';
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(sent
+              ? "Zoom link sent ($channels)"
+              : (body['message'] ?? 'No deliverable channels')),
+          backgroundColor: sent ? Colors.green : Colors.orange,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Resend link failed: $e"), backgroundColor: Colors.red),
+        );
       }
     }
   }
@@ -8231,6 +8259,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                             color: const Color(0xFF0A0A0F),
                             icon: const Icon(Icons.more_vert, color: Colors.white70),
                             onSelected: (v) async {
+                              if (v == "resend_link") {
+                                await _resendSessionLink(sessionId);
+                              }
                               if (v == "check_status") {
                                 await _showRecordingStatus(sessionId);
                               }
@@ -8304,6 +8335,17 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                             itemBuilder: (ctx) => [
                               // Only show Zoom options if there's a Zoom meeting ID
                               if (zoomMeetingId.trim().isNotEmpty) ...[
+                                const PopupMenuItem(
+                                  value: "resend_link",
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.send, size: 18, color: Color(0xFFC9A962)),
+                                      SizedBox(width: 8),
+                                      Text("Resend Zoom Link", style: TextStyle(color: Color(0xFFC9A962))),
+                                    ],
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
                                 const PopupMenuItem(
                                   value: "check_status",
                                   child: Row(
@@ -9725,10 +9767,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     if (_assistantsTabLoading) return;
     setState(() => _assistantsTabLoading = true);
     try {
-      final token = widget.currentUserProfile['token'] ?? '';
       final resp = await http.get(
         Uri.parse('$_apiBaseUrl/api/coach/hierarchy/assistant-metrics?days=30'),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: _restHeaders(json: false),
       );
       if (!mounted) return;
       if (resp.statusCode == 200) {
@@ -9736,6 +9777,13 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         setState(() {
           _assistantMetrics = List<Map<String, dynamic>>.from(data['assistants'] ?? []);
         });
+      } else if (mounted && resp.statusCode == 401) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Assistants tab: session auth failed — pull to refresh or re-login.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
     } catch (e) {
       _debugLog("Assistant metrics error: $e");
@@ -9746,10 +9794,9 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   Future<void> _loadAssistantClients(String username) async {
     setState(() => _expandedClientsLoading = true);
     try {
-      final token = widget.currentUserProfile['token'] ?? '';
       final resp = await http.get(
         Uri.parse('$_apiBaseUrl/api/coach/hierarchy/assistant-clients/$username'),
-        headers: {'Authorization': 'Bearer $token'},
+        headers: _restHeaders(json: false),
       );
       if (!mounted) return;
       if (resp.statusCode == 200) {
@@ -9808,7 +9855,6 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     _assistantChatController.clear();
     _scrollAssistantChat();
     try {
-      final token = widget.currentUserProfile['token'] ?? '';
       final coachUsername = widget.currentUserProfile['username'] ?? '';
 
       final assistantNames = _assistantMetrics.map((a) {
@@ -9845,7 +9891,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       final uri = Uri.parse('$_apiBaseUrl/api/coach/nate-chat');
       final resp = await http.post(
         uri,
-        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        headers: _restHeaders(),
         body: jsonEncode({
           'message': message,
           'mode': 'assistant_inquiry',
@@ -10222,10 +10268,15 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
 
   Widget _buildAssistantsTab() {
     final profile = widget.currentUserProfile;
+    final roleUpper = (profile['role'] ?? '').toString().toUpperCase();
+    // login_success sets _authToken; profile map may not include token. COACH/ADMIN
+    // always see this tab (API returns [] for non-master coaches).
     final isMaster = _assistantMetrics.isNotEmpty
         || profile['is_master_coach'] == true
         || profile['master_coach_approved'] == true
-        || profile['master_coach_approved'] == 'true';
+        || profile['master_coach_approved'] == 'true'
+        || roleUpper == 'COACH'
+        || roleUpper == 'ADMIN';
 
     if (!isMaster && !_assistantsTabLoading && _assistantMetrics.isEmpty) {
       return Center(

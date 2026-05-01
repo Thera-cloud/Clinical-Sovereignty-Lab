@@ -19323,7 +19323,13 @@ If 'challenge', respectfully push the coach's thinking."""
                                 "availability": [],
                             }
                         else:
-                            calendar_data = coach_nexus_v2.get_calendar_data(current_profile, month, year)
+                            # QUANTUM-CRYSTAL-ARCH: PG-merge calendar so REST-created Zoom
+                            # sessions (encrypted backend sessions.json) appear in the coach's
+                            # Schedule tab. Feature-flagged; falls back to JSON-only on disable.
+                            if os.getenv("BRIDGE_PG_CALENDAR_MERGE", "true").lower() == "true" and db_pool is not None and hasattr(coach_nexus_v2, "get_calendar_data_pg"):
+                                calendar_data = await coach_nexus_v2.get_calendar_data_pg(current_profile, month, year, db_pool)
+                            else:
+                                calendar_data = coach_nexus_v2.get_calendar_data(current_profile, month, year)
                         await websocket.send(json.dumps({
                             "type": "coach_calendar_data",
                             "data": calendar_data

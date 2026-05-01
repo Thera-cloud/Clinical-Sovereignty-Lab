@@ -419,6 +419,150 @@ async def _save_session_dual(request: Request, session: dict, all_sessions: list
     if all_sessions is not None:
         save_json(DATA_DIR / "sessions.json", all_sessions)
 
+
+async def _lookup_client_contact(db_pool, client_id: str) -> dict:
+    """Resolve client email / phone / name from users.profile_data."""
+    if not db_pool or not client_id:
+        return {}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile_data->>'email' AS email, "
+                "       profile_data->>'phone' AS phone, "
+                "       profile_data->>'name'  AS name "
+                "FROM users "
+                "WHERE hardware_id = $1 OR username = $1 "
+                "LIMIT 1",
+                client_id,
+            )
+        if not row:
+            return {}
+        return {
+            "email": (row["email"] or "").strip(),
+            "phone": (row["phone"] or "").strip(),
+            "name": (row["name"] or "").strip(),
+        }
+    except Exception as e:
+        _logger.warning("_lookup_client_contact failed for %s: %s", client_id, e)
+        return {}
+
+
+async def _lookup_coach_display(db_pool, coach_id: str) -> dict:
+    """Resolve coach display name / credentials from users.profile_data."""
+    if not db_pool or not coach_id:
+        return {"name": "Your coach", "credentials": ""}
+    try:
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile_data->>'name' AS name, "
+                "       profile_data->>'credentials' AS credentials, "
+                "       username "
+                "FROM users "
+                "WHERE hardware_id = $1 OR username = $1 "
+                "LIMIT 1",
+                coach_id,
+            )
+        if not row:
+            return {"name": "Your coach", "credentials": ""}
+        nm = (row["name"] or row["username"] or "Your coach").strip()
+        return {
+            "name": nm,
+            "credentials": (row["credentials"] or "").strip(),
+        }
+    except Exception:
+        return {"name": "Your coach", "credentials": ""}
+
+
+async def _send_session_link(request: Request, session: dict) -> dict:
+    """
+    Email + SMS the Zoom join link to the client (and external consultee, if present).
+    Mirrors what Zoom sends natively: subject, time, host, agenda, join URL.
+    Returns a dict with per-channel delivery results.
+    """
+    result = {"email": False, "sms": False, "channels": []}
+    join_url = (session.get("zoom_link") or "").strip()
+    if not join_url:
+        result["error"] = "no_zoom_link"
+        return result
+
+    db = _get_db(request)
+    client_id = (session.get("client_id") or "").strip()
+    contact = await _lookup_client_contact(db, client_id)
+
+    # External consultee path overrides registered client contact when present.
+    consult_email = (session.get("consultation_email") or "").strip()
+    consult_name = (session.get("consultation_name") or "").strip()
+    if consult_email and "@" in consult_email:
+        contact["email"] = consult_email
+    if consult_name:
+        contact["name"] = consult_name
+
+    coach_id = (session.get("coach_id") or "").strip()
+    coach = await _lookup_coach_display(db, coach_id)
+    coach_name = coach["name"]
+    coach_initials = (coach_name[:1] or "C").upper()
+
+    # Format date / time from scheduled_start (ISO).
+    start_iso = (session.get("scheduled_start") or "").strip()
+    date_str = start_iso
+    time_str = ""
+    try:
+        dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+        date_str = dt.strftime("%B %d, %Y")
+        time_str = dt.strftime("%I:%M %p UTC").lstrip("0")
+    except Exception:
+        pass
+
+    # ── EMAIL via SendGrid (coaching_confirmation template)
+    email_addr = (contact.get("email") or "").strip()
+    if email_addr and "@" in email_addr:
+        try:
+            from app.services.notifications_service import EmailService
+            email_svc = EmailService()
+            ok = await email_svc.send_coaching_confirmation(
+                to_email=email_addr,
+                date=date_str,
+                time=time_str or start_iso,
+                timezone="UTC",
+                coach_name=coach_name,
+                coach_initials=coach_initials,
+                coach_credentials=coach.get("credentials") or "",
+                join_url=join_url,
+            )
+            result["email"] = bool(ok)
+            if ok:
+                result["channels"].append(f"email:{email_addr}")
+        except Exception as e:
+            _logger.warning("_send_session_link: email failed: %s", e)
+
+    # ── SMS via NotificationSystem (Twilio)
+    phone = (contact.get("phone") or "").strip()
+    if phone:
+        try:
+            notify_sys = getattr(request.app.state, "notification_system", None)
+            if notify_sys is None:
+                from app.websocket.notification_system import NotificationSystem
+                notify_sys = NotificationSystem(
+                    data_dir=os.environ.get("DATA_DIR", "/app/data"),
+                    sendgrid_key=os.environ.get("SENDGRID_API_KEY"),
+                )
+                request.app.state.notification_system = notify_sys
+            body = (
+                f"Sanctuary: Your session with {coach_name}"
+                + (f" on {date_str}" if date_str else "")
+                + (f" at {time_str}" if time_str else "")
+                + f"\nJoin Zoom: {join_url}"
+            )
+            ok = await notify_sys.send_sms(phone, body)
+            result["sms"] = bool(ok)
+            if ok:
+                result["channels"].append(f"sms:{phone}")
+        except Exception as e:
+            _logger.warning("_send_session_link: sms failed: %s", e)
+
+    return result
+
+
 # Zoom meeting map (meeting_id -> internal session metadata)
 ZOOM_MEETING_MAP_FILE = DATA_DIR / "zoom_meeting_map.json"
 
@@ -617,10 +761,50 @@ async def schedule_session(req: ScheduleSessionRequest, request: Request):
         except Exception:
             pass
 
+    # Auto-send Zoom join link via email + SMS if a link exists.
+    notify_result = None
+    if (session.get("zoom_link") or "").strip():
+        try:
+            notify_result = await _send_session_link(request, session)
+            print(f">>> [SESSION] Auto-sent link for {session_id}: {notify_result}")
+        except Exception as e:
+            print(f">>> [SESSION] Auto-send link failed for {session_id}: {e}")
+
     resp = {"session": session}
     if zoom_error:
         resp["zoom_error"] = zoom_error
+    if notify_result is not None:
+        resp["notification"] = notify_result
     return resp
+
+
+@router.post("/{session_id}/resend-link")
+async def resend_session_link(session_id: str, request: Request):
+    """
+    Resend the Zoom join link to the client via email + SMS.
+    Triggered from the coach's Schedule tab "Resend Link" action.
+    """
+    sessions = await _load_sessions_pf(request)
+    session = next((s for s in sessions if s.get("session_id") == session_id), None)
+    if not session:
+        raise HTTPException(404, f"Session {session_id} not found")
+    if not (session.get("zoom_link") or "").strip():
+        raise HTTPException(400, "Session has no Zoom link to resend")
+
+    notify_result = await _send_session_link(request, session)
+    if not notify_result.get("email") and not notify_result.get("sms"):
+        # Surface a useful error so the UI can render a snackbar.
+        return {
+            "session_id": session_id,
+            "sent": False,
+            "notification": notify_result,
+            "message": "No deliverable channels — client has no email or phone on file.",
+        }
+    return {
+        "session_id": session_id,
+        "sent": True,
+        "notification": notify_result,
+    }
 
 @router.get("/client/{client_id}")
 async def get_client_sessions(request: Request, client_id: str, current_user: str = Depends(get_current_user_id), status: str = None, limit: int = 20):

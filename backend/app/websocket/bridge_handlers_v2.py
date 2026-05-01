@@ -215,7 +215,136 @@ class CoachNexusV2:
             "schedule": filtered,
             "availability": self._get_availability(hid),
         }
-    
+
+    async def get_calendar_data_pg(self, coach_profile: Dict[str, Any],
+                                    month: int = None, year: int = None,
+                                    db_pool=None) -> Dict[str, Any]:
+        """
+        PG-merged calendar: returns the standard JSON-file calendar PLUS sessions
+        from the encrypted backend `coaching_sessions` table that the JSON path
+        cannot read (REST-created Zoom sessions).
+        """
+        base = self.get_calendar_data(coach_profile, month=month, year=year)
+        if not db_pool:
+            return base
+
+        hid = coach_profile.get("hardware_id")
+        try:
+            month = int(month) if month is not None else datetime.datetime.now().month
+        except Exception:
+            month = datetime.datetime.now().month
+        try:
+            year = int(year) if year is not None else datetime.datetime.now().year
+        except Exception:
+            year = datetime.datetime.now().year
+
+        # Compute month window (UTC).
+        month_start = datetime.datetime(year, month, 1, tzinfo=datetime.timezone.utc)
+        if month == 12:
+            month_end = datetime.datetime(year + 1, 1, 1, tzinfo=datetime.timezone.utc)
+        else:
+            month_end = datetime.datetime(year, month + 1, 1, tzinfo=datetime.timezone.utc)
+
+        # Collect existing session IDs to avoid duplicating from JSON.
+        existing_ids = {
+            (s.get("session_id") or s.get("id") or "")
+            for s in base.get("schedule", [])
+        }
+        existing_ids.discard("")
+
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT session_id, coach_id, client_id, client_name,
+                           session_type, status,
+                           scheduled_start, scheduled_end,
+                           zoom_link, zoom_meeting_id, notes,
+                           session_data
+                    FROM coaching_sessions
+                    WHERE coach_id = $1
+                      AND scheduled_start >= $2
+                      AND scheduled_start <  $3
+                      AND status IN ('scheduled', 'active', 'pending_approval')
+                    ORDER BY scheduled_start ASC
+                    LIMIT 500
+                    """,
+                    hid, month_start, month_end,
+                )
+        except Exception as e:
+            print(f">>> [WARN] get_calendar_data_pg: PG query failed: {e}")
+            return base
+
+        # session_data may be JSON-string or dict depending on driver/codec.
+        def _sd(row, key, default=""):
+            sd = row.get("session_data") if isinstance(row, dict) else row["session_data"]
+            if isinstance(sd, str):
+                try:
+                    sd = json.loads(sd)
+                except Exception:
+                    sd = {}
+            if isinstance(sd, dict):
+                v = sd.get(key)
+                if v not in (None, ""):
+                    return v
+            return default
+
+        added = 0
+        for r in rows or []:
+            row = dict(r)
+            sid = (row.get("session_id") or "").strip()
+            if not sid or sid in existing_ids:
+                continue
+            st_dt = row.get("scheduled_start")
+            en_dt = row.get("scheduled_end")
+            if not st_dt:
+                continue
+            dur_min = 50
+            try:
+                if en_dt and en_dt > st_dt:
+                    dur_min = max(5, int((en_dt - st_dt).total_seconds() / 60))
+            except Exception:
+                pass
+            try:
+                date_str = st_dt.date().isoformat()
+                time_str = st_dt.strftime("%H:%M")
+                start_iso = st_dt.isoformat()
+                end_iso = en_dt.isoformat() if en_dt else ""
+            except Exception:
+                continue
+
+            base["schedule"].append({
+                "id": sid,
+                "session_id": sid,
+                "coach_id": hid,
+                "client_id": row.get("client_id") or "",
+                "client_name": row.get("client_name") or _sd(row, "client_name", ""),
+                "consultation_email": _sd(row, "consultation_email", ""),
+                "consultation_name": _sd(row, "consultation_name", ""),
+                "consultation_subject": _sd(row, "consultation_subject", ""),
+                "booked_by": _sd(row, "booked_by", ""),
+                "family_id": _sd(row, "family_id", ""),
+                "date": date_str,
+                "time": time_str,
+                "scheduled_start": start_iso,
+                "scheduled_end": end_iso,
+                "type": row.get("session_type") or "COACH",
+                "session_type": row.get("session_type") or "COACH",
+                "duration_minutes": dur_min,
+                "platform": "Zoom",
+                "zoom_link": row.get("zoom_link") or "",
+                "zoom_host_url": _sd(row, "zoom_host_url", ""),
+                "zoom_meeting_id": row.get("zoom_meeting_id") or "",
+                "status": row.get("status") or "scheduled",
+                "notes": row.get("notes") or "",
+            })
+            existing_ids.add(sid)
+            added += 1
+
+        if added:
+            print(f">>> [INFO] get_calendar_data_pg: merged {added} PG sessions for coach={hid} {year}-{month:02d}")
+        return base
+
     def _get_availability(self, hardware_id: str) -> List[str]:
         """Get coach availability slots."""
         avail_file = self._get_coach_path(hardware_id) / "availability.json"

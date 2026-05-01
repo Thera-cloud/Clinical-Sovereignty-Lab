@@ -40,6 +40,25 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 _cipher = TokenCipher.get()
 
 
+async def _resolve_client_email(pool, client_id: str) -> Optional[str]:
+    """Look up registered client's email so COACH sessions also invite the client."""
+    if not pool or not client_id:
+        return None
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile_data->>'email' AS email FROM users "
+                "WHERE hardware_id = $1 OR username = $1 LIMIT 1",
+                client_id,
+            )
+        if not row:
+            return None
+        em = (row["email"] or "").strip()
+        return em if em and "@" in em else None
+    except Exception:
+        return None
+
+
 async def _get_connection(pool, user_id: str) -> Optional[Dict[str, Any]]:
     if not pool or not user_id:
         return None
@@ -84,7 +103,8 @@ async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
     return new_access
 
 
-def _build_payload(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _build_payload(session: Dict[str, Any],
+                   extra_attendee_email: Optional[str] = None) -> Optional[Dict[str, Any]]:
     start = session.get("scheduled_start") or session.get("start_time")
     end = session.get("scheduled_end") or session.get("end_time")
     if not start or not end:
@@ -112,12 +132,17 @@ def _build_payload(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if join_url:
         description_parts.append(f"\nJoin: {join_url}")
     description = "\n".join(description_parts)
+
+    # Compose attendee list: external consultee (if any) + registered client (if any).
+    attendee_set = []
     consultation_email = (session.get("consultation_email") or "").strip()
-    attendees = (
-        [consultation_email]
-        if consultation_email and "@" in consultation_email
-        else None
-    )
+    if consultation_email and "@" in consultation_email:
+        attendee_set.append(consultation_email)
+    if extra_attendee_email and "@" in extra_attendee_email:
+        if extra_attendee_email.lower() not in {a.lower() for a in attendee_set}:
+            attendee_set.append(extra_attendee_email)
+    attendees = attendee_set or None
+
     payload = gcc._build_event_payload(
         summary=summary,
         description=description,
@@ -221,7 +246,11 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
                        status="ok" if ok else "error")
             return {"status": "ok" if ok else "error"}
 
-        payload = _build_payload(session)
+        # Resolve client email so coach's GCal event also invites the registered client.
+        client_email = await _resolve_client_email(
+            pool, (session.get("client_id") or "").strip()
+        )
+        payload = _build_payload(session, extra_attendee_email=client_email)
         if not payload:
             return {"status": "skipped", "reason": "missing time"}
 
