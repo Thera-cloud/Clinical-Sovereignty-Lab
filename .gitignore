@@ -169,6 +169,8 @@ deploy-web.sh
 
 # Local agent heartbeat (machine-specific)
 data/mac_agent_alive.json
+# Runtime SSE / bridge fallback log — unbounded growth, not source of truth
+data/blue_fallback.jsonl
 
 # Block bypass patterns in any directory under dashboard/ and mobile/
 dashboard/**/admin_bypass*
