@@ -21,7 +21,7 @@ async def run_audit():
     )
     pool = await asyncpg.create_pool(db_url, min_size=1, max_size=2)
 
-    # Step 1: Verify test analysis exists
+    # Step 1: Verify test analysis exists (seed minimal row if missing)
     print("\n[1] Verifying test analysis exists...")
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -35,8 +35,37 @@ async def run_audit():
             f"| client={row['client_name']} | status={row['status']}"
         )
     else:
-        print("   FAIL Test analysis not found!")
-        return
+        print("   Seeding audit_test_session_001...")
+        from app.services.pg_data_helpers import upsert_classroom_analysis_pg
+
+        ok_seed = await upsert_classroom_analysis_pg(
+            pool,
+            {
+                "session_id": "audit_test_session_001",
+                "coach_id": "audit_lawyer_1_hw",
+                "client_id": "audit_student_1_hw",
+                "client_name": "Audit Student 1",
+                "family_id": "",
+                "status": "completed",
+                "metrics": {"total_duration_minutes": 45.0},
+                "therapeutic_presence_score": 7.0,
+                "transcript_text": "Sample transcript for audit testing.",
+            },
+        )
+        if not ok_seed:
+            print("   FAIL Could not seed test analysis row")
+            return
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT session_id, coach_id, client_id, client_name, status "
+                "FROM classroom_session_analyses WHERE session_id = $1",
+                "audit_test_session_001",
+            )
+        if row:
+            print(f"   OK Seeded: {row['session_id']} | status={row['status']}")
+        else:
+            print("   FAIL Seed verification failed")
+            return
 
     from app.services.pg_data_helpers import (
         get_classroom_analysis_pg,

@@ -355,6 +355,42 @@ async def delete_session_pg(db_pool, session_id: str) -> bool:
 # Classroom lived wisdom (session analyses)
 # ---------------------------------------------------------------------------
 
+def normalize_classroom_analysis_for_pg(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize analyzer / vault-shaped dicts for upsert_classroom_analysis_pg."""
+    from dataclasses import asdict, is_dataclass
+
+    if not analysis:
+        return {}
+    d = dict(analysis)
+    m = d.get("metrics")
+    if m is None:
+        d["metrics"] = {}
+    elif isinstance(m, dict):
+        pass
+    elif is_dataclass(m):
+        d["metrics"] = asdict(m)
+    else:
+        try:
+            d["metrics"] = dict(m)
+        except Exception:
+            d["metrics"] = {}
+    st = str(d.get("status") or "").strip().lower()
+    if st == "analyzed":
+        d["status"] = "completed"
+    elif not st:
+        if d.get("ai_analysis_pending") is True:
+            d["status"] = "assessing"
+        elif float(d.get("therapeutic_presence_score") or 0) > 0 or d.get("strengths"):
+            d["status"] = "completed"
+        else:
+            d["status"] = "pending_dojo_selection"
+    try:
+        d["therapeutic_presence_score"] = float(d.get("therapeutic_presence_score") or 0)
+    except Exception:
+        d["therapeutic_presence_score"] = 0.0
+    return d
+
+
 async def upsert_classroom_analysis_pg(db_pool, analysis: Dict) -> bool:
     """
     Persist classroom session analysis to PG so lived wisdom is not lost.
@@ -363,12 +399,15 @@ async def upsert_classroom_analysis_pg(db_pool, analysis: Dict) -> bool:
     if not db_pool or not analysis or not analysis.get("session_id"):
         return False
     try:
+        analysis = normalize_classroom_analysis_for_pg(analysis)
         session_id = analysis.get("session_id", "")
         coach_id = analysis.get("coach_id", "")
         client_id = analysis.get("client_id", "")
         client_name = (analysis.get("client_name") or "")[:256]
         family_id = (analysis.get("family_id") or "")[:128]
         status = analysis.get("status", "pending_dojo_selection")
+        if status == "analyzed":
+            status = "completed"
         if status not in ("pending_dojo_selection", "assessing", "completed"):
             status = "pending_dojo_selection"
         analyzed_at = analysis.get("analyzed_at")

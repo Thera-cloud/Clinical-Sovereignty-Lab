@@ -1782,7 +1782,8 @@ class ClassroomAnalyzer:
                             vtt_content=vtt_content,
                             full_analysis=final_analysis
                         )
-                        
+                        await self._dual_write_classroom_pg(final_analysis)
+
                         return True
                         
                 except json.JSONDecodeError as e:
@@ -2999,6 +3000,14 @@ class ClassroomAnalyzer:
                 payload["session_arc"] = analysis["session_arc"]
             if analysis.get("longitudinal_patterns"):
                 payload["longitudinal_patterns"] = analysis["longitudinal_patterns"]
+            merged_pg = dict(payload)
+            merged_pg["session_id"] = video_id
+            merged_pg["coach_id"] = coach_id
+            merged_pg["client_id"] = client_id or merged_pg.get("client_id") or ""
+            merged_pg["client_name"] = client_name or merged_pg.get("client_name") or ""
+            merged_pg["therapeutic_presence_score"] = float(tps)
+            merged_pg["status"] = "completed"
+            await self._dual_write_classroom_pg(merged_pg)
             await notify_coach(
                 coach_id=coach_id,
                 message_type="classroom_analysis_complete",
@@ -3023,6 +3032,31 @@ class ClassroomAnalyzer:
             pass
 
         return analysis
+
+    async def _dual_write_classroom_pg(self, merged_analysis: Dict[str, Any]) -> None:
+        # QUANTUM-CRYSTAL-ARCH: PG mirror for classroom_session_analyses; vault unchanged.
+        if not merged_analysis or not merged_analysis.get("session_id"):
+            return
+        db_pool = None
+        try:
+            from app.main import app as _app
+
+            db_pool = getattr(_app.state, "db_pool", None) if _app else None
+        except Exception:
+            db_pool = None
+        if not db_pool:
+            return
+        try:
+            from app.services.pg_data_helpers import upsert_classroom_analysis_pg
+
+            ok = await upsert_classroom_analysis_pg(db_pool, merged_analysis)
+            if ok:
+                print(
+                    "[Classroom→PG] upsert ok session="
+                    f"{merged_analysis.get('session_id')}"
+                )
+        except Exception as _pg_err:
+            print(f"[Classroom→PG] dual-write failed (non-fatal): {_pg_err}")
 
     async def _push_to_night_school(
         self,

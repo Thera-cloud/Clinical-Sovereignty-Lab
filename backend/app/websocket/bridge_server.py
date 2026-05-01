@@ -7773,9 +7773,40 @@ class AzureCortex:
         """Load the client's full story - who they are, their wounds, their growth"""
         client_id = profile.get("hardware_id")
         story_path = os.path.join(DATA_DIR, "Vaults", "Clients", client_id, "story.json")
-                
+
+        # QUANTUM-CRYSTAL-ARCH: PG-first classroom lived context for relational prompts.
+        classroom_context = ""
+        if client_id:
+            try:
+                _pool = globals().get("db_pool")
+                if _pool:
+                    from app.services.pg_data_helpers import (
+                        get_classroom_context_for_client_pg,
+                    )
+                    classroom_context = await get_classroom_context_for_client_pg(
+                        _pool, client_id
+                    )
+            except Exception as _pg_cc_err:
+                print(f">>> [CLASSROOM PG CONTEXT ERROR] {_pg_cc_err}")
+            if not (classroom_context or "").strip():
+                classroom_context = self._get_classroom_context(
+                    client_id, profile.get("family_id")
+                )
+
         if not os.path.exists(story_path):
-            return ""
+            assessment_only = await self._get_assessment_context(profile)
+            parts_early = []
+            if classroom_context:
+                parts_early.append(
+                    "RECENT COACHING INSIGHTS:\n" + classroom_context
+                )
+            if assessment_only:
+                parts_early.append(
+                    "SELF-ASSESSMENT RESULTS:\n"
+                    + assessment_only
+                    + "\nUse these scores to guide conversation — acknowledge strengths, gently explore growth areas.\nNever quote exact numbers to the client unless they ask."
+                )
+            return "\n\n".join(parts_early).strip()
                 
         try:
             with open(story_path, 'r') as f:
@@ -7852,8 +7883,7 @@ class AzureCortex:
         {remember}
         """
             
-            # Add Classroom context (coaching session insights)
-            classroom_context = self._get_classroom_context(client_id, profile.get("family_id"))
+            # Add Classroom context (PG-first; computed at method start)
             if classroom_context:
                 context += f"""
         
@@ -19384,7 +19414,26 @@ If 'challenge', respectfully push the coach's thinking."""
                 if current_profile and current_profile.get("role") in ["COACH", "ADMIN"]:
                     query = d.get("nate_query", d.get("text", ""))
                     client_context = d.get("client_id")
-                    
+
+                    wisdom_prefix = ""
+                    try:
+                        _pool = globals().get("db_pool")
+                        coach_hw = current_profile.get("hardware_id") or ""
+                        if _pool and client_context and coach_hw:
+                            from app.services.pg_data_helpers import (
+                                get_classroom_lived_wisdom_pg,
+                            )
+                            lw = await get_classroom_lived_wisdom_pg(
+                                _pool,
+                                coach_hw,
+                                client_id=client_context,
+                                limit=5,
+                            )
+                            if lw:
+                                wisdom_prefix = lw.strip() + "\n\n"
+                    except Exception as _lw_err:
+                        print(f"[Coach Nate] lived wisdom PG error: {_lw_err}")
+
                     if client_context:
                         registry = load_registry()
                         brief = coach_nexus_v2.get_presession_brief(
@@ -19395,8 +19444,12 @@ If 'challenge', respectfully push the coach's thinking."""
                         augmented_query = f"[Coach asking about {brief.get('client_name', 'client')}]: {query}"
                     else:
                         augmented_query = f"[Coach general query]: {query}"
-                    
-                    await cortex.process_interaction(current_profile, augmented_query, client_context=getattr(websocket, "_eviction_context", "main"))
+
+                    await cortex.process_interaction(
+                        current_profile,
+                        wisdom_prefix + augmented_query,
+                        client_context=getattr(websocket, "_eviction_context", "main"),
+                    )
             
             # === COACH: SAVE RECORDING METADATA ===
             elif t == "save_recording":

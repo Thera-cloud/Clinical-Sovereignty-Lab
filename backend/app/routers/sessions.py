@@ -51,8 +51,12 @@ DATA_DIR = Path(_settings.DATA_DIR)
 WORKBOOKS_DIR = Path(_settings.WORKBOOKS_DIR)
 
 from app.services.pg_data_helpers import (
-    load_sessions_pg, upsert_session_pg, delete_session_pg,
-    load_registry_pg, find_user_pg,
+    load_sessions_pg,
+    upsert_session_pg,
+    delete_session_pg,
+    load_registry_pg,
+    find_user_pg,
+    upsert_classroom_analysis_pg,
 )
 
 try:
@@ -128,7 +132,16 @@ async def auto_analyze_transcript(
         )
         
         print(f"[AutoAnalysis] Metrics extracted for {session_id}: {analysis.get('metrics', {}).get('total_duration_minutes', 0):.1f} min")
-        
+
+        try:
+            from app.main import app as _app
+
+            db_pg = getattr(_app.state, "db_pool", None) if _app else None
+            if db_pg:
+                await upsert_classroom_analysis_pg(db_pg, analysis)
+        except Exception as _ae_pg:
+            print(f"[AutoAnalysis] PG classroom dual-write (non-fatal): {_ae_pg}")
+
         # Mark as ready for AI analysis
         sessions = load_json(DATA_DIR / "sessions.json", [])
         for s in sessions:
@@ -1373,7 +1386,16 @@ async def archive_zoom_transcript(
             print(f"[Archive] Step 2: Metrics extracted - {analysis_result.get('metrics', {}).get('total_duration_minutes', 0):.1f} min session")
             target["nate_read_transcript_at"] = str(datetime.now())
             target["nate_extracted_metrics"] = True
-            
+
+            try:
+                db_pg = _get_db(request)
+                if db_pg:
+                    await upsert_classroom_analysis_pg(db_pg, analysis_result)
+            except Exception as _arc_pg:
+                _logger.warning(
+                    "archive_zoom_transcript: PG classroom dual-write: %s", _arc_pg
+                )
+
             # Queue AI analysis (will run in background and push to Night School)
             _classroom_analyzer.queue_ai_analysis(
                 session_id=session_id,
