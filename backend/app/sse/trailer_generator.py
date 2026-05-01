@@ -537,14 +537,15 @@ def _build_video_prompt(
     # CRITICAL-inline + full casting_locksheet (still used for Steps 3–4 still generation elsewhere).
     if pid == FAMILY_SANCTUARY_PRESET_ID:
         fuse = _FS_GROK_VIDEO_STYLE_PREFIX
-        vlock = _family_sanctuary_grok_video_casting_lock(scene_chars)
-        # Scene 12 JSON sometimes omits characters[] → empty vlock yielded wrong quartet; enforce silhouettes here.
-        if scene_num == 12 and not (vlock or "").strip():
+        # Scene 12: moderation-safe motion — silhouette/composition lock only (no age bands in Grok Video prompt).
+        if scene_num == 12:
             vlock = (
-                "CAST LOCK — nuclear family quartet SILHOUETTE ROLES ONLY distinct mother + father in fitted navy henley silhouette + "
-                "teen son taller + younger daughter dress/puffs — linked walking-toward-distant-sanctuary; FORBIDDEN four matching "
-                "women in ceremonial gowns priestess symmetry identical robes generic female quartet. "
+                "CAST LOCK — silhouette-outline ONLY: preserve exactly four distinct linked figures viewed from behind; "
+                "two taller outer silhouettes with two shorter between; motion keeps outline readable as one kin group marching "
+                "toward distant glow; forbid replacing cast with four identical women matching ceremonial gowns priestess rows. "
             )
+        else:
+            vlock = _family_sanctuary_grok_video_casting_lock(scene_chars)
         lead = _FS_GROK_VIDEO_SCENE1_PHOTOREAL_LEAD if scene_num == 1 else ""
         assembled = lead + fuse + vlock + motion_text
         return _append_dragon_negative_if_applicable(assembled, scene_num, pid)
@@ -1814,6 +1815,98 @@ def _family_sanctuary_scene_png_key(scene_num: int) -> str:
     return f"{FAMILY_SANCTUARY_SCENE_R2_PREFIX}/scene_{int(scene_num):02d}.png"
 
 
+# Step 3 surgical regen (PATH B drift fix): narrative + identity stack for audited scenes only.
+_FAMILY_SANCTUARY_AUDIT_REGEN_SCENES: frozenset[int] = frozenset({2, 3, 4, 5, 8, 9})
+
+_FAMILY_SANCT_AUDIT_SCENE_NARRATIVES: dict[int, str] = {
+    2: (
+        "Family in mirror chamber—mother's hand on daughter's shoulder, all four reacting to portal awakening. "
+        "Mercury glass mirror, fogged stone sanctum, hearth-amber bounce light. Daughter TWIN AFRO PUFFS with beads, "
+        "never single Afro."
+    ),
+    3: (
+        "Daughter reaches toward portal; mother BESIDE her protectively; father and son visible; four family ONLY. "
+        "Same mercury fogged stone chamber—vault/pillars paint cleanly to ALL frame edges—NO white or gray corner "
+        "rectangles, blank slabs, or UI-frame artifacts."
+    ),
+    4: (
+        "Family of four seeing portal pulse with energy—mother foreground center, father behind, son and daughter "
+        "flanking; ONLY four family members visible; mercury chamber continuity; fogged stone sanctum."
+    ),
+    5: (
+        "Family of four braced against portal force—son foreground, mother in background, father and daughter visible. "
+        "ONLY the four named family members; no other women, no extras."
+    ),
+    8: (
+        "Father at center frame; mother, son, daughter behind him mid-resolve to follow into portal. "
+        "ONLY four people: father, mother, son, daughter from refs—no robed extras, no ceremonial figures, no crowd."
+    ),
+    9: (
+        "Father takes step forward; mother, son, daughter closing ranks behind him. Four family members ONLY."
+    ),
+}
+
+_FAMILY_SANCT_AUDIT_LAYER2_TEXT_LOCKS = (
+    "MOTHER LOCK — AFRICAN AMERICAN BLACK WOMAN, late 30s to early 40s, DARK UMBER skin tone, twist-out crown braid "
+    "hairstyle, terracotta + sage green wrap dress with subtle West African textile (mudcloth/kente) accents at hem and "
+    "cuffs, warm protective matriarch presence. NEVER white skin, NEVER blonde hair, NEVER fair complexion, NEVER "
+    "European features, NEVER any non-Black appearance. SAME WOMAN as mother.png ref — identical face shape, identical "
+    "hair pattern, identical dress, identical body type. "
+    "FATHER LOCK — AFRICAN AMERICAN BLACK MAN, early 40s, deep umber skin, cropped hair with first hints of gray at "
+    "temples ONLY (NOT silver-fox, NOT elderly), short beard with temple salt, fitted dark navy henley shirt + dark "
+    "cargo pants + boots. SAME MAN as father.png ref — identical face, identical beard pattern, identical wardrobe. "
+    "DAUGHTER LOCK — BLACK GIRL age 10-12 (school-age proportions, NEVER toddler, NEVER teen), TWIN AFRO PUFFS with "
+    "colorful beads (NEVER single Afro, NEVER cornrows, NEVER straight hair, NEVER adult ages), bright YELLOW pocket "
+    "dress with green accents, green sneakers. SAME GIRL as daughter.png ref — identical face, identical twin puffs, "
+    "identical yellow dress. "
+    "SON LOCK — BLACK BOY age 13-15, fade haircut with short twists, graphic tee under earth-toned half-open overshirt, "
+    "dark jeans, sneakers. SAME BOY as son.png ref — identical face, identical hair, identical wardrobe. "
+)
+
+_FAMILY_SANCT_AUDIT_LAYER3_FAMILY_OF_FOUR = (
+    "FAMILY OF EXACTLY FOUR PEOPLE: Mother + Father + Son + Daughter ONLY. ABSOLUTELY NO additional people in frame. "
+    "NO extras in background, NO crowds, NO ceremonial attendants, NO robed strangers, NO other women, NO other "
+    "children, NO twins of any character, NO duplicate adults. If the scene shows the family, it shows EXACTLY these "
+    "four people from the ref images and no one else."
+)
+
+_FAMILY_SANCT_AUDIT_NEGATIVE = (
+    "FORBIDDEN: white woman, blonde hair, fair-skinned mother, European features, ceremonial gowns, priestess robes, "
+    "matching costumes for women, four matching adult women, extras in background, additional family members, twins, "
+    "duplicate characters, mother as different woman in different scenes, father as silver-fox elderly, daughter as "
+    "toddler, daughter as teenager, son as adult."
+)
+
+_FAMILY_SANCT_AUDIT_LAYER2_COMPACT = (
+    "REF-STRIP LAW: replicate mother/daughter/son/father tiles exactly — dark-umber Black mother (twist/braid crown, "
+    "terracotta+sage wrap dress); twin-puff+beads yellow dress daughter (~10–12); fade+twists son (~13–15); cropped hair "
+    "early-40s father (navy henley, temples-only salt)."
+)
+
+_FAMILY_SANCT_AUDIT_LAYER3_COMPACT = (
+    "EXACTLY four people — mother, father, son, daughter — no extras, duplicates, twins, crowds, robed strangers."
+)
+
+_FAMILY_SANCT_AUDIT_NEGATIVE_COMPACT = (
+    "FORBIDDEN: wrong-race mother, blonde mother, ceremonial-gown quartet, extras, duplicate cast, toddler/teen daughter, "
+    "silver-fox father — AND white/gray rectangles, blank corner panels, collage seams, bezel/crop placeholders in background."
+)
+
+
+def _family_sanctuary_audit_regen_prompt_suffix(*, compact: bool = False) -> str:
+    if compact:
+        return (
+            _FAMILY_SANCT_AUDIT_LAYER2_COMPACT
+            + _FAMILY_SANCT_AUDIT_LAYER3_COMPACT
+            + _FAMILY_SANCT_AUDIT_NEGATIVE_COMPACT
+        ).strip()
+    return (
+        _FAMILY_SANCT_AUDIT_LAYER2_TEXT_LOCKS
+        + _FAMILY_SANCT_AUDIT_LAYER3_FAMILY_OF_FOUR
+        + _FAMILY_SANCT_AUDIT_NEGATIVE
+    ).strip()
+
+
 def _neutral_storyboard_placeholder_png(width: int = 1152, height: int = 648) -> bytes:
     """Center column slate for cel plate (16:9). Model replaces with final hero in output."""
     import io
@@ -1895,9 +1988,10 @@ _FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT = (
 )
 
 _FAMILY_SANCT_MOTION_SCENE12_FAMILY_SILHOUETTE_ROLES = (
-    "SILHOUETTE_FAMILY_LOCK: visible DISTINCT roles — AA mother braid/crown silhouette + AA father cropped-beard NAVY henley fit + "
-    "teen AA son + younger daughter Afro-puffs/dress silhouette — quartet linked walking toward vista NOT four identical gowns "
-    "NOT priestesses NOT symmetrical cult line-up."
+    "SILHOUETTE_FAMILY_LOCK — composition-first only: four linked back-view figures; two taller outer silhouettes bracket two "
+    "shorter inner silhouettes; stature variation reads guardians-with-dependents WITHOUT naming ages or minors; wardrobe cues "
+    "only via outline (henley drape braid crown dress puffs) — NOT four identical women NOT ceremonial priestess symmetry "
+    "NOT matching gowns NOT clone quartet."
 )
 
 _FAMILY_SANCT_MOTION_FATHER_ARC_7_9 = (
@@ -2006,9 +2100,55 @@ def _build_family_sanctuary_cel_composite_plate(
     return buf.getvalue()
 
 
-def _family_sanctuary_cel_hero_prompt(scene_def: dict, doc: dict) -> str:
+_FAMILY_SANCT_CEL_AUDIT_COMPACT_INSTRUCTIONS = (
+    "CEL INPUT: wide plate — optional world-bible top-left + four stacked ref portraits — center is hero OUT only. "
+    "Match ref likenesses; seamless painterly backdrop to edges; forbid triptych chrome, gray storyboard slabs, corner "
+    "white/blank rectangles."
+)
+
+_FAMILY_SANCT_CHAMBER_THROUGHLINE_COMPACT = (
+    "CONTINUITY: same fogged stone mercury sanctum indoors (beats 1–10); jewel amber warmth — not cyclorama VOID."
+)
+
+
+def _family_sanctuary_cel_hero_prompt(scene_def: dict, doc: dict, *, audit_compact: bool = False) -> str:
     characters = list(scene_def.get("characters") or [])
     scene_num = int(scene_def.get("scene") or 0)
+
+    if audit_compact:
+        prefix = _get_style_prefix(scene_num, FAMILY_SANCTUARY_PRESET_ID)
+        narrative = (scene_def.get("prompt") or "").strip()
+        # Avoid duplicating preset casting_locksheet + full inline stacks (composite carries refs).
+        base = prefix + narrative
+        locks: list[str] = [_FAMILY_SANCTUARY_EXACT_FAMILY_LOCK, _FAMILY_SANCTUARY_COSTUME_LOCK]
+        if 1 <= scene_num <= 10:
+            locks.append(_FAMILY_SANCT_CHAMBER_THROUGHLINE_COMPACT)
+        if scene_num >= 11:
+            locks.append(_family_sanctuary_outdoor_throughline_sentence())
+        if "father" in characters or scene_num in (11, 12):
+            locks.append(_father_age_lock_sentence())
+        if scene_num == 11:
+            locks.append(
+                "SCENE11 EXTERIOR GEOMETRY LOCK — open sky ridgeline mountain path overlook only; forbid interior chamber mirror hall "
+                "vaulted ceiling or candlelit room cues."
+            )
+        if scene_num == 12:
+            locks.append(
+                "SCENE12 SILHOUETTE DIVERSITY — back-view family group only; forbid four identical women ceremonial robes priestess rows."
+            )
+        if scene_num == 12:
+            locks.append(
+                "SCENE12 TEXT BAN — render ZERO typography title logo subtitle watermark glyphs letters words flames shaped "
+                "as text forbidden; luminous painterly dusk vista ONLY — vector title will composite in FFmpeg later."
+            )
+        bible_note_c = ""
+        if 2 <= scene_num <= 10:
+            bible_note_c = (
+                "WORLD BIBLE sliver matches scene-one chamber palette — extrapolate SAME stone volumetrics hearth warmth."
+            )
+        cel = _FAMILY_SANCT_CEL_AUDIT_COMPACT_INSTRUCTIONS + (" " + bible_note_c if bible_note_c else "")
+        return " ".join(p for p in (base, " ".join(locks), cel) if p).strip()
+
     base = _build_consistent_prompt(
         scene_def.get("prompt") or "",
         characters,
@@ -2018,13 +2158,22 @@ def _family_sanctuary_cel_hero_prompt(scene_def: dict, doc: dict) -> str:
 
     prio = _family_sanctuary_priority_suffix(scene_def)
 
-    locks: list[str] = [_FAMILY_SANCTUARY_EXACT_FAMILY_LOCK, _FAMILY_SANCTUARY_COSTUME_LOCK]
+    locks = [_FAMILY_SANCTUARY_EXACT_FAMILY_LOCK, _FAMILY_SANCTUARY_COSTUME_LOCK]
     if 1 <= scene_num <= 10:
         locks.append(_family_sanctuary_chamber_throughline_sentence())
     if scene_num >= 11:
         locks.append(_family_sanctuary_outdoor_throughline_sentence())
     if "father" in characters or scene_num in (11, 12):
         locks.append(_father_age_lock_sentence())
+    if scene_num == 11:
+        locks.append(
+            "SCENE11 EXTERIOR GEOMETRY LOCK — open sky ridgeline mountain path overlook only; forbid interior chamber mirror hall "
+            "vaulted ceiling or candlelit room cues."
+        )
+    if scene_num == 12:
+        locks.append(
+            "SCENE12 SILHOUETTE DIVERSITY — back-view family group only; forbid four identical women ceremonial robes priestess rows."
+        )
     if scene_num == 12:
         locks.append(
             "SCENE12 TEXT BAN — render ZERO typography title logo subtitle watermark glyphs letters words flames shaped "
@@ -2181,6 +2330,202 @@ async def generate_family_sanctuary_hero_scenes(
         len(scenes),
         manifest["total_cost_usd"],
     )
+    return results
+
+
+async def regenerate_family_sanctuary_hero_scene_pngs(
+    project_id: str,
+    scene_nums: Sequence[int],
+    *,
+    cost_ceiling_usd: float | None = 15.0,
+    backup_name: str = "v2_backup",
+    audit_identity_strict: bool = False,
+    local_audit_review_dir: str | None = None,
+) -> list[dict]:
+    """Step 3 — regenerate specific family_sanctuary scene hero PNGs; backs up prior keys to *_<backup_name>.png on R2.
+
+    When ``audit_identity_strict=True`` (PATH B drift remediation), scenes in
+    ``_FAMILY_SANCTUARY_AUDIT_REGEN_SCENES`` use frozen narrative beats plus a **compact** cel prompt + Layer2/3/negative
+    stack (under Grok Imagine's ~8k prompt cap; ref plate still carries full likeness). World-bible strip for 2–10,
+    correct previous-frame chain, and quartet character list for cel composite.
+    Optional ``local_audit_review_dir``: if set (e.g. ``/tmp/gate1b_scenes``), each successful regenerated PNG is also
+    written as ``scene_NN_audit.png`` for SCP review gates.
+    """
+    want = sorted({int(n) for n in scene_nums if int(n) > 0})
+    if not want:
+        return []
+
+    doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
+    all_scenes = {int(s.get("scene") or 0): s for s in (doc.get("scenes") or [])}
+    for n in want:
+        if n not in all_scenes:
+            return [
+                {
+                    "scene": n,
+                    "status": f"error: scene {n} not in preset",
+                    "r2_key": _family_sanctuary_scene_png_key(n),
+                },
+            ]
+
+    out_chars = doc.get("output") or {}
+    char_prefix_raw = str(out_chars.get("r2_character_prefix") or "").strip()
+    char_prefix = char_prefix_raw if char_prefix_raw.endswith("/") else (char_prefix_raw + "/" if char_prefix_raw else "")
+
+    canonical_ref_urls: dict[str, str] = {}
+    for role in FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER:
+        k = f"{char_prefix.rstrip('/')}/{role}.png"
+        canonical_ref_urls[role] = presigned_url(k) or k
+
+    world_bible_png: bytes | None = None
+    if audit_identity_strict:
+        world_bible_png = await download_bytes(_family_sanctuary_scene_png_key(1))
+        if world_bible_png:
+            logger.info("[FAMILY-HERO-REGEN] World bible strip from scene_01 (%d bytes)", len(world_bible_png))
+        else:
+            logger.warning("[FAMILY-HERO-REGEN] audit mode: missing scene_01.png for world bible strip")
+
+    results: list[dict] = []
+    running_cost = 0.0
+    last_generated_num: int | None = None
+    last_hero_png: bytes | None = None
+
+    async with GROK_IMAGINE_LOCK:
+        for num in want:
+            scene = dict(all_scenes[num])
+            title = str(scene.get("title") or f"scene_{num}")
+            characters = list(scene.get("characters") or [])
+
+            if cost_ceiling_usd is not None and running_cost + FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD > cost_ceiling_usd:
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "r2_url": None,
+                        "r2_key": _family_sanctuary_scene_png_key(num),
+                        "status": "stopped_cost_ceiling",
+                        "cost": 0,
+                    },
+                )
+                break
+
+            hero_key = _family_sanctuary_scene_png_key(num)
+            backup_key = f"{FAMILY_SANCTUARY_SCENE_R2_PREFIX}/scene_{int(num):02d}_{backup_name}.png"
+            pre_existing = await download_bytes(hero_key)
+            backup_url: str | None = None
+            if pre_existing:
+                backup_url = await store_image(pre_existing, backup_key)
+                logger.info("[FAMILY-HERO-REGEN] scene %d backed up → %s", num, backup_key)
+            else:
+                logger.warning("[FAMILY-HERO-REGEN] scene %d: no existing PNG to back up", num)
+
+            prev_hero_png: bytes | None = None
+            pn = num - 1
+            if pn >= 1:
+                if last_generated_num == pn and last_hero_png is not None:
+                    prev_hero_png = last_hero_png
+                else:
+                    prev_hero_png = await download_bytes(_family_sanctuary_scene_png_key(pn))
+
+            four_refs: list[bytes] = []
+            for role in FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER:
+                key_png = f"{char_prefix.rstrip('/')}/{role}.png"
+                blob = await download_bytes(key_png)
+                if blob:
+                    four_refs.append(blob)
+                else:
+                    logger.warning("[FAMILY-HERO-REGEN] Missing R2 ref for role=%s — solid pad", role)
+                    four_refs.append(_solid_rgb_png_bytes(64, 64))
+
+            center_png = _neutral_storyboard_placeholder_png()
+            use_bible = bool(
+                audit_identity_strict
+                and world_bible_png
+                and 2 <= num <= 10,
+            )
+            composite_jpg = _build_family_sanctuary_cel_composite_plate(
+                four_refs,
+                center_png,
+                prev_hero_png,
+                world_bible_png if use_bible else None,
+            )
+            composite_key = f"sse/studio/projects/{project_id}/step3/cel_scene_{num:02d}_regen.jpg"
+
+            if audit_identity_strict and num in _FAMILY_SANCTUARY_AUDIT_REGEN_SCENES:
+                narr = _FAMILY_SANCT_AUDIT_SCENE_NARRATIVES.get(num)
+                if narr:
+                    scene["prompt"] = narr
+                scene["characters"] = ["mother", "daughter", "son", "father"]
+                # Grok Imagine max prompt ~8000 chars — audit stack + full preset locks can overflow; compact path preserves ref-plate fidelity.
+                hero_prompt = _family_sanctuary_cel_hero_prompt(
+                    scene, doc, audit_compact=True
+                ) + " " + _family_sanctuary_audit_regen_prompt_suffix(compact=True)
+            else:
+                hero_prompt = _family_sanctuary_cel_hero_prompt(scene, doc)
+
+            try:
+                composite_url = await store_bytes(composite_jpg, composite_key, "image/jpeg")
+                if composite_url.startswith("mock://"):
+                    raise RuntimeError("R2 unavailable — composite upload mocked")
+
+                hero_bytes = await generate_image(hero_prompt, source_image_url=composite_url)
+                hero_url = await store_image(hero_bytes, hero_key)
+                last_hero_png = hero_bytes
+                last_generated_num = num
+                running_cost += FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "scene_characters": list(scene.get("characters") or []),
+                        "cel_strip_roles": list(FAMILY_SANCTUARY_CEL_REF_ROLES_ORDER),
+                        "backup_r2_key": backup_key if pre_existing else None,
+                        "backup_r2_url": backup_url,
+                        "r2_url": hero_url,
+                        "r2_key": hero_key,
+                        "composite_r2_key": composite_key,
+                        "status": "success",
+                        "cost": FAMILY_SANCTUARY_HERO_SCENE_IMAGE_COST_USD,
+                    },
+                )
+                logger.info("[FAMILY-HERO-REGEN] scene %d regenerated", num)
+                if local_audit_review_dir and audit_identity_strict:
+                    from pathlib import Path
+
+                    ap = Path(local_audit_review_dir)
+                    ap.mkdir(parents=True, exist_ok=True)
+                    ap.joinpath(f"scene_{num:02d}_audit.png").write_bytes(hero_bytes)
+                    logger.info("[FAMILY-HERO-REGEN] audit PNG → %s", ap / f"scene_{num:02d}_audit.png")
+            except Exception as e:
+                logger.warning("[FAMILY-HERO-REGEN] scene %d failed: %s", num, e)
+                results.append(
+                    {
+                        "scene": num,
+                        "title": title,
+                        "r2_url": None,
+                        "r2_key": hero_key,
+                        "backup_r2_key": backup_key if pre_existing else None,
+                        "status": f"error: {str(e)[:160]}",
+                        "cost": 0,
+                    },
+                )
+
+            await asyncio.sleep(5)
+
+    manifest = {
+        "project_id": project_id,
+        "preset_id": FAMILY_SANCTUARY_PRESET_ID,
+        "generated_at": datetime.utcnow().isoformat(),
+        "pipeline": "family_sanctuary_step3_cel_hero_subset_regen",
+        "character_ref_urls": canonical_ref_urls,
+        "requested_scenes": want,
+        "scene_hero_prefix": FAMILY_SANCTUARY_SCENE_R2_PREFIX,
+        "backup_suffix": backup_name,
+        "scenes": results,
+        "success": sum(1 for r in results if r.get("status") == "success"),
+        "total_cost_usd": round(sum(float(r.get("cost") or 0) for r in results), 4),
+    }
+    await _save_manifest_to_r2(project_id, manifest)
+    logger.info("[FAMILY-HERO-REGEN] subset complete success=%s", manifest["success"])
     return results
 
 
