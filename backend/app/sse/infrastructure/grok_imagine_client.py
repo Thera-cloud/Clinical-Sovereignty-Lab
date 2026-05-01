@@ -196,6 +196,8 @@ async def generate_video(
     if not key:
         raise RuntimeError("XAI_API_KEY not set — cannot call Grok Video")
 
+    # Payload is model-dependent; preset output.resolution (e.g. 1920x1080) is not wired here —
+    # xAI returns native dimensions (often ~848x480 observed) unless/until API documents width/height.
     payload: dict = {"model": "grok-imagine-video", "prompt": prompt}
     if source_image_url:
         payload["image_url"] = source_image_url

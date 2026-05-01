@@ -427,6 +427,13 @@ _FS_GROK_VIDEO_STYLE_PREFIX = (
     "16:9 cinematic — "
 )
 
+# Scene 1 only: Grok-video sometimes ignores generic NOT-anime fuse — prepend this full-strength anchor for Act1 open beat.
+_FS_GROK_VIDEO_SCENE1_PHOTOREAL_LEAD = (
+    "SCENE1 PHOTOREAL ANCHOR: live-action cinematic fantasy film still LOOK — volumetric jewel light photoreal painterly DEPTH "
+    "(match Scenes 2–10 still style) — FORBIDDEN animated cartoon Flash/Toon shaded look FORBIDDEN flat 2D cel FORBIDDEN anime "
+    "FORBIDDEN Saturday-morning illustration — MUST READ as photographed practical fantasy miniature stage feel NOT drawn series. "
+)
+
 
 def _family_sanctuary_grok_video_casting_lock(character_ids: list[str]) -> str:
     if not character_ids:
@@ -531,7 +538,15 @@ def _build_video_prompt(
     if pid == FAMILY_SANCTUARY_PRESET_ID:
         fuse = _FS_GROK_VIDEO_STYLE_PREFIX
         vlock = _family_sanctuary_grok_video_casting_lock(scene_chars)
-        assembled = fuse + vlock + motion_text
+        # Scene 12 JSON sometimes omits characters[] → empty vlock yielded wrong quartet; enforce silhouettes here.
+        if scene_num == 12 and not (vlock or "").strip():
+            vlock = (
+                "CAST LOCK — nuclear family quartet SILHOUETTE ROLES ONLY distinct mother + father in fitted navy henley silhouette + "
+                "teen son taller + younger daughter dress/puffs — linked walking-toward-distant-sanctuary; FORBIDDEN four matching "
+                "women in ceremonial gowns priestess symmetry identical robes generic female quartet. "
+            )
+        lead = _FS_GROK_VIDEO_SCENE1_PHOTOREAL_LEAD if scene_num == 1 else ""
+        assembled = lead + fuse + vlock + motion_text
         return _append_dragon_negative_if_applicable(assembled, scene_num, pid)
 
     prefix = _get_style_prefix(scene_num, pid)
@@ -1868,13 +1883,21 @@ _FAMILY_SANCT_MOTION_INDOOR_WORLD_BIBLE_1_10 = (
 )
 
 _FAMILY_SANCT_MOTION_SCENE11_OUTDOOR_VISTA = (
-    "ACT3 EXTERIOR: golden-hour wide landscape pullback awe scale serene invitation geography distinct "
-    "from Acts 1–10 enclosed chamber."
+    "ACT3 VISTA_LOCK EXTERIOR ONLY: OPEN SKY golden-hour luminous painterly landscape — wide cinematic pullback awe-scale serene "
+    "invitation; family four small/mid on ridge crest OR winding hill path LOOKING OUT at layered distant sanctuary-city spires "
+    "terraced glow amber particulate drift. FORBIDDEN interior chamber vaulted stone mirror sanctum ceiling NO standing inside "
+    "a hall LOOKING UP at ceiling — WORLD GEOGRAPHY must read OUTDOORS not Acts1–10 enclosed sanctum."
 )
 
 _FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT = (
     "SCENE12: NO readable text logos subtitles captions in-frame — clean lower-third for FFmpeg drawtext; dusk-gold painterly "
     "silhouettes embers negative space."
+)
+
+_FAMILY_SANCT_MOTION_SCENE12_FAMILY_SILHOUETTE_ROLES = (
+    "SILHOUETTE_FAMILY_LOCK: visible DISTINCT roles — AA mother braid/crown silhouette + AA father cropped-beard NAVY henley fit + "
+    "teen AA son + younger daughter Afro-puffs/dress silhouette — quartet linked walking toward vista NOT four identical gowns "
+    "NOT priestesses NOT symmetrical cult line-up."
 )
 
 _FAMILY_SANCT_MOTION_FATHER_ARC_7_9 = (
@@ -1891,6 +1914,7 @@ def _family_sanctuary_motion_prompt_layers(scene_num: int) -> str:
     if scene_num == 11:
         parts.append(_FAMILY_SANCT_MOTION_SCENE11_OUTDOOR_VISTA)
     if scene_num == 12:
+        parts.append(_FAMILY_SANCT_MOTION_SCENE12_FAMILY_SILHOUETTE_ROLES)
         parts.append(_FAMILY_SANCT_MOTION_SCENE12_NO_AI_TEXT)
     if 7 <= scene_num <= 9:
         parts.append(_FAMILY_SANCT_MOTION_FATHER_ARC_7_9)
@@ -2929,6 +2953,7 @@ async def generate_family_sanctuary_step5_motion(
     local_dir: str | None = None,
     preview_path: str | None = None,
     inter_scene_delay_seconds: float = 8.0,
+    scenes_to_regenerate: list[int] | None = None,
 ) -> dict:
     """Step 5: twelve motion clips from FS hero PNGs → local disk + ``sse/trailer/family_sanctuary/motion/``.
 
@@ -2940,6 +2965,10 @@ async def generate_family_sanctuary_step5_motion(
     Builds ``tmp/family_sanctuary_step5_preview.mp4`` (low-res motion-only crossfades).
 
     GATE: Caller must pause for user approval before Step 6 narration/music/remux (~\$ spend).
+
+    If ``scenes_to_regenerate`` is set (e.g. ``[1, 11, 12]``), only those scenes (1–12) are processed; Grok Video is forced;
+    preset Ken Burns fallback is suppressed for those runs (failures stay ``failed`` and existing files on disk are left untouched).
+    Cost ceiling raised to at least ``FAMILY_SANCTUARY_STEP5_REGEN_CEILING_USD`` (default 15 USD) over the regenerated subset.
     """
     repo_root = Path(__file__).resolve().parents[3]
     doc = _load_preset_document(FAMILY_SANCTUARY_PRESET_ID)
@@ -2955,9 +2984,21 @@ async def generate_family_sanctuary_step5_motion(
     motion_map = _motion_prompts_map(FAMILY_SANCTUARY_PRESET_ID)
     results: list[dict] = []
     running_cost = 0.0
+    regeneration_mode = bool(scenes_to_regenerate)
+    if regeneration_mode:
+        proc_scenes = sorted({int(x) for x in (scenes_to_regenerate or []) if 1 <= int(x) <= 12})
+    else:
+        proc_scenes = list(range(1, 13))
+
+    policy_eff = dict(policy)
+    if regeneration_mode:
+        policy_eff["force_grok"] = True
+        policy_eff["ken_burns_only"] = False
+        reg_ceiling = float(os.getenv("FAMILY_SANCTUARY_STEP5_REGEN_CEILING_USD", "15"))
+        policy_eff["ceiling"] = max(policy_eff["ceiling"], reg_ceiling)
 
     async with GROK_IMAGINE_LOCK:
-        for scene_num in range(1, 13):
+        for scene_num in proc_scenes:
             slot = round(_family_sanctuary_step5_motion_slot_duration(scene_num, doc), 4)
             hero_key = _family_sanctuary_scene_png_key(scene_num)
             img_uri = presigned_url(hero_key, expires_in=7200)
@@ -2969,23 +3010,35 @@ async def generate_family_sanctuary_step5_motion(
             final_mp4 = os.path.join(motion_dir, f"scene_{scene_num:02d}.mp4")
             vid_bytes_opt: Optional[bytes] = None
             cost_this = 0.0
-            method = "ken_burns"
+            method = "grok_required" if regeneration_mode else "ken_burns"
 
             try_grok = bool(
-                policy["force_grok"] or (
-                    not policy["ken_burns_only"]
-                    and running_cost + policy["est_per_clip"] <= float(policy["ceiling"]) + 1e-6
+                policy_eff["force_grok"] or (
+                    not policy_eff["ken_burns_only"]
+                    and running_cost + policy_eff["est_per_clip"] <= float(policy_eff["ceiling"]) + 1e-6
                 ),
             )
 
             if try_grok and not img_uri:
-                logger.warning(
-                    "[FS-MOTION] Grok path needs presigned URL; missing for %s — Ken Burns fallback",
-                    hero_key,
-                )
+                if regeneration_mode:
+                    logger.error(
+                        "[FS-MOTION] Surgical regen scene %d: missing presigned URL for %s — cannot call Grok.",
+                        scene_num,
+                        hero_key,
+                    )
+                else:
+                    logger.warning(
+                        "[FS-MOTION] Grok path needs presigned URL; missing for %s — Ken Burns fallback",
+                        hero_key,
+                    )
 
             if try_grok and img_uri:
-                logger.info("[FS-MOTION] Scene %d Grok (running ~\$%.2f / ceiling \$%.2f)", scene_num, running_cost, policy["ceiling"])
+                logger.info(
+                    "[FS-MOTION] Scene %d Grok (running ~\$%.2f / ceiling \$%.2f)",
+                    scene_num,
+                    running_cost,
+                    policy_eff["ceiling"],
+                )
                 try:
                     video_id = await generate_video(motion_prompt, source_image_url=img_uri)
                     video_url_remote: str | None = None
@@ -3005,22 +3058,30 @@ async def generate_family_sanctuary_step5_motion(
                                 if vr.status == 200:
                                     vid_bytes_opt = await vr.read()
                                     method = "grok_video"
-                                    cost_this = float(policy["est_per_clip"])
+                                    cost_this = float(policy_eff["est_per_clip"])
                 except Exception as e:
                     logger.warning("[FS-MOTION] Grok scene %d error: %s", scene_num, e)
 
             if vid_bytes_opt is None:
-                work_kb = tempfile.mkdtemp(prefix="fs_kb_")
-                try:
-                    kb_path = os.path.join(work_kb, f"scene_{scene_num:02d}.mp4")
-                    ok_kb = await _ken_burns_fallback(hero_key, kb_path, duration=max(0.4, float(slot)))
-                    if ok_kb and os.path.isfile(kb_path):
-                        with open(kb_path, "rb") as f:
-                            vid_bytes_opt = f.read()
-                        method = "ken_burns"
-                        cost_this = 0.0
-                finally:
-                    shutil.rmtree(work_kb, ignore_errors=True)
+                if regeneration_mode:
+                    logger.error(
+                        "[FS-MOTION] Surgical regen scene %d FAILED (Grok or download) — NOT using Ken Burns; "
+                        "existing scene_%02d.mp4 left unchanged if present.",
+                        scene_num,
+                        scene_num,
+                    )
+                else:
+                    work_kb = tempfile.mkdtemp(prefix="fs_kb_")
+                    try:
+                        kb_path = os.path.join(work_kb, f"scene_{scene_num:02d}.mp4")
+                        ok_kb = await _ken_burns_fallback(hero_key, kb_path, duration=max(0.4, float(slot)))
+                        if ok_kb and os.path.isfile(kb_path):
+                            with open(kb_path, "rb") as f:
+                                vid_bytes_opt = f.read()
+                            method = "ken_burns"
+                            cost_this = 0.0
+                    finally:
+                        shutil.rmtree(work_kb, ignore_errors=True)
 
             status = "failed"
             uploaded_url: str | None = None
@@ -3089,7 +3150,9 @@ async def generate_family_sanctuary_step5_motion(
     report: dict[str, object] = {
         "preset_id": FAMILY_SANCTUARY_PRESET_ID,
         "step": "family_sanctuary_step5_motion",
-        "grok_budget_policy": policy,
+        "grok_budget_policy": policy_eff,
+        "regeneration_mode": regeneration_mode,
+        "scenes_processed": proc_scenes,
         "total_cost_usd_assumed_running": running_cost,
         "motion_local_dir": motion_dir,
         "clips": results,
