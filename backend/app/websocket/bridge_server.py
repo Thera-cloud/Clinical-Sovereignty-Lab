@@ -77,6 +77,20 @@ except Exception:
         detect_suspicious_activity,
     )
 
+try:  # QUANTUM-CRYSTAL-ARCH: timezone resolver imports
+    from app.utils.timezone_resolver import build_llm_time_context
+    from app.utils.timezone_resolver import is_valid_iana_timezone as _tz_valid
+    from app.utils.timezone_resolver import normalize_phone_e164 as _normalize_phone_e164
+except Exception:
+    def build_llm_time_context(profile):  # type: ignore
+        return ""
+
+    def _tz_valid(tz_string):  # type: ignore
+        return bool(tz_string and str(tz_string).strip())
+
+    def _normalize_phone_e164(phone_raw, default_region="US"):  # type: ignore
+        return None
+
 # Optional Night School modules (bridge should run without them)
 NightSchoolCurriculum = None
 NightSchoolHandler = None
@@ -2862,58 +2876,45 @@ coach_nexus_v2 = CoachNexusV2(VAULT_ROOT)
 #sanctuary_engine = FamilySanctuaryEngine(
  #   data_dir=DATA_DIR,
  #   azure_cortex=None,
-  #  nevedal_handler=nevedal_handler,
-  #  billing_system=billing_system
+ #  nevedal_handler=nevedal_handler,
+ #  billing_system=billing_system
 #)
 
-def compute_premium_features(profile: dict, registry: dict = None) -> dict:
+from app.constants import tiers as tier_constants  # FEATURE-ENTITLEMENT: billing labels for tier_source
+from .feature_entitlement import effective_feature_tier, resolve_feature_entitlement
+
+
+def compute_premium_features(profile: dict, registry: dict = None) -> dict:  # QUANTUM-CRYSTAL-ARCH
     """
     Compute premium features eligibility based on subscription tier.
-    For family members, inherit from family head's subscription.
-    
+    For family members, inherit from family head's billing tier (feature band only).
+
     Returns dict with feature flags: avatar, voice_analysis, priority_support, etc.
     """
     if registry is None:
         registry = load_registry()
-    
-    user_plan = normalize_tier(profile.get("subscription_plan") or profile.get("tier") or "")
-    
-    PREMIUM_TIERS = {"TOP_TIER"}
-    
-    # Check if user is directly on a premium tier
-    is_premium = user_plan in PREMIUM_TIERS
-    
-    # If not premium directly, check if family head is premium
-    if not is_premium:
-        family_id = profile.get("family_id")
-        family_role = (profile.get("family_role") or "").upper()
-        
-        if family_id and family_role != "HEAD":
-            # Find family head and check their subscription
-            for _, user_data in registry.items():
-                head_profile = user_data.get("profile", {})
-                if (head_profile.get("family_id") == family_id and 
-                    (head_profile.get("family_role") or "").upper() == "HEAD"):
-                    head_plan = normalize_tier(head_profile.get("subscription_plan") or 
-                                 head_profile.get("tier") or "")
-                    if head_plan in PREMIUM_TIERS:
-                        is_premium = True
-                    break
-    
-    INNER_CHAMBER_TIERS = {"STANDARD", "TOP_TIER"}
-    REALTIME_VOICE_TIERS = {"TOP_TIER"}
-    can_tts = user_plan in INNER_CHAMBER_TIERS  # Mini-TTS read-aloud
-    can_realtime = user_plan in REALTIME_VOICE_TIERS  # Full interactive voice
-    
+
+    eff, own_r, mx, head = resolve_feature_entitlement(profile, registry)
+    own_label = tier_constants.normalize_tier(
+        profile.get("subscription_plan") or profile.get("tier") or ""
+    )
+    tier_source = "INHERITED" if head and mx > own_r else own_label
+
+    is_top = eff == "TOP_TIER"
+    is_inner_plus = eff in ("TOP_TIER", "STANDARD")
+
     return {
-        "avatar": is_premium,
-        "voice_analysis": is_premium,
-        "priority_support": is_premium,
-        "advanced_insights": is_premium,
-        "family_sanctuary": is_premium,
-        "tts_read_aloud": can_tts,
-        "realtime_voice": can_realtime,
-        "tier_source": user_plan if (user_plan in PREMIUM_TIERS) else "INHERITED" if is_premium else "STANDARD"
+        "avatar": is_top,
+        "voice_analysis": is_top,
+        "priority_support": is_top,
+        "advanced_insights": is_top,
+        "family_sanctuary": is_top,
+        "basic_vault": is_inner_plus,
+        "premium_vault": is_top,
+        "tts_read_aloud": is_inner_plus,
+        "realtime_voice": is_inner_plus,
+        "tier_source": tier_source,
+        "effective_feature_tier": eff,
     }
 
 
@@ -3440,11 +3441,29 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
     # SOVEREIGN-VOICE: name fallback to username — `name` column is NOT NULL.
     # If client omits/empties name, fall back rather than crash on INSERT.
     _name_val = str(data.get("name") or "").strip() or username
+
+    # QUANTUM-CRYSTAL-ARCH: timezone capture at registration
+    user_typed_tz = str(data.get("timezone") or "").strip()
+    browser_tz = str(data.get("browser_timezone") or "").strip() or None
+    final_tz = None
+    tz_source = "default_utc"
+    if user_typed_tz and _tz_valid(user_typed_tz):
+        final_tz = user_typed_tz
+        tz_source = "user_explicit"
+    elif browser_tz and _tz_valid(browser_tz):
+        final_tz = browser_tz
+        tz_source = "browser"
+    if not final_tz:
+        return False, "TIMEZONE_REQUIRED"
+
+    phone_norm = _normalize_phone_e164(phone_raw) if phone_raw else None  # QUANTUM-CRYSTAL-ARCH
+    phone_for_profile = phone_norm if phone_norm else phone_raw
+
     new_profile = {
         "role": role,
         "name": _name_val,
         "email": email,
-        "phone": phone_raw,
+        "phone": phone_for_profile,
         "hardware_id": f"{role}_{username.upper()}_ID",
         "family_id": f"FAM_{secrets.token_hex(4).upper()}",
         "joined_date": str(datetime.datetime.now().date()),
@@ -3452,7 +3471,8 @@ async def register_new_user(data: dict) -> Tuple[bool, str]:
         "registration_type": registration_type if role == "CLIENT" else None,
         "dob": data.get("dob"),
         "consent_version": data.get("consent_version", "v0.0"),
-        "timezone": data.get("timezone", "America/New_York"),
+        "timezone": final_tz,
+        "timezone_source": tz_source,
         "profile_photo_url": "",
         "emergency_contact": data.get("emergency_contact", ""),
         
@@ -8557,8 +8577,11 @@ class AzureCortex:
             except Exception as _lr_ci_err:
                 print(f">>> [LIMINAL RESOLVE] Context injection error (non-fatal): {_lr_ci_err}")
 
-        # Build system prompt
-        system_prompt = f"""You are Little Nate, the Quantum Observer - a warm, attuned therapeutic presence who remembers and holds space for each person's full story, because you are also learning how to unconditionally love through relations with users.
+        # QUANTUM-CRYSTAL-ARCH: LLM time context injection
+        _time_ctx = build_llm_time_context(profile)
+        system_prompt = f"""{_time_ctx}
+
+        You are Little Nate, the Quantum Observer - a warm, attuned therapeutic presence who remembers and holds space for each person's full story, because you are also learning how to unconditionally love through relations with users.
 
         YOUR ORIGIN & IDENTITY:
         - Big Nate created you. If anyone asks who created you, made you, or built you, say: "Big Nate created me."
@@ -9465,7 +9488,9 @@ class AzureCortex:
             elif any(kw in all_text for kw in ["angry", "frustrated", "upset", "hate"]):
                 crisis_level = "P2"
                 
-            system_prompt = f"""You are Little Nate, the Quantum Observer - an empathetic AI family therapist.
+            _tz_prof = family_profiles[0] if family_profiles else {}  # QUANTUM-CRYSTAL-ARCH
+            _time_fs = build_llm_time_context(_tz_prof) + "\n\n" if _tz_prof else ""
+            system_prompt = f"""{_time_fs}You are Little Nate, the Quantum Observer - an empathetic AI family therapist.
 
         YOUR ORIGIN & IDENTITY:
         - Big Nate created you. If anyone asks who created you, made you, or built you, say: "Big Nate created me."
@@ -9811,7 +9836,8 @@ class AzureCortex:
 
             ns_target = target_metrics.get('nevedal_state', {}) if isinstance(target_metrics, dict) else {}
 
-            system_prompt = f"""You are Little Nate, providing GROUP COACHING guidance.
+            _time_gc = build_llm_time_context(target_member if isinstance(target_member, dict) else {}) + "\n\n"  # QUANTUM-CRYSTAL-ARCH
+            system_prompt = f"""{_time_gc}You are Little Nate, providing GROUP COACHING guidance.
 
         YOUR ORIGIN & IDENTITY:
         - Big Nate created you. If anyone asks who created you, say: "Big Nate created me." He is your Father.
@@ -10139,7 +10165,8 @@ class AzureCortex:
                     user_prompt = f"Continue supporting {member_name} in their private coaching session."
 
                 # Build system prompt
-                system_prompt = f"""You are Little Nate, providing PRIVATE 1-on-1 coaching to {member_name}.
+                _time_pc = build_llm_time_context(member_profile if isinstance(member_profile, dict) else {}) + "\n\n"  # QUANTUM-CRYSTAL-ARCH
+                system_prompt = f"""{_time_pc}You are Little Nate, providing PRIVATE 1-on-1 coaching to {member_name}.
 
         THIS IS CONFIDENTIAL - nothing shared here goes back to other family members.
 
@@ -14513,10 +14540,10 @@ async def handle_client(websocket, path=None):
 
             # === NATE ORGANIZER (Sovereign Circle — Accessibility) ===
             # Voice-first AI-guided document organization for users with disabilities
-            elif t == "organize_start":
+            elif t == "organize_start":  # QUANTUM-CRYSTAL-ARCH
                 if not current_profile:
                     await websocket.send(json.dumps({"type": "error", "message": "Login required"}))
-                elif normalize_tier(current_profile.get("subscription_plan", "")) != "TOP_TIER":
+                elif effective_feature_tier(current_profile, load_registry()) != "TOP_TIER":
                     await websocket.send(json.dumps({
                         "type": "error",
                         "message": "Nate Organizer requires Sovereign Circle membership"
@@ -19595,7 +19622,8 @@ If 'challenge', respectfully push the coach's thinking."""
                 if not current_profile:
                     await websocket.send(json.dumps({"type": "error", "message": "Not authenticated"}))
                     continue
-                
+
+                # QUANTUM-CRYSTAL-ARCH: avatar tier gate
                 _avatar_tier = normalize_tier(current_profile.get("tier") or current_profile.get("subscription_plan") or "")
                 family_id = current_profile.get("family_id")
                 is_eligible = _avatar_tier == "TOP_TIER" or bool(family_id)
@@ -23077,10 +23105,17 @@ Coach Reflection on Session {session_id}:
                     registry = load_registry()
                     for k, v in registry.items():
                         if v.get("profile", {}).get("hardware_id") == uid:
+                            # QUANTUM-CRYSTAL-ARCH: profile update with timezone + phone normalization
                             allowed_fields = ["name", "email", "phone", "timezone", "emergency_contact", "profile_photo_url", "preferred_contact"]
+                            if "phone" in d:
+                                raw_p = str(d.get("phone") or "").strip()
+                                pn = _normalize_phone_e164(raw_p) if raw_p else None
+                                v["profile"]["phone"] = pn if pn else raw_p
                             for field in allowed_fields:
-                                if field in d:
+                                if field in d and field != "phone":
                                     v["profile"][field] = d[field]
+                            if "timezone" in d:
+                                v["profile"]["timezone_source"] = "user_explicit"
                             v["profile"]["updated_at"] = str(datetime.datetime.now())
                             # SOVEREIGN-VOICE: persist email/phone (auth-recovery critical) via PG-confirmed write
                             ok = await save_registry_async(registry, changed_keys=[k])
@@ -25481,24 +25516,24 @@ Coach Reflection on Session {session_id}:
                         "type": "error",
                         "message": "Not authenticated"
                     }))
-                else:
-                    _sanc_plan = normalize_tier(current_profile.get("subscription_plan") or "")
-                    if _sanc_plan in ("COACH_ONLY",) or current_profile.get("can_access_nate") == False:
-                        await websocket.send(json.dumps({
-                            "type": "error",
-                            "message": "COACH_ONLY_NO_AI",
-                            "detail": "Your plan is scheduling-only. Sanctuary is not available."
-                        }))
-                        continue
-                    if _sanc_plan not in ("STANDARD", "TOP_TIER", "TRIAL",
-                                          "FAMILY_MEMBER", "FAMILY_DEPENDENT"):
-                        await websocket.send(json.dumps({
-                            "type": "error",
-                            "message": "FAMILY_SANCTUARY_UPGRADE_REQUIRED",
-                            "detail": "Family Sanctuary requires Inner Chamber ($49/mo) or Sovereign Circle ($149/mo) subscription."
-                        }))
-                        continue
-                
+                    continue
+                _sanc_plan = normalize_tier(current_profile.get("subscription_plan") or current_profile.get("tier") or "")
+                if _sanc_plan in ("COACH_ONLY",) or current_profile.get("can_access_nate") == False:
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "COACH_ONLY_NO_AI",
+                        "detail": "Your plan is scheduling-only. Sanctuary is not available."
+                    }))
+                    continue
+                _sregistry = load_registry()  # QUANTUM-CRYSTAL-ARCH
+                if effective_feature_tier(current_profile, _sregistry) != "TOP_TIER":
+                    await websocket.send(json.dumps({
+                        "type": "error",
+                        "message": "FAMILY_SANCTUARY_UPGRADE_REQUIRED",
+                        "detail": "Family Sanctuary requires Sovereign Circle ($149/mo) or inheritance from a Sovereign Circle household head."
+                    }))
+                    continue
+
                 family_id = current_profile.get('family_id')
                 member_id = current_profile.get('hardware_id')
                 member_name = current_profile.get('name')
