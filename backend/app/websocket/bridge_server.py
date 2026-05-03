@@ -19623,6 +19623,8 @@ If 'challenge', respectfully push the coach's thinking."""
                     await websocket.send(json.dumps({"type": "error", "message": "Not authenticated"}))
                     continue
 
+                # TODO(FOLLOW-UP SECURITY): Gate still treats any non-empty family_id as eligible;
+                # should use effective_feature_tier (Rule 4 — deferred; do not widen without review).
                 # QUANTUM-CRYSTAL-ARCH: avatar tier gate
                 _avatar_tier = normalize_tier(current_profile.get("tier") or current_profile.get("subscription_plan") or "")
                 family_id = current_profile.get("family_id")
