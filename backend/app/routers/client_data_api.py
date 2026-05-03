@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -510,16 +511,24 @@ async def client_health_check(request: Request, user=Depends(_require_auth)):
         "server_entry_count": 0,
         "last_server_entry_at": None,
         "ai_consent_granted_at": None,
+        "timezone": "UTC",
+        "timezone_source": "default_utc",
     }
 
     if db_pool and username:
         try:
             row = await db_pool.fetchrow(
-                "SELECT profile_data->>'ai_consent_granted_at' as consent FROM users WHERE username = $1",
+                """SELECT profile_data->>'ai_consent_granted_at' as consent,
+                          timezone,
+                          timezone_source
+                   FROM users WHERE username = $1""",
                 username,
             )
             if row and row["consent"]:
                 result["ai_consent_granted_at"] = row["consent"]
+            if row:
+                result["timezone"] = row["timezone"] or "UTC"
+                result["timezone_source"] = row["timezone_source"] or "default_utc"
         except Exception as e:
             logger.warning("health-check consent lookup failed: %s", e)
 
@@ -537,6 +546,48 @@ async def client_health_check(request: Request, user=Depends(_require_auth)):
             logger.warning("health-check conversation count failed: %s", e)
 
     return result
+
+
+@router.patch("/timezone")
+async def patch_client_timezone(request: Request, payload: dict, user=Depends(_require_auth)):
+    """Persist IANA timezone (user_explicit). Bridge/WebSocket profile stays in sync via PG columns + registry reload."""
+    tz_string = (payload.get("timezone") or "").strip()
+    if not tz_string:
+        raise HTTPException(status_code=400, detail="timezone field required")
+    try:
+        ZoneInfo(tz_string)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid IANA timezone: {tz_string}")
+    db_pool = getattr(request.app.state, "db_pool", None)
+    if not db_pool:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    uname = user.get("username") if isinstance(user, dict) else None
+    if not uname:
+        raise HTTPException(status_code=400, detail="username missing")
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users
+            SET timezone = $1,
+                timezone_source = 'user_explicit',
+                timezone_updated_at = NOW(),
+                profile_data = jsonb_set(
+                    jsonb_set(
+                        COALESCE(profile_data, '{}'::jsonb),
+                        '{timezone}',
+                        to_jsonb($1::text),
+                        true
+                    ),
+                    '{timezone_source}',
+                    to_jsonb('user_explicit'::text),
+                    true
+                )
+            WHERE username = $2 AND (deleted_at IS NULL)
+            """,
+            tz_string,
+            uname,
+        )
+    return {"timezone": tz_string, "source": "user_explicit"}
 
 
 def _load_registry() -> dict:

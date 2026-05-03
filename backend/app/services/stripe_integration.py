@@ -38,6 +38,16 @@ from pydantic import BaseModel
 import asyncpg
 import json
 
+try:
+    from app.utils.timezone_resolver import SUPPORT_DISPLAY_TIMEZONE, render_user_time
+except ImportError:
+    SUPPORT_DISPLAY_TIMEZONE = os.getenv("SUPPORT_DISPLAY_TIMEZONE", "America/Los_Angeles")
+
+    def render_user_time(utc_dt, user_timezone, fmt="%Y-%m-%d %H:%M"):  # type: ignore
+        if utc_dt.tzinfo is None:
+            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        return utc_dt.strftime(fmt)
+
 from app.auth import get_current_user_id
 from app.constants.tiers import (
     TIER_STANDARD,
@@ -285,6 +295,11 @@ async def report_token_usage_by_username(
 # =============================================================================
 
 PRICING_NOTIFY_EMAIL = "support@sovereignsanctuary.net"
+# Paid registration (Stripe-first checkout) internal notify — override via env on GREEN.
+REGISTRATION_CHARGE_NOTIFY_EMAIL = os.getenv(
+    "REGISTRATION_CHARGE_NOTIFY_EMAIL",
+    "support@sovereignsanctuary.net",
+)
 
 async def notify_pricing_change(
     changed_items: list,
@@ -1484,6 +1499,20 @@ class StripeWebhookHandler:
             except Exception:
                 pass
         return self._fortress
+
+    async def _user_display_timezone(self, username: Optional[str]) -> str:
+        if not username or not self.db:
+            return "UTC"
+        try:
+            v = await self.db.fetchval(
+                "SELECT timezone FROM users WHERE username = $1",
+                username,
+            )
+            if v:
+                return str(v)
+        except Exception:
+            pass
+        return "UTC"
     
     async def _apply_subscription_grant(
         self,
@@ -1666,6 +1695,7 @@ class StripeWebhookHandler:
         handlers = {
             'checkout.session.completed': self._handle_checkout_completed,
             'invoice.paid': self._handle_invoice_paid,
+            'invoice.payment_succeeded': self._handle_invoice_payment_succeeded,
             'invoice.payment_failed': self._handle_payment_failed,
             'customer.subscription.updated': self._handle_subscription_updated,
             'customer.subscription.deleted': self._handle_subscription_deleted,
@@ -1997,75 +2027,88 @@ class StripeWebhookHandler:
 
     async def _handle_invoice_paid(self, invoice: Dict, event_id: str = ""):
         """Handle successful invoice payment — subscription monthly cap top-up."""
-
         subscription_id = invoice.get("subscription")
-        if not subscription_id:
-            return
+        try:
+            if not subscription_id:
+                return
 
-        customer_id = invoice.get("customer")
-        user_id = await self.db.fetchval(
-            "SELECT id FROM users WHERE stripe_customer_id = $1",
-            customer_id,
-        )
-
-        if not user_id:
-            return
-
-        await self.db.execute(
-            """
-            INSERT INTO payment_history (user_id, stripe_invoice_id, amount_cents, status, event_type)
-            VALUES ($1, $2, $3, 'SUCCEEDED', 'invoice.paid')
-            """,
-            user_id,
-            invoice["id"],
-            invoice["amount_paid"],
-        )
-
-        sub = stripe.Subscription.retrieve(subscription_id)
-        await self.db.execute(
-            """
-            UPDATE subscriptions
-            SET current_period_start = to_timestamp($1), current_period_end = to_timestamp($2), status = 'ACTIVE'
-            WHERE stripe_subscription_id = $3
-            """,
-            sub["current_period_start"],
-            sub["current_period_end"],
-            subscription_id,
-        )
-
-        sub_row = await self.db.fetchrow(
-            "SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1",
-            subscription_id,
-        )
-        if sub_row and sub_row["tier"]:
-            tier_norm = normalize_tier(sub_row["tier"])
-        else:
-            db_tier = await self.db.fetchval("SELECT tier FROM users WHERE id = $1", user_id)
-            tier_norm = normalize_tier(db_tier or TIER_TRIAL)
-
-        lines = invoice.get("lines", {}).get("data") or []
-        period_start = None
-        period_end = None
-        if lines and isinstance(lines[0], dict):
-            per = lines[0].get("period") or {}
-            if per.get("start"):
-                period_start = datetime.fromtimestamp(per["start"], tz=timezone.utc)
-            if per.get("end"):
-                period_end = datetime.fromtimestamp(per["end"], tz=timezone.utc)
-
-        uname = await self.db.fetchval("SELECT username FROM users WHERE id = $1", user_id)
-        if uname:
-            await self._apply_subscription_grant(
-                uname,
-                tier_norm,
-                "monthly_cap",
-                event_id or None,
-                period_start,
-                period_end,
-                f"invoice.paid id={invoice.get('id')}",
-                "monthly_grant",
-                sync_tier=False,
+            customer_id = invoice.get("customer")
+            user_id = await self.db.fetchval(
+                "SELECT id FROM users WHERE stripe_customer_id = $1",
+                customer_id,
             )
+
+            if not user_id:
+                return
+
+            await self.db.execute(
+                """
+                INSERT INTO payment_history (user_id, stripe_invoice_id, amount_cents, status, event_type)
+                VALUES ($1, $2, $3, 'SUCCEEDED', 'invoice.paid')
+                """,
+                user_id,
+                invoice["id"],
+                invoice["amount_paid"],
+            )
+
+            sub = stripe.Subscription.retrieve(subscription_id)
+            await self.db.execute(
+                """
+                UPDATE subscriptions
+                SET current_period_start = to_timestamp($1), current_period_end = to_timestamp($2), status = 'ACTIVE'
+                WHERE stripe_subscription_id = $3
+                """,
+                sub["current_period_start"],
+                sub["current_period_end"],
+                subscription_id,
+            )
+
+            sub_row = await self.db.fetchrow(
+                "SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1",
+                subscription_id,
+            )
+            if sub_row and sub_row["tier"]:
+                tier_norm = normalize_tier(sub_row["tier"])
+            else:
+                db_tier = await self.db.fetchval("SELECT tier FROM users WHERE id = $1", user_id)
+                tier_norm = normalize_tier(db_tier or TIER_TRIAL)
+
+            lines = invoice.get("lines", {}).get("data") or []
+            period_start = None
+            period_end = None
+            if lines and isinstance(lines[0], dict):
+                per = lines[0].get("period") or {}
+                if per.get("start"):
+                    period_start = datetime.fromtimestamp(per["start"], tz=timezone.utc)
+                if per.get("end"):
+                    period_end = datetime.fromtimestamp(per["end"], tz=timezone.utc)
+
+            uname = await self.db.fetchval("SELECT username FROM users WHERE id = $1", user_id)
+            if uname:
+                await self._apply_subscription_grant(
+                    uname,
+                    tier_norm,
+                    "monthly_cap",
+                    event_id or None,
+                    period_start,
+                    period_end,
+                    f"invoice.paid id={invoice.get('id')}",
+                    "monthly_grant",
+                    sync_tier=False,
+                )
+        finally:
+            if subscription_id:
+                try:
+                    await self._maybe_support_notify_trial_converted(invoice, event_id)
+                except Exception:
+                    _logger.exception(
+                        "Support trial-converted helper failed (invoice.paid finally)",
+                        extra={"stripe_invoice_id": invoice.get("id")},
+                    )
+
+    async def _handle_invoice_payment_succeeded(self, invoice: Dict, event_id: str = ""):
+        """Trial-converted support emails only — grants stay on invoice.paid (deduped per invoice id)."""  # QUANTUM-CRYSTAL-ARCH
+        await self._maybe_support_notify_trial_converted(invoice, event_id)
 
     async def _handle_payment_failed(self, invoice: Dict, event_id: str = ""):
         """Handle failed payment."""
@@ -2234,6 +2277,13 @@ class StripeWebhookHandler:
                 signup_uuid,
             )
             print(f">>> [STRIPE] Registration finalized for {row['username']}")
+            stripe_sub_snap = None
+            sid_early = session.get("subscription")
+            if sid_early:
+                try:
+                    stripe_sub_snap = stripe.Subscription.retrieve(sid_early)
+                except Exception:
+                    stripe_sub_snap = None
             if not is_dependent:
                 uid = await self.db.fetchval(
                     "SELECT id FROM users WHERE username = $1", row["username"]
@@ -2242,7 +2292,9 @@ class StripeWebhookHandler:
                 cust = session.get("customer") or ""
                 if uid and sid:
                     try:
-                        stripe_sub = stripe.Subscription.retrieve(sid)
+                        sub_obj = stripe_sub_snap
+                        if sub_obj is None:
+                            sub_obj = stripe.Subscription.retrieve(sid)
                         tier_norm = normalize_tier(row.get("tier") or "")
                         await self.db.execute(
                             """
@@ -2263,11 +2315,58 @@ class StripeWebhookHandler:
                             sid,
                             cust,
                             tier_norm,
-                            stripe_sub["current_period_start"],
-                            stripe_sub["current_period_end"],
+                            sub_obj["current_period_start"],
+                            sub_obj["current_period_end"],
                         )
                     except Exception as _sub_err:
                         print(f">>> [STRIPE] subscriptions row after pending_signup failed: {_sub_err}")
+            amt = session.get("amount_total")
+            mode = session.get("mode")
+            trial_end_ts = stripe_sub_snap.get("trial_end") if stripe_sub_snap else None
+            try:
+                is_paid_checkout_charge = amt is not None and float(amt) > 0
+            except (TypeError, ValueError):
+                is_paid_checkout_charge = False
+            zero_or_unknown_total = not is_paid_checkout_charge
+            trial_started_here = (
+                mode == "subscription"
+                and zero_or_unknown_total
+                and trial_end_ts
+            )
+
+            if is_paid_checkout_charge:
+                try:
+                    await self._send_support_paid_registration_notice(
+                        row, session, is_dependent=is_dependent,
+                    )
+                except Exception as e:
+                    _logger.exception(
+                        "Support paid-registration notification failed",
+                        extra={
+                            "stripe_session_id": session.get("id"),
+                            "is_dependent": is_dependent,
+                            "error_type": type(e).__name__,
+                        },
+                    )
+                    # Intentional: do not re-raise. Signup is already finalized;
+                    # support email is recoverable from logs.
+            elif trial_started_here:
+                try:
+                    await self._send_support_trial_started_notice(
+                        row,
+                        session,
+                        stripe_sub_snap,
+                        is_dependent=is_dependent,
+                    )
+                except Exception as e:
+                    _logger.exception(
+                        "Support trial-started notification failed",
+                        extra={
+                            "stripe_session_id": session.get("id"),
+                            "error_type": type(e).__name__,
+                        },
+                    )
+                    # Intentional: do not re-raise
             await self._send_registration_receipt(row)
         else:
             await self.db.execute(
@@ -2276,6 +2375,132 @@ class StripeWebhookHandler:
             )
             print(f">>> [STRIPE] Registration finalize FAILED for {row['username']}: "
                   f"{reason}. Session {session.get('id')} needs refund.")
+
+    async def _maybe_support_notify_trial_converted(self, invoice: Dict, event_id: str = "") -> None:
+        """Exactly one SendGrid ping per Stripe invoice across invoice.paid + invoice.payment_succeeded."""
+        subscription_id = invoice.get("subscription")
+        if not subscription_id:
+            return
+
+        amt = int(invoice.get("amount_paid") or 0)
+        if amt <= 0:
+            return
+
+        br = invoice.get("billing_reason") or ""
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+        except Exception as e:
+            _logger.warning("trial converted notify: subscription retrieve failed: %s", e)
+            return
+
+        trial_end = sub.get("trial_end")
+        if not trial_end:
+            return
+
+        lines = invoice.get("lines", {}).get("data") or []
+        period_start_first = invoice.get("period_start")
+        if lines and isinstance(lines[0], dict):
+            per = lines[0].get("period") or {}
+            if per.get("start"):
+                period_start_first = per["start"]
+        trial_end_int = int(trial_end)
+
+        slack = 172800  # 48h slack: billing anchor vs trial_end can drift by a day+
+        qualifies = False
+        if br == "subscription_cycle" and period_start_first:
+            if abs(int(period_start_first) - trial_end_int) <= slack:
+                qualifies = True
+        elif br == "subscription_create" and period_start_first:
+            ts_now = int(datetime.now(timezone.utc).timestamp())
+            if ts_now >= trial_end_int and abs(int(period_start_first) - trial_end_int) <= slack:
+                qualifies = True
+        if not qualifies:
+            return
+
+        invoice_id = str(invoice.get("id") or "")
+        if not invoice_id:
+            return
+
+        customer_id = str(invoice.get("customer") or "")
+        uid = await self.db.fetchval(
+            "SELECT id FROM users WHERE stripe_customer_id = $1",
+            customer_id,
+        )
+        if not uid:
+            return
+
+        tier_row = await self.db.fetchval(
+            "SELECT COALESCE((SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1),"
+            "(SELECT tier FROM users WHERE id = $2)) AS t",
+            subscription_id,
+            uid,
+        )
+        tier_norm = normalize_tier(tier_row or TIER_TRIAL)
+        username = await self.db.fetchval("SELECT username FROM users WHERE id = $1", uid)
+        user_email = await self.db.fetchval(
+            """
+            SELECT COALESCE(NULLIF(trim(email), ''), profile_data->>'email')
+            FROM users WHERE id = $1
+            """,
+            uid,
+        )
+        if not username or not user_email:
+            return
+
+        if not await self._claim_support_notification_slot(f"trial_converted_notice:{invoice_id}"):
+            return
+
+        cur = (invoice.get("currency") or "usd").upper()
+        try:
+            await self._send_support_trial_converted_notice(
+                username=username,
+                user_email=user_email,
+                tier=tier_norm,
+                amount_paid_cents=amt,
+                currency_code=cur,
+                subscription_id=subscription_id,
+                customer_id=customer_id,
+                invoice_id=invoice_id,
+            )
+        except Exception:
+            _logger.exception(
+                "Support trial-converted delegate failed",
+                extra={"stripe_invoice_id": invoice_id},
+            )
+
+    def _subscription_had_positive_paid_invoice(self, subscription_id: str) -> bool:
+        """True if this subscription ever had a paid Stripe invoice (>0 paid)."""  # QUANTUM-CRYSTAL-ARCH
+        try:
+            invs = stripe.Invoice.list(subscription=subscription_id, limit=30)
+            for inv in getattr(invs, "data", []) or []:
+                try:
+                    if inv.get("status") == "paid" and int(inv.get("amount_paid") or 0) > 0:
+                        return True
+                except Exception:
+                    continue
+        except Exception as e:
+            _logger.warning("trial ended: invoice list failed for %s: %s", subscription_id, e)
+        return False
+
+    async def _claim_support_notification_slot(self, deterministic_event_id: str) -> bool:
+        """Dedupe support emails across overlapping Stripe webhook payloads."""
+        if not deterministic_event_id:
+            return False
+        eid = deterministic_event_id[:255]
+        try:
+            rid = await self.db.fetchval(
+                """
+                INSERT INTO webhook_events (event_id, provider, event_type)
+                VALUES ($1, 'stripe', 'trial_support_email')
+                ON CONFLICT (event_id) DO NOTHING
+                RETURNING event_id
+                """,
+                eid,
+            )
+            return rid is not None
+        except Exception as e:
+            _logger.warning("trial support dedupe webhook_events insert failed (skip send): %s", e)
+            return False
 
     async def _send_registration_receipt(self, signup_row):
         """Send welcome email after successful Stripe-first registration."""
@@ -2289,6 +2514,11 @@ class StripeWebhookHandler:
             sg_key = os.getenv("SENDGRID_API_KEY")
             if not sg_key:
                 return
+            user_tz = await self._user_display_timezone(username)
+            now_u = datetime.now(timezone.utc)
+            welcome_when = render_user_time(
+                now_u, user_tz, "%A, %B %d, %Y at %I:%M %p %Z"
+            )
             payload = signup_row.get("payload", {})
             if isinstance(payload, str):
                 import json as _json
@@ -2302,6 +2532,7 @@ class StripeWebhookHandler:
                 html_content=(
                     f"<h2>Welcome, {name}!</h2>"
                     f"<p>Your <strong>{tier}</strong> account has been created.</p>"
+                    f"<p><strong>Registered at (your time, {user_tz}):</strong> {welcome_when}</p>"
                     f"<p><strong>Username:</strong> {username}</p>"
                     f"<p>Sign in at "
                     f"<a href='https://app.sovereignsanctuary.net'>app.sovereignsanctuary.net</a></p>"
@@ -2314,6 +2545,394 @@ class StripeWebhookHandler:
             print(f">>> [STRIPE] Welcome email sent to {email}")
         except Exception as e:
             print(f">>> [STRIPE] Welcome email failed: {e}")
+
+    # TODO(scale): trial notifications will outnumber paid signups by 5–10× in any healthy funnel.
+    # Once aggregate webhook notification volume exceeds ~100/day, route trial events to a Slack channel
+    # or ops dashboard rather than support@ inbox. Email-per-event fits early-stage operation only.
+    async def _send_support_trial_started_notice(
+        self,
+        signup_row,
+        session: Dict,
+        stripe_sub,
+        *,
+        is_dependent: bool = False,
+    ) -> None:
+        """Notify support of $0 checkout + active subscription trial (Stripe-first registration)."""  # QUANTUM-CRYSTAL-ARCH
+        import html as html_mod
+
+        sg_key = os.getenv("SENDGRID_API_KEY")
+        if not sg_key or stripe_sub is None:
+            return
+        trial_end_ts = stripe_sub.get("trial_end")
+        if not trial_end_ts:
+            return
+        trial_dt = datetime.fromtimestamp(int(trial_end_ts), tz=timezone.utc)
+        trial_iso = trial_dt.date().isoformat()
+        tier = signup_row.get("tier") or ""
+        username = signup_row.get("username") or ""
+        user_tz = await self._user_display_timezone(username)
+        trial_human_support = render_user_time(
+            trial_dt, SUPPORT_DISPLAY_TIMEZONE, "%B %d, %Y %I:%M %p %Z"
+        )
+        trial_human_user = render_user_time(trial_dt, user_tz, "%B %d, %Y %I:%M %p %Z")
+
+        user_email = signup_row.get("email") or ""
+        payload = signup_row.get("payload", {}) or {}
+        if isinstance(payload, str):
+            import json as _json
+
+            try:
+                payload = _json.loads(payload)
+            except Exception:
+                payload = {}
+        raw_name = str((payload.get("name") if isinstance(payload, dict) else "") or username).strip()
+
+        cust = html_mod.escape(str(session.get("customer") or ""))
+        sub_id = html_mod.escape(str(session.get("subscription") or ""))
+        cs_id = html_mod.escape(str(session.get("id") or ""))
+
+        tier_disp = normalize_tier(tier)
+
+        subject = f"Trial started: {tier_disp} — ends {trial_iso}"
+        dependent_tag = "<li><strong>Dependent signup:</strong> yes</li>" if is_dependent else ""
+
+        body = (
+            f"<p><strong>STATUS:</strong> Trial — no charge has occurred yet.</p>"
+            f"<p><strong>Trial ends (support TZ):</strong> {html_mod.escape(trial_human_support)}</p>"
+            f"<p><strong>Trial ends (user TZ, {html_mod.escape(user_tz)}):</strong> {html_mod.escape(trial_human_user)}</p>"
+            f"<ul>"
+            f"<li><strong>Username:</strong> {html_mod.escape(username)}</li>"
+            f"<li><strong>Email:</strong> {html_mod.escape(user_email)}</li>"
+            f"<li><strong>Tier:</strong> {html_mod.escape(tier_disp)}</li>"
+            f"<li><strong>trial_end (ISO date):</strong> {html_mod.escape(trial_iso)}</li>"
+            f"<li><strong>trial_end (Stripe epoch):</strong> {trial_end_ts}</li>"
+            f"{dependent_tag}"
+            f"<li><strong>Stripe Customer:</strong> <code>{cust}</code></li>"
+            f"<li><strong>Stripe Subscription:</strong> <code>{sub_id}</code></li>"
+            f"<li><strong>Checkout Session ID:</strong> <code>{cs_id}</code></li>"
+            f"</ul>"
+            f"<p style='color:#666;font-size:12px'><strong>Name (payload):</strong> "
+            f"{html_mod.escape(raw_name)}</p>"
+        )
+        try:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail
+
+            msg = Mail(
+                from_email="support@sovereignsanctuary.net",
+                to_emails=REGISTRATION_CHARGE_NOTIFY_EMAIL,
+                subject=subject[:250],
+                html_content=body,
+            )
+            sendgrid.SendGridAPIClient(api_key=sg_key).send(msg)
+            print(f">>> [STRIPE] Support trial-started notice sent for {username}")
+        except Exception as e:
+            print(f">>> [STRIPE] Support trial-started notice failed: {e}")
+
+    async def _send_support_trial_converted_notice(
+        self,
+        *,
+        username: str,
+        user_email: str,
+        tier: str,
+        amount_paid_cents: int,
+        currency_code: str,
+        subscription_id: str,
+        customer_id: str,
+        invoice_id: str,
+    ) -> None:
+        """Notify support — first recurring charge succeeded after subscription trial."""
+        import html as html_mod
+
+        sg_key = os.getenv("SENDGRID_API_KEY")
+        if not sg_key:
+            return
+        user_tz = await self._user_display_timezone(username)
+        now_u = datetime.now(timezone.utc)
+        proc_sup = html_mod.escape(
+            render_user_time(
+                now_u, SUPPORT_DISPLAY_TIMEZONE, "%B %d, %Y %I:%M %p %Z"
+            )
+        )
+        proc_usr = html_mod.escape(
+            render_user_time(now_u, user_tz, "%B %d, %Y %I:%M %p %Z")
+        )
+        cur_u = html_mod.escape(currency_code.upper())
+        amt_human = html_mod.escape(f"${amount_paid_cents / 100:.2f} {cur_u}")
+        tier_disp = normalize_tier(tier)
+        subject = f"Trial converted: {tier_disp} — first charge {amount_paid_cents / 100:.2f} {currency_code.upper()}"
+
+        body = (
+            f"<p><strong>STATUS:</strong> Trial converted to paid. First charge succeeded.</p>"
+            f"<p><strong>Processed (support TZ):</strong> {proc_sup}</p>"
+            f"<p><strong>Processed (user TZ, {html_mod.escape(user_tz)}):</strong> {proc_usr}</p>"
+            f"<ul>"
+            f"<li><strong>Username:</strong> {html_mod.escape(username)}</li>"
+            f"<li><strong>Email:</strong> {html_mod.escape(user_email)}</li>"
+            f"<li><strong>Tier:</strong> {html_mod.escape(tier_disp)}</li>"
+            f"<li><strong>Amount paid:</strong> {amt_human}</li>"
+            f"<li><strong>Subscription ID:</strong> <code>{html_mod.escape(subscription_id)}</code></li>"
+            f"<li><strong>Customer ID:</strong> <code>{html_mod.escape(customer_id)}</code></li>"
+            f"<li><strong>Invoice ID:</strong> <code>{html_mod.escape(invoice_id)}</code></li>"
+            f"</ul>"
+        )
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+
+        msg = Mail(
+            from_email="support@sovereignsanctuary.net",
+            to_emails=REGISTRATION_CHARGE_NOTIFY_EMAIL,
+            subject=subject[:250],
+            html_content=body,
+        )
+        sendgrid.SendGridAPIClient(api_key=sg_key).send(msg)
+        print(f">>> [STRIPE] Support trial-converted notice sent for {username}")
+
+    async def _send_support_trial_ended_notice(
+        self,
+        *,
+        username: str,
+        user_email: str,
+        tier: str,
+        trial_start_ts: Optional[int],
+        trial_end_ts: Optional[int],
+        cancellation_reason_txt: str,
+        subscription_id: str,
+        customer_id: str,
+    ) -> None:
+        """Notify support — subscription with trial deleted without converting to sustained paid invoices."""
+        import html as html_mod
+
+        sg_key = os.getenv("SENDGRID_API_KEY")
+        if not sg_key:
+            return
+
+        user_tz = await self._user_display_timezone(username)
+
+        def _fmt_pair(epoch: Optional[int]) -> tuple[str, str]:
+            if epoch is None:
+                return "(none)", "(none)"
+            try:
+                dt = datetime.fromtimestamp(int(epoch), tz=timezone.utc)
+                sup = render_user_time(
+                    dt, SUPPORT_DISPLAY_TIMEZONE, "%B %d, %Y %I:%M %p %Z"
+                )
+                usr = render_user_time(dt, user_tz, "%B %d, %Y %I:%M %p %Z")
+                return html_mod.escape(sup), html_mod.escape(usr)
+            except Exception:
+                s = str(epoch)
+                return html_mod.escape(s), html_mod.escape(s)
+
+        trial_s_sup, trial_s_usr = _fmt_pair(trial_start_ts)
+        trial_e_sup, trial_e_usr = _fmt_pair(trial_end_ts)
+        canc_r = html_mod.escape(cancellation_reason_txt or "")
+        tier_disp = normalize_tier(tier)
+
+        subject = f"Trial ended without converting: {tier_disp}"
+
+        body = (
+            f"<p><strong>STATUS:</strong> Trial ended without conversion. No Stripe-recorded paid "
+            f">$0 invoices on this subscription lifetime.</p>"
+            f"<ul>"
+            f"<li><strong>Username:</strong> {html_mod.escape(username)}</li>"
+            f"<li><strong>Email:</strong> {html_mod.escape(user_email)}</li>"
+            f"<li><strong>Tier (DB/cache):</strong> {html_mod.escape(tier_disp)}</li>"
+            f"<li><strong>trial_start (support):</strong> {trial_s_sup}</li>"
+            f"<li><strong>trial_start (user):</strong> {trial_s_usr}</li>"
+            f"<li><strong>trial_end (support):</strong> {trial_e_sup}</li>"
+            f"<li><strong>trial_end (user):</strong> {trial_e_usr}</li>"
+            f"<li><strong>cancellation_reason / details:</strong> {canc_r or '—'}</li>"
+            f"<li><strong>Subscription ID:</strong> <code>{html_mod.escape(subscription_id)}</code></li>"
+            f"<li><strong>Customer ID:</strong> <code>{html_mod.escape(customer_id)}</code></li>"
+            f"</ul>"
+        )
+
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+
+        msg = Mail(
+            from_email="support@sovereignsanctuary.net",
+            to_emails=REGISTRATION_CHARGE_NOTIFY_EMAIL,
+            subject=subject[:250],
+            html_content=body,
+        )
+        sendgrid.SendGridAPIClient(api_key=sg_key).send(msg)
+        print(f">>> [STRIPE] Support trial-ended notice sent for {username}")
+
+    async def _maybe_support_notify_trial_ended(self, subscription: Dict, event_id: str = "") -> None:
+        """customer.subscription.deleted — trial exited without Stripe-recorded conversion."""
+        sub_id = str(subscription.get("id") or "")
+        trial_end_ts = subscription.get("trial_end")
+        if not sub_id or trial_end_ts is None:
+            return
+        customer_id = str(subscription.get("customer") or "")
+        if self._subscription_had_positive_paid_invoice(sub_id):
+            return
+
+        uid = None
+        if customer_id:
+            uid = await self.db.fetchval(
+                "SELECT id FROM users WHERE stripe_customer_id = $1",
+                customer_id,
+            )
+        if not uid:
+            uid = await self.db.fetchval(
+                "SELECT user_id FROM subscriptions WHERE stripe_subscription_id = $1",
+                sub_id,
+            )
+
+        tier_row = await self.db.fetchval(
+            "SELECT tier FROM subscriptions WHERE stripe_subscription_id = $1",
+            sub_id,
+        )
+        if uid and tier_row is None:
+            tier_row = await self.db.fetchval("SELECT tier FROM users WHERE id = $1", uid)
+        tier_raw = tier_row or TIER_TRIAL
+
+        username = None
+        user_email = None
+        if uid:
+            prow = await self.db.fetchrow(
+                """
+                SELECT username,
+                       COALESCE(NULLIF(trim(email), ''), profile_data->>'email') AS em
+                FROM users WHERE id = $1
+                """,
+                uid,
+            )
+            if prow:
+                username = prow.get("username")
+                user_email = prow.get("em")
+        if not username or not user_email:
+            return
+
+        if not await self._claim_support_notification_slot(f"trial_ended_notice:{sub_id}"):
+            return
+
+        cd = subscription.get("cancellation_details") or {}
+        if not isinstance(cd, dict):
+            cd = {}
+        canc_parts = []
+        if cd.get("reason"):
+            canc_parts.append(str(cd["reason"]))
+        if cd.get("comment"):
+            canc_parts.append(str(cd["comment"]))
+        cancellation_reason_txt = "; ".join(canc_parts)
+
+        trial_start_ts = subscription.get("trial_start")
+        trial_end_conv = subscription.get("trial_end")
+
+        try:
+            await self._send_support_trial_ended_notice(
+                username=username,
+                user_email=user_email,
+                tier=tier_raw or TIER_TRIAL,
+                trial_start_ts=trial_start_ts,
+                trial_end_ts=trial_end_conv,
+                cancellation_reason_txt=cancellation_reason_txt,
+                subscription_id=sub_id,
+                customer_id=customer_id,
+            )
+        except Exception:
+            print(f">>> [STRIPE] Support trial-ended notice delegate failed sub={sub_id}")
+
+    # TODO(scale): once paid-signup volume exceeds ~20/day, route this notification
+    # to a Slack channel or ops dashboard rather than support@ inbox. Inbox volume
+    # becomes noise at growth stage and anomalies (refunds, payment_status != succeeded,
+    # currency mismatches, dependent without primary) drown.
+    async def _send_support_paid_registration_notice(
+        self,
+        signup_row,
+        session: Dict,
+        *,
+        is_dependent: bool = False,
+    ) -> None:
+        """Notify support that a paid Stripe checkout registration completed (verification details)."""  # QUANTUM-CRYSTAL-ARCH
+        import html as html_mod
+
+        sg_key = os.getenv("SENDGRID_API_KEY")
+        if not sg_key:
+            return
+        username = signup_row.get("username") or ""
+        user_email = signup_row.get("email") or ""
+        tier = signup_row.get("tier") or ""
+        payload = signup_row.get("payload", {}) or {}
+        if isinstance(payload, str):
+            import json as _json
+
+            try:
+                payload = _json.loads(payload)
+            except Exception:
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        raw_name = str(payload.get("name") or username or "").strip() or username
+        full_name_html = html_mod.escape(raw_name)
+        amt = session.get("amount_total")
+        cur = (session.get("currency") or "usd").upper()
+        if amt is None:
+            amt_line = "amount_total: (not on session object — check Stripe Dashboard)"
+        else:
+            amt_line = f"${int(amt) / 100:.2f} {cur}"
+        raw_pay = str(session.get("payment_status") or "unknown")
+        pay_status = html_mod.escape(raw_pay)
+        cs_id = html_mod.escape(str(session.get("id") or ""))
+        cust = html_mod.escape(str(session.get("customer") or ""))
+        sub_id = html_mod.escape(str(session.get("subscription") or ""))
+        mode = html_mod.escape(str(session.get("mode") or ""))
+        kind = "Paid family dependent registration" if is_dependent else "Paid client registration"
+        user_tz = await self._user_display_timezone(username)
+        created_ts = session.get("created")
+        checkout_time_html = ""
+        if created_ts is not None:
+            try:
+                cdt = datetime.fromtimestamp(int(created_ts), tz=timezone.utc)
+                sup_h = html_mod.escape(
+                    render_user_time(
+                        cdt, SUPPORT_DISPLAY_TIMEZONE, "%B %d, %Y %I:%M %p %Z"
+                    )
+                )
+                usr_h = html_mod.escape(
+                    render_user_time(cdt, user_tz, "%B %d, %Y %I:%M %p %Z")
+                )
+                checkout_time_html = (
+                    f"<p><strong>Checkout completed (support TZ):</strong> {sup_h}</p>"
+                    f"<p><strong>Checkout completed (user TZ, {html_mod.escape(user_tz)}):</strong> {usr_h}</p>"
+                )
+            except Exception:
+                checkout_time_html = ""
+        try:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail
+
+            body = (
+                f"<p><strong>{kind}</strong> — Stripe reports checkout completed.</p>"
+                f"{checkout_time_html}"
+                f"<ul>"
+                f"<li><strong>Full name:</strong> {full_name_html}</li>"
+                f"<li><strong>Username:</strong> {html_mod.escape(username)}</li>"
+                f"<li><strong>Email:</strong> {html_mod.escape(user_email)}</li>"
+                f"<li><strong>Tier (pending_signup):</strong> {html_mod.escape(str(tier))}</li>"
+                f"<li><strong>Payment status:</strong> {pay_status}</li>"
+                f"<li><strong>Charged (session total):</strong> {html_mod.escape(amt_line)}</li>"
+                f"<li><strong>Checkout Session ID:</strong> <code>{cs_id}</code></li>"
+                f"<li><strong>Stripe Customer:</strong> <code>{cust}</code></li>"
+                f"<li><strong>Stripe Subscription:</strong> <code>{sub_id or '—'}</code></li>"
+                f"<li><strong>Mode:</strong> {mode}</li>"
+                f"</ul>"
+                f"<p style='color:#666;font-size:12px'>Verify in Stripe: Customers → find by ID, or Payments / Subscriptions. "
+                f"Session <code>{cs_id}</code> is the webhook source of truth for this event.</p>"
+            )
+            msg = Mail(
+                from_email="support@sovereignsanctuary.net",
+                to_emails=REGISTRATION_CHARGE_NOTIFY_EMAIL,
+                subject=f"[Paid signup] {raw_name[:120]} — {raw_pay}",
+                html_content=body,
+            )
+            sendgrid.SendGridAPIClient(api_key=sg_key).send(msg)
+            print(f">>> [STRIPE] Support paid-registration notice sent for {username}")
+        except Exception as e:
+            print(f">>> [STRIPE] Support paid-registration notice failed: {e}")
 
     async def _handle_coach_upgrade(self, session: Dict, metadata: Dict):
         """Handle client-to-coach upgrade after Stripe payment.""" # QUANTUM-CRYSTAL-ARCH
@@ -2421,7 +3040,18 @@ class StripeWebhookHandler:
 
     async def _handle_subscription_deleted(self, subscription: Dict, event_id: str = ""):
         """Handle subscription cancellation."""
-        
+        try:
+            await self._maybe_support_notify_trial_ended(subscription, event_id)
+        except Exception:
+            _logger.exception(
+                "Support trial-ended notification failed (wrapper)",
+                extra={
+                    "event_id": event_id,
+                    "stripe_subscription_id": subscription.get("id"),
+                    "error_type": "trial_ended_notice",
+                },
+            )
+
         subscription_id = subscription['id']
         
         user_id = await self.db.fetchval(

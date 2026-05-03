@@ -5571,7 +5571,9 @@ async def sse_client_journey_panels(request: Request, _user: dict = Depends(_sse
             "SELECT log_id::text as id, generation_type::text as panel_type, r2_url, "
             "prompt_used as narrative_text, storyboard_id::text as biome, "
             "generation_type::text as panel_tone, generated_at, NULL::timestamptz as viewed_at "
-            "FROM sse_delivery_generation_log WHERE user_id = ANY($1) ORDER BY generated_at DESC LIMIT 50", ids)
+            "FROM sse_delivery_generation_log WHERE user_id = ANY($1) "
+            "AND r2_url IS NOT NULL AND r2_url != '' "
+            "ORDER BY generated_at DESC LIMIT 50", ids)
         uid = hw_id or uname
         j = await conn.fetchrow("SELECT current_biome, dominant_character FROM sse_user_journeys WHERE user_id = ANY($1) LIMIT 1", ids)
         f = await conn.fetchrow("SELECT archetype_hint, archetype_image_url FROM sse_identity_forge WHERE user_id = ANY($1) LIMIT 1", ids)
