@@ -1,0 +1,48 @@
+Primary deploy complete ✅
+HEAD: 2665a526 → 8ba383ef (25 commits applied)
+
+Check	Result
+Containers
+All 6 healthy (nate_backend rebuilt, recreated 1m ago)
+Service health
+114/114 services healthy — ALL SYSTEMS NOMINAL
+/health endpoint
+{"status":"healthy"...}
+ENVIRONMENT match
+backend=production, bridge=production ✅
+Migrations 195/196/199
+All applied (195 inserted 21 family_members rows; 196/199 idempotent)
+New deps
+phonenumbers, geoip2 installed in image
+Schema errors
+none
+Drift cleanup
+3 no-op modified/untracked files stashed/moved (content already matched origin); stash dropped, backup deleted
+One pre-existing warning (not caused by this deploy):
+
+⚠️ patient_sovereignty router failed: No module named 'app.database'
+This is an import-path issue in the patient_sovereignty router that predates today's commits (my 944a61f1 only fixed triple-quote literals in the service file, not the router import). The app.database module doesn't exist in this codebase. Worth fixing but it's not blocking 114/114.
+
+SSE scheduler: running on primary (correct per c5599343 design — clone is the node that needs DISABLE_SSE_SCHEDULER=1 to prevent duplication).
+
+Path 1 — what's left
+The clone (159.65.108.25) still has the original blockers from the investigation:
+
+Not a git repo (rsync deployment)
+No DISABLE_SSE_SCHEDULER=1 in .env
+Local feature_entitlement.py may diverge from primary's now-canonical version
+Three ways to proceed on the clone:
+
+Option	Method	Risk
+A
+rsync primary's /opt/clinical-sovereignty-lab/backend/ to clone, edit .env to add DISABLE_SSE_SCHEDULER=1, rebuild backend
+low — mirrors a known-good source
+B
+Convert clone to a git repo (git clone into temp, swap with current dir preserving .env/data dirs), then standard git pull workflow going forward
+medium — one-time disruption, eliminates drift forever
+C
+Defer the clone (it's serving REST API only, no bridge); fix it during scheduled maintenance
+none today, but SSE duplication continues
+EFF: 105/118 = 89% | PASS LOSS: 13 tokens at $0.000325 | session: ~600 | model: claude-opus-4-7-thinking-high (cursor-blended)
+
+Which option for the clone?

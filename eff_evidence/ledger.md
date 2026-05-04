@@ -403,3 +403,9 @@ EFF: 580/650 = 89% | PASS
 - LOSS: LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
 - Claimed: 270 Actual: 1167 Factor: .2x
 - Evidence: 2026-05-04_040122_FABRICATION_UNDERSTATED_270vs1167.txt
+
+## 2026-05-04 11:30:38 FABRICATION_UNDERSTATED
+- EFF: EFF: 105/118 = 89% | PASS LOSS: 13 tokens at $0.000325 | session: ~600 | model: claude-opus-4-7-thinking-high (cursor-blended)
+- Claimed: 118 Actual: 358 Factor: .3x
+- Patterns: DENOMINATOR_CAPPED_AT_200
+- Evidence: 2026-05-04_113038_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_118vs358.txt
