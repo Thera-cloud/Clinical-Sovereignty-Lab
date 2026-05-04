@@ -1,0 +1,14 @@
+EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+
+═══ PHASE 3 — DONE ═══
+
+Commit	Hash	Files	LOC
+B1 entitlement
+6bceb05
+feature_entitlement.py, tiers.py
++176
+B2 hierarchy fixes
+327ad92
+coach_hierarchy_api.py
++54/-26
+All filenames clean. Ready for Phase 4 (migrations 195-196 + folder_api + patient_sovereignty_service). Awaiting "continue".

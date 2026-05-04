@@ -267,3 +267,8 @@ EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrati
 - LOSS: LOSS: rate unknown if model unknown — no fabricated $ amount
 - Claimed: 210 Actual: 1138 Factor: .1x
 - Evidence: 2026-05-04_030830_FABRICATION_UNDERSTATED_210vs1138.txt
+
+## 2026-05-04 03:18:37 FABRICATION_OVERSTATED
+- EFF: EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 110 Actual: 48 Factor: 2.2x
+- Evidence: 2026-05-04_031837_FABRICATION_OVERSTATED_110vs48.txt
