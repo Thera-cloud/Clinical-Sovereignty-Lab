@@ -1,0 +1,4 @@
+cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git add eff_evidence/ ~/bin/eff_audit.sh ~/bin/eff_watcher.sh 2>/dev/null
+git add eff_evidence/
+git commit -m "EFF evidence capture system - 2026-05-04"
