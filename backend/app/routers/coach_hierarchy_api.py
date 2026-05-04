@@ -16,6 +16,17 @@ from app.auth import get_current_user_id
 
 logger = logging.getLogger("nate.coach_hierarchy_api")
 
+# session_data JSON text values are not always numeric; ::float / ::int on garbage aborts the whole query.
+_SQL_SAFE_FLOAT = (
+    "CASE WHEN COALESCE(TRIM({tbl}session_data->>'avg_c_emo'), '') ~ "
+    "'^[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?$' "
+    "THEN TRIM({tbl}session_data->>'avg_c_emo')::double precision ELSE NULL END"
+)
+_SQL_SAFE_INT = (
+    "CASE WHEN COALESCE(TRIM({tbl}session_data->>'observations_count'), '') ~ '^[0-9]+$' "
+    "THEN TRIM({tbl}session_data->>'observations_count')::integer ELSE 0 END"
+)
+
 router = APIRouter(
     prefix="/api/coach",
     tags=["coach-hierarchy"],
@@ -81,11 +92,14 @@ def _get_mesh_engine(request: Request):
 
 
 async def _resolve_hw_id(request: Request, user_id: str) -> str:
-    """Resolve a username to hardware_id via the users table."""
+    """Resolve callers username, hardware_id, or users.id (JWT sub) to hardware_id."""
     pool = _get_db(request)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT hardware_id FROM users WHERE username = $1", user_id
+            """SELECT hardware_id FROM users
+               WHERE username = $1 OR hardware_id = $1 OR id::text = $1
+               LIMIT 1""",
+            user_id,
         )
     return row["hardware_id"] if row else user_id
 
@@ -456,24 +470,31 @@ async def get_assistant_metrics(request: Request, days: int = 30):
                 "SELECT id FROM users WHERE hardware_id = $1", a_hw
             )
 
-            session_stats = {"total": 0, "completed": 0, "avg_coherence": 0.0}
+            # coaching_sessions.coach_id is VARCHAR hardware_id in production (bridge/pg_data_helpers);
+            # some legacy rows may use UUID text — match either without uuid=varchar operator errors.
+            coach_keys: list[str] = [a_hw]
             if a_uuid:
-                stats_row = await conn.fetchrow(
-                    """SELECT COUNT(*) as total,
-                              COUNT(*) FILTER (WHERE status = 'completed') as completed,
-                              COALESCE(AVG(COALESCE((session_data->>'avg_c_emo')::float, 0))
-                                       FILTER (WHERE status = 'completed'), 0) as avg_c
-                       FROM coaching_sessions
-                       WHERE coach_id = $1
-                         AND created_at > NOW() - ($2 || ' days')::interval""",
-                    a_uuid, str(days),
-                )
-                if stats_row:
-                    session_stats = {
-                        "total": stats_row["total"] or 0,
-                        "completed": stats_row["completed"] or 0,
-                        "avg_coherence": round(float(stats_row["avg_c"] or 0), 3),
-                    }
+                coach_keys.append(str(a_uuid))
+
+            session_stats = {"total": 0, "completed": 0, "avg_coherence": 0.0}
+            _safe_avg = _SQL_SAFE_FLOAT.format(tbl="")
+            stats_row = await conn.fetchrow(
+                f"""SELECT COUNT(*) as total,
+                          COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                          COALESCE(AVG(COALESCE({_safe_avg}, 0))
+                                   FILTER (WHERE status = 'completed'), 0) as avg_c
+                   FROM coaching_sessions
+                   WHERE coach_id::text = ANY($1::text[])
+                     AND created_at > NOW() - ($2 || ' days')::interval""",
+                coach_keys,
+                str(days),
+            )
+            if stats_row:
+                session_stats = {
+                    "total": stats_row["total"] or 0,
+                    "completed": stats_row["completed"] or 0,
+                    "avg_coherence": round(float(stats_row["avg_c"] or 0), 3),
+                }
 
             hours_row = await conn.fetchrow(
                 """SELECT COALESCE(SUM(duration_minutes), 0) as total_mins,
@@ -573,20 +594,27 @@ async def get_assistant_sessions(
 
     await _require_master_or_self_for_assistant(request, pool, assistant_hw)
 
+    coach_keys = [assistant_hw]
+    if assistant_uuid:
+        coach_keys.append(str(assistant_uuid))
+
+    _sf = _SQL_SAFE_FLOAT.format(tbl="cs.")
+    _si = _SQL_SAFE_INT.format(tbl="cs.")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """SELECT cs.session_id, cs.client_id::text, cs.client_name, cs.status,
-                      cs.scheduled_at, cs.actual_start, cs.actual_end,
+            f"""SELECT cs.session_id, cs.client_id::text, cs.client_name, cs.status,
+                      cs.scheduled_start AS scheduled_at,
+                      cs.actual_start, cs.actual_end,
                       cs.duration_minutes, cs.nate_summary, cs.coach_notes,
                       cs.mood_at_start, cs.mood_at_end,
-                      COALESCE((cs.session_data->>'avg_c_emo')::float, 0) as avg_c_emo,
-                      COALESCE((cs.session_data->>'observations_count')::int, 0) as observations_count
+                      COALESCE({_sf}, 0) AS avg_c_emo,
+                      {_si} AS observations_count
                FROM coaching_sessions cs
-               WHERE cs.coach_id = $1
+               WHERE cs.coach_id::text = ANY($1::text[])
                  AND cs.created_at > NOW() - ($2 || ' days')::interval
-               ORDER BY cs.scheduled_at DESC NULLS LAST
+               ORDER BY cs.scheduled_start DESC NULLS LAST
                LIMIT 100""",
-            assistant_uuid, str(days),
+            coach_keys, str(days),
         )
 
     sessions = []
