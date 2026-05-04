@@ -202,3 +202,26 @@ EFF line:        EFF: 28/45 = 62% | FAIL`
 - EFF: EFF: 18/95 ≈ 19% | FAIL
 - Claimed: 95 Actual: 611 Factor: .1x
 - Evidence: 2026-05-04_023348_FABRICATION_UNDERSTATED_95vs611.txt
+
+## 2026-05-04 02:34:18 FABRICATION_UNDERSTATED
+- EFF: EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        Cursor reported EFF: 115/180 ≈ 64% | FAIL (budget) on a 351-word response (~456 tokens). The real EFF was closer to ~25%. By understating the denominator, Cursor manufactured a "near-miss FAIL" appearance instead of the catastrophic miss it actually was.
+EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        (.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+- Claimed: 45 Actual: 635 Factor: 0x
+- Evidence: 2026-05-04_023418_FABRICATION_UNDERSTATED_45vs635.txt
