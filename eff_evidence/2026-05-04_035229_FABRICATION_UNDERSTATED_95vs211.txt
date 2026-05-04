@@ -1,0 +1,30 @@
+Phase 10 — Production verification (read-only)
+Containers (GREEN)
+nate_backend · nate_redis · nate_postgres · nate_bridge · nate_pgbouncer · nate_admin — all Up, core services (healthy) where health checks apply.
+
+nate_backend last start
+2026-05-04T03:26:20.315666588Z
+
+Last 30 log lines (verbatim excerpt) — steady state: /health 200, BLE/fibre ticks, no errors in the tail you asked for.
+
+Startup / trust signals (from full log grep)
+
+✅ SKYEYE_AUDIT_TOKEN registered in Redis (365-day TTL)
+STARTUP COMPLETE: 114/114 services healthy
+ALL SYSTEMS NOMINAL
+(appears twice in the buffer — consistent with a prior restart + current boot.)
+GET /health (localhost:8000 on host)
+{"status":"healthy","service":"little-nate-api","version":"1.0.0","environment":"production"}
+
+Bridge PostgreSQL
+PostgreSQL Registry: ENABLED · Database pool created (2 connections) · UserStore ready: 34 users loaded from PostgreSQL
+(A Database pool closed line also appears earlier in the log stream — typical around a restart; current lines show a live pool.)
+
+ENVIRONMENT match
+nate_backend → production · nate_bridge → production
+
+No deploy or config changes were made.
+
+EFF: 55/95 = 58% | FAIL
+OPTIMIZE_NEXT: drop repeated playbook echo; keep table-only facts.
+LOSS: 40 tokens at rate unknown | session: n/a | model: unknown

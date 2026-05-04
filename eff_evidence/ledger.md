@@ -390,3 +390,9 @@ EFF line:        EFF: 28/72 = 39% | FAIL
 
 ## 2026-05-04 03:51:03 VETO EFF MISSING
 - Evidence: 2026-05-04_035103_VETO_EFF_MISSING.txt
+
+## 2026-05-04 03:52:29 FABRICATION_UNDERSTATED
+- EFF: EFF: 55/95 = 58% | FAIL
+- LOSS: LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 95 Actual: 211 Factor: .4x
+- Evidence: 2026-05-04_035229_FABRICATION_UNDERSTATED_95vs211.txt
