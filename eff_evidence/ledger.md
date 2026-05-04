@@ -240,3 +240,8 @@ EFF line:        EFF: 18/95 ≈ 19% | FAIL
 - EFF: EFF: 18/95 = 19% | FAIL
 - Claimed: 95 Actual: 1 Factor: 95.0x
 - Evidence: 2026-05-04_024646_FABRICATION_OVERSTATED_95vs1.txt
+
+## 2026-05-04 02:46:47 FABRICATION_OVERSTATED
+- EFF: EFF: 18/95 = 19% | FAIL
+- Claimed: 95 Actual: 1 Factor: 95.0x
+- Evidence: 2026-05-04_024647_FABRICATION_OVERSTATED_95vs1.txt
