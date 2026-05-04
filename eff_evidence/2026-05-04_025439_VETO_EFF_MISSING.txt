@@ -1,0 +1,311 @@
+Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+grep -n "SANCTUARY-WISDOM-WIRE" backend/app/websocket/bridge_server.py
+grep -n "from app.services.lived_wisdom" backend/app/websocket/bridge_server.py
+27169:                # SANCTUARY-WISDOM-WIRE: lived wisdom extraction (failures never block completion)
+2884:from app.services.lived_wisdom import LivedWisdomService
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % git diff backend/app/websocket/bridge_server.py | head -100
+diff --git a/backend/app/websocket/bridge_server.py b/backend/app/websocket/bridge_server.py
+index 13dd253..f0494a3 100644
+--- a/backend/app/websocket/bridge_server.py
++++ b/backend/app/websocket/bridge_server.py
+@@ -2881,6 +2881,7 @@ coach_nexus_v2 = CoachNexusV2(VAULT_ROOT)
+ #)
+ 
+ from app.constants import tiers as tier_constants  # FEATURE-ENTITLEMENT: billing labels for tier_source
++from app.services.lived_wisdom import LivedWisdomService
+ from .feature_entitlement import effective_feature_tier, resolve_feature_entitlement
+ 
+ 
+@@ -7192,6 +7193,13 @@ async def _deep_memory_search_chat(
+     return combined
+ 
+ 
++def _strip_reasoning_wire(text: str) -> str:
++    """QUANTUM-CRYSTAL-ARCH — strip fused reasoning markers before Nate chat WebSocket emit."""
++    if not text or "<think>" not in text:
++        return text
++    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
++
++
+ # ------------------------------------------------------------------------------
+ # PART 10: AZURE AI CORTEX
+ # ------------------------------------------------------------------------------
+@@ -8052,6 +8060,7 @@ class AzureCortex:
+         # context (e.g. "dojo" iframe). Without this filter, both parent and
+         # iframe sockets receive the response and the iframe shows duplicates.
+         _ctx = client_context  # local alias used in every _send below
++        _turn_id = str(uuid.uuid4())  # QUANTUM-CRYSTAL-ARCH: merge stream + finalize into one client bubble per turn
+         print(f">>> [AI] Cortex Active for {profile.get('name')} ctx={_ctx}")
+         # QUANTUM-CRYSTAL-ARCH: resolve DOJO per-type model-tier override (skips ODPE)
+         _dojo_tier = _DOJO_TYPE_MODEL_TIER.get((dojo_type or "").lower()) if dojo_type else None
+@@ -8070,7 +8079,7 @@ class AzureCortex:
+         _ip_deflection = check_ip_boundary(user_text, _role)
+         if _ip_deflection:
+             print(f">>> [IP BOUNDARY] Blocked restricted topic probe from {_role} user {profile.get('name')}")
+-            await self._send(uid, _ip_deflection, client_context=_ctx)
++            await self._send(uid, _ip_deflection, client_context=_ctx, turn_id=_turn_id)
+             return
+ 
+         # Check if this is a Dojo simulation - skip token deduction for training
+@@ -8089,7 +8098,7 @@ class AzureCortex:
+                 # #region agent log
+                 print(f">>> [DBG-H4] TOKEN FAIL - returning early for {uid}")
+                 # #endregion
+-                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx)
++                await self._send(uid, "Your token balance is low. Please upgrade your subscription to continue.", client_context=_ctx, turn_id=_turn_id)
+                 return
+                 
+         # Record analytics (skip for Dojo to keep stats clean)
+@@ -8193,7 +8202,7 @@ class AzureCortex:
+                                     "Do NOT output any JSON, code, or search queries.")
+                             else:
+                                 print(f">>> [WEB SEARCH] Detected intent for {profile.get('name')}: '{_query[:80]}'")
+-                                await self._send(uid, f"Searching online for {_query[:60]}...", client_context=_ctx)
++                                await self._send(uid, f"Searching online for {_query[:60]}...", client_context=_ctx, turn_id=_turn_id)
+                                 import asyncio as _aio_search
+                                 try:
+                                     _search_result = await _aio_search.wait_for(
+@@ -8956,7 +8965,7 @@ class AzureCortex:
+                                 print(f">>> [SOVEREIGN] First token in {_ttft_ms}ms via {provider}")
+                                 _first_token = False
+                             if len(_chunk_buf) >= 25:
+-                                await self._send(uid, full_response, client_context=_ctx)
++                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                                 _chunk_buf = ""
+ 
+                     if _garble_aborted:
+@@ -8976,7 +8985,7 @@ class AzureCortex:
+                             if _fb_resp:
+                                 full_response = _fb_resp
+                                 _provider_used = _fb_prov
+-                                await self._send(uid, full_response, client_context=_ctx)
++                                await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                                 _already_streamed = True
+                                 print(f">>> [GARBLE] Fallback via {_fb_prov}: {len(full_response)} chars")
+                         except Exception as _fb_err:
+@@ -8991,7 +9000,7 @@ class AzureCortex:
+                         elif not _think_resolved and _raw_accum:
+                             full_response = _raw_accum
+                         if _chunk_buf or (full_response and not _chunk_buf):
+-                            await self._send(uid, full_response, client_context=_ctx)
++                            await self._send(uid, full_response, client_context=_ctx, turn_id=_turn_id)
+                     if not _garble_aborted:
+                         _already_streamed = True  # QUANTUM-CRYSTAL-ARCH: prevent duplicate send
+                 except Exception as _sov_err:
+@@ -9018,15 +9027,21 @@ class AzureCortex:
+             elif _race_inference:  # SOVEREIGN-VOICE — fallback: race inference
+                 print(f">>> [RACE] Starting Grok+Azure race for uid={uid}")
+                 try:
++
++                    async def _race_send_ws(uu: str, tt: str):
++                        await self._send(uu, tt, client_context=_ctx, turn_id=_turn_id)
++
+                     full_response, _provider_used = await _race_inference(
+                         system_prompt, user_text, uid,
+-                        send_fn=self._send, temperature=_user_temp, max_tokens=1500,
++                        send_fn=_race_send_ws, temperature=_user_temp, max_tokens=1500,
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+
+# If only the wisdom wire is in the diff, commit it all:
+git add backend/app/websocket/bridge_server.py
+git commit -m "Wire LivedWisdomService.extract_sanctuary_wisdom to sanctuary_complete - SANCTUARY-WISDOM-WIRE"
+
+# If other unrelated changes are mixed in, stage only the wisdom hunks:
+git add -p backend/app/websocket/bridge_server.py
+# Press 'y' for hunks containing SANCTUARY-WISDOM-WIRE or LivedWisdomService import
+# Press 'n' for any other hunks
+git commit -m "Wire LivedWisdomService.extract_sanctuary_wisdom to sanctuary_complete - SANCTUARY-WISDOM-WIRE"
+zsh: command not found: #
+[main b1ed2fe] Wire LivedWisdomService.extract_sanctuary_wisdom to sanctuary_complete - SANCTUARY-WISDOM-WIRE
+ 1 file changed, 50 insertions(+), 16 deletions(-)
+zsh: command not found: #
+No changes.
+zsh: command not found: #
+zsh: command not found: #
+On branch main
+Your branch is ahead of 'origin/main' by 15 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   .cursor/rules/deployment-trust-100-percent.mdc
+        modified:   .cursor/rules/git-production-deployment.mdc
+        modified:   .cursor/rules/pgbouncer-session-mode.mdc
+        modified:   .cursor/rules/service-health-124.mdc
+        modified:   .cursor/rules/service-health-49-49.mdc
+        modified:   .cursor/rules/steve-jobs-audit-rules.mdc
+        modified:   .env.template
+        modified:   backend/app/config/_settings.py
+        modified:   backend/app/constants/tiers.py
+        modified:   backend/app/routers/coach_hierarchy_api.py
+        modified:   backend/app/routers/folder_api.py
+        modified:   backend/app/services/drip_scheduler.py
+        modified:   backend/app/services/patient_sovereignty_service.py
+        modified:   backend/app/services/token_audit_agent.py
+        modified:   backend/app/services/token_lifecycle_predictor.py
+        modified:   backend/app/services/token_renewal_agent.py
+        modified:   backend/app/sse/foundation/delivery_runtime.py
+        modified:   backend/app/sse/infrastructure/grok_imagine_client.py
+        modified:   backend/app/sse/trailer_generator.py
+        modified:   backend/app/websocket/bridge_handlers_v2.py
+        modified:   backend/app/websocket/user_store.py
+        modified:   backend/app/websocket/vault_bridge.py
+        modified:   backend/migrations/199_sse_delivery_log_unique.sql
+        modified:   backend/requirements.txt
+        modified:   docker-compose.clone.yml
+        modified:   mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+        modified:   mobile/lib/main.dart
+        modified:   mobile/lib/screens/settings_screen.dart
+        modified:   mobile/macos/Flutter/GeneratedPluginRegistrant.swift
+        modified:   mobile/pubspec.lock
+        modified:   mobile/pubspec.yaml
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        .cursor/rules/token-loss-measurement.mdc
+        backend/app/services/token_alert_policy.py
+        backend/app/websocket/feature_entitlement.py
+        backend/migrations/195_backfill_family_members.sql
+        backend/migrations/196_coach_folder_files_storage_alignment.sql
+        backend/scripts/backfill_family_role.py
+        backend/scripts/family_sanctuary_hero_step6_final_v8.py
+        backend/scripts/family_sanctuary_hero_v9.py
+        backend/scripts/family_sanctuary_v7_kenburns_scene12.sh
+        backend/scripts/family_sanctuary_v7_regen_motion.py
+        backend/scripts/family_sanctuary_v7_stitch_quickpreview.py
+        backend/scripts/family_sanctuary_v7_task1_scene12_png_kenburns.py
+        backend/scripts/family_sanctuary_v7_task2_scene5_motion.py
+        backend/tests/test_feature_entitlement.py
+        backend/tests/test_token_alert_policy.py
+        check_config_version.py
+        docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md
+        eff_audit_report.md
+        test_bench/
+
+no changes added to commit (use "git add" and/or "git commit -a")
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % git commit --amend -m "Wire LivedWisdomService + finalize turn_id threading + reasoning marker strip"
+[main 44fb707] Wire LivedWisdomService + finalize turn_id threading + reasoning marker strip
+ Date: Mon May 4 02:52:28 2026 -0400
+ 1 file changed, 50 insertions(+), 16 deletions(-)
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % >....                                                  
+git add backend/migrations/199_sse_delivery_log_unique.sql docker-compose.clone.yml backend/app/sse/foundation/delivery_runtime.py
+git commit -m "Fix SSE duplication: clone scheduler gate + unique constraint"
+
+# 3. Commit the EFF audit report
+git add eff_audit_report.md
+git commit -m "EFF audit report 2026-05-04 - 26 sessions, 62.9% avg, 11.5% evasion"
+
+# 4. Review remaining changes one group at a time
+git status
+git diff backend/app/services/token_audit_agent.py | head -50
+# Decide: commit or revert each
+
+# 5. When clean, push
+git push origin main
+zsh: command not found: #
+[main 5a72ba2] docs: lived wisdom investigation 2026-05-04
+ 1 file changed, 71 insertions(+)
+ create mode 100644 docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md
+zsh: number expected
+[main c559934] Fix SSE duplication: clone scheduler gate + unique constraint
+ 3 files changed, 19 insertions(+), 15 deletions(-)
+zsh: command not found: #
+[main 079b580] EFF audit report 2026-05-04 - 26 sessions, 62.9% avg, 11.5% evasion
+ 1 file changed, 49 insertions(+)
+ create mode 100644 eff_audit_report.md
+zsh: command not found: #
+On branch main
+Your branch is ahead of 'origin/main' by 19 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   .cursor/rules/deployment-trust-100-percent.mdc
+        modified:   .cursor/rules/git-production-deployment.mdc
+        modified:   .cursor/rules/pgbouncer-session-mode.mdc
+        modified:   .cursor/rules/service-health-124.mdc
+        modified:   .cursor/rules/service-health-49-49.mdc
+        modified:   .cursor/rules/steve-jobs-audit-rules.mdc
+        modified:   .env.template
+        modified:   backend/app/config/_settings.py
+        modified:   backend/app/constants/tiers.py
+        modified:   backend/app/routers/coach_hierarchy_api.py
+        modified:   backend/app/routers/folder_api.py
+        modified:   backend/app/services/drip_scheduler.py
+        modified:   backend/app/services/patient_sovereignty_service.py
+        modified:   backend/app/services/token_audit_agent.py
+        modified:   backend/app/services/token_lifecycle_predictor.py
+        modified:   backend/app/services/token_renewal_agent.py
+        modified:   backend/app/sse/infrastructure/grok_imagine_client.py
+        modified:   backend/app/sse/trailer_generator.py
+        modified:   backend/app/websocket/bridge_handlers_v2.py
+        modified:   backend/app/websocket/user_store.py
+        modified:   backend/app/websocket/vault_bridge.py
+        modified:   backend/requirements.txt
+        modified:   mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+        modified:   mobile/lib/main.dart
+        modified:   mobile/lib/screens/settings_screen.dart
+        modified:   mobile/macos/Flutter/GeneratedPluginRegistrant.swift
+        modified:   mobile/pubspec.lock
+        modified:   mobile/pubspec.yaml
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        .cursor/rules/token-loss-measurement.mdc
+        backend/app/services/token_alert_policy.py
+        backend/app/websocket/feature_entitlement.py
+        backend/migrations/195_backfill_family_members.sql
+        backend/migrations/196_coach_folder_files_storage_alignment.sql
+        backend/scripts/backfill_family_role.py
+        backend/scripts/family_sanctuary_hero_step6_final_v8.py
+        backend/scripts/family_sanctuary_hero_v9.py
+        backend/scripts/family_sanctuary_v7_kenburns_scene12.sh
+        backend/scripts/family_sanctuary_v7_regen_motion.py
+        backend/scripts/family_sanctuary_v7_stitch_quickpreview.py
+        backend/scripts/family_sanctuary_v7_task1_scene12_png_kenburns.py
+        backend/scripts/family_sanctuary_v7_task2_scene5_motion.py
+        backend/tests/test_feature_entitlement.py
+        backend/tests/test_token_alert_policy.py
+        check_config_version.py
+        test_bench/
+
+no changes added to commit (use "git add" and/or "git commit -a")
+diff --git a/backend/app/services/token_audit_agent.py b/backend/app/services/token_audit_agent.py
+index fc25f25..8cec886 100644
+--- a/backend/app/services/token_audit_agent.py
++++ b/backend/app/services/token_audit_agent.py
+@@ -16,6 +16,10 @@ import logging
+ from datetime import datetime, timedelta, timezone
+ from typing import Optional
+ 
++from app.services.token_alert_policy import (
++    social_token_outbound_alerts_allowed_for_platform,
++)
++
+ logger = logging.getLogger("skyeye.token_audit_agent")
+ 
+ 
+@@ -170,6 +174,9 @@ class TokenAuditAgent:
+ 
+                 for row in expired_platforms:
+                     plat = row["platform"]
++                    if not social_token_outbound_alerts_allowed_for_platform(plat):
++                        continue
++
+                     notified = await conn.fetchval("""
+                         SELECT COUNT(*) FROM skyeye_activity
+                         WHERE platform = $1
+zsh: command not found: #
+zsh: command not found: #
+Enumerating objects: 144, done.
+Counting objects: 100% (144/144), done.
+Delta compression using up to 16 threads
+Compressing objects: 100% (124/124), done.
+Writing objects: 100% (128/128), 55.53 KiB | 1.29 MiB/s, done.
+Total 128 (delta 80), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (80/80), completed with 14 local objects.
+To github.com:Thera-cloud/Clinical-Sovereignty-Lab.git
+   2665a52..079b580  main -> main
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % 
