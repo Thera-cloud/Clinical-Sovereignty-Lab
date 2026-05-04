@@ -90,7 +90,9 @@ async def list_files(folder_id: str, request: Request, user: Dict = Depends(requ
             raise HTTPException(404, "Folder not found")
 
         rows = await conn.fetch(
-            """SELECT id, filename, file_type, azure_blob_url, file_size_bytes, uploaded_by, metadata, created_at
+            """SELECT id, filename, file_type,
+                      COALESCE(azure_blob_url, storage_url) AS azure_blob_url,
+                      file_size_bytes, uploaded_by, metadata, created_at
                FROM coach_folder_files WHERE folder_id = $1::uuid ORDER BY created_at DESC""",
             folder_id,
         )
@@ -147,8 +149,8 @@ async def upload_file_metadata(req: UploadFileRequest, request: Request, user: D
             raise HTTPException(404, "Folder not found")
 
         row = await conn.fetchrow(
-            """INSERT INTO coach_folder_files (folder_id, filename, file_type, azure_blob_url, uploaded_by)
-               VALUES ($1::uuid, $2, $3, $4, $5) RETURNING id""",
+            """INSERT INTO coach_folder_files (folder_id, filename, file_type, azure_blob_url, storage_url, uploaded_by)
+               VALUES ($1::uuid, $2, $3, $4, $4, $5) RETURNING id""",
             req.folder_id, req.filename, req.file_type, req.azure_blob_url, coach_id,
         )
 
@@ -211,8 +213,8 @@ async def upload_file(
     async with db.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO coach_folder_files
-               (folder_id, filename, file_type, azure_blob_url, file_size_bytes, uploaded_by, metadata)
-               VALUES ($1::uuid, $2, $3, $4, $5, $6, $7) RETURNING id, created_at""",
+               (folder_id, filename, file_type, azure_blob_url, storage_url, file_size_bytes, uploaded_by, metadata)
+               VALUES ($1::uuid, $2, $3, $4, $4, $5, $6, $7) RETURNING id, created_at""",
             folder_id, filename, file_type,
             str(file_path), len(content), coach_id,
             json.dumps({"original_name": filename, "mime": mime}),
@@ -239,7 +241,7 @@ async def download_file(file_id: str, request: Request, user: Dict = Depends(req
 
     async with db.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT f.filename, f.azure_blob_url, f.metadata
+            """SELECT f.filename, COALESCE(f.azure_blob_url, f.storage_url) AS azure_blob_url, f.metadata
                FROM coach_folder_files f
                JOIN coach_folders d ON f.folder_id = d.id
                WHERE f.id = $1::uuid AND d.coach_id = $2""",
@@ -268,7 +270,7 @@ async def delete_file(file_id: str, request: Request, user: Dict = Depends(requi
 
     async with db.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT f.azure_blob_url FROM coach_folder_files f
+            """SELECT COALESCE(f.azure_blob_url, f.storage_url) AS azure_blob_url FROM coach_folder_files f
                JOIN coach_folders d ON f.folder_id = d.id
                WHERE f.id = $1::uuid AND d.coach_id = $2""",
             file_id, coach_id,
