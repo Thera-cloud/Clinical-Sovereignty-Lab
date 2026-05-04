@@ -146,12 +146,14 @@ class TokenLifecyclePredictor:
 
         await self._log_activity(platform, "token_expiry_warning", msg, severity)
 
-        from app.config import settings as _settings
+        from app.services.token_alert_policy import (
+            social_token_outbound_alerts_allowed_for_platform,
+        )
 
-        if not getattr(_settings, "SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED", True):
+        if not social_token_outbound_alerts_allowed_for_platform(platform):
             logger.debug(
-                "TokenLifecyclePredictor: outbound token alerts disabled "
-                "(SKYEYE_SOCIAL_TOKEN_ALERT_EMAILS_ENABLED=false), skipping email/SMS for %s",
+                "TokenLifecyclePredictor: outbound token alerts suppressed for %s "
+                "(global flag or SKYEYE_TOKEN_ALERT_PAUSED_PLATFORMS), skipping email/SMS",
                 platform,
             )
             logger.info("TokenLifecyclePredictor: %s", msg)
@@ -191,7 +193,16 @@ class TokenLifecyclePredictor:
     async def _send_reconnection_confirmation(self, platform: str):
         msg = f"{platform}: token is now valid and connected."
         await self._log_activity(platform, "token_reconnection_confirmed", msg, "success")
-        if self.notifications and self.admin_email:
+
+        from app.services.token_alert_policy import (
+            social_token_outbound_alerts_allowed_for_platform,
+        )
+
+        if (
+            social_token_outbound_alerts_allowed_for_platform(platform)
+            and self.notifications
+            and self.admin_email
+        ):
             await self.notifications._send_email(
                 self.admin_email,
                 f"{platform} token reconnected",

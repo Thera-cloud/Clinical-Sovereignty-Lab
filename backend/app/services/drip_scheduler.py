@@ -896,7 +896,12 @@ class DripScheduler:
                 continue
 
             try:
-                trial_start = datetime.fromisoformat(str(trial_start_str).replace("Z", "+00:00").replace("+00:00", ""))
+                ts = str(trial_start_str).replace("Z", "+00:00")
+                trial_start = datetime.fromisoformat(ts)
+                if trial_start.tzinfo is None:
+                    trial_start = trial_start.replace(tzinfo=timezone.utc)
+                else:
+                    trial_start = trial_start.astimezone(timezone.utc)
             except (ValueError, TypeError):
                 continue
 

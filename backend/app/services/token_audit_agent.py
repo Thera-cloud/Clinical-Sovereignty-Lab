@@ -16,6 +16,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from app.services.token_alert_policy import (
+    social_token_outbound_alerts_allowed_for_platform,
+)
+
 logger = logging.getLogger("skyeye.token_audit_agent")
 
 
@@ -170,6 +174,9 @@ class TokenAuditAgent:
 
                 for row in expired_platforms:
                     plat = row["platform"]
+                    if not social_token_outbound_alerts_allowed_for_platform(plat):
+                        continue
+
                     notified = await conn.fetchval("""
                         SELECT COUNT(*) FROM skyeye_activity
                         WHERE platform = $1

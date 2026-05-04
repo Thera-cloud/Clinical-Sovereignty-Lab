@@ -1,0 +1,62 @@
+---
+description: EFF/LOSS footer, per-model output rates, no fabricated pricing
+alwaysApply: true
+---
+
+# Token loss measurement
+
+Every assistant response ends with these two lines (after substantive content):
+
+```
+EFF: <useful>/<total> = X% | [PASS/FAIL]
+LOSS: <wasted_tokens> at $<cost> | session: <running_sum> | model: <name>
+```
+
+## EFF format (enforced)
+
+- **Three numeric values required:** useful token count, total token count, percentage (e.g. `EFF: 42/118 = 36% | FAIL`).
+- **Forbidden in EFF:** qualitative substitutes (`useful/high`, `moderate/moderate`, `~80%` alone, words instead of two integers + percent). **Qualitative EFF = automatic FAIL** even if the answer is good.
+- **Imprecise count:** estimate useful and total each to the **nearest 10**, prefix both with `~`, e.g. `EFF: ~40/~120 = 33% | FAIL`.
+- **`| EXEMPT: correctness`** (if used) does **not** replace numeric EFF — still emit `useful/total = %`.
+
+When **EFF** is **FAIL**, also append: `OPTIMIZE_NEXT: <one specific change to reduce bloat>` (see `.cursorrules`).
+
+## Per-token output rates (USD per 1k output tokens)
+
+| Model slug | $ / 1k out |
+|------------|------------|
+| `claude-opus-4-7` | $0.025 |
+| `claude-opus-4-6` | $0.025 |
+| `claude-sonnet-4-6` | $0.015 |
+| `claude-haiku-4-5` | $0.005 |
+| `gpt-4o` | $0.010 |
+| `gpt-5.2` | $0.014 |
+| unknown | **do not invent a rate** |
+
+## Calculations
+
+- `wasted_tokens = total - useful` (useful = code, commands, diffs, file:line refs, and other directly actionable content)
+- **Named model:** `cost = wasted_tokens × (rate_for_model / 1000)` USD — state as `$` with up to 4 decimal places when small
+- **Unknown model:** use exactly: `LOSS: <n> tokens at rate unknown | session: <running_sum> | model: unknown` — **no `$` cost figure**
+
+## Verification examples (2026-05)
+
+- 180 output tokens at Opus 4.7 → 180 × $0.000025 = **$0.0045**
+- 180 output tokens at Sonnet 4.6 → 180 × $0.000015 = **$0.0027**
+- 180 output tokens with unknown model → **not** 180 × $0.020 = $3.60 — **never use a default “other” rate**
+
+## Pricing verification
+
+Rates current as of **2026-05**. Re-verify monthly at:
+
+- Anthropic: https://platform.claude.com/docs/about-claude/pricing
+- OpenAI: https://platform.openai.com/docs/pricing
+
+Stale or fabricated rates produce false LOSS values and undermine the measurement contract.
+
+## Rules
+
+1. **Never** use **`$0.020`** or any “Other: default” rate for unknown models.
+2. **Never** fabricate a cost when the active model name/slug is unknown.
+3. Map the **actual** Cursor/IDE model identifier to the table when possible; if it does not match a row, treat as **unknown**.
+4. `session: <running_sum>` — carry a running waste tally across the conversation when the product supports it; otherwise `session: n/a`.
