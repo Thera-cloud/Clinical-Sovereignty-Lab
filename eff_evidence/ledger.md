@@ -331,3 +331,6 @@ EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model
 - LOSS: LOSS: rate unknown if model unknown — no fabricated $ amount
 - Claimed: 210 Actual: 1853 Factor: .1x
 - Evidence: 2026-05-04_033310_FABRICATION_UNDERSTATED_210vs1853.txt
+
+## 2026-05-04 03:45:47 VETO EFF MISSING
+- Evidence: 2026-05-04_034547_VETO_EFF_MISSING.txt

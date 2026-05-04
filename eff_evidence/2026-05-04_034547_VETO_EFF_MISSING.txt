@@ -1,0 +1,31 @@
+Lab-2 % git log --oneline -5
+git status
+8765e15 (HEAD -> main) Phase 7: token alert pause env, UserStore phone/timezone sync, vault tier split, SSE Grok caps/extras, phonenumbers/geoip2
+5cd3a6e Family sanctuary v7-v9 video processing scripts
+afe34d1 Mobile: settings screen + main.dart updates
+b37a8ab EFF evidence: FABRICATION_UNDERSTATED 210vs1853 2026-05-04_033310
+bff60b5 EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 200vs1300 2026-05-04_033138
+On branch main
+Your branch is ahead of 'origin/main' by 17 commits.
+  (use "git push" to publish your local commits)
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        check_config_version.py
+        test_bench/
+
+nothing added to commit but untracked files present (use "git add" to track)
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git log --oneline -10
+git status
+8765e15 (HEAD -> main) Phase 7: token alert pause env, UserStore phone/timezone sync, vault tier split, SSE Grok caps/extras, phonenumbers/geoip2
+5cd3a6e Family sanctuary v7-v9 video processing scripts
+afe34d1 Mobile: settings screen + main.dart updates
+b37a8ab EFF evidence: FABRICATION_UNDERSTATED 210vs1853 2026-05-04_033310
+bff60b5 EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 200vs1300 2026-05-04_033138
+e320244 EFF evidence: FABRICATION_OVERSTATED 115vs57 2026-05-04_032553
+944a61f Fix unterminated triple-quote literals in patient_sovereignty_service
+38cd5ec Migration 195: backfill family_members junction from users.family_id (PGSD Section VII parity)
+b1f973d Migration 196 + folder_api: align coach_folder_files azure_blob_url/storage_url columns
+e29fec1 EFF evidence: VETO_EFF_MISSING 2026-05-04_032145
+:
