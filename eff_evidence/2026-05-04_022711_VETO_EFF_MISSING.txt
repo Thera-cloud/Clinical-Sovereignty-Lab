@@ -1,0 +1,78 @@
+cat > ~/bin/eff_audit.sh << 'SCRIPT_END'
+#!/bin/bash
+LAB_DIR="$HOME/Desktop/Clinical-Sovereignty-Lab-2"
+EVIDENCE_DIR="$LAB_DIR/eff_evidence"
+LEDGER="$EVIDENCE_DIR/ledger.md"
+SUMMARY_CSV="$EVIDENCE_DIR/violations.csv"
+RESPONSE_FILE="/tmp/cursor_response.txt"
+TOLERANCE_FACTOR=2
+AUTO_COMMIT=true
+
+mkdir -p "$EVIDENCE_DIR"
+[ ! -f "$LEDGER" ] && echo "# EFF Evidence Ledger" > "$LEDGER"
+[ ! -f "$SUMMARY_CSV" ] && echo "timestamp,violation_type,claimed_total,actual_tokens,overstatement_factor,evidence_file" > "$SUMMARY_CSV"
+
+pbpaste > "$RESPONSE_FILE"
+TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
+DATE_HUMAN=$(date "+%Y-%m-%d %H:%M:%S")
+
+auto_commit() {
+    [ "$AUTO_COMMIT" != "true" ] && return 0
+    cd "$LAB_DIR" 2>/dev/null || return 1
+    [ -z "$(git status --porcelain eff_evidence/ 2>/dev/null)" ] && return 0
+    git add eff_evidence/ 2>/dev/null
+    git commit -m "$1" --quiet 2>/dev/null && echo "Auto-committed: $1"
+}
+
+EFF_LINE=$(grep -iE "EFF:?\s*[0-9]+\s*/\s*[0-9]+" "$RESPONSE_FILE")
+
+if [ -z "$EFF_LINE" ]; then
+    EVIDENCE_FILE="$EVIDENCE_DIR/${TIMESTAMP}_VETO_EFF_MISSING.txt"
+    cp "$RESPONSE_FILE" "$EVIDENCE_FILE"
+    echo "" >> "$LEDGER"
+    echo "## $DATE_HUMAN VETO EFF MISSING" >> "$LEDGER"
+    echo "- Evidence: $(basename "$EVIDENCE_FILE")" >> "$LEDGER"
+    echo "$DATE_HUMAN,VETO_EFF_MISSING,n/a,n/a,n/a,$(basename "$EVIDENCE_FILE")" >> "$SUMMARY_CSV"
+    echo "VETO: EFF MISSING"
+    echo "Evidence: $EVIDENCE_FILE"
+    auto_commit "EFF evidence: VETO_EFF_MISSING $TIMESTAMP"
+    exit 1
+fi
+
+CLAIMED_TOTAL=$(echo "$EFF_LINE" | grep -oE "/[0-9]+" | head -1 | tr -d '/')
+ACTUAL_WORDS=$(grep -vE "^(EFF|LOSS):" "$RESPONSE_FILE" | wc -w | tr -d ' ')
+ACTUAL_TOKENS=$((ACTUAL_WORDS * 13 / 10))
+[ "$ACTUAL_TOKENS" -eq 0 ] && ACTUAL_TOKENS=1
+OVERSTATEMENT=$(echo "scale=1; $CLAIMED_TOTAL / $ACTUAL_TOKENS" | bc)
+
+echo "Captured:        $RESPONSE_FILE"
+echo "EFF line:        $EFF_LINE"
+echo "Claimed total:   $CLAIMED_TOTAL"
+echo "Actual words:    $ACTUAL_WORDS"
+echo "Actual tokens:   ~$ACTUAL_TOKENS"
+echo "Overstatement:   ${OVERSTATEMENT}x"
+
+if [ "$CLAIMED_TOTAL" -gt $((ACTUAL_TOKENS * TOLERANCE_FACTOR)) ]; then
+    VTYPE="FABRICATION_OVERSTATED"
+elif [ "$CLAIMED_TOTAL" -lt $((ACTUAL_TOKENS / TOLERANCE_FACTOR)) ]; then
+    VTYPE="FABRICATION_UNDERSTATED"
+else
+    VTYPE="PLAUSIBLE"
+fi
+
+echo "STATUS:          $VTYPE"
+
+if [ "$VTYPE" != "PLAUSIBLE" ]; then
+    EVIDENCE_FILE="$EVIDENCE_DIR/${TIMESTAMP}_${VTYPE}_${CLAIMED_TOTAL}vs${ACTUAL_TOKENS}.txt"
+    cp "$RESPONSE_FILE" "$EVIDENCE_FILE"
+    echo "" >> "$LEDGER"
+    echo "## $DATE_HUMAN $VTYPE" >> "$LEDGER"
+    echo "- EFF: $EFF_LINE" >> "$LEDGER"
+    echo "- Claimed: $CLAIMED_TOTAL Actual: $ACTUAL_TOKENS Factor: ${OVERSTATEMENT}x" >> "$LEDGER"
+    echo "- Evidence: $(basename "$EVIDENCE_FILE")" >> "$LEDGER"
+    echo "$DATE_HUMAN,$VTYPE,$CLAIMED_TOTAL,$ACTUAL_TOKENS,${OVERSTATEMENT}x,$(basename "$EVIDENCE_FILE")" >> "$SUMMARY_CSV"
+    echo "Evidence archived: $EVIDENCE_FILE"
+    auto_commit "EFF evidence: $VTYPE ${CLAIMED_TOTAL}vs${ACTUAL_TOKENS} $TIMESTAMP"
+fi
+SCRIPT_END
+chmod +x ~/bin/eff_audit.sh

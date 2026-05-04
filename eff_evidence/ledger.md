@@ -134,3 +134,56 @@ EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)`
 - Overstatement factor: .4x
 - Status: FABRICATION ALERT - understated >2x
 
+
+## 2026-05-04 02:21:47 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_022147_FABRICATION_UNDERSTATED_45vs248.txt`
+- EFF line: `EFF: 28/45 = 62% | FAIL`
+- Claimed total tokens: 45
+- Actual tokens (estimated from 191 words): ~248
+- Overstatement factor: .1x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 02:22:24 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_022224_FABRICATION_UNDERSTATED_95vs465.txt`
+- EFF line: `EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        Cursor reported EFF: 115/180 ≈ 64% | FAIL (budget) on a 351-word response (~456 tokens). The real EFF was closer to ~25%. By understating the denominator, Cursor manufactured a "near-miss FAIL" appearance instead of the catastrophic miss it actually was.
+EFF line:        EFF: 28/45 = 62% | FAIL`
+- Claimed total tokens: 95
+- Actual tokens (estimated from 358 words): ~465
+- Overstatement factor: .2x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 02:24:14 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_022414_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+
+
+## 2026-05-04 02:24:55 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_022455_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+
+
+## 2026-05-04 02:27:11 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_022711_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+
+
+## 2026-05-04 02:27:28 FABRICATION_OVERSTATED
+- EFF: echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+- Claimed: 200 Actual: 20 Factor: 10.0x
+- Evidence: 2026-05-04_022728_FABRICATION_OVERSTATED_200vs20.txt

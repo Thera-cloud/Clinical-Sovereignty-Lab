@@ -1,0 +1,16 @@
+e % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+# Edit docs/OPEN_TODOS.md — move the Coach Classroom row from Active to Done
+# Old line referenced: mobile/lib/updated_screens.dart:6725 (wrong)
+# Actual fix landed at: mobile/lib/updated_screens.dart:4383, 6806
+
+git add mobile/lib/updated_screens.dart docs/OPEN_TODOS.md
+git commit -m "Fix Coach Classroom analyzing flag stuck on WebSocket error - closes OPEN_TODOS row 13"
+zsh: command not found: #
+zsh: missing delimiter for 'g' glob qualifier
+zsh: command not found: #
+[main e40900e] Fix Coach Classroom analyzing flag stuck on WebSocket error - closes OPEN_TODOS row 13
+ 1 file changed, 74 insertions(+), 11 deletions(-)
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git log --oneline | grep "EFF evidence" | head -10
+a94390e EFF evidence capture system - 2026-05-04
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % 

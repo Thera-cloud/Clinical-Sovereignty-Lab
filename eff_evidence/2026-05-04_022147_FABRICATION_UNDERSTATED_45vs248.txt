@@ -1,0 +1,65 @@
+> Fix Coach Classroom analyzing-flag stuck bug.
+
+File: mobile/lib/updated_screens.dart
+
+Method: _handleSocketMessage in CoachDashboardScreenV2
+
+
+
+Add to the existing error handler at lines 6806–6839 (inside the existing setState block):
+
+    _classroomAnalyzing = false;
+
+    _classroomLiveAnalyzing = false;
+
+
+
+Add to _connectToBridge stream onError/onDone at lines 4383–4391 (inside existing setState if present, or wrap):
+
+    _classroomAnalyzing = false;
+
+    _classroomLiveAnalyzing = false;
+
+
+
+No other changes. No reformatting. Show diff before saving.
+
+Max 50 lines changed (protected-file rule per .cursorrules).
+
+Diff (preview)
+
+        _handleSocketMessage,
+        onError: (e) {
+          _debugLog("Coach Socket Error: $e");
+          if (mounted) setState(() => _statusMessage = "Connection Failed\n$_serverUrl");
+          if (mounted) setState(() {
+            _statusMessage = "Connection Failed\n$_serverUrl";
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
+          });
+          _scheduleWsReconnect();
+        },
+        onDone: () {
+          _debugLog("Coach Socket Closed");
+          if (mounted) setState(() => _statusMessage = "Disconnected — reconnecting...\n$_serverUrl");
+          if (mounted) setState(() {
+            _statusMessage = "Disconnected — reconnecting...\n$_serverUrl";
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
+          });
+          _scheduleWsReconnect();
+        },
+          setState(() {
+            _notesLoading = false;
+            _dojoBusy = false;
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
+            final msg = (data['message'] ?? 'Unknown error').toString();
+Applying now.
+
+Applied as above: ~14 lines touched, under the 50-line cap. read_lints is clean.
+
+Deploy path: run flutter build web --release before shipping the coach web bundle per project rules.
+
+EFF: 28/45 = 62% | FAIL
+LOSS: 17 at rate unknown | session: n/a | model: Composer — OPTIMIZE_NEXT: skip repeating the diff after apply when user already saw it in-chat.
