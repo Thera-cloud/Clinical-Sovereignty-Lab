@@ -11,6 +11,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../io_file_stub.dart' if (dart.library.io) 'dart:io' show File;
@@ -123,6 +125,79 @@ class _Design {
   static const border = Color(0xFF252525);
 }
 
+/// One-off prompt when device IANA zone ≠ account zone (sticky TZ policy).
+Future<void> promptIfDeviceTimezoneDiffersFromAccount({
+  required BuildContext context,
+  required Map<String, dynamic> profile,
+  required TextEditingController timezoneCtrl,
+  required void Function(String newTz) onPatched,
+}) async {
+  try {
+    final deviceTz = await FlutterTimezone.getLocalTimezone();
+    final accountTz = (profile['timezone'] ?? '').toString().trim();
+    if (accountTz.isEmpty || deviceTz == accountTz) return;
+    final uname = (profile['username'] ?? '').toString();
+    if (uname.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('tz_mismatch_dismissed_$uname') == true) return;
+    if (!context.mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _Design.bgCard,
+        title: const Text('Time zone', style: TextStyle(color: _Design.gold)),
+        content: Text(
+          'Your device is set to $deviceTz, but your account uses $accountTz. '
+          'Update your account to match this device?',
+          style: const TextStyle(color: _Design.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await prefs.setBool('tz_mismatch_dismissed_$uname', true);
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Keep account setting'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final token = (profile['token'] ?? '').toString();
+              final resp = await http.patch(
+                Uri.parse('${AppConfig.apiBaseUrl}/api/client/timezone'),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $token',
+                },
+                body: jsonEncode({'timezone': deviceTz}),
+              );
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (resp.statusCode == 200) {
+                await prefs.setBool('tz_mismatch_dismissed_$uname', true);
+                onPatched(deviceTz);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Time zone updated'),
+                      backgroundColor: _Design.green,
+                    ),
+                  );
+                }
+              } else if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not update time zone (${resp.statusCode})')),
+                );
+              }
+            },
+            child: const Text('Update account'),
+          ),
+        ],
+      ),
+    );
+  } catch (_) {}
+}
+
 // =============================================================================
 // CLIENT SETTINGS SCREEN
 // =============================================================================
@@ -215,6 +290,21 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _fetchQuestsAndMissions();
     _refreshProfileFromServer();
     if (!_isCoachOnly) _fetchVoiceBalance();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      promptIfDeviceTimezoneDiffersFromAccount(
+        context: context,
+        profile: _profile,
+        timezoneCtrl: _timezoneCtrl,
+        onPatched: (tz) {
+          if (!mounted) return;
+          setState(() {
+            _profile['timezone'] = tz;
+            _profile['timezone_source'] = 'user_explicit';
+            _timezoneCtrl.text = tz;
+          });
+        },
+      );
+    });
   }
 
   Future<void> _refreshProfileFromServer() async {
@@ -259,7 +349,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       if (result != null && mounted) {
         final fresh = Map<String, dynamic>.from(_profile);
         for (final key in ['subscription_plan', 'tier', 'subscription_status',
-                           'family_id', 'family_role', 'name', 'email', 'phone']) {
+                           'family_id', 'family_role', 'name', 'email', 'phone', 'timezone', 'timezone_source']) {
           if (result.containsKey(key) && result[key] != null) {
             fresh[key] = result[key];
           }
@@ -3780,6 +3870,19 @@ class _CoachSettingsScreenState extends State<CoachSettingsScreen> {
     // subscription and is silently dropped, leaving every field blank.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _requestProfileRefresh();
+      promptIfDeviceTimezoneDiffersFromAccount(
+        context: context,
+        profile: _profile,
+        timezoneCtrl: _timezoneCtrl,
+        onPatched: (tz) {
+          if (!mounted) return;
+          setState(() {
+            _profile['timezone'] = tz;
+            _profile['timezone_source'] = 'user_explicit';
+            _timezoneCtrl.text = tz;
+          });
+        },
+      );
     });
   }
 

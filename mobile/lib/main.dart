@@ -19,6 +19,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter_timezone/flutter_timezone.dart';
 
 import 'metrics_widgets.dart';
 import 'updated_screens.dart';
@@ -7744,6 +7745,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
   // Contact fields
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _timezoneCtrl = TextEditingController();
+  /// Device-detected IANA zone at signup (sent as browser_timezone; sticky policy on server).
+  String? _browserIanaForSignup;
 
   // W-9 fields (coaches only)
   final _w9LegalNameCtrl = TextEditingController();
@@ -7794,6 +7798,17 @@ class _SignUpWizardState extends State<SignUpWizard> {
     _selectedRole = widget.role; // Pre-set if passed
     _parseCoachInviteFromUrl();
     _sanitizeSession();
+    _loadSignupIanaForSignup();
+  }
+
+  Future<void> _loadSignupIanaForSignup() async {
+    try {
+      final tz = await FlutterTimezone.getLocalTimezone();
+      final s = tz.trim();
+      if (s.isEmpty || !mounted) return;
+      _browserIanaForSignup = s;
+      setState(() => _timezoneCtrl.text = s);
+    } catch (_) {}
   }
 
   void _parseCoachInviteFromUrl() {
@@ -7891,6 +7906,12 @@ class _SignUpWizardState extends State<SignUpWizard> {
         );
         return;
       }
+    }
+    if (_timezoneCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Time zone is required. Confirm or edit the detected value.")),
+      );
+      return;
     }
     if (_userCtrl.text.trim().isEmpty || _passCtrl.text.trim().isEmpty) {
        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Username and Password are required")));
@@ -8032,6 +8053,9 @@ class _SignUpWizardState extends State<SignUpWizard> {
       // Contact info
       "email": _emailCtrl.text.trim(),
       "phone": _phoneCtrl.text.trim(),
+      "timezone": _timezoneCtrl.text.trim(),
+      if (_browserIanaForSignup != null && _browserIanaForSignup!.trim().isNotEmpty)
+        "browser_timezone": _browserIanaForSignup!.trim(),
       // Tier/plan selection (clients)
       "registration_type": role == "CLIENT" ? _selectedTier : null,
       // Coach invite token (when client arrives via coach invite link)
@@ -9234,6 +9258,17 @@ class _SignUpWizardState extends State<SignUpWizard> {
                       suffixIcon: _phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
                           ? const Icon(Icons.check_circle, color: Color(0xFF4ECDC4), size: 20)
                           : null,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _timezoneCtrl,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: "Time zone (IANA) *",
+                      hintText: "e.g. America/Los_Angeles",
+                      prefixIcon: Icon(Icons.schedule),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
