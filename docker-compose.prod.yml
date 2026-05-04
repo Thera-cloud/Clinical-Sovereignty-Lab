@@ -46,7 +46,10 @@ services:
     volumes:
       - redis_data:/data
       - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    # No ports exposed — only reachable by backend/bridge via nate_network (redis:6379)
+    # VPC port binding: allows clone VPS (10.120.0.6) to connect via DO VPC peering
+    # UFW already allows 6379/tcp from 10.120.0.0/20 for this purpose
+    ports:
+      - "10.120.0.2:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
       interval: 10s
