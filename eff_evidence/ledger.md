@@ -427,3 +427,6 @@ EFF: 580/650 = 89% | PASS
 - LOSS: LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
 - Claimed: 380 Actual: 787 Factor: .4x
 - Evidence: 2026-05-04_173134_FABRICATION_UNDERSTATED_380vs787.txt
+
+## 2026-05-04 17:33:33 VETO EFF MISSING
+- Evidence: 2026-05-04_173333_VETO_EFF_MISSING.txt

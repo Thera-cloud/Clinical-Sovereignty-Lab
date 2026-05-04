@@ -1,0 +1,145 @@
+> Fix coach session scheduling sync issues — three coordinated fixes.
+
+Source of truth: docs/coach_portal/_FOUNDATIONAL_SPEC.md
+Reference: scheduling investigation showing hardware_id vs username mismatch + UTC-only timezone
+
+═══════════════════════════════════════════════════════════════
+GATING — investigate FIRST, fix per gate
+═══════════════════════════════════════════════════════════════
+
+Three independent fixes, three gates. Stop and report after each.
+Do NOT bundle all three into one commit.
+
+═══════════════════════════════════════════════════════════════
+FIX 1 — Google Calendar sync: hardware_id → username resolution
+═══════════════════════════════════════════════════════════════
+
+File: backend/app/services/google_calendar_session_sync.py
+Function: sync_session_for_participants (lines 313-321)
+
+Problem: function receives hardware_id values (COACH_COACHN_ID, CLIENT_PAULA182_ID)
+but google_calendar_connection.user_id stores users.username (per migration 183).
+Result: _get_connection returns None, sync is silent no-op.
+
+Required change:
+1. Add helper: async def _hardware_id_to_username(pool, hardware_id: str) -> Optional[str]
+   - Query: SELECT username FROM users WHERE hardware_id = $1 LIMIT 1
+   - Cache result in module-level dict (TTL 300 seconds) to avoid repeat queries
+   - Return None if not found, log a warning
+2. In sync_session_for_participants:
+   - Before the "for uid in (coach_id, client_id)" loop, resolve each ID via _hardware_id_to_username
+   - Pass the resolved username (not hardware_id) to sync_session_to_google
+   - If resolution fails, log and skip that participant (do not block the other)
+3. Add logger.warning if either resolution fails so silent no-ops surface
+
+Constraints:
+- Maximum 35 lines added
+- No changes to migration 183 schema
+- No changes to OAuth flow
+- Add # GCAL-SYNC-FIX marker comment on the new helper
+
+After this gate completes:
+- Show diff
+- Run: git diff backend/app/services/google_calendar_session_sync.py | head -60
+- Confirm: "Fix 1 ready for review"
+- HALT until operator says "continue Fix 2"
+
+═══════════════════════════════════════════════════════════════
+FIX 2 — Email/SMS notification timezone (UTC → recipient TZ)
+═══════════════════════════════════════════════════════════════
+
+File: backend/app/routers/sessions.py
+Function: _send_session_link (lines 518-539 area)
+
+Problem: time formatted as "%I:%M %p UTC", template hardcoded timezone="UTC"
+Recipients see UTC labels, not their actual timezone.
+
+Required change:
+1. Read recipient timezone from users.profile_data->>'timezone' (default "America/New_York" if NULL)
+2. Convert datetime to recipient timezone using zoneinfo.ZoneInfo
+3. Format as "%I:%M %p %Z" (will display "EST", "PST", etc. naturally)
+4. Pass actual timezone string to send_coaching_confirmation timezone= parameter
+5. Apply same logic to SMS body construction
+
+Implementation pattern:
+   from zoneinfo import ZoneInfo
+   tz_name = recipient_profile.get("timezone") or "America/New_York"
+   tz = ZoneInfo(tz_name)
+   dt_local = dt.astimezone(tz)
+   time_str = dt_local.strftime("%I:%M %p %Z").lstrip("0")
+   # Pass tz_name to send_coaching_confirmation
+
+Constraints:
+- Maximum 25 lines added
+- Apply to both client AND coach notification paths
+- Handle ZoneInfoNotFoundError gracefully (fall back to UTC with logged warning)
+- Add # TZ-NOTIFICATION-FIX marker comment
+
+After this gate completes:
+- Show diff
+- Confirm: "Fix 2 ready for review"
+- HALT until operator says "continue Fix 3"
+
+═══════════════════════════════════════════════════════════════
+FIX 3 — Session payload timezone (Google Calendar event)
+═══════════════════════════════════════════════════════════════
+
+File: backend/app/services/google_calendar_session_sync.py
+Function: _build_event_payload (uses session.get("timezone") with default "America/New_York")
+
+Problem: All Google events get the same timezone field regardless of participants.
+Coach in PT and client in ET see different display times even though instant is correct.
+
+Required change:
+1. When sync_session_to_google runs for a specific user, look up that user's
+   profile_data->>'timezone' and pass to _build_event_payload as timezone_str
+2. Each participant's calendar push uses THEIR timezone for the payload
+3. The dateTime values keep the UTC offset (no change to the instant)
+4. Default fallback chain:
+   user.profile_data.timezone → session.timezone → "America/New_York"
+
+Constraints:
+- Maximum 20 lines added
+- Backward compatible — if session has no timezone field, behavior unchanged from current
+- Add # PER-USER-TZ-FIX marker comment
+
+After this gate completes:
+- Show diff
+- Confirm: "Fix 3 ready for review"
+- HALT until operator says "commit all three"
+
+═══════════════════════════════════════════════════════════════
+COMMIT SEQUENCE (only after all 3 gates verified)
+═══════════════════════════════════════════════════════════════
+
+Three commits, in order:
+
+git add backend/app/services/google_calendar_session_sync.py
+git commit -m "Fix GCal sync: resolve hardware_id to username before OAuth lookup"
+
+git add backend/app/routers/sessions.py
+git commit -m "Fix notification timezone: use recipient profile_data timezone instead of UTC"
+
+git add backend/app/services/google_calendar_session_sync.py
+git commit -m "Fix GCal event payload: per-user timezone from profile_data"
+
+═══════════════════════════════════════════════════════════════
+VERIFICATION (after commits)
+═══════════════════════════════════════════════════════════════
+
+For each fix, confirm:
+- read_lints clean on modified files
+- No new TODO markers introduced
+- Marker comments (# GCAL-SYNC-FIX, # TZ-NOTIFICATION-FIX, # PER-USER-TZ-FIX) present
+- git log --oneline -3 shows three distinct commits
+
+Constraints throughout:
+- Read-only investigation first, then per-gate execute
+- No --force, no --hard
+- Mark TBD if profile_data column doesn't have timezone field on real users
+- If profile_data.timezone is empty for test accounts, log warning + use default
+- Do NOT recreate Paula's session or modify any existing DB rows
+
+Mode: investigate then execute (gated per fix)
+EFF: numeric only
+LOSS: rate unknown if model unknown — no fabricated cost
