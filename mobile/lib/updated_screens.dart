@@ -1229,6 +1229,38 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
   bool _restartScheduled = false;
 
   final List<String> _chatHistory = [];
+  static const int _kMaxTurnBubbleMap = 200;
+  final Map<String, int> _turnIdToChatIndex = {};
+  final Map<String, String> _latestNateTextByTurnForTts = {};
+  final Map<String, Timer> _ttsDebounceByTurn = {};
+
+  void _pruneTurnBubbleMapIfNeeded() {
+    while (_turnIdToChatIndex.length > _kMaxTurnBubbleMap) {
+      final k = _turnIdToChatIndex.keys.first;
+      _turnIdToChatIndex.remove(k);
+    }
+  }
+
+  /// One TTS invocation per logical `turn_id`; uses latest accumulated text after stream settles.
+  void _scheduleTtsOncePerTurn(String? turnId, String reply, bool voiceDefault) {
+    if (!voiceDefault || reply.trim().isEmpty || !mounted) return;
+    final tid = turnId?.trim() ?? '';
+    if (tid.isEmpty) {
+      _speakNateMessage(reply);
+      return;
+    }
+    _latestNateTextByTurnForTts[tid] = reply;
+    _ttsDebounceByTurn[tid]?.cancel();
+    _ttsDebounceByTurn[tid] = Timer(const Duration(milliseconds: 420), () {
+      _ttsDebounceByTurn.remove(tid);
+      if (!mounted) return;
+      final latest = _latestNateTextByTurnForTts.remove(tid);
+      if (latest != null && latest.trim().isNotEmpty) {
+        _speakNateMessage(latest);
+      }
+    });
+  }
+
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final SpeechToText _speech = SpeechToText();
@@ -1521,20 +1553,35 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
       }
       else if (data['type'] == 'nate_response' || data['type'] == 'chat_reply') {
         String reply = data['text'] ?? "";
+        final turnId = data['turn_id'] as String?;
         setState(() {
-          if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("Little Nate:")) {
-            _chatHistory[_chatHistory.length - 1] = "Little Nate: $reply";
+          final prefix = "Little Nate: ";
+          final line = "$prefix$reply";
+          if (turnId != null && turnId.trim().isNotEmpty) {
+            final tid = turnId.trim();
+            final existing = _turnIdToChatIndex[tid];
+            if (existing != null && existing >= 0 && existing < _chatHistory.length) {
+              _chatHistory[existing] = line;
+            } else {
+              _chatHistory.add(line);
+              _turnIdToChatIndex[tid] = _chatHistory.length - 1;
+              _pruneTurnBubbleMapIfNeeded();
+            }
           } else {
-            _chatHistory.add("Little Nate: $reply");
-          } 
+            if (_chatHistory.isNotEmpty && _chatHistory.last.startsWith("Little Nate:")) {
+              _chatHistory[_chatHistory.length - 1] = line;
+            } else {
+              _chatHistory.add(line);
+            }
+          }
           _scrollToBottom();
         });
-        
+
         // Auto-speak if voice mode default is enabled
-        final voiceDefault = widget.currentUserProfile?['voice_mode_default'] ??
-            widget.currentUserProfile?['notification_prefs']?['voice_mode_default'] ?? false;
-        if (voiceDefault == true && reply.trim().isNotEmpty && mounted) {
-          _speakNateMessage(reply);
+        final voiceDefault = widget.currentUserProfile?['voice_mode_default'] == true ||
+            widget.currentUserProfile?['notification_prefs']?['voice_mode_default'] == true;
+        if (voiceDefault && reply.trim().isNotEmpty && mounted) {
+          _scheduleTtsOncePerTurn(turnId, reply, true);
         }
 
         // Update avatar expression based on AI response mood/sentiment
@@ -3598,6 +3645,12 @@ class _NeuralInterfaceV2State extends State<NeuralInterfaceV2> with WidgetsBindi
     _talkingTimer?.cancel();
     _reconnectTimer?.cancel();
     _recapTimer?.cancel();
+    for (final t in _ttsDebounceByTurn.values) {
+      t.cancel();
+    }
+    _ttsDebounceByTurn.clear();
+    _latestNateTextByTurnForTts.clear();
+    _turnIdToChatIndex.clear();
     _chatController.dispose();
     _scrollController.dispose();
     _tts.stop();
@@ -4329,12 +4382,20 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         _handleSocketMessage,
         onError: (e) {
           _debugLog("Coach Socket Error: $e");
-          if (mounted) setState(() => _statusMessage = "Connection Failed\n$_serverUrl");
+          if (mounted) setState(() {
+            _statusMessage = "Connection Failed\n$_serverUrl";
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
+          });
           _scheduleWsReconnect();
         },
         onDone: () {
           _debugLog("Coach Socket Closed");
-          if (mounted) setState(() => _statusMessage = "Disconnected — reconnecting...\n$_serverUrl");
+          if (mounted) setState(() {
+            _statusMessage = "Disconnected — reconnecting...\n$_serverUrl";
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
+          });
           _scheduleWsReconnect();
         },
         cancelOnError: true,
@@ -6764,6 +6825,8 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
           setState(() {
             _notesLoading = false;
             _dojoBusy = false;
+            _classroomAnalyzing = false;
+            _classroomLiveAnalyzing = false;
             final msg = (data['message'] ?? 'Unknown error').toString();
             final lowerMsg = msg.toLowerCase();
             // Check if this is a Dojo-related error
