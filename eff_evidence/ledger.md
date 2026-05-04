@@ -421,3 +421,9 @@ EFF: 580/650 = 89% | PASS
 
 ## 2026-05-04 12:34:49 VETO EFF MISSING
 - Evidence: 2026-05-04_123449_VETO_EFF_MISSING.txt
+
+## 2026-05-04 17:31:34 FABRICATION_UNDERSTATED
+- EFF: EFF: 140/380 = 37% | FAIL
+- LOSS: LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 380 Actual: 787 Factor: .4x
+- Evidence: 2026-05-04_173134_FABRICATION_UNDERSTATED_380vs787.txt

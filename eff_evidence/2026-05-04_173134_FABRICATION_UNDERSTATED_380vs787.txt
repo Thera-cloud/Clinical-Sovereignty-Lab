@@ -1,0 +1,84 @@
+Here is what the codebase actually does versus what you asked for.
+
+1. CoachN “recreate” + SCHEDULE + Zoom link
+Coach portal: Create Session → POST /api/sessions/schedule (sessions.py): builds status: "scheduled", creates Zoom when enabled, _save_session_dual → Postgres coaching_sessions, then _send_session_link if there is a zoom_link.
+Coach calendar: Bridge fetch_coach_calendar + get_calendar_data_pg merges rows where status IN ('scheduled','active','pending_approval') — so a new scheduled row will show (unlike the cancelled Paula rows).
+2. Email + SMS (Paula)
+Implemented in _send_session_link (sessions.py). It loads Paula’s email/phone from users.profile_data via client_id (hardware id).
+Timezone in notifications: times are formatted as %I:%M %p UTC and the template gets timezone="UTC" — so Paula sees server/UTC labeling, not “your EST” copy.
+
+sessions.py
+Lines 518-539
+    try:
+        dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+        date_str = dt.strftime("%B %d, %Y")
+        time_str = dt.strftime("%I:%M %p UTC").lstrip("0")
+    except Exception:
+        pass
+    ...
+            ok = await email_svc.send_coaching_confirmation(
+                ...
+                time=time_str or start_iso,
+                timezone="UTC",
+SMS uses the same time_str (still UTC).
+
+3. Paula + CoachN Google Calendar sync
+Orchestrator: sync_session_for_participants runs after REST schedule (and other flows). It pushes once per coach_id and client_id taken from the session dict:
+
+
+google_calendar_session_sync.py
+Lines 313-321
+async def sync_session_for_participants(pool, session: Dict[str, Any],
+                                         action: str = "create") -> None:
+    coach_id = (session.get("coach_id") or session.get("assigned_coach_id") or "").strip()
+    client_id = (session.get("client_id") or session.get("hardware_id") or "").strip()
+    for uid in (coach_id, client_id):
+        if uid:
+            try:
+                await sync_session_to_google(pool, uid, session, action=action)
+Those values are hardware ids (e.g. COACH_COACHN_ID, CLIENT_PAULA182_ID).
+
+OAuth storage: google_calendar_connection.user_id is documented and implemented as users.username:
+
+
+183_google_calendar.sql
+Lines 7-12
+-- One row per user (coach OR client). user_id matches users.username for portability with
+-- the bridge's PG-first registry; user_role tracks whether the user is COACH or CLIENT.
+CREATE TABLE IF NOT EXISTS google_calendar_connection (
+    ...
+    user_id VARCHAR NOT NULL UNIQUE,         -- users.username
+Connect flow uses _user_id(user) → user["username"] (google_calendar_api.py).
+
+So sync_session_to_google(pool, "COACH_COACHN_ID", ...) looks up WHERE user_id = 'COACH_COACHN_ID', but the row is stored under CoachN. _get_connection returns None → sync is a silent no-op unless username accidentally equals hardware id.
+
+That is a structural mismatch: calendar push keys by hardware id; DB keys by username.
+
+4. “EST on Google” vs “CoachN timezone”
+Events use scheduled_start / scheduled_end (UTC instants from the app) and _build_event_payload(..., timezone_str=session.get("timezone") or "America/New_York").
+There is no per-user timezone on the session from the coach schedule API today, so everyone gets the same default America/New_York for the payload’s timeZone field — not “Paula = EST, CoachN = other TZ” from profiles.
+Google still anchors the instant correctly if dateTime includes an offset; display in each user’s calendar normally follows their calendar timezone. The gap is mainly email/SMS (UTC) and wrong user id for sync above.
+Summary table
+Goal	Code reality
+Recreate + show on SCHEDULE
+Works if session stays scheduled and PG merge is on.
+Email + SMS with link
+Yes, if Zoom link + contact info — time labeled UTC, not EST.
+Paula Google sync
+Likely broken: lookup uses hardware_id, OAuth row uses username.
+CoachN Google sync
+Same mismatch.
+Explicit EST in notifications
+Not implemented — hard-coded UTC.
+Separate coach vs client TZ in GCal payload
+Not implemented — defaults to America/New_York only.
+Recommended fixes (for a follow-up implementation pass)
+sync_session_for_participants: resolve coach_id / client_id (hardware) → username (query users) before sync_session_to_google, or change OAuth persistence to use hardware_id consistently (bigger migration/UI change).
+_send_session_link: format date/time in America/New_York (or profile_data->>'timezone' when present) and pass that label into send_coaching_confirmation / SMS.
+Optionally set session["timezone"] when scheduling from coach/client UIs from profile or a single agreed “session timezone” field.
+I did not recreate Paula’s meeting or change DB rows here (session/account changes need your explicit go-ahead per project rules).
+
+EFF: 140/380 = 37% | FAIL
+OPTIMIZE_NEXT: collapse duplicate code citations; table-only delivery after first finding.
+
+LOSS: 240 tokens at rate unknown | session: n/a | model: unknown
