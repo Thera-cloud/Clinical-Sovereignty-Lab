@@ -1,0 +1,2 @@
+echo "EFF: 18/95 = 19% | FAIL" | pbcopy
+~/bin/eff_audit.sh

@@ -230,3 +230,8 @@ EFF line:        EFF: 18/95 ≈ 19% | FAIL
 - EFF: EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
 - Claimed: 180 Actual: 504 Factor: .3x
 - Evidence: 2026-05-04_023900_FABRICATION_UNDERSTATED_180vs504.txt
+
+## 2026-05-04 02:46:45 FABRICATION_OVERSTATED
+- EFF: echo "EFF: 18/95 = 19% | FAIL" | pbcopy
+- Claimed: 95 Actual: 13 Factor: 7.3x
+- Evidence: 2026-05-04_024645_FABRICATION_OVERSTATED_95vs13.txt
