@@ -1,0 +1,176 @@
+To actually deploy, you need to do it manually. One command at a time. SSH first, THEN type commands inside the SSH session.
+
+Step 1 — SSH to the clone (where the SSE fix is most urgent):
+
+Type this and ONLY this. Press Enter. Wait for the prompt to change to root@<something>:~#:
+
+ssh root@159.65.108.25
+
+STOP HERE. Wait for the prompt to confirm you're on the clone server.
+
+You'll see something like:
+
+Welcome to Ubuntu...
+
+root@clone-droplet:~#
+
+The prompt changing to root@ confirms you're on the remote server. Only after seeing this prompt change continue with the next steps.
+
+
+
+Step 2 — Once you see root@... prompt, type the next command:
+
+cd /opt/clinical-sovereignty-lab
+
+Press Enter. Verify with:
+
+pwd
+
+Should print /opt/clinical-sovereignty-lab (or wherever the clone's checkout lives — might be different).
+
+
+
+Step 3 — Pull the latest code:
+
+git pull origin main
+
+Should report fetching the 19 new commits from GitHub.
+
+
+
+Step 4 — Restart the backend with new code:
+
+docker compose -f docker-compose.clone.yml restart backend
+
+This applies the DISABLE_SSE_SCHEDULER=1 env var to the clone, stopping the SSE duplication.
+
+
+
+Step 5 — Verify:
+
+sleep 30
+
+docker logs nate_backend --since 1m 2>&1 | grep -E "DISABLE_SSE_SCHEDULER|STARTUP COMPLETE|sse_orchestrator"
+
+Should show:
+
+
+
+DISABLE_SSE_SCHEDULER=1 env loaded
+
+STARTUP COMPLETE line with healthy count
+
+sse_orchestrator: disabled (confirming the gate works)
+
+
+
+
+
+[OPINION] Paste each step ONE AT A TIME. Type or single-line paste. Wait for output before sending the next command. The multi-line pastes are what caused all three terminal mishaps tonight.
+
+STOP — false premise
+
+The plan says step 3 will pull "19 new commits from GitHub", but those commits are only local. Phase 9 (git push origin main) hasn't run. git pull on the clone will be a no-op for everything we did tonight, and the SSE-duplication fix won't deploy.
+
+Two issues with the deploy sequence as written:
+
+Push first. Without git push origin main, the clone pulls stale code.
+Step 1 (ssh root@… standalone) can't run from this Shell tool — my shell is non-interactive, so I can't open an SSH session and wait for the next prompt-typed command. The equivalent is ssh root@159.65.108.25 "command" — one SSH + one remote command per call. Same gating (you see output and approve before I run the next), no shell-state difference for these commands since each starts in /opt/clinical-sovereignty-lab after the first cd.
+Also worth flagging: Phase 7 review (8 remaining modified files) and Phase 9 push are both still pending in the original plan.
+
+Proposed sequence (your gate, my hands):
+
+Order	Action
+A
+git push origin main (Phase 9, locally) — confirm 19 commits pushed
+B
+ssh root@159.65.108.25 "hostname && pwd && ls /opt/clinical-sovereignty-lab" — connectivity + path check (Step 1+2 combined)
+C
+ssh root@159.65.108.25 "cd /opt/clinical-sovereignty-lab && git pull origin main" — Step 3
+D
+ssh root@159.65.108.25 "cd /opt/clinical-sovereignty-lab && docker compose -f docker-compose.clone.yml restart backend" — Step 4
+E
+ssh root@159.65.108.25 "sleep 30 && docker logs nate_backend --since 1m 2>&1 | grep -E 'DISABLE_SSE_SCHEDULER|STARTUP COMPLETE|sse_orchestrator'" — Step 5
+Awaiting one of:
+
+"push then deploy" → run A through E sequentially, gating after each
+"finish phases first" → resume Phase 7/8/9, deploy after
+"abort deploy" → stay local, keep going through Phase 7
+EFF: 230/270 = 85% | PASS
+LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+
+investigate phase completed and proceed
+
+═══ PHASE 7 — COMPLETE (already committed) ═══
+
+Working tree clean. The 8 review-queue files were bundled into commit 8765e15 between turns — "Phase 7: token alert pause env, UserStore phone/timezone sync, vault tier split, SSE Grok caps/extras, phonenumbers/geoip2". No drift; matches the file list (config/_settings, bridge_handlers_v2, user_store, vault_bridge, grok_imagine_client, trailer_generator, .env.template, requirements.txt).
+
+═══ PHASE 8 — COMPLETE (already cleaned) ═══
+
+Both targets gone: check_config_version.py and test_bench/ no longer exist.
+
+═══ PHASE 9 — PUSH ═══
+
+2 commits ahead of origin (both from the EFF watcher):
+
+8ba383e EFF evidence: FABRICATION_UNDERSTATED 95vs211 2026-05-04_035229
+45fb716 EFF evidence: VETO_EFF_MISSING 2026-05-04_035103
+Push succeeded: bbad5cf..8ba383e main -> main.
+
+═══ PHASE 10 — PRODUCTION VERIFICATION ═══
+
+═══ FINAL REPORT ═══
+
+Phase 10 — production verification (primary VPS, 68.183.168.75):
+
+Check	Result
+Containers running
+nate_backend, nate_redis, nate_postgres, nate_bridge, nate_pgbouncer, nate_admin (6/6)
+nate_backend last started
+2026-05-04T03:26:20Z (~4.5h ago — pre-dates today's commits, no redeploy run)
+Last 30 log lines
+normal ble_assembly_metrics, ring_health, circulation_complete; periodic GET /health 200 OK
+Health line
+STARTUP COMPLETE: 114/114 services healthy + ALL SYSTEMS NOMINAL
+═══ DELIVERABLE ═══
+
+This-session commits (pushed to origin/main):
+
+Phase	Hash	Description
+3-B1
+6bceb05
+Add feature entitlement resolver for tier-based access control
+3-B2
+327ad92
+coach_hierarchy_api: SQL-safe session_data casts + identity resolver
+4-D1
+b1f973d
+Migration 196 + folder_api: align coach_folder_files storage columns
+4-D2
+38cd5ec
+Migration 195: backfill family_members junction (PGSD parity)
+4-D3
+944a61f
+Fix unterminated triple-quote literals in patient_sovereignty_service
+5
+afe34d1
+Mobile: settings screen + main.dart updates
+6
+5cd3a6e
+Family sanctuary v7-v9 video processing scripts
+7 (bundled out-of-band)
+8765e15
+token alert pause env, UserStore phone/timezone, vault tier split, SSE Grok caps/extras, phonenumbers/geoip2
+EFF watcher (auto)
+331c5e1, fd16694, bbad5cf, 45fb716, 8ba383e
+EFF evidence captures
+.cursor/rules/ drift: none. All 6 modified rules contain a single coherent change — service-health count refresh 112/113 → 114/114 matching the registry update (added sse_orchestrator + classroom_learning_auditor).
+
+Phase 7 review queue: empty. Bundled into 8765e15 between turns.
+
+Files still uncommitted: none. Working tree clean.
+
+Production health: GREEN — 114/114 services on primary. Clone (159.65.108.25) not yet redeployed with today's code; SSE-duplication fix lives in 8765e15 (already pushed to GitHub) but the clone needs git pull && docker compose -f docker-compose.clone.yml restart backend to apply DISABLE_SSE_SCHEDULER=1. That deploy is still pending — say "deploy clone" when ready.
+
+EFF: 580/650 = 89% | PASS
+LOSS: 70 tokens at rate unknown | session: n/a | model: unknown

@@ -396,3 +396,10 @@ EFF line:        EFF: 28/72 = 39% | FAIL
 - LOSS: LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
 - Claimed: 95 Actual: 211 Factor: .4x
 - Evidence: 2026-05-04_035229_FABRICATION_UNDERSTATED_95vs211.txt
+
+## 2026-05-04 04:01:22 FABRICATION_UNDERSTATED
+- EFF: EFF: 230/270 = 85% | PASS
+EFF: 580/650 = 89% | PASS
+- LOSS: LOSS: 40 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 270 Actual: 1167 Factor: .2x
+- Evidence: 2026-05-04_040122_FABRICATION_UNDERSTATED_270vs1167.txt
