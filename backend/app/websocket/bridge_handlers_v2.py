@@ -8,6 +8,11 @@ Add these handlers to bridge_server_hybrid_v1.py
 import json
 import re
 import datetime
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    ZoneInfo = None  # type: ignore[misc,assignment]
+    ZoneInfoNotFoundError = Exception  # type: ignore[misc,assignment]
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -252,6 +257,26 @@ class CoachNexusV2:
         }
         existing_ids.discard("")
 
+        # COACH-TZ-DISPLAY-FIX: display date/time in coach TZ; scheduled_* ISO stays UTC.
+        _pd = coach_profile.get("profile_data")
+        if isinstance(_pd, str):
+            try:
+                _pd = json.loads(_pd)
+            except Exception:
+                _pd = {}
+        elif not isinstance(_pd, dict):
+            _pd = {}
+        tz_name = (
+            str(coach_profile.get("timezone") or _pd.get("timezone") or "America/New_York").strip()
+            or "America/New_York"
+        )
+        coach_tz = datetime.timezone.utc
+        if ZoneInfo:
+            try:
+                coach_tz = ZoneInfo(tz_name)
+            except ZoneInfoNotFoundError:
+                print(f">>> [WARN] get_calendar_data_pg: unknown timezone {tz_name!r}, UTC fallback")
+
         try:
             async with db_pool.acquire() as conn:
                 rows = await conn.fetch(
@@ -306,9 +331,11 @@ class CoachNexusV2:
             except Exception:
                 pass
             try:
-                date_str = st_dt.date().isoformat()
-                time_str = st_dt.strftime("%H:%M")
-                start_iso = st_dt.isoformat()
+                st_utc = st_dt if st_dt.tzinfo else st_dt.replace(tzinfo=datetime.timezone.utc)
+                st_local = st_utc.astimezone(coach_tz)
+                date_str = st_local.date().isoformat()
+                time_str = st_local.strftime("%H:%M")
+                start_iso = st_utc.isoformat()
                 end_iso = en_dt.isoformat() if en_dt else ""
             except Exception:
                 continue
@@ -324,6 +351,7 @@ class CoachNexusV2:
                 "consultation_subject": _sd(row, "consultation_subject", ""),
                 "booked_by": _sd(row, "booked_by", ""),
                 "family_id": _sd(row, "family_id", ""),
+                "timezone": tz_name,
                 "date": date_str,
                 "time": time_str,
                 "scheduled_start": start_iso,
