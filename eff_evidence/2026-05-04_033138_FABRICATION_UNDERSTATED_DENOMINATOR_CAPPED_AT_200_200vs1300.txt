@@ -1,0 +1,197 @@
+===== 02:27:30 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 50/200 = 25% | FAIL
+Claimed total:   200
+Actual words:    0
+Actual tokens:   ~1
+Overstatement:   200.0x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_022730_FABRICATION_OVERSTATED_200vs1.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 200vs1 2026-05-04_022730
+
+===== 02:27:46 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        (.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+Claimed total:   200
+Actual words:    255
+Actual tokens:   ~331
+Overstatement:   .6x
+STATUS:          PLAUSIBLE
+
+===== 02:33:48 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+Claimed total:   95
+Actual words:    470
+Actual tokens:   ~611
+Overstatement:   .1x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_023348_FABRICATION_UNDERSTATED_95vs611.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 95vs611 2026-05-04_023348
+
+===== 02:34:18 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        Cursor reported EFF: 115/180 ≈ 64% | FAIL (budget) on a 351-word response (~456 tokens). The real EFF was closer to ~25%. By understating the denominator, Cursor manufactured a "near-miss FAIL" appearance instead of the catastrophic miss it actually was.
+EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        (.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+Claimed total:   45
+Actual words:    489
+Actual tokens:   ~635
+Overstatement:   0x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_023418_FABRICATION_UNDERSTATED_45vs635.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 45vs635 2026-05-04_023418
+
+===== 02:39:00 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+Claimed total:   180
+Actual words:    388
+Actual tokens:   ~504
+Overstatement:   .3x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_023900_FABRICATION_UNDERSTATED_180vs504.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 180vs504 2026-05-04_023900
+
+===== 02:46:44 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        echo "EFF: 18/95 = 19% | FAIL" | pbcopy
+Claimed total:   95
+Actual words:    10
+Actual tokens:   ~13
+Overstatement:   7.3x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_024645_FABRICATION_OVERSTATED_95vs13.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 95vs13 2026-05-04_024645
+
+===== 02:46:47 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 18/95 = 19% | FAIL
+Claimed total:   95
+Actual words:    0
+Actual tokens:   ~1
+Overstatement:   95.0x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_024647_FABRICATION_OVERSTATED_95vs1.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 95vs1 2026-05-04_024647
+
+===== 02:47:57 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+Claimed total:   95
+Actual words:    698
+Actual tokens:   ~907
+Overstatement:   .1x
+PATTERN ALERT:   DENOMINATOR_CAPPED_AT_200
+                 Claimed 95 ≤ 200 ceiling on 907-token response
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_024757_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_95vs907.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 95vs907 2026-05-04_024757
+
+===== 02:54:01 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_025402_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_025402
+
+===== 02:54:39 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_025439_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_025439
+
+===== 03:06:52 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_030652_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_030652
+
+===== 03:08:30 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 180/210 = 85% | PASS LOSS: 30 tokens at rate unknown | session: n/a | model: unknown
+LOSS line:       LOSS: rate unknown if model unknown — no fabricated $ amount
+Claimed total:   210
+Actual words:    876
+Actual tokens:   ~1138
+Overstatement:   .1x
+STATUS:          FABRICATION_UNDERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_030830_FABRICATION_UNDERSTATED_210vs1138.txt
+Auto-committed: EFF evidence: FABRICATION_UNDERSTATED 210vs1138 2026-05-04_030830
+
+===== 03:10:41 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 220/240 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   240
+Actual words:    162
+Actual tokens:   ~210
+Overstatement:   1.1x
+STATUS:          PLAUSIBLE
+
+===== 03:17:17 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 130/150 = 86% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   150
+Actual words:    152
+Actual tokens:   ~197
+Overstatement:   .7x
+STATUS:          PLAUSIBLE
+
+===== 03:18:37 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   110
+Actual words:    37
+Actual tokens:   ~48
+Overstatement:   2.2x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_031837_FABRICATION_OVERSTATED_110vs48.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 110vs48 2026-05-04_031837
+
+===== 03:21:02 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 130/150 = 87% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   150
+Actual words:    146
+Actual tokens:   ~189
+Overstatement:   .7x
+STATUS:          PLAUSIBLE
+
+===== 03:21:45 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_032145_VETO_EFF_MISSING.txt
+Auto-committed: EFF evidence: VETO_EFF_MISSING 2026-05-04_032145
+
+===== 03:25:53 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   115
+Actual words:    44
+Actual tokens:   ~57
+Overstatement:   2.0x
+STATUS:          FABRICATION_OVERSTATED
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_032553_FABRICATION_OVERSTATED_115vs57.txt
+Auto-committed: EFF evidence: FABRICATION_OVERSTATED 115vs57 2026-05-04_032553
+
+===== 03:26:09 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF line:        EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+Claimed total:   115
+Actual words:    51
+Actual tokens:   ~66
+Overstatement:   1.7x
+STATUS:          PLAUSIBLE
