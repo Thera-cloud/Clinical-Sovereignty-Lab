@@ -1,0 +1,108 @@
+> Fix Coach SCHEDULE display showing UTC instead of coach-local time.
+
+Two fixes coordinated. Display only — no DB changes (instants already correct in UTC).
+
+═══════════════════════════════════════════════════════════════
+FIX A — Bridge: format time in coach timezone, not UTC
+═══════════════════════════════════════════════════════════════
+
+File: backend/app/websocket/bridge_handlers_v2.py
+Function: get_calendar_data_pg, lines 308-329
+
+Problem: date_str and time_str use st_dt.strftime("%H:%M") which is UTC clock.
+Coach in America/New_York sees 12:30 instead of 08:30.
+
+Required change:
+1. Look up coach's profile_data->>'timezone' before the loop
+   (default "America/New_York" if NULL or column missing)
+2. Convert each st_dt to coach-local using zoneinfo.ZoneInfo
+3. Format date_str and time_str from the local datetime
+4. Keep scheduled_start ISO string in UTC (don't change wire format)
+5. Add a new field "timezone" to each row so client can verify
+
+Implementation pattern:
+   from zoneinfo import ZoneInfo
+   tz_name = coach_profile.get("timezone") or "America/New_York"
+   tz = ZoneInfo(tz_name)
+   st_local = st_dt.astimezone(tz)
+   date_str = st_local.date().isoformat()
+   time_str = st_local.strftime("%H:%M")
+
+Constraints:
+- Maximum 25 lines added/changed
+- Handle ZoneInfoNotFoundError → fall back UTC + log warning
+- Add # COACH-TZ-DISPLAY-FIX marker
+- Apply to BOTH scheduled and consultation row builders if both exist in this function
+
+After this gate:
+- Show diff
+- Confirm "Fix A ready"
+- HALT until "continue Fix B"
+
+═══════════════════════════════════════════════════════════════
+FIX B — Flutter: prefer scheduled_start over time field
+═══════════════════════════════════════════════════════════════
+
+File: mobile/lib/updated_screens.dart
+Locations:
+  - Lines 9498-9518 ("SESSIONS THIS DAY" cards)
+  - Lines 8169-8298 (confirmed session cards)
+
+Problem: UI joins date + time fields directly. With Fix A those will be coach-local,
+but defense in depth — also support scheduled_start parsing for any callers that
+still send UTC time.
+
+Required change:
+1. Where displaying time, prefer this logic:
+   - If scheduled_start present: parse ISO, call toLocal(), format HH:MM
+   - Else if time field present: use as-is
+   - Else: hide time
+2. Add helper: String _formatScheduledTime(Map session) at appropriate scope
+3. Replace inline time references in both card builders with helper call
+
+Constraints:
+- Maximum 30 lines added
+- Use existing intl/DateTime patterns from pending bookings code (search for toLocal() to find pattern)
+- Add // COACH-SCHEDULE-LOCAL marker
+- No prop drilling — read scheduled_start from session map
+
+After this gate:
+- Show diff
+- Confirm "Fix B ready"
+- HALT until "commit both"
+
+═══════════════════════════════════════════════════════════════
+COMMIT SEQUENCE
+═══════════════════════════════════════════════════════════════
+
+git add backend/app/websocket/bridge_handlers_v2.py
+git commit -m "Fix coach SCHEDULE display: format times in coach timezone not UTC"
+
+git add mobile/lib/updated_screens.dart
+git commit -m "Fix coach SCHEDULE cards: prefer scheduled_start.toLocal over UTC time field"
+
+═══════════════════════════════════════════════════════════════
+SETTINGS OVERRIDE BEHAVIOR
+═══════════════════════════════════════════════════════════════
+
+profile_data.timezone is the single source of truth for coach timezone.
+- Set at signup (existing flow)
+- Overridable in Settings screen (existing flow — confirmed user has America/New_York)
+- This fix reads whatever is currently in profile_data.timezone
+- No new schema or API needed for override — already works
+
+═══════════════════════════════════════════════════════════════
+VERIFICATION AFTER DEPLOY
+═══════════════════════════════════════════════════════════════
+
+Test case: Paula's session at 12:30 UTC May 5 2026
+Expected coach SCHEDULE display: 08:30 (EDT, UTC-4)
+
+If coach changes Settings timezone to America/Los_Angeles:
+Expected display: 05:30
+
+No DB writes during test — only display change.
+
+Mode: investigate then execute (gated per fix)
+EFF: numeric only
+LOSS: rate unknown if model unknown — no fabricated cost
