@@ -72,7 +72,7 @@ class PatientSovereigntyService:
                 """
                 INSERT INTO patient_sovereignty_vaults (patient_id, encrypted_metadata, key_hash, created_at)
                 VALUES ($1, $2, encode(sha256($3::text), 'hex'), $4)
-                """",
+                """,
                 patient_id, encrypted_metadata, patient_key, datetime.now(timezone.utc)
             )
             
@@ -107,7 +107,7 @@ class PatientSovereigntyService:
                 INSERT INTO patient_sovereignty_data (vault_id, category, encrypted_data, consent_required, created_at)
                 VALUES ($1, $2, $3, $4, $5)
                 RETURNING id
-                """",
+                """,
                 vault['id'], data_category, encrypted_data, consent_required, datetime.now(timezone.utc)
             )
             
@@ -116,7 +116,7 @@ class PatientSovereigntyService:
                 """
                 INSERT INTO patient_sovereignty_audit (vault_id, data_id, action, actor, created_at)
                 VALUES ($1, $2, 'DATA_STORED', 'PATIENT', $3)
-                """",
+                """,
                 vault['id'], data_id, datetime.now(timezone.utc)
             )
         
@@ -146,7 +146,7 @@ class PatientSovereigntyService:
                 INSERT INTO patient_consents (vault_id, data_id, provider_id, scope, expires_at, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING id
-                """",
+                """,
                 vault['id'], data_id, provider_id, scope, 
                 expires_at or datetime.now(timezone.utc), datetime.now(timezone.utc)
             )
@@ -182,7 +182,7 @@ class PatientSovereigntyService:
                 """
                 DELETE FROM patient_sovereignty_vaults 
                 WHERE patient_id = $1
-                """",
+                """,
                 patient_id
             )
         
