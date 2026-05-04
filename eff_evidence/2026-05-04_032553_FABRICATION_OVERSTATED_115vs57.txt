@@ -1,0 +1,20 @@
+split
+
+EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+
+═══ PHASE 4 — DONE ═══
+
+Commit	Hash	Files	LOC
+D1 storage alignment
+b1f973d
+mig 196 + folder_api.py
++29/-7
+D2 family_members backfill
+38cd5ec
+mig 195
++42
+D3 syntax fix
+944a61f
+patient_sovereignty_service.py
++5/-5
+All filenames clean. Ready for Phase 5 (mobile changes). Awaiting "continue".

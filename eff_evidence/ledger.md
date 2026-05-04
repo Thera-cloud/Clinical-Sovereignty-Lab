@@ -275,3 +275,8 @@ EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrati
 
 ## 2026-05-04 03:21:45 VETO EFF MISSING
 - Evidence: 2026-05-04_032145_VETO_EFF_MISSING.txt
+
+## 2026-05-04 03:25:53 FABRICATION_OVERSTATED
+- EFF: EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 115 Actual: 57 Factor: 2.0x
+- Evidence: 2026-05-04_032553_FABRICATION_OVERSTATED_115vs57.txt
