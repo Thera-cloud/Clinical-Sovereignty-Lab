@@ -2916,10 +2916,14 @@ async def lifespan(app: FastAPI):
     _sse_orchestrator = None
     try:
         from app.sse.layer0_orchestrator import SSEOrchestrator
-        _sse_orchestrator = SSEOrchestrator(db_pool=db_pool)
-        await _sse_orchestrator.start()
-        app.state.sse_orchestrator = _sse_orchestrator
-        print("   ✅ SSEOrchestrator started (daily panels + weekly clips + monthly recaps + group monthly videos)")
+        import os as _os
+        if _os.environ.get("DISABLE_SSE_SCHEDULER", "0") == "1":
+            print("   ℹ️  SSEOrchestrator DISABLED on this node (DISABLE_SSE_SCHEDULER=1)")
+        else:
+            _sse_orchestrator = SSEOrchestrator(db_pool=db_pool)
+            await _sse_orchestrator.start()
+            app.state.sse_orchestrator = _sse_orchestrator
+            print("   ✅ SSEOrchestrator started (daily panels + weekly clips + monthly recaps + group monthly videos)")
     except Exception as _sse_err:
         print(f"   ⚠️  SSEOrchestrator init failed: {_sse_err}")
 

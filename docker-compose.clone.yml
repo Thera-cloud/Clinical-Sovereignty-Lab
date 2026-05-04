@@ -56,6 +56,8 @@ services:
       - B2_COLD_BUCKET=${B2_COLD_BUCKET:-nate-cold-archive}
       - B2_HERITAGE_LOCK_YEARS=${B2_HERITAGE_LOCK_YEARS:-7}
       - B2_PUBLIC_URL=${B2_PUBLIC_URL:-}
+      # SSE scheduler disabled on clone — primary VPS owns all cron generation
+      - DISABLE_SSE_SCHEDULER=1
       # Sovereign Inference
       - SOVEREIGN_INFERENCE_URL=${SOVEREIGN_INFERENCE_URL:-}
       - SOVEREIGN_MODEL=${SOVEREIGN_MODEL:-llama3.1:8b-instruct-q4_K_M}
