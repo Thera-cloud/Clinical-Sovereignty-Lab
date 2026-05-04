@@ -235,3 +235,8 @@ EFF line:        EFF: 18/95 ≈ 19% | FAIL
 - EFF: echo "EFF: 18/95 = 19% | FAIL" | pbcopy
 - Claimed: 95 Actual: 13 Factor: 7.3x
 - Evidence: 2026-05-04_024645_FABRICATION_OVERSTATED_95vs13.txt
+
+## 2026-05-04 02:46:46 FABRICATION_OVERSTATED
+- EFF: EFF: 18/95 = 19% | FAIL
+- Claimed: 95 Actual: 1 Factor: 95.0x
+- Evidence: 2026-05-04_024646_FABRICATION_OVERSTATED_95vs1.txt
