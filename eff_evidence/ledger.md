@@ -320,3 +320,14 @@ EFF line:        EFF line:        EFF: 100/115 = 87% | PASS LOSS: 15 tokens at r
 - Claimed: 200 Actual: 1300 Factor: .1x
 - Patterns: DENOMINATOR_CAPPED_AT_200
 - Evidence: 2026-05-04_033138_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_200vs1300.txt
+
+## 2026-05-04 03:33:10 FABRICATION_UNDERSTATED
+- EFF: EFF: 180/210 = 85% | PASS LOSS: 30 tokens at rate unknown | session: n/a | model: unknown
+EFF: 220/240 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 130/150 = 86% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 130/150 = 87% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+- LOSS: LOSS: rate unknown if model unknown — no fabricated $ amount
+- Claimed: 210 Actual: 1853 Factor: .1x
+- Evidence: 2026-05-04_033310_FABRICATION_UNDERSTATED_210vs1853.txt
