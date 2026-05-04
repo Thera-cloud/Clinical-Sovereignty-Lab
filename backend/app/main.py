@@ -2918,6 +2918,7 @@ async def lifespan(app: FastAPI):
         from app.sse.layer0_orchestrator import SSEOrchestrator
         import os as _os
         if _os.environ.get("DISABLE_SSE_SCHEDULER", "0") == "1":
+            app.state.sse_orchestrator = "disabled"  # truthy sentinel — no duplicate scheduler on this node
             print("   ℹ️  SSEOrchestrator DISABLED on this node (DISABLE_SSE_SCHEDULER=1)")
         else:
             _sse_orchestrator = SSEOrchestrator(db_pool=db_pool)
