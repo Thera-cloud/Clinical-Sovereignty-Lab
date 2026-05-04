@@ -1,0 +1,51 @@
+continue Fix B
+
+  // --- Helpers for availability/calendar ---
+  /// Prefer UTC ISO scheduled_start converted to device-local HH:mm; else wire `time`. // COACH-SCHEDULE-LOCAL
+  String _formatScheduledTime(Map session) {
+    final ss = (session['scheduled_start'] ?? '').toString().trim();
+    if (ss.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(ss).toLocal();
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      } catch (_) {}
+    }
+    return (session['time'] ?? '').toString().trim();
+  }
+  static const List<String> _dayShort = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+                  final date = (session['date'] ?? '').toString();
+                  final time = (session['time'] ?? '').toString();
+                  final time = _formatScheduledTime(session); // COACH-SCHEDULE-LOCAL
+                  final consultSubject = (session['consultation_subject'] ?? '').toString().trim();
+                : (sm['client_name'] ?? sm['client'] ?? 'Client').toString();
+            final tm = (sm['time'] ?? '').toString();
+            final tm = _formatScheduledTime(sm); // COACH-SCHEDULE-LOCAL
+            return Padding(
+Added _formatScheduledTime on _CoachDashboardScreenV2State and wired confirmed session rows plus “Sessions this day” to use scheduled_start → DateTime.parse → toLocal() → HH:mm, with fallback to time.
+
+
+updated_screens.dart
+Lines 8497-8511
+  /// Prefer UTC ISO scheduled_start converted to device-local HH:mm; else wire `time`. // COACH-SCHEDULE-LOCAL
+  String _formatScheduledTime(Map session) {
+    final ss = (session['scheduled_start'] ?? '').toString().trim();
+    if (ss.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(ss).toLocal();
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      } catch (_) {}
+    }
+    return (session['time'] ?? '').toString().trim();
+  }
+dart analyze reports no errors for this edit (existing infos elsewhere). Deploy: flutter build web --release then your usual rsync/script.
+
+EFF: ~35/~115 = 30% | FAIL
+OPTIMIZE_NEXT: Reply with citations only, no toolchain recap.
+
+LOSS: ~80 tokens at rate unknown | session: n/a | model: unknown
+
+deploy 
+
+Running the Flutter web deploy script, then syncing modified backend/bridge files and restarting bridge and backend.
+
+Flutter web deployed successfully (nginx reloaded, Deploy complete). Syncing modified backend/bridge Python files and running Cloudflare purge.
