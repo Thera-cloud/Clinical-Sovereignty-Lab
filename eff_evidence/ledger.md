@@ -245,3 +245,10 @@ EFF line:        EFF: 18/95 ≈ 19% | FAIL
 - EFF: EFF: 18/95 = 19% | FAIL
 - Claimed: 95 Actual: 1 Factor: 95.0x
 - Evidence: 2026-05-04_024647_FABRICATION_OVERSTATED_95vs1.txt
+
+## 2026-05-04 02:47:57 FABRICATION_UNDERSTATED
+- EFF: EFF: 18/95 ≈ 19% | FAIL
+EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+- Claimed: 95 Actual: 907 Factor: .1x
+- Pattern: DENOMINATOR_CAPPED_AT_200 (denominator capped under 200 on 907-token response)
+- Evidence: 2026-05-04_024757_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_95vs907.txt

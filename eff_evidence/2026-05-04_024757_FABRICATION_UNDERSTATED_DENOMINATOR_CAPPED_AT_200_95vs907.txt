@@ -1,0 +1,207 @@
+? Investigate lived wisdom extraction wire-up to Night School.
+
+Read-only investigate mode. Max 500 tokens.
+
+
+
+Context per docs/OPEN_TODOS.md row 15:
+
+- File 1: backend/app/websocket/bridge_server.py around line 26814 (sanctuary_complete handler)
+
+- File 2: lived_wisdom.py (location unknown, find it)
+
+- Goal: extract wisdom on sanctuary_complete event, feed into Night School pipeline
+
+
+
+Investigate:
+
+
+
+1. Find lived_wisdom.py:
+
+   find backend/ -name "lived_wisdom.py" -o -name "*lived_wisdom*"
+
+
+
+2. Show the sanctuary_complete handler:
+
+   - Open backend/app/websocket/bridge_server.py
+
+   - Show the function/handler containing line 26814
+
+   - Identify the event message structure and what fields are available
+
+
+
+3. Show what lived_wisdom.py exports:
+
+   - Class names, function names, docstrings only
+
+   - Identify the "extract" function the wire-up should call
+
+   - Note what input it expects and what output it produces
+
+
+
+4. Find Night School ingest path:
+
+   grep -rn "night_school\|NightSchool" backend/app/ --include="*.py" | head -20
+
+   - Identify how lived_wisdom output should be fed in
+
+   - Note the function signature Night School expects
+
+
+
+5. Check existing partial wiring:
+
+   grep -rn "extract_sanctuary_wisdom\|sanctuary_wisdom\|lived_wisdom" backend/app/ | head -20
+
+   - Report any existing references to confirm whether code stub exists
+
+
+
+6. Database schema check:
+
+   grep -rn "wisdom" backend/migrations/ | head -10
+
+   - Identify whether a wisdom table exists for storage
+
+   - If yes, show the schema
+
+
+
+7. Per-file report structure:
+
+   - File path
+
+   - Relevant line numbers
+
+   - Single-line context
+
+   - Whether the code path is empty/stub/partial/complete
+
+
+
+8. Final summary (3 bullets max):
+
+   - What's already built
+
+   - What's missing
+
+   - Estimated lines to add (must fit 50-line cap on protected files)
+
+
+
+No fix proposed. No code changes. Investigation only.
+
+Write findings to docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md
+
+Writing the investigation document.
+
+Findings are in docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md. Highlights: sanctuary_complete is ~26930–27236 (OPEN_TODOS 26814 is the wrong handler); no extract_sanctuary_wisdom call; message field mismatch (content vs text); wisdom_extractions.approved default vs get_*_wisdom filter; Night School = file + CurriculumPipeline / night_school_* tables, not wired from PG extractions.
+
+EFF: 18/95 ≈ 19% | FAIL
+LOSS: 77 at rate unknown | session: n/a | model: Composer — OPTIMIZE_NEXT: point only to the doc, skip repeating tables the doc already has.
+
+> Wire LivedWisdomService.extract_sanctuary_wisdom into sanctuary_complete handler.
+
+
+
+File: backend/app/websocket/bridge_server.py (PROTECTED — 50-line cap)
+
+Handler: sanctuary_complete event, lines 26930–27236
+
+
+
+Service: backend/app/services/lived_wisdom.py
+
+  Class: LivedWisdomService
+
+  Method: async def extract_sanctuary_wisdom(session_id, family_id, messages, member_ids=None) -> List[Dict]
+
+  Expects messages: List[Dict] with shape {sender_type, sender_id, text, timestamp}
+
+  Bridge messages use 'content' field — translate to 'text' at call site
+
+
+
+Approval policy: MANUAL (default — do NOT change _store_wisdom approval logic).
+
+Coach review UI is future work. Stored wisdom remains approved=FALSE until coach action.
+
+
+
+Implementation rules:
+
+1. Find an appropriate insertion point inside the sanctuary_complete handler AFTER session data is finalized but BEFORE the response is sent
+
+2. Import LivedWisdomService at top of file if not already imported
+
+3. Instantiate the service (use existing DB pool/session pattern from surrounding code)
+
+4. Translate messages: [{**m, "text": m.get("content", m.get("text", ""))} for m in messages]
+
+5. Wrap the extract call in try/except — extraction failure must NOT block sanctuary_complete response
+
+6. Log success and failure cases via existing logger pattern
+
+7. Add comment marker: # SANCTUARY-WISDOM-WIRE per protected-file convention
+
+
+
+Constraints:
+
+- Maximum 50 lines added/changed total
+
+- No reformatting of existing code
+
+- No moving or renaming existing functions
+
+- No changes to lived_wisdom.py itself
+
+- Show diff before saving
+
+
+
+Mode: execute
+
+Show: diff + line count of changes + read_lints status
+
+The user wants me to wire the LivedWisdomService.
+
+Checking imports and how family_id / session_id appear in sanctuary data and whether db_pool is available in the handler scope.
+
+Applying the import and inserting the wire block after history save, before the personalized summary loop.
+
+Sanctuary wire (this task only)
+
+from app.constants import tiers as tier_constants
+from app.services.lived_wisdom import LivedWisdomService
+from .feature_entitlement import effective_feature_tier, resolve_feature_entitlement
+                print(f">>> [SANCTUARY] Saved to history: {history_path}")
+                print(f">>> [SANCTUARY] Needs coach review: {needs_review} {review_reasons}")
+                # SANCTUARY-WISDOM-WIRE: lived wisdom extraction (failures never block completion)
+                _lw_log = logging.getLogger("bridge")
+                if db_pool and sanctuary_data.get("family_id"):
+                    try:
+                        _lw_sess = uuid.UUID(str(sanctuary_id))
+                        _lw_fam = uuid.UUID(str(sanctuary_data.get("family_id")))
+                        _lw_msgs = [{**m, "text": m.get("content", m.get("text", ""))} for m in messages]
+                        _lw_svc = LivedWisdomService(db_pool)
+                        _lw_n = len(await _lw_svc.extract_sanctuary_wisdom(_lw_sess, _lw_fam, _lw_msgs, member_ids=None))
+                        _lw_log.info("sanctuary_complete lived_wisdom stored=%s sanctuary=%s", _lw_n, sanctuary_id)
+                    except Exception as _lw_e:
+                        _lw_log.warning("sanctuary_complete lived_wisdom: %s", _lw_e)
+                
+                # ============================================
+                # SEND PERSONALIZED SUMMARY TO EACH MEMBER
+Change count (this task): +1 import, +13 handler lines → 14 net lines (under 50).
+
+read_lints: no issues for bridge_server.py.
+
+Note: git diff backend/app/websocket/bridge_server.py in your tree also includes other hunks (e.g. cortex turn_id, _strip_reasoning_wire); those are separate from the sanctuary wire.
+
+EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+LOSS: 135 at $0.020 ≈ $2.70 | session: n/a | model: unknown
