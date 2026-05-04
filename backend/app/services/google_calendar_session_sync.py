@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -310,17 +311,53 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
         return {"status": "error", "error": str(e)}
 
 
+# GCAL-SYNC-FIX: hardware_id → username resolution cache (TTL 300s).
+# google_calendar_connection.user_id stores users.username (per migration 183),
+# but session payloads carry hardware_id. Resolve before OAuth lookup.
+_HW_TO_USERNAME_CACHE: Dict[str, tuple] = {}  # hardware_id -> (username, expires_at)
+
+
+async def _hardware_id_to_username(pool, hardware_id: str) -> Optional[str]:
+    """Resolve hardware_id → users.username with 300s in-memory cache."""
+    if not pool or not hardware_id:
+        return None
+    now = _time.time()
+    cached = _HW_TO_USERNAME_CACHE.get(hardware_id)
+    if cached and cached[1] > now:
+        return cached[0]
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT username FROM users WHERE hardware_id = $1 LIMIT 1",
+                hardware_id,
+            )
+        username = row["username"] if row else None
+    except Exception as e:
+        logger.warning("_hardware_id_to_username query failed for %s: %s", hardware_id, e)
+        return None
+    if not username:
+        logger.warning("_hardware_id_to_username: no username for hardware_id=%s", hardware_id)
+        return None
+    _HW_TO_USERNAME_CACHE[hardware_id] = (username, now + 300.0)
+    return username
+
+
 async def sync_session_for_participants(pool, session: Dict[str, Any],
                                          action: str = "create") -> None:
     """Convenience: push a session to BOTH the coach's and the client's Google Calendars."""
     coach_id = (session.get("coach_id") or session.get("assigned_coach_id") or "").strip()
     client_id = (session.get("client_id") or session.get("hardware_id") or "").strip()
     for uid in (coach_id, client_id):
-        if uid:
-            try:
-                await sync_session_to_google(pool, uid, session, action=action)
-            except Exception:
-                pass
+        if not uid:
+            continue
+        username = await _hardware_id_to_username(pool, uid)
+        if not username:
+            logger.warning("sync_session_for_participants: skipping %s (no username)", uid)
+            continue
+        try:
+            await sync_session_to_google(pool, username, session, action=action)
+        except Exception:
+            pass
 
 
 __all__ = ["sync_session_to_google", "sync_session_for_participants"]
