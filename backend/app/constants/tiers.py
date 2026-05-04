@@ -14,7 +14,17 @@ TIER_STANDARD = "STANDARD"
 TIER_TOP_TIER = "TOP_TIER"
 TIER_COACH_ONLY = "COACH_ONLY"
 TIER_DEPENDENT = "DEPENDENT"
+TIER_SPOUSE = "SPOUSE"
 TIER_COACH = "COACH"  # coach accounts
+
+# Long Stripe / invite plan strings → billing buckets (never TOP_TIER / STANDARD — entitlement is separate).
+TIER_LONG_PLAN_ALIASES: Dict[str, str] = {
+    "DEPENDENT_UNDER_SOVEREIGN_CIRCLE": TIER_DEPENDENT,
+    "DEPENDENT_UNDER_INNER_CHAMBER": TIER_DEPENDENT,
+    "DEPENDENT_UNDER_THRESHOLD": TIER_DEPENDENT,
+    "SPOUSE_UNDER_SOVEREIGN_CIRCLE": TIER_SPOUSE,
+    "SPOUSE_UNDER_INNER_CHAMBER": TIER_SPOUSE,
+}
 
 # Display / legacy input → canonical DB tier
 TIER_ALIASES: Dict[str, str] = {
@@ -29,6 +39,7 @@ TIER_ALIASES: Dict[str, str] = {
     "COACH_ONLY": TIER_COACH_ONLY,
     "COACH": TIER_COACH_ONLY,
     "DEPENDENT": TIER_DEPENDENT,
+    "SPOUSE": TIER_SPOUSE,
     "FAMILY_MEMBER": TIER_DEPENDENT,
     "MASTER": TIER_STANDARD,
     "SUPERVISOR": TIER_STANDARD,
@@ -41,6 +52,7 @@ TIER_INITIAL_TOKENS: Dict[str, int] = {
     TIER_TOP_TIER: 200_000,
     TIER_COACH_ONLY: 0,
     TIER_DEPENDENT: 5_000,
+    TIER_SPOUSE: 5_000,
     TIER_COACH: 50_000,
 }
 
@@ -50,6 +62,7 @@ TIER_MONTHLY_TOKENS: Dict[str, int] = {
     TIER_STANDARD: 50_000,
     TIER_TOP_TIER: 200_000,
     TIER_DEPENDENT: 5_000,
+    TIER_SPOUSE: 5_000,
     TIER_COACH_ONLY: 0,
     TIER_COACH: 0,
 }
@@ -59,6 +72,7 @@ _TIER_RANK = {
     TIER_TRIAL: 0,
     TIER_COACH_ONLY: 0,
     TIER_DEPENDENT: 1,
+    TIER_SPOUSE: 1,
     TIER_STANDARD: 2,
     TIER_TOP_TIER: 3,
     TIER_COACH: 4,
@@ -70,6 +84,13 @@ def normalize_tier(raw: str | None) -> str:
     if not raw:
         return TIER_TRIAL
     key = str(raw).upper().strip()
+    long = TIER_LONG_PLAN_ALIASES.get(key)
+    if long:
+        return long
+    if key.startswith("DEPENDENT_UNDER_"):
+        return TIER_DEPENDENT
+    if key.startswith("SPOUSE_UNDER_"):
+        return TIER_SPOUSE
     return TIER_ALIASES.get(key, TIER_TRIAL)
 
 
