@@ -1,0 +1,117 @@
+? Investigate lived wisdom extraction wire-up to Night School.
+
+Read-only investigate mode. Max 500 tokens.
+
+
+
+Context per docs/OPEN_TODOS.md row 15:
+
+- File 1: backend/app/websocket/bridge_server.py around line 26814 (sanctuary_complete handler)
+
+- File 2: lived_wisdom.py (location unknown, find it)
+
+- Goal: extract wisdom on sanctuary_complete event, feed into Night School pipeline
+
+
+
+Investigate:
+
+
+
+1. Find lived_wisdom.py:
+
+   find backend/ -name "lived_wisdom.py" -o -name "*lived_wisdom*"
+
+
+
+2. Show the sanctuary_complete handler:
+
+   - Open backend/app/websocket/bridge_server.py
+
+   - Show the function/handler containing line 26814
+
+   - Identify the event message structure and what fields are available
+
+
+
+3. Show what lived_wisdom.py exports:
+
+   - Class names, function names, docstrings only
+
+   - Identify the "extract" function the wire-up should call
+
+   - Note what input it expects and what output it produces
+
+
+
+4. Find Night School ingest path:
+
+   grep -rn "night_school\|NightSchool" backend/app/ --include="*.py" | head -20
+
+   - Identify how lived_wisdom output should be fed in
+
+   - Note the function signature Night School expects
+
+
+
+5. Check existing partial wiring:
+
+   grep -rn "extract_sanctuary_wisdom\|sanctuary_wisdom\|lived_wisdom" backend/app/ | head -20
+
+   - Report any existing references to confirm whether code stub exists
+
+
+
+6. Database schema check:
+
+   grep -rn "wisdom" backend/migrations/ | head -10
+
+   - Identify whether a wisdom table exists for storage
+
+   - If yes, show the schema
+
+
+
+7. Per-file report structure:
+
+   - File path
+
+   - Relevant line numbers
+
+   - Single-line context
+
+   - Whether the code path is empty/stub/partial/complete
+
+
+
+8. Final summary (3 bullets max):
+
+   - What's already built
+
+   - What's missing
+
+   - Estimated lines to add (must fit 50-line cap on protected files)
+
+
+
+No fix proposed. No code changes. Investigation only.
+
+Write findings to docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md
+
+Writing the investigation document.
+
+# Lived wisdom × Night School — investigation (2026-05-04)
+Per-file: `path` | lines | status | one-line context
+---
+## 1) `lived_wisdom.py`
+- `backend/app/services/lived_wisdom.py` | 1–19 | complete (service spec) | Module doc: pipeline “Session completes → extract_sanctuary_wisdom() … → wisdom_extractions … Night School personalization”.
+- `backend/app/services/lived_wisdom.py` | 57–58 | complete | `class LivedWisdomService` — “Extracts and stores therapeutic wisdom from sessions.”
+- `backend/app/services/lived_wisdom.py` | 66–77 | **extract API** | `async def extract_sanctuary_wisdom(self, session_id: UUID, family_id: UUID, messages: List[Dict], member_ids: Optional[List[UUID]] = None) -> List[Dict]` — doc: messages `{sender_type, sender_id, text, timestamp}`; returns list of stored entries.
+- `backend/app/services/lived_wisdom.py` | 127–163 | complete | `extract_session_wisdom` — 1:1 sessions; Azure then heuristic; `_store_wisdom` with `source="session"`.
+- `backend/app/services/lived_wisdom.py` | 167–211 | complete | `get_client_wisdom` / `get_family_wisdom` — read `wisdom_extractions` **`approved = TRUE`** only.
+- `backend/app/services/lived_wisdom.py` | 349–377 | complete | `_store_wisdom` INSERT into `wisdom_extractions` — **does not set `approved`** → DB default **FALSE** (migration 015).
+**Wire-up target:** call `LivedWisdomService.extract_sanctuary_wisdom(...)` after you have UUIDs + message list in the expected shape.
+Findings are in docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md. Highlights: sanctuary_complete is ~26930–27236 (OPEN_TODOS 26814 is the wrong handler); no extract_sanctuary_wisdom call; message field mismatch (content vs text); wisdom_extractions.approved default vs get_*_wisdom filter; Night School = file + CurriculumPipeline / night_school_* tables, not wired from PG extractions.
+
+EFF: 18/95 ≈ 19% | FAIL
+LOSS: 77 at rate unknown | session: n/a | model: Composer — OPTIMIZE_NEXT: point only to the doc, skip repeating tables the doc already has.
