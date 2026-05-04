@@ -1,0 +1,87 @@
+? Build canonical Coach Portal foundational spec.
+Read-only investigate mode. Output: docs/coach_portal/_FOUNDATIONAL_SPEC.md
+
+Goal: document every Coach Portal feature as it ACTUALLY exists in
+the shipped code, not as it was originally designed. This becomes
+the source of truth for per-tab pipeline specs.
+
+Investigate:
+
+1. Find Coach Portal entry point
+   grep -n "COACH ACCESS\|CoachDashboard\|coach_portal" mobile/lib/updated_screens.dart | head -20
+   - Identify entry screen, login flow, role routing
+
+2. Enumerate every tab/section in CoachDashboardScreenV2
+   - Look for: TabBar, BottomNavigationBar, Drawer, IndexedStack, conditional rendering
+   - Report tab name, line where defined, what state controls visibility
+
+3. For each tab, list every primary action (button/menu/gesture)
+   - Look for: ElevatedButton, IconButton, GestureDetector, InkWell with onPressed
+   - For each: label, line, handler function name, what backend call it triggers
+
+4. For each backend call, identify:
+   - WebSocket message type OR REST endpoint
+   - Backend handler file:line
+   - Database tables touched
+   - Service classes invoked
+
+5. For each tab, identify state variables
+   - Loading flags, selected items, filter state, pagination cursors
+   - Where set true, where reset false (critical for stuck-UI bug detection)
+
+6. Database table inventory (for coach features)
+   grep -rn "coach_\|coaching_" backend/migrations/ | grep -E "CREATE TABLE|ALTER TABLE" | head -30
+   - List every coach-related table
+   - For each: column count, primary purpose, related tabs
+
+7. Identify implemented vs stubbed features
+   - Look for: TODO, FIXME, NotImplementedError, "coming soon", placeholder UI
+   - Flag any feature with stub/placeholder code
+
+8. Cross-reference with original design (if possible)
+   grep -rn "feature\|coach" docs/ | head -40
+   - Note any docs that describe intended behavior
+   - Flag mismatches between docs and current code
+
+9. Output structure for _FOUNDATIONAL_SPEC.md:
+
+   # Coach Portal Foundational Spec
+   
+   ## Architecture
+   - Entry point + routing
+   - Shared state (CoachDashboardScreenV2 fields)
+   - WebSocket connection lifecycle
+   
+   ## Tab Inventory
+   For each tab:
+     - Name
+     - Implementation status (shipped / partial / stub)
+     - Files (mobile + backend)
+     - Primary actions table
+     - State variables table
+     - WebSocket messages table
+     - Database tables
+     - Known UX debt
+   
+   ## Database Tables
+   List of all coach-related tables with:
+     - Migration file
+     - Columns (name + type + purpose)
+     - Used by tabs: [list]
+   
+   ## Cross-Tab Dependencies
+   Where tabs share state, services, or tables.
+   
+   ## Implementation Gaps
+   Features in design docs but missing from code.
+   Features in code but not documented.
+
+10. Constraints:
+   - Read-only — no code changes
+   - Cite file:line for every claim
+   - Mark unverified claims as TBD
+   - Maximum 1500 tokens output narrative; the doc itself can be long
+   - Do not summarize the doc back in chat — just confirm "doc written, N lines"
+
+EFF: numeric only
+LOSS: rate unknown if model unknown — no fabricated cost
