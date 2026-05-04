@@ -4361,6 +4361,10 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     super.initState();
     _tabController = TabController(length: 10, vsync: this);
     _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      if (_tabController.index == 1) {
+        _emitFetchCoachCalendar();
+      }
       if (_tabController.index == 9 && _assistantMetrics.isEmpty && !_assistantsTabLoading) {
         _loadAssistantMetrics();
       }
@@ -4548,9 +4552,19 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     );
   }
 
+  /// Sends visible calendar month so bridge PG merge returns sessions for May/June/etc.
+  void _emitFetchCoachCalendar() {
+    if (_socket == null) return;
+    _socket!.sink.add(jsonEncode({
+      "type": "fetch_coach_calendar",
+      "month": _calMonth.month,
+      "year": _calMonth.year,
+    }));
+  }
+
   void _fetchDashboard() {
     _socket?.sink.add(jsonEncode({"type": "coach_get_clients"}));
-    _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+    _emitFetchCoachCalendar();
     _socket?.sink.add(jsonEncode({"type": "coach_get_inbound_requests"}));
     _socket?.sink.add(jsonEncode({"type": "coach_get_my_availability"}));
     _requestPendingBookings();
@@ -4733,7 +4747,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Zoom meeting deleted")));
       }
-      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      _emitFetchCoachCalendar();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Delete Zoom failed: $e")));
@@ -4754,7 +4768,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
         );
       }
       // Refresh the schedule
-      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      _emitFetchCoachCalendar();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4773,7 +4787,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Transcript archived; recordings cleaned up")));
       }
-      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      _emitFetchCoachCalendar();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Archive transcript failed: $e")));
@@ -4856,7 +4870,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       }
 
       // Refresh schedule view immediately.
-      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      _emitFetchCoachCalendar();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4908,7 +4922,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
       );
       if (!dialogContext.mounted) return;
       Navigator.of(dialogContext).pop();
-      _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+      _emitFetchCoachCalendar();
       if (!mounted) return;
       final link = data["zoom_link"]?.toString() ?? "";
       final host = data["zoom_host_url"]?.toString() ?? "";
@@ -6097,7 +6111,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               backgroundColor: Color(0xFF22C55E),
             ),
           );
-          _socket?.sink.add(jsonEncode({"type": "fetch_coach_calendar"}));
+          _emitFetchCoachCalendar();
         }
       }
       else if (data['type'] == 'availability_updated') {
@@ -7800,7 +7814,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                           familyId: f['family_id'],
                           clients: List<Map<String, dynamic>>.from(f['clients'] ?? []),
                         );
-                        _tabController.animateTo(3); // BRIEFINGS
+                        _tabController.animateTo(8); // FOLDER
                       },
                       style: TextButton.styleFrom(
                         foregroundColor: const Color(0xFFFFD700),
@@ -8153,7 +8167,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                       ? (session['consultation_name'] ?? session['client_name'] ?? session['client'] ?? 'Consultee').toString()
                       : (session['client_name'] ?? session['client'] ?? session['client_id'] ?? 'Session').toString();
                   final date = (session['date'] ?? '').toString();
-                  final time = (session['time'] ?? '').toString();
+                  final time = _formatScheduledTime(session); // COACH-SCHEDULE-LOCAL
                   final consultSubject = (session['consultation_subject'] ?? '').toString().trim();
                   final meetingUrl = (session['zoom_link'] ?? session['meeting_url'] ?? '').toString();
                   final zoomHostUrl = (session['zoom_host_url'] ?? '').toString();
@@ -8490,6 +8504,18 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
   }
 
   // --- Helpers for availability/calendar ---
+  /// Prefer UTC ISO scheduled_start converted to device-local HH:mm; else wire `time`. // COACH-SCHEDULE-LOCAL
+  String _formatScheduledTime(Map session) {
+    final ss = (session['scheduled_start'] ?? '').toString().trim();
+    if (ss.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(ss).toLocal();
+        return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      } catch (_) {}
+    }
+    return (session['time'] ?? '').toString().trim();
+  }
+
   static const List<String> _dayShort = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   static const List<String> _dayLong = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
@@ -8620,15 +8646,28 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
     }
   }
 
+  /// True if session belongs on [d] in local timezone (PG payloads often omit/wrong `date`).
+  bool _sessionMatchesCalendarDay(Map<String, dynamic> m, DateTime d) {
+    final iso = _fmtDate(d);
+    final ds = (m['date'] ?? '').toString();
+    if (ds.startsWith(iso)) return true;
+    try {
+      final ss = (m['scheduled_start'] ?? '').toString();
+      if (ss.isEmpty) return false;
+      final local = DateTime.parse(ss).toLocal();
+      return local.year == d.year && local.month == d.month && local.day == d.day;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // List of confirmed sessions on a given date (best-effort match against _schedule items)
   List<Map<String, dynamic>> _sessionsOnDate(DateTime d) {
-    final iso = _fmtDate(d);
     final out = <Map<String, dynamic>>[];
     for (final raw in _schedule) {
       if (raw is! Map) continue;
       final m = Map<String, dynamic>.from(raw);
-      final ds = (m['date'] ?? '').toString();
-      if (ds.startsWith(iso)) out.add(m);
+      if (_sessionMatchesCalendarDay(m, d)) out.add(m);
     }
     return out;
   }
@@ -9294,9 +9333,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             children: [
               IconButton(
                 icon: const Icon(Icons.chevron_left, color: Color(0xFFC9A962)),
-                onPressed: () => setState(() {
-                  _calMonth = DateTime(_calMonth.year, _calMonth.month - 1, 1);
-                }),
+                onPressed: () {
+                  setState(() {
+                    _calMonth = DateTime(_calMonth.year, _calMonth.month - 1, 1);
+                  });
+                  _emitFetchCoachCalendar();
+                },
               ),
               Expanded(
                 child: Center(
@@ -9313,9 +9355,12 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right, color: Color(0xFFC9A962)),
-                onPressed: () => setState(() {
-                  _calMonth = DateTime(_calMonth.year, _calMonth.month + 1, 1);
-                }),
+                onPressed: () {
+                  setState(() {
+                    _calMonth = DateTime(_calMonth.year, _calMonth.month + 1, 1);
+                  });
+                  _emitFetchCoachCalendar();
+                },
               ),
             ],
           ),
@@ -9365,11 +9410,14 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
                     side: const BorderSide(color: Color(0xFF4ECDC4)),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  onPressed: () => setState(() {
-                    final now = DateTime.now();
-                    _calMonth = DateTime(now.year, now.month, 1);
-                    _calSelectedDay = now;
-                  }),
+                  onPressed: () {
+                    setState(() {
+                      final now = DateTime.now();
+                      _calMonth = DateTime(now.year, now.month, 1);
+                      _calSelectedDay = now;
+                    });
+                    _emitFetchCoachCalendar();
+                  },
                 ),
               ),
             ],
@@ -9465,7 +9513,7 @@ class _CoachDashboardScreenV2State extends State<CoachDashboardScreenV2> with Si
             final cl = isC
                 ? (sm['consultation_name'] ?? sm['client_name'] ?? sm['client'] ?? 'Consultee').toString()
                 : (sm['client_name'] ?? sm['client'] ?? 'Client').toString();
-            final tm = (sm['time'] ?? '').toString();
+            final tm = _formatScheduledTime(sm); // COACH-SCHEDULE-LOCAL
             return Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(children: [
