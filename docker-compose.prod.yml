@@ -14,7 +14,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/migrations:/docker-entrypoint-initdb.d:ro
-    # No ports exposed — only reachable by backend/bridge via nate_network (postgres:5432)
+    # VPC port binding: allows clone VPS (10.120.0.6) to connect via DO VPC peering
+    # Public internet cannot reach this — 10.120.0.2 is only accessible within the VPC subnet
+    # UFW: 5432/tcp ALLOW 10.120.0.0/20 is already in place
+    ports:
+      - "10.120.0.2:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nate_admin} -d ${POSTGRES_DB:-little_nate}"]
       interval: 10s
