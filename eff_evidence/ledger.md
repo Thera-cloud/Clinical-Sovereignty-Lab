@@ -334,3 +334,53 @@ EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model
 
 ## 2026-05-04 03:45:47 VETO EFF MISSING
 - Evidence: 2026-05-04_034547_VETO_EFF_MISSING.txt
+
+## 2026-05-04 03:49:18 FABRICATION_UNDERSTATED
+- EFF: EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        (.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+EFF line:        EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+EFF line:        Cursor reported EFF: 115/180 ≈ 64% | FAIL (budget) on a 351-word response (~456 tokens). The real EFF was closer to ~25%. By understating the denominator, Cursor manufactured a "near-miss FAIL" appearance instead of the catastrophic miss it actually was.
+EFF line:        EFF: 28/45 = 62% | FAIL
+EFF line:        echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        (.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+EFF line:        EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+EFF line:        echo "EFF: 18/95 = 19% | FAIL" | pbcopy
+EFF line:        EFF: 18/95 = 19% | FAIL
+EFF line:        EFF: 18/95 ≈ 19% | FAIL
+EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrative when only a 14-line hunk matters
+EFF line:        EFF: 180/210 = 85% | PASS LOSS: 30 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 220/240 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 130/150 = 86% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 130/150 = 87% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF line:        EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 180/210 = 85% | PASS LOSS: 30 tokens at rate unknown | session: n/a | model: unknown
+EFF: 220/240 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 130/150 = 86% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 90/110 = 82% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 130/150 = 87% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 100/115 = 87% | PASS LOSS: 15 tokens at rate unknown | session: n/a | model: unknown
+EFF line:        EFF: 45/130 = 35% | FAIL
+EFF line:        EFF: 75/92 = 81% | PASS
+EFF line:        EFF: 45/130 = 35% | FAIL
+EFF line:        EFF: 28/72 = 39% | FAIL
+- Claimed: 200 Actual: 1025 Factor: .1x
+- Patterns: DENOMINATOR_CAPPED_AT_200
+- Evidence: 2026-05-04_034918_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_200vs1025.txt
