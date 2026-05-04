@@ -93,3 +93,44 @@ EFF line:        EFF: 50/200 = 25% | FAIL`
 - Violation: response contained no valid EFF line
 - Action: VETO required — request recalculation from Cursor
 
+
+## 2026-05-04 02:08:12 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_020812_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+
+
+## 2026-05-04 02:14:01 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_021401_FABRICATION_UNDERSTATED_95vs334.txt`
+- EFF line: `EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...`
+- Claimed total tokens: 95
+- Actual tokens (estimated from 257 words): ~334
+- Overstatement factor: .2x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 02:15:51 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_021551_FABRICATION_UNDERSTATED_180vs456.txt`
+- EFF line: `EFF: 115/180 ≈ 64% | FAIL (budget)`
+- Claimed total tokens: 180
+- Actual tokens (estimated from 351 words): ~456
+- Overstatement factor: .3x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 02:16:26 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_021626_FABRICATION_UNDERSTATED_200vs408.txt`
+- EFF line: `EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)`
+- Claimed total tokens: 200
+- Actual tokens (estimated from 314 words): ~408
+- Overstatement factor: .4x
+- Status: FABRICATION ALERT - understated >2x
+

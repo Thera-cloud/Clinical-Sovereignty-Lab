@@ -1,0 +1,76 @@
+
+===== 01:59:27 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+Claimed total:   200
+Actual words:    52
+Actual tokens:   ~67
+Overstatement:   2.9x
+STATUS:          FABRICATION ALERT - overstated >2x
+
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_015927_FABRICATION_OVERSTATED_200vs67.txt
+Ledger updated:    /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+CSV updated:       /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/violations.csv
+
+===== 02:04:57 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+Claimed total:   95
+Actual words:    267
+Actual tokens:   ~347
+Overstatement:   .2x
+STATUS:          FABRICATION ALERT - understated >2x
+
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_020458_FABRICATION_UNDERSTATED_95vs347.txt
+Ledger updated:    /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+CSV updated:       /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/violations.csv
+
+===== 02:05:22 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL
+EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.
+Claimed total:   200
+Actual words:    156
+Actual tokens:   ~202
+Overstatement:   .9x
+STATUS:          plausible
+
+===== 02:07:10 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence saved: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_020710_VETO_EFF_MISSING.txt
+Ledger updated: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+
+===== 02:08:12 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence saved: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_020812_VETO_EFF_MISSING.txt
+Ledger updated: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+
+===== 02:14:01 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF line:        EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap...
+Claimed total:   95
+Actual words:    257
+Actual tokens:   ~334
+Overstatement:   .2x
+STATUS:          FABRICATION ALERT - understated >2x
+
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_021401_FABRICATION_UNDERSTATED_95vs334.txt
+Ledger updated:    /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+CSV updated:       /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/violations.csv
+
+===== 02:15:51 — clipboard changed, auditing =====
+Captured:        /tmp/cursor_response.txt
+EFF line:        EFF: 115/180 ≈ 64% | FAIL (budget)
+Claimed total:   180
+Actual words:    351
+Actual tokens:   ~456
+Overstatement:   .3x
+STATUS:          FABRICATION ALERT - understated >2x
+
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_021551_FABRICATION_UNDERSTATED_180vs456.txt
+Ledger updated:    /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+CSV updated:       /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/violations.csv
+

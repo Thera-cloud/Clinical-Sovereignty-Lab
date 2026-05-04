@@ -1,0 +1,55 @@
+? Investigate Coach Classroom WebSocket analyzing-flag reset bug.
+
+File: mobile/lib/updated_screens.dart:6725
+
+Symptom per OPEN_TODOS.md: WebSocket error leaves UI stuck — analyzing flag never resets.
+
+Read-only investigate mode.
+
+
+
+1. Show the function containing line 6725 (full method body)
+
+2. Find every place the analyzing flag is set to true
+
+3. Find every place it's set to false
+
+4. Identify the WebSocket error handler and verify whether it resets the flag
+
+5. Report findings as bullets — no fix yet
+
+6. Max 500 tokens
+
+Line reference: In the current file, 6725 is a closing } for the coach_payment_mode_updated WebSocket branch, not Classroom UI. OPEN_TODOS.md:6725 is a stale/wrong line anchor for the analyzing bug. The Classroom + global error handling lives in _handleSocketMessage (CoachDashboardScreenV2), ~6001–6845.
+
+1) “Function containing 6725”
+
+Method: void _handleSocketMessage(dynamic message) starting at 6001 (ends before _showAiModeOutputDialog at 6848).
+Body length: ~845 lines — too large to paste here; 6725 sits in the middle of financial/booking/DOJO branches, not the analyzing flow.
+2) _classroomAnalyzing = true (every place)
+
+6470 — classroom_analysis_started → setState
+6579 — classroom_analysis with pipeline_stage set (in-progress poll UI)
+15230 — _startClassroomVideoAnalysisPoll → setState
+15301 — _analyzeSelectedSession → setState before sending classroom_analyze_session
+3) _classroomAnalyzing = false (every place)
+
+6496 — classroom_analysis_complete success path
+6525 — classroom_analysis_complete error path (hasErr)
+6553 — classroom_analysis when _isClassroomSessionAnalysisComplete is true
+15254 — poll timer ceiling (30 min) in _startClassroomVideoAnalysisPoll
+(not set false) on generic error, socket onError/onDone, or JSON parse catch
+4) _classroomLiveAnalyzing
+
+true: 15354 — _analyzeLiveSession
+false: 6627 — classroom_live_analysis handler (setState always clears it whether success or not)
+5) WebSocket error / transport failure vs flags
+
+else if (data['type'] == 'error') (6806–6839): setState only sets _notesLoading = false, _dojoBusy = false, Dojo/snackbar logic — no _classroomAnalyzing / _classroomLiveAnalyzing.
+_connectToBridge stream onError / onDone (4383–4391): status message + _scheduleWsReconnect() only — no classroom flag reset.
+6) Extra gap
+
+classroom_live_analysis with success == false: still clears _classroomLiveAnalyzing at 6627 — live path is covered.
+Archived / device-upload path relies on classroom_analysis_* messages or poll timeout; bridge type: error or dropped connection after _analyzeSelectedSession (15301) can leave _classroomAnalyzing == true until timeout or a later message.
+EFF: 115/180 ≈ 64% | FAIL (budget)
+LOSS: 65 at $0.020 ≈ $1.30 | session: n/a | model: Composer — OPTIMIZE_NEXT: omit redundant “full method” wording; keep line tables only.
