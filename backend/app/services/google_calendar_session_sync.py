@@ -105,7 +105,8 @@ async def _ensure_token(pool, conn_row: Dict[str, Any]) -> Optional[str]:
 
 
 def _build_payload(session: Dict[str, Any],
-                   extra_attendee_email: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                   extra_attendee_email: Optional[str] = None,
+                   tz_override: Optional[str] = None) -> Optional[Dict[str, Any]]:
     start = session.get("scheduled_start") or session.get("start_time")
     end = session.get("scheduled_end") or session.get("end_time")
     if not start or not end:
@@ -144,12 +145,14 @@ def _build_payload(session: Dict[str, Any],
             attendee_set.append(extra_attendee_email)
     attendees = attendee_set or None
 
+    # PER-USER-TZ-FIX: participant profile → session.timezone → America/New_York
+    tz_for_event = (tz_override or "").strip() or session.get("timezone") or "America/New_York"
     payload = gcc._build_event_payload(
         summary=summary,
         description=description,
         start_iso=start,
         end_iso=end,
-        timezone_str=session.get("timezone") or "America/New_York",
+        timezone_str=tz_for_event,
         location=join_url or None,
         attendees=attendees,
         conference_link=None,
@@ -251,7 +254,18 @@ async def sync_session_to_google(pool, user_id: str, session: Dict[str, Any],
         client_email = await _resolve_client_email(
             pool, (session.get("client_id") or "").strip()
         )
-        payload = _build_payload(session, extra_attendee_email=client_email)
+        user_tz = None  # PER-USER-TZ-FIX
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT NULLIF(TRIM(profile_data->>'timezone'), '') AS tz "
+                    "FROM users WHERE username = $1 LIMIT 1",
+                    user_id,
+                )
+            user_tz = row["tz"] if row else None
+        except Exception:
+            pass
+        payload = _build_payload(session, extra_attendee_email=client_email, tz_override=user_tz)
         if not payload:
             return {"status": "skipped", "reason": "missing time"}
 
