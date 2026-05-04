@@ -1,0 +1,169 @@
+> Finalize outstanding commits in Clinical-Sovereignty-Lab-2 working tree.
+
+Repo: ~/Desktop/Clinical-Sovereignty-Lab-2
+Branch: main, ahead of origin/main by 4 commits already.
+
+Goal: commit every legitimate change in the working tree, grouped by purpose,
+push to origin/main, then verify production health.
+
+CONSTRAINTS:
+- No --force, no --hard reset, no rebase
+- Each commit must contain only files that belong together
+- Show git diff --stat before each commit, get implicit approval by proceeding
+- Stop and report if any diff looks unintentional or unrecognized
+- All filenames must contain ONLY alphanumerics, underscores, hyphens, dots, slashes
+  — flag any filename containing brackets, parentheses, or "http" as corrupted
+
+═══════════════════════════════════════════════════════════════
+PHASE 1 — INVENTORY (read-only)
+═══════════════════════════════════════════════════════════════
+
+git status --porcelain
+git diff --stat
+
+Report:
+- Total modified files
+- Total untracked files
+- Any filenames containing [, ], (, ), or "http"
+- 4 most recent commits via: git log --oneline -10
+
+═══════════════════════════════════════════════════════════════
+PHASE 2 — REVIEW PROTECTED RULES (read-only)
+═══════════════════════════════════════════════════════════════
+
+For each modified .cursor/rules/*.mdc file:
+  git diff <file>
+
+Report a 2-line summary per file:
+- What changed
+- Whether change appears intentional (matches a known feature) or unexplained drift
+
+DO NOT commit yet. Wait for explicit "rules: keep" or "rules: revert" decision
+from operator before proceeding to Phase 3.
+
+═══════════════════════════════════════════════════════════════
+PHASE 3 — GROUP B: feature entitlement system
+═══════════════════════════════════════════════════════════════
+
+git add backend/app/websocket/feature_entitlement.py
+git add backend/app/constants/tiers.py
+git add backend/app/routers/coach_hierarchy_api.py
+git diff --cached --stat
+git commit -m "Add feature entitlement resolver for tier-based access control"
+
+═══════════════════════════════════════════════════════════════
+PHASE 4 — GROUP D: schema migrations 195-196
+═══════════════════════════════════════════════════════════════
+
+git add backend/migrations/195_backfill_family_members.sql
+git add backend/migrations/196_coach_folder_files_storage_alignment.sql
+git add backend/app/routers/folder_api.py
+git add backend/app/services/patient_sovereignty_service.py
+git diff --cached --stat
+git commit -m "Migrations 195-196: backfill family members + coach folder storage alignment"
+
+═══════════════════════════════════════════════════════════════
+PHASE 5 — GROUP E: mobile changes
+═══════════════════════════════════════════════════════════════
+
+git add mobile/lib/main.dart
+git add mobile/lib/screens/settings_screen.dart
+git add mobile/pubspec.yaml
+git add mobile/pubspec.lock
+git add mobile/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+git add mobile/macos/Flutter/GeneratedPluginRegistrant.swift
+git diff --cached --stat
+git commit -m "Mobile: settings screen + main.dart updates"
+
+═══════════════════════════════════════════════════════════════
+PHASE 6 — GROUP C: family sanctuary scripts
+═══════════════════════════════════════════════════════════════
+
+git add backend/scripts/family_sanctuary_hero_step6_final_v8.py
+git add backend/scripts/family_sanctuary_hero_v9.py
+git add backend/scripts/backfill_family_role.py
+git add backend/scripts/family_sanctuary_v7_kenburns_scene12.sh
+git add backend/scripts/family_sanctuary_v7_regen_motion.py
+git add backend/scripts/family_sanctuary_v7_stitch_quickpreview.py
+git add backend/scripts/family_sanctuary_v7_task1_scene12_png_kenburns.py
+git add backend/scripts/family_sanctuary_v7_task2_scene5_motion.py
+git diff --cached --stat
+git commit -m "Family sanctuary v7-v9 video processing scripts"
+
+═══════════════════════════════════════════════════════════════
+PHASE 7 — REMAINING FILES (review one by one)
+═══════════════════════════════════════════════════════════════
+
+For each remaining modified file in: git status --porcelain | grep "^ M"
+
+  git diff <file> | head -40
+  Report: filename, summary of change, suggested commit group
+
+DO NOT auto-commit any of these. Stop after listing.
+Wait for explicit operator instruction per file: "commit", "revert", or "skip".
+
+═══════════════════════════════════════════════════════════════
+PHASE 8 — CLEANUP
+═══════════════════════════════════════════════════════════════
+
+If these files exist and are not under version control:
+  rm check_config_version.py
+  rm -rf test_bench/
+
+Verify with: git status
+
+═══════════════════════════════════════════════════════════════
+PHASE 9 — PUSH
+═══════════════════════════════════════════════════════════════
+
+git log --oneline origin/main..HEAD
+Report number of commits about to be pushed.
+
+git push origin main
+Confirm push succeeded.
+
+═══════════════════════════════════════════════════════════════
+PHASE 10 — PRODUCTION VERIFICATION
+═══════════════════════════════════════════════════════════════
+
+ssh root@68.183.168.75 "docker ps --format '{{.Names}}'"
+Report container names found.
+
+ssh root@68.183.168.75 "docker inspect nate_backend --format '{{.State.StartedAt}}'"
+Report last container start time.
+
+ssh root@68.183.168.75 "docker logs nate_backend --tail 200 2>&1 | tail -30"
+Report last 30 log lines verbatim.
+
+Search for service health pattern in those logs.
+Report exact wording of any health/startup line found.
+
+DO NOT redeploy. Verification only. If operator wants deploy, that is a
+separate command.
+
+═══════════════════════════════════════════════════════════════
+RULES OF ENGAGEMENT
+═══════════════════════════════════════════════════════════════
+
+- Each phase is gated. Complete phase, report, wait for "continue" or next instruction.
+- Never use --force, --hard, force-push, or any destructive flag.
+- If any phase produces an unexpected error, STOP and report — do not auto-recover.
+- Filename validation: reject any path containing brackets or "http".
+- After each commit: run `git show --stat HEAD` and confirm filenames are clean.
+- If the wisdom service import or any new module breaks during deploy verification,
+  do NOT auto-revert. Report and wait.
+
+═══════════════════════════════════════════════════════════════
+DELIVERABLE
+═══════════════════════════════════════════════════════════════
+
+Phase-by-phase report with:
+- Files committed per group
+- Commit hashes
+- Any unexplained drift in .cursor/rules/
+- Production health status from Phase 10
+- List of files still uncommitted (Phase 7 review queue)
+
+Mode: execute
+EFF: numeric only, no qualitative
+LOSS: rate unknown if model unknown — no fabricated $ amount
