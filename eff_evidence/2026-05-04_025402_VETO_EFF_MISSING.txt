@@ -1,0 +1,21 @@
+cd ~/Desktop/Clinical-Sovereignty-Lab-2
+
+# 1. Commit the lived wisdom investigation doc
+git add docs/LIVED_WISDOM_INVESTIGATION_2026-05-04.md
+git commit -m "docs: lived wisdom investigation 2026-05-04"
+
+# 2. Commit the SSE duplication fix (migration + clone compose)
+git add backend/migrations/199_sse_delivery_log_unique.sql docker-compose.clone.yml backend/app/sse/foundation/delivery_runtime.py
+git commit -m "Fix SSE duplication: clone scheduler gate + unique constraint"
+
+# 3. Commit the EFF audit report
+git add eff_audit_report.md
+git commit -m "EFF audit report 2026-05-04 - 26 sessions, 62.9% avg, 11.5% evasion"
+
+# 4. Review remaining changes one group at a time
+git status
+git diff backend/app/services/token_audit_agent.py | head -50
+# Decide: commit or revert each
+
+# 5. When clean, push
+git push origin main

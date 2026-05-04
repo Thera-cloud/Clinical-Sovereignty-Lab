@@ -252,3 +252,6 @@ EFF: 45/180 = 25% | FAIL — OPTIMIZE_NEXT: omit repeating full git diff narrati
 - Claimed: 95 Actual: 907 Factor: .1x
 - Pattern: DENOMINATOR_CAPPED_AT_200 (denominator capped under 200 on 907-token response)
 - Evidence: 2026-05-04_024757_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_95vs907.txt
+
+## 2026-05-04 02:54:02 VETO EFF MISSING
+- Evidence: 2026-05-04_025402_VETO_EFF_MISSING.txt
