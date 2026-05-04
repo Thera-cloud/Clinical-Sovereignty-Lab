@@ -1,0 +1,962 @@
+? Build canonical Coach Portal foundational spec.
+
+Read-only investigate mode. Output: docs/coach_portal/_FOUNDATIONAL_SPEC.md
+
+
+
+Goal: document every Coach Portal feature as it ACTUALLY exists in
+
+the shipped code, not as it was originally designed. This becomes
+
+the source of truth for per-tab pipeline specs.
+
+
+
+Investigate:
+
+
+
+1. Find Coach Portal entry point
+
+   grep -n "COACH ACCESS\|CoachDashboard\|coach_portal" mobile/lib/updated_screens.dart | head -20
+
+   - Identify entry screen, login flow, role routing
+
+
+
+2. Enumerate every tab/section in CoachDashboardScreenV2
+
+   - Look for: TabBar, BottomNavigationBar, Drawer, IndexedStack, conditional rendering
+
+   - Report tab name, line where defined, what state controls visibility
+
+
+
+3. For each tab, list every primary action (button/menu/gesture)
+
+   - Look for: ElevatedButton, IconButton, GestureDetector, InkWell with onPressed
+
+   - For each: label, line, handler function name, what backend call it triggers
+
+
+
+4. For each backend call, identify:
+
+   - WebSocket message type OR REST endpoint
+
+   - Backend handler file:line
+
+   - Database tables touched
+
+   - Service classes invoked
+
+
+
+5. For each tab, identify state variables
+
+   - Loading flags, selected items, filter state, pagination cursors
+
+   - Where set true, where reset false (critical for stuck-UI bug detection)
+
+
+
+6. Database table inventory (for coach features)
+
+   grep -rn "coach_\|coaching_" backend/migrations/ | grep -E "CREATE TABLE|ALTER TABLE" | head -30
+
+   - List every coach-related table
+
+   - For each: column count, primary purpose, related tabs
+
+
+
+7. Identify implemented vs stubbed features
+
+   - Look for: TODO, FIXME, NotImplementedError, "coming soon", placeholder UI
+
+   - Flag any feature with stub/placeholder code
+
+
+
+8. Cross-reference with original design (if possible)
+
+   grep -rn "feature\|coach" docs/ | head -40
+
+   - Note any docs that describe intended behavior
+
+   - Flag mismatches between docs and current code
+
+
+
+9. Output structure for _FOUNDATIONAL_SPEC.md:
+
+
+
+   # Coach Portal Foundational Spec
+
+   
+
+   ## Architecture
+
+   - Entry point + routing
+
+   - Shared state (CoachDashboardScreenV2 fields)
+
+   - WebSocket connection lifecycle
+
+   
+
+   ## Tab Inventory
+
+   For each tab:
+
+     - Name
+
+     - Implementation status (shipped / partial / stub)
+
+     - Files (mobile + backend)
+
+     - Primary actions table
+
+     - State variables table
+
+     - WebSocket messages table
+
+     - Database tables
+
+     - Known UX debt
+
+   
+
+   ## Database Tables
+
+   List of all coach-related tables with:
+
+     - Migration file
+
+     - Columns (name + type + purpose)
+
+     - Used by tabs: [list]
+
+   
+
+   ## Cross-Tab Dependencies
+
+   Where tabs share state, services, or tables.
+
+   
+
+   ## Implementation Gaps
+
+   Features in design docs but missing from code.
+
+   Features in code but not documented.
+
+
+
+10. Constraints:
+
+   - Read-only — no code changes
+
+   - Cite file:line for every claim
+
+   - Mark unverified claims as TBD
+
+   - Maximum 1500 tokens output narrative; the doc itself can be long
+
+   - Do not summarize the doc back in chat — just confirm "doc written, N lines"
+
+
+
+EFF: numeric only
+
+LOSS: rate unknown if model unknown — no fabricated cost
+
+Three parallel investigation agents launched — Flutter UI, backend handlers, and database schema. Waiting for results before writing the spec.
+
+EFF: ~15/~15 = 100% | PASS LOSS: 0 tokens at rate unknown | session: 0 | model: unknown
+
+1) CREATE TABLE hits in backend/migrations/ (coach / coaching / hierarchy / supervised / session)
+Below is the grep harvest aligned with your patterns. Each bullet: file, line(s), table.
+
+Coach / coaching / hierarchy / supervised
+
+File	Lines	Table
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/068_coach_hierarchy.sql
+7–17
+coach_hierarchy
+same
+25–38
+supervised_hours
+same
+46–59
+coaching_mesh_sessions
+same
+68–77
+coaching_mesh_participants
+same
+84–94
+coaching_mesh_messages
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/081_coach_portal_enhancements.sql
+13–21
+coach_folders
+same
+26–36
+coach_folder_files
+same
+44–55
+coach_form_templates
+same
+191–201
+coach_availability (TEXT coach_id; see also 001_schema.sql)
+same
+209–222
+coach_signup_codes
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/081b_coach_portal_suite.sql
+9–37, 170–186, etc.
+Same coach portal suite (parallel migration)
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/083_coach_assignments.sql
+6–15
+coach_assignments
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/182_coach_only_experience.sql
+7–24
+coach_profiles
+same
+51–64
+coach_requests
+same
+82–90
+coach_messages
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/186_coach_client_overrides.sql
+3–16
+coach_client_overrides
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/189_coach_override_audit_and_expiry.sql
+3–12
+coach_override_audit
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/031_hive_defense_supplemental.sql
+502–508
+coach_member_assignments
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/027_solutions_tables.sql
+118–128
+coach_briefings
+same
+165–178
+coach_recruitment_campaigns
+same
+180–190
+coach_assessment_results
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/041_advanced_protections.sql
+51–60
+coach_w9_vault
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/090_coach_nate_chat.sql
+5–13
+coach_nate_chat_history
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/078_checkin_wisdom.sql
+19–35
+coach_nate_progress
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/086_multi_tenant_quickbooks.sql
+64–79, 81–93, 95–107
+qb_coach_connection, qb_coach_sync_log, qb_coach_account_mapping
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/093_schedule_consolidation.sql
+22–33
+coach_consultations
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/153_sovereign_voice_v31.sql
+83–93
+coach_escalation_notifications
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/001_schema.sql
+230–256
+coach_notes
+same
+357–374
+coach_availability (UUID coach_id → users)
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/002_drip_campaign.sql
+245–267
+coaching_assessments (marketing funnel / prospects)
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/013_stripe_tables.sql
+27–42
+coaching_sessions (UUID PK variant)
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/080_coaching_sessions_pg.sql
+5–32
+coaching_sessions (alternative CREATE with session_id TEXT PK — only applies if table did not already exist)
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/migrations/052_data_consolidation.sql
+143–159
+coach_metrics
+“Session” in name (also matched)
+
+Examples: family_sanctuary_sessions (016_family_sanctuary_tables.sql:9), livestream_sessions (048:4), big_nate_sessions (023:73), dojo_mentor_sessions (063:4), skyeye_session_actions (010:61), organization_sessions (038:6), skyeye_sessions (004:102), session_summaries (029:54), session_packs / coaching_sessions (013:8, 013:27), classroom_session_analyses (102:5), voice_sessions / voice_hold_sessions (160:20, 153:73), community_sessions (061:5), me2me_visitor_sessions (028:213), liminal_sessions (062:4), etc.
+
+2) Key tables — full DDL from migrations
+coach_hierarchy (068_coach_hierarchy.sql 7–21)
+Columns: id SERIAL PK; master_coach_id VARCHAR(64) NOT NULL; assistant_id VARCHAR(64) NOT NULL; status VARCHAR(20) DEFAULT 'pending'; invited_at, accepted_at, revoked_at, created_at TIMESTAMPTZ.
+Constraints: UNIQUE (master_coach_id, assistant_id).
+Indexes: idx_coach_hierarchy_master, _assistant, _status (18–21).
+supervised_hours (25–42)
+Columns: id SERIAL PK; assistant_id, master_coach_id VARCHAR(64) NOT NULL; activity_type VARCHAR(64) DEFAULT 'individual_supervision'; dojo_type VARCHAR(32); duration_minutes DOUBLE PRECISION NOT NULL; session_date DATE DEFAULT CURRENT_DATE; notes TEXT; attestation_status VARCHAR(20) DEFAULT 'pending'; attested_at TIMESTAMPTZ; mesh_session_id VARCHAR(64); created_at TIMESTAMPTZ.
+Indexes: idx_supervised_hours_assistant, _master, _status (40–42).
+coaching_mesh_sessions (46–64)
+Columns: id SERIAL PK; session_id VARCHAR(64) UNIQUE NOT NULL; master_coach_id VARCHAR(64) NOT NULL; session_type VARCHAR(64); title VARCHAR(256); topic_tags JSONB DEFAULT '[]'; dojo_context VARCHAR(32); started_at, ended_at TIMESTAMPTZ; participant_count INT DEFAULT 0; nate_participation BOOLEAN DEFAULT true; created_at TIMESTAMPTZ.
+Indexes: idx_mesh_sessions_master, _type, _dojo, _started (61–64).
+coaching_mesh_participants (68–80)
+Columns: id SERIAL PK; session_id VARCHAR(64) NOT NULL REFERENCES coaching_mesh_sessions(session_id) ON DELETE CASCADE; user_id VARCHAR(64) NOT NULL; role VARCHAR(20); joined_at, left_at TIMESTAMPTZ; ble_device_id VARCHAR(128).
+Constraints: UNIQUE (session_id, user_id).
+Indexes: idx_mesh_participants_session, _user (79–80).
+coaching_mesh_messages (84–99)
+Columns: id SERIAL PK; session_id VARCHAR(64) NOT NULL REFERENCES coaching_mesh_sessions(session_id) ON DELETE CASCADE; sender_id VARCHAR(64); message_type VARCHAR(32); content TEXT NOT NULL; metadata JSONB; parent_message_id INTEGER; score DOUBLE PRECISION; created_at TIMESTAMPTZ.
+Indexes: idx_mesh_messages_session, _sender, _type, _created (96–99).
+Other coach_* tables (compact)
+coach_folders / coach_folder_files / coach_form_templates: 081_coach_portal_enhancements.sql 13–57 (indexes 23–24, 38, 57).
+coach_assignments: 083_coach_assignments.sql 6–18.
+coach_profiles, coach_requests, coach_messages: 182_coach_only_experience.sql 7–94; alters coaching_sessions + coach_availability at 96–100.
+coach_client_overrides + audit: 186_coach_client_overrides.sql 3–22; 189_coach_override_audit_and_expiry.sql 3–18 + ALTER coach_client_overrides 20–24.
+coach_nate_chat_history: 090_coach_nate_chat.sql 5–16.
+coach_nate_progress: 078_checkin_wisdom.sql 19–36.
+coach_w9_vault: 041_advanced_protections.sql 51–61.
+coach_briefings / coach_recruitment_campaigns / coach_assessment_results: 027_solutions_tables.sql 118–190 (indexes 130–131).
+coach_signup_codes (+ related signup_code_links, signup_sharing_ledger, signup_code_audit_log): 081_coach_portal_enhancements.sql 209–274.
+coach_consultations: 093_schedule_consolidation.sql 22–33 (partial; file continues).
+coach_escalation_notifications: 153_sovereign_voice_v31.sql 83–95.
+coach_member_assignments: 031_hive_defense_supplemental.sql 502–510.
+qb_coach_*: 086_multi_tenant_quickbooks.sql 64–110.
+coach_metrics: 052_data_consolidation.sql 143–162.
+coaching_sessions (evolution — not one static shape)
+Original (Stripe booking): 013_stripe_tables.sql 27–42 — id UUID PK, client_id/coach_id UUID → users, pack_id, scheduled_at, price_cents, status, started_at, ended_at, session_notes, stripe_payment_intent, timestamps; indexes 44–47.
+Aligned columns (on existing table): 094_coaching_sessions_columns.sql adds family_id, session_type, scheduled_start/end, zoom_host_url, notes, topics_covered, homework_assigned, recording_url, optional session_id unique constraint (full file 1–47).
+Payment / portal: 081_coach_portal_enhancements.sql 157–161.
+PG mirror CREATE (only if table missing): 080_coaching_sessions_pg.sql 5–38 (session_id VARCHAR PK, TEXT client_id/coach_id, etc.).
+Also: 182 intake_note (97–97); Google Calendar 183_google_calendar.sql 51–66; RLS 107_rls_phase2_clinical_tables.sql 56+; encryption columns/trigger 105_pgcrypto_sql_encryption.sql 212+; 097_recording_disabled_column.sql, 095_billing_pipeline_fixes.sql, 184_consultation_session_type.sql, etc.
+3) Tables coaches use that are not coach_*
+users — dedicated + coach-relevant columns
+Base schema 001_schema.sql 31–75: role (includes 'COACH'), specialties TEXT[], coaching_style VARCHAR(50), family_id, hardware_id, etc.
+
+Later (examples):
+
+profile_data JSONB — 032_user_store_profile_data.sql 21 (comment lists assigned_coach among stored fields, lines 5–7).
+company_id UUID — 085_corporate_command.sql 9–11.
+token_balance, phone, etc. — 032 (37–55).
+Coach-facing assignment is largely in profile_data (see §4) plus company_id for corporate.
+
+sessions (canonical therapy session table)
+001_schema.sql 85–116: user_id, coach_id (both → users), session_type CHECK includes 'COACH', platform, status, scheduling, recording paths, biometrics flags.
+
+conversation_history
+099_conversation_history.sql 5–24: user_id TEXT, session_id TEXT, user_text, ai_text, word counts, metadata JSONB, me2me_absorbed, created_at; indexes + FTS GIN 18–24. Coaches reach client memory via APIs that query this table (per workspace rule conversation-history-postgresql.mdc, not re-quoted here as file:line).
+
+client_metrics / assessments
+client_metrics: 052_data_consolidation.sql 9–41 — Nevedal/snapshot fields, crisis_perception, shame_profile, pmb, nevedal_state JSONB, etc.
+dynamic_assessments / assessment_responses: same file 103–140.
+coach_metrics: 143–162.
+Related
+coach_notes: 001_schema.sql 230–257 — coach_id, client_id, session_id, approval workflow.
+nevedal_metrics: 001_schema.sql 121–173 — optional session_id, dyad partner.
+4) profile_data / bridge: coach_id, assigned_coach, group_id, group_role
+user_store.py
+No matches for coach_id, assigned_coach, group_id, or group_role as string literals. Coach-adjacent profile handling appears at 338–339 (certification_status, coach_verified, coaching_fee, w9_*) and 546–547 (coaching_style overlay from DB row).
+
+bridge_server.py
+Registration / defaults: coach_id, assigned_coach, assigned_coach_id — 3502–3504, 3685–3716.
+Client assignment accept (JSONB patch): jsonb_set on coach_id, assigned_coach_id, assigned_coach — 12690–12692; coach_assignments insert 12699–12702; profile fields 12714–12716.
+coach_get_clients payload includes group_id: 17306, 17363 (not group_role in this handler).
+group_id in group coherence / removal flows: 21810–21831, 22050–22085, 22307; coach team synthetic ids 21823.
+group_role: no matches in bridge_server.py for the literal group_role (may still exist only inside profile_data from admin/DB and rules docs).
+5) Docs mentioning coach features
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/docs/coach_portal/_PIPELINE_TEMPLATE.md
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/docs/coach_portal/classroom.md
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/docs/mockups/ecommerce/ec_03_coaching_booking.html
+Broader grep hits (examples): docs/FAMILY_SANCTUARY_SPEC.md (many “coach” / “coaching” lines), docs/DASHBOARD_ACCESS_GUIDE.md (coach dashboard / test accounts), docs/COMPLETE_DASHBOARD_ACCESS_GUIDE.md, docs/AUDIT_CLIENT_PORTAL_SETTINGS.md (assigned coach API), docs/METRICS_REFERENCE.md, docs/CODE_PRESERVATION_AUDIT.md (coach portal Dart), docs/ANALYTICS_AND_CRISIS_PROTOCOL.md, docs/LOGIN_REQUIREMENTS_GUIDE.md, etc.
+
+Schema caveat: coach_availability is defined in 001_schema.sql (UUID coach_id) and again in 081_* (TEXT coach_id) — only one physical table exists; 093_schedule_consolidation.sql alters coach_availability to merge realities (5–19).
+
+EFF: ~120/~420 = 29% | FAIL LOSS: ~300 tokens at rate unknown | session: n/a | model: unknown
+
+OPTIMIZE_NEXT: Ask for a single scope (e.g. “only mesh + hierarchy”) if you want a shorter follow-up.
+
+Database schema agent complete. Waiting on Flutter UI and backend handler agents before synthesizing the spec.
+
+EFF: ~10/~10 = 100% | PASS LOSS: 0 tokens at rate unknown | session: 0 | model: unknown
+
+1. CoachDashboardScreenV2 definition, constructor, login, WebSocket
+Class location
+
+Stateful widget: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/mobile/lib/updated_screens.dart lines 4144–4158
+State class: same file lines 4160–17688 (state class closes just before AdminDashboardScreen at 17695)
+Constructor parameters (CoachDashboardScreenV2, 4149–4154):
+
+required Map<String, dynamic> currentUserProfile
+required String username
+required String password
+Login / routing (how a coach reaches this screen)
+
+Path	File:lines
+Lobby WebSocket login_success → role == 'COACH' → CoachDashboardScreenV2
+main.dart 6740–6749, 6779
+Coach completes onboarding tutorial → pushAndRemoveUntil → CoachDashboardScreenV2
+updated_screens.dart 370–373
+ReConsentScreen after consent → COACH → CoachDashboardScreenV2
+main.dart 9859–9864
+CoachEthicsScreen after coach_ethics_updated
+main.dart 9966–9970
+There is also a reference at updated_screens.dart 20012 (secondary navigation path in that file).
+
+WebSocket setup
+
+initState wires TabController(length: 10) and calls _connectToBridge() (4360–4372).
+_connectToBridge() (4375–4418): closes prior channel, WebSocketChannel.connect(Uri.parse(_serverUrl)), listen(..., onError, onDone) → _scheduleWsReconnect(), then sends:
+updated_screens.dart
+Lines 4409-4414
+ _socket!.sink.add(jsonEncode({
+ "type": "login_request",
+ "username": widget.username,
+ "password": widget.password,
+ "expected_role": "COACH"
+ }));
+On login_success (6031–6037): stores _authToken, _coachHardwareId, calls _fetchDashboard().
+_fetchDashboard() (4565–4577) sends multiple WS types (coach_get_clients, fetch_coach_calendar, coach_get_inbound_requests, coach_get_my_availability, plus helpers for bookings, financials, classroom, assistants).
+
+2. Tabs / sections (structure & switching)
+Mechanism
+
+Desktop: AppBar.bottom → TabBar(controller: _tabController, ...) (7440–7457).
+Mobile: no TabBar; popup menu from _buildMobileNavDropdown() (7622–7707) → showMenu → setState(() => _tabController.animateTo(selected)) (7681–7683).
+Body: _isLoading ? spinner : TabBarView(controller: _tabController, physics: NeverScrollableScrollPhysics on mobile) (7500–7525).
+Labels / icons / order (7419–7420, mirrored in TabBar 7446–7456 and TabBarView children 7515–7524):
+
+Index	Name (_tabLabels)	Builder
+0
+CLIENTS
+_buildClientsTab()
+1
+SCHEDULE
+_buildScheduleTab()
+2
+INSIGHTS
+_buildInsightsTab()
+3
+BRIEFINGS
+_buildBriefingsTab()
+4
+DOJO
+_buildDojoTab()
+5
+CLASSROOM
+_buildClassroomTab()
+6
+TRAINING
+_buildTrainingTab()
+7
+FINANCIALS
+_buildFinancialsTab()
+8
+FOLDER
+_buildFolderTab()
+9
+ASSISTANTS
+_buildAssistantsTab()
+Visibility control
+
+Tab visibility is not conditional: all 10 tabs always exist. Loading gates the whole dashboard via _isLoading (4197, 7500–7510).
+TabController listener (4363–4371): index 1 → _emitFetchCoachCalendar(); index 9 → _loadAssistantMetrics() if empty.
+Note: Workspace rule coach-dashboard-tab-sync.mdc still says “Current Tabs (8)”; the implementation uses 10 tabs (4362, 7419).
+
+3. Actions per tab (representative; class is ~13.5k lines)
+Below is a structured inventory of primary actions and transports (WS vs REST). Listing every GestureDetector/ListTile/TextButton in schedule/classroom/briefings dialogs would duplicate hundreds of lines—those flows are concentrated in _buildScheduleTab (7834+), _buildBriefingsTab (10687+), _buildClassroomTab (13142+), and dialog helpers (_openCreateSessionDialog ~4957+, _showCoachMessageDialog, etc.).
+
+Global app bar (7459–7497)
+UI	Line	Handler	Effect
+Connection (desktop)
+7461–7465
+_showConnectionInfo
+Dialog only
+Refresh
+7466–7471
+anonymous
+setState(_isLoading=true); _fetchDashboard()
+Settings
+7473–7487
+anonymous
+Navigator → CoachSettingsScreen (passes _socket, _messageRelay.stream)
+Logout
+7489–7496
+anonymous
+Close socket; pushReplacement → LobbyScreen
+CLIENTS (7710–7832)
+UI	Line	Handler	Transport
+Search field
+10944–10976
+onChanged
+Local state _clientSearchQuery
+Clear search
+10952–10957
+onPressed
+Local
+Filter chips
+11001–11018
+onSelected
+_clientFilterMode
+Open Folder
+7809–7823
+anonymous
+_openFolder(...) then _tabController.animateTo(3) — jumps to BRIEFINGS, not FOLDER (8)
+SCHEDULE (7834+)
+Examples:
+
+UI	Line	Transport
+Accept inbound request
+7914–7918
+WS coach_accept_request
+Message / Decline
+7921–7931
+_showCoachMessageDialog / _showCoachDeclineDialog → WS coach_send_message, coach_decline_request (15695, 15737 area)
+Calendar / availability
+e.g. 7844–7848, 8879, 9006, 9022
+setState for _calView / _calFocusedDate; WS update_availability, coach_block_time, coach_unblock_time
+Pending bookings approve/decline
+(in same tab region)
+WS coach_approve_booking, coach_decline_booking (15601, 15609)
+Start Zoom / session actions
+e.g. 8238–8247, 8304–8313
+_launchZoomMeeting (external); other flows call REST for Zoom (4741–4822, 4612)
+Create session / consultation
+dialogs
+REST POST /api/sessions/schedule (4825+); WS coach_create_consultation (4907–4916)
+INSIGHTS (10515–10684)
+UI	Lines	Handler	Transport
+AI MODES
+10525–10544
+_showCoachAiModePicker → _activateCoachAiMode
+WS ai_mode_activate (6958–6963)
+NEVEDAL REPORT
+10549–10557
+_showNevedalReportDialog
+REST POST .../api/research/nevedal/reports/generate (7049–7059)
+Insights chat send
+9847–9851, 9843
+_sendInsightsChat
+REST POST .../api/coach/nate-chat mode: inquiry (9700–9711)
+Coach override section
+_buildCoachOverrideInsightsSection (called 10610)
+Various WS: coach_get_client_override, coach_get_override_history (5525–5526), related handlers 6056–6088
+BRIEFINGS (10687+)
+Uses _selectedFolderId, _openFolder, note loading _notesLoading, WS coach_get_session_notes, coach_add_session_note (5999–6020), responses coach_session_notes / coach_session_note_saved (6302–6315).
+Wide vs narrow layout branches under 10696+ (auto-select first folder when wide).
+DOJO (12546–12624)
+Production path: embedded iframe (web) or WebView (mobile) loading night_school_dojo.html with query params token, hw, ws (12553–12576, 12584–12623) — in-tab actions are mostly inside the HTML, not Flutter buttons.
+Unused Flutter fallback: _buildDojoTabNative() (12645+) is never referenced (grep shows only its definition) — dead / stub UI.
+Separate WS helpers still exist for legacy native dojo: dojo_start, dojo_end, dojo_test_message, dojo_share_learning (4459–4532), with inbound types dojo_started, dojo_prompt, dojo_analysis, dojo_ended (6381–6431).
+CLASSROOM (13142+)
+WS types include classroom_get_sessions, classroom_get_progress, classroom_get_analysis, classroom_analyze_session, classroom_submit_reflection, classroom_check_recording, classroom_analyze_live (15325–15403 region); handlers 6434–6676+.
+REST used for recording status / archive paths (4612–4796).
+TRAINING (15774–15872)
+UI	Lines	Effect
+Start Training Session
+15786–15795
+Navigator → _lazyCoachingMeshScreen(isMaster: true)
+Join Training Session
+15800–15809
+Navigator → _lazyCoachingMeshScreen(isMaster: false)
+Community Circle
+15819–15828
+Navigator → _lazyCommunityMeshScreen()
+Recent sessions
+15838+
+FutureBuilder → _fetchRecentTrainingSessions() (REST — definition elsewhere in file)
+FINANCIALS (16148+)
+UI	Lines	Transport
+Refresh
+16171
+_requestFinancials() → WS coach_get_financials (15485)
+Update Rate
+16237–16254
+_setCoachFee → WS coach_set_fee (15748)
+Payment mode tiles
+16286–16333
+_setPaymentMode → WS coach_set_payment_mode (15756)
+W-9 / Stripe Connect
+later in same tab
+WS coach_submit_w9 (15762–15767); Connect helpers use REST elsewhere (_loadConnectStatus, etc.)
+DOJO subscriptions section
+_buildDojoSubscriptionsSection (16499+)
+WS get_dojo_subscriptions, cancel_dojo_subscription, add_dojo_subscription (15574–15594)
+FOLDER (file manager) (17205–17687)
+UI	Lines	Transport
+Pull refresh
+17207
+_coachFetchFolders()
+New Folder
+17235–17238
+_coachCreateFolder → REST POST /api/coach/folders/create (17677–17678)
+Folder card tap
+17307–17314
+_coachFetchFolderFiles → REST GET /api/coach/folders/$id/files (17629–17634)
+Upload
+17363–17380
+_coachPickAndUploadFile (17507+)
+List folders
+_coachFetchFolders
+REST GET /api/coach/folders (17609)
+ASSISTANTS (10368–10502)
+UI	Lines	Transport
+Refresh
+10416–10421
+_loadAssistantMetrics → REST GET /api/coach/hierarchy/assistant-metrics?days=30 (9869–9871)
+Assistant chat
+_sendAssistantChat
+REST POST /api/coach/nate-chat mode: assistant_inquiry (9990–9998)
+Free consultation (dialog)
+_startConsultation (9913–9945)
+WS master_consultation_request (9935–9939)
+Session assistant overlay / live session (not a tab): WS coach_start_live_session, coach_live_note, coach_end_live_session, session_assistant_*, session_service_mode_change, save_recording_consent (5960–12379 region).
+
+4. State variables (summary)
+Declared fields: 4161–4357 (socket, clients, schedule, folders, calendar, classroom, dojo, financials, assistants, reconnect timers, etc.).
+
+setState inside coach dashboard state: 131 occurrences on lines 4160–17694 (shell awk count); examples include connection status (4377–4398), socket-driven updates (6041+), calendar UI (7844–7845), insights/assistant chat (9666–9736), folder UI (17309), app bar refresh (7469), mobile tab menu (7682).
+
+Loading / busy flags (non-exhaustive): _isLoading (4197), _notesLoading (4196), _financialsLoading (4231), _connectLoading / _connectOnboarding (4252–4253), _dojoSubsLoading (4260), _dojoBusy (4301), _classroomAnalyzing / _classroomLiveAnalyzing (4274–4285), _assistantsTabLoading (4346), _insightsChatLoading (4322), _assistantChatLoading (4352), _coachFoldersLoading (17203), _financialsLoading-gated UI (16149–16151).
+
+Selection / filter: _tabController (4265); _clientFilterMode / _clientSearchQuery (4201–4203); _calMonth, _calSelectedDay, _calView, _calFocusedDate (4241–4244); _selectedFolderId / briefing folder state (4191–4195); _coachActiveFolderId (17201); _expandedAssistant (4347); _classroomSelectedSessionId (4279); DOJO persona queue state (4291–4299).
+
+Pagination / cursor: no generic REST cursor pattern found; lists use full arrays from WS/REST. Classroom video pipeline uses timers/polling (_classroomVideoPollTimer 4210).
+
+5. Stubs / placeholders
+grep for TODO|FIXME|coming soon|NotImplementedError in updated_screens.dart: no matches.
+Hard-coded placeholder metrics on Insights tab: “High Risk” and “Breakthroughs” show "0" literals (10585–10595) — not wired to backend.
+_buildDojoTabNative: defined 12645+ but never called — leftover native DOJO UI; current tab uses WebView/iframe only (12546–12623).
+Error handler snackbar: “This feature is currently being prepared…” for certain error messages (6849–6856).
+Assistants “Master Coach Access” empty state (10380–10396) is rarely shown because isMaster includes roleUpper == 'COACH' (10377), so most coaches skip that branch.
+Documentation drift: .cursor/rules/coach-dashboard-tab-sync.mdc lists 8 tabs; code has 10 and TabController(length: 10).
+
+EFF: ~170/~480 = 35% | FAIL OPTIMIZE_NEXT: For a full control-by-control matrix, run a small Dart analyzer/visitor script over _CoachDashboardScreenV2State instead of manual prose. LOSS: ~310 tokens at rate unknown | session: n/a | model: unknown
+
+Flutter UI agent complete. Backend handler agent still running.
+
+EFF: ~8/~8 = 100% | PASS LOSS: 0 tokens at rate unknown | session: 0 | model: unknown
+
+1. WebSocket coach-related handlers (/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py)
+Sentinel / read-only coach traffic is listed around 10931:10950:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py (includes coach_get_clients, fetch_coach_calendar, coaching_mesh_*, etc.).
+
+Vestigial type (no elif t == handler found): coach_request_briefing appears only in the skip set at 10933:10934:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py — there is no matching handler branch in the current file (repo-wide it only appears in this line and old archives).
+
+Below, line is the start of the elif (or elif t in (...)). DB / services are representative; many branches also read/write JSON under DATA_DIR, call load_registry(), parietal, hippocampus, sanctuary_engine, file-backed stores, or print on failure.
+
+Message type	Line	Role / main effects
+client_get_coach_availability
+12152
+Client reads coach slots; users + coach_availability
+client_get_coach_info
+12282
+Client reads coach public/profile info from registry / DB
+client_get_coach_month_overview
+14081
+Client month view; sessions / calendar data
+coach_request_submit
+12504
+Coach directory / requests pipeline
+coach_request_cancel
+12559
+Cancel outbound coach request
+coach_request_nudge
+12582
+Nudge on pending request
+coach_get_inbound_requests
+12631
+List inbound requests
+coach_accept_request / coach_decline_request
+12665, 12735
+Accept/decline; DB + notifications
+coach_send_message
+12770
+Messaging in request flow
+coach_get_request_status
+12815
+Status poll
+master_consultation_request
+12862
+Master/assistant consultation flow
+coach_approve_booking / coach_decline_booking
+13169, 13681
+Booking approvals
+coach_create_consultation / coach_cancel_consultation
+13290, 13545
+Consultation sessions
+coach_get_pending_bookings
+13724
+Pending bookings list
+coach_get_my_availability
+13927
+Read coach availability
+coach_block_time / coach_unblock_time
+13982, 14035
+Block calendar; coach_availability
+coach_set_fee / coach_set_payment_mode
+14141, 14167
+Coach billing prefs (profile/DB)
+coach_get_financials
+14383
+Financial summary
+coach_submit_w9
+14459
+W-9 / documents
+update_availability
+13844
+COACH: replaces recurring slots in coach_availability (see 13843:13914:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py)
+fetch_reports
+14420
+Coach reports export
+coach_get_clients
+17176
+Client roster (detailed in §4)
+get_presession_brief
+17382
+Rich presession brief; registry + parietal/hippocampus + PG (client_fcodes, nate_intelligence_crystals, coaching_sessions, sse_*, etc.) — see 17470:17633:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+coach_get_client_panel_insights
+17680
+Panel/SSE insights from DB
+coach_set_client_override, coach_get_client_override, coach_clear_client_override, coach_get_override_history, coach_renew_override
+17903
+Single block; uses coach_assignments, coach_client_overrides, coach_override_audit + coach_override_protocol helpers — 17902:17988:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+coach_start_live_session, coach_live_note, coach_live_biometric_update, coach_end_live_session
+18536
+Live session + notes/biometrics; files / broadcasts
+fetch_coach_calendar
+19309
+Coach calendar
+fetch_coach_sessions
+19425
+Coach sessions from schedule store / PG
+coach_cancel_session
+19435
+Cancel session
+fetch_coaching_advice
+19449
+Advice payload
+coach_nate_query
+19461
+Coach → Nate query (inference path)
+coach_get_briefing
+20219
+Family sanctuary briefing via sanctuary_engine.generate_coach_briefing — 20218:20305:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+coach_get_client_briefing
+20308
+Non-sanctuary client briefing; coaching_sessions intake — 20307:20384:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+coach_invite_client
+24246
+Invite flow / registry
+coach_request_master_status
+28828
+Hierarchy status
+coach_invite_assistant / coach_accept_invitation
+28852, 28899
+coach_hierarchy
+coach_list_assistants / coach_get_master / coach_revoke_assistant
+28928, 28962, 28996
+Hierarchy list/master/revoke
+coach_log_hours / coach_get_hours / coach_export_hours / coach_attest_hours
+29014–29103
+supervised_hours + related
+coaching_mesh_create … coaching_mesh_scores
+29125–29410+
+CoachingMeshEngine from app.state + coaching_mesh_participants fan-out — 29125:29146:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+Also coach-relevant (not coach_ prefix): get_presession_brief (above), classroom_* in the skip list at 10955:10960:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py, sanctuary_coaching_*, ask_nate_coaching, add_coach_learning, accept_coach_ethics, update_coach_profile, etc. (lines from the earlier grep, e.g. 23008, 23186, 23207, 26365, 26524+).
+
+2. REST routers for coach features
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach.py
+Prefix / auth: 23:27:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach.py — APIRouter(prefix="/api/coach", dependencies=[Depends(get_current_user_id)]) (app.auth.get_current_user_id → hardware_id string).
+Endpoints:
+Method	Path	Line	Returns (summary)
+GET
+/clients
+106–114
+Delegates to get_assigned_clients with caller as coach
+GET
+/clients/{coach_id}
+117–231
+{"clients": [...], "count": N} — PG: users, load_sessions_pg; fallback JSON
+GET
+/presession-brief/{client_id}
+233–380
+Large brief dict (client, metrics, topics, homework, family, suggestions)
+POST
+/notes
+460–503
+{"message", "note"}; PG coach_notes + JSON mirror
+GET
+/notes/{client_id}
+505–546
+{"notes": [...]}
+POST
+/homework
+548–567
+{"message", "homework"} — file homework.json
+GET
+/homework/{client_id}
+569–578
+{"homework": [...]}
+POST
+/homework/{homework_id}/complete
+580–594
+{"message", "homework"} or 404
+GET
+/stats/{coach_id}
+596–691
+clients / sessions / client_outcomes aggregates
+GET
+/ask-nate/{client_id}
+693–742
+Structured question + nate_response (template; notes Azure future)
+POST
+/matchmaker
+750–761
+CoachMatcher → {"client_id", "matches"}
+POST
+/nate-chat
+770+
+SkyEyeChatService coach chat; verifies master via coach_hierarchy
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach_hierarchy_api.py
+Prefix / auth: 30:34:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach_hierarchy_api.py — prefix="/api/coach", Depends(get_current_user_id).
+Endpoints (line = decorator): POST /hierarchy/invite 181, POST /hierarchy/accept 206, GET /hierarchy/assistants/{coach_id} 225, POST /hierarchy/revoke 254, POST /hierarchy/hours/log 271, GET /hierarchy/hours/{assistant_id} 291, GET /hierarchy/hours/export/{assistant_id} 324, POST /hierarchy/hours/attest 359, GET /hierarchy/metrics 375, GET /hierarchy/wisdom 400, GET /hierarchy/assistant-metrics 435, GET /hierarchy/assistant-clients/{coach_username} 522, GET /hierarchy/assistant-sessions/{coach_username} 575, POST /mesh/create 661, GET /mesh/sessions/{coach_id} 681, GET /mesh/session/{session_id} 690, GET /mesh/session/{session_id}/scores 724, POST /mesh/generate-quiz 733, GET /mesh/methods/{dojo_type} 743, GET /nate-progress 756, GET /nate-progress/{coach_username} 810 — each returns JSON status/payloads (hierarchy rows, mesh session metadata, scores, etc.).
+/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/sessions.py
+Router: 40:47:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/sessions.py — prefix="/api/sessions", dependencies=[Depends(_require_auth)] where _require_auth is get_current_user from api_server (full profile + role on request.state).
+Coach-relevant routes:
+Method	Path	Line	Notes
+GET
+/client/{client_id}
+822–837
+Coach must be coach_id on a session for that client
+GET
+/coach/{coach_id}
+839–852
+Coach’s sessions
+GET
+/upcoming/{user_id}
+854–878
+Client or coach upcoming
+GET
+/{session_id}
+901–910
+Participant check
+POST
+/start/{session_id}
+912+
+Coach-only start
+POST
+/end/{session_id}
+928+
+End session
+PUT
+/{session_id}
+1479+
+Coach-only update
+POST
+/availability
+1556+
+Legacy file availability
+GET
+/availability/{coach_id}
+1572+
+Read availability file
+GET
+/available-slots/{coach_id}
+1579+
+Slots
+GET
+/stats/coach/{coach_id}
+1644+
+Coach stats
+POST
+/schedule
+651+
+Schedule (Zoom, coaching_sessions, etc.)
+Classroom (same file, separate router): classroom_router 43:47:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/sessions.py — POST upload paths at 1682, 1829, 1950, 2048, 2134, etc.
+
+Other coach-scoped routers
+File	Prefix / auth	Notes
+coach_directory_api.py
+/api/coach/directory — GET "" and GET /{id} use Depends(get_current_user); /health open — 16:109:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach_directory_api.py
+schedule_api.py
+/api/coach/schedule — Depends(require_coach) — 19:241:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/schedule_api.py
+folder_api.py
+/api/coach/folders — require_coach — 24:28:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/folder_api.py
+coach_quickbooks_api.py
+/api/coach/quickbooks — require_coach; public oauth_router for callback — 42:51:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/coach_quickbooks_api.py
+dojo_api.py
+/api/dojo — all routes Depends(require_coach) — 17:19:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/dojo_api.py
+fcode_api.py
+/api/fcodes — require_coach on router — 18:22:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/fcode_api.py
+twilio_voice.py
+/api/calls — per-route get_current_user; live call coaching — 21:39:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/routers/twilio_voice.py
+Registration in main.py includes coach_api, coach_hierarchy_router, coach_directory_router, schedule_router, folder_router, fcode_router, coach_qb_router, sessions, classroom, Twilio — see 3490:3752:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/main.py (summarized from grep).
+
+3. Coach-related services (backend/app/services)
+File	Class / symbol	Purpose / key APIs
+coaching_mesh_engine.py
+CoachingMeshEngine (941:1557:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/services/coaching_mesh_engine.py)
+create_session, join_session, leave_session, end_session, post_message, push_quiz, submit_quiz_answer, push_scenario, submit_scenario_response, get_nate_feedback, get_session_scores, generate_quiz_from_topic, Azure-backed _call_azure
+call_coaching_engine.py
+CallCoachingEngine (54:120:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/services/call_coaching_engine.py)
+Twilio media stream → transcription → _generate_coaching
+liminal_coaching_engine.py
+LiminalCoachingEngine (63:136:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/services/liminal_coaching_engine.py)
+coach() external-conversation coaching via Azure
+coach_recruitment.py
+CoachRecruitmentService
+create_campaign, process_assessment, send_golden_ticket, persistence helpers
+coach_matcher.py
+CoachMatcher
+get_top_matches for /matchmaker
+coach_experience/session_interface.py
+SessionInterface
+Live session notifications (whisper/nudge/alert/crisis)
+coach_experience/briefing_renderer.py
+BriefingRenderer
+PredictiveCoachBriefing → dashboard JSON
+coach_experience/caseload_manager.py
+CaseloadManager
+get_caseload (queries DB — note queries use sessions/assigned_coach_id patterns that may or may not match your live schema)
+coach_notifications.py
+notify_coach() (no class)
+Inserts coach_escalation_notifications
+coach_override_protocol.py
+Functions (merge_override_payload, etc.)
+Validation/audit for coach client overrides
+coach_integrity_shield.py
+CoachIntegrityShield
+Used from coach.py _get_coach_shield
+billing/coach_financial_guard.py
+(Hive billing)
+Financial guardrail
+coach_dojo_auditor.py, coach_hierarchy_auditor.py
+Auditor classes
+Trust scorecards
+onboarding/coach_matching.py
+OnboardingCoachMatchingService
+Onboarding
+4. coach_get_clients (WebSocket)
+Location: 17175:17379:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+
+Who can call: current_profile.role in ["COACH", "ADMIN"] (17177:17182).
+
+Per-client fields (primary path): 17298:17319:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py — id, name, tier, subscription_plan, last_login, assigned_coach, family_id, group_id, company_id, company_name, can_access_nate, recording_consent, metrics, nevedal_state, total_sessions.
+
+Session-fallback synthetic rows (missing registry assignment): 17355:17375:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py — omit recording_consent; use assigned_coach fallback to coach_username.
+
+Assignment resolution (non-admin): 17252:17260:/Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/backend/app/websocket/bridge_server.py
+
+p.get("coach_id") == coach_id OR
+p.get("assigned_coach_id") == coach_id OR
+p.get("assigned_coach") == coach_username (requires coach_username truthy) OR
+p.get("hardware_id") in session_client_ids — where session_client_ids comes from sessions.json rows with matching coach_id (17184:17206).
+Admin: assigned_ok = True → all non-deleted clients (17151:17151, 17243:17245).
+
+Assistant / master inheritance: Explicitly removed for roster visibility — comment 17253:17255; coach_hierarchy is still queried for master_coach_ids but not used in assigned_ok (17211:17227).
+
+Outputs: WebSocket JSON {"type": "coach_clients", "clients": clients} 17379:17379.
+
+DB: Mostly registry + parietal metrics + optional read of coach_hierarchy (unused for filter) + sessions.json for fallback IDs; not the same as REST /api/coach/clients query on users (coach.py uses three profile_data fields — see §2).
+
+EFF: ~95/780 = 12% | FAIL OPTIMIZE_NEXT: Collapse duplicated WebSocket handler table into a machine-generated index from ripgrep. LOSS: 685 tokens at rate unknown | session: n/a | model: unknown
+
+All three agents complete. Synthesizing into the spec now.
+
+Doc written, 585 lines. Covers all 10 tabs, 30+ coach DB tables, 50+ WS message types, REST endpoints, cross-tab dependencies, services, and implementation gaps — all with file:line citations.
+
+EFF: ~570/~600 = 95% | PASS LOSS: ~30 tokens at rate unknown | session: ~30 | model: unknown
