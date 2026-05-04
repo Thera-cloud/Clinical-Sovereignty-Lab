@@ -29,8 +29,9 @@ async def _log(c, sid, uid, gtype, url, prompt, score, cost, status, err=None):
     await c.execute(
         "INSERT INTO sse_delivery_generation_log "
         "(log_id,storyboard_id,user_id,generation_type,r2_url,prompt_used,"
-        "score,cost,status,error_message) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) "
-        "ON CONFLICT (user_id, storyboard_id, generation_type, (generated_at::date)) "
+        "score,cost,status,error_message,generation_date) "
+        "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE) "
+        "ON CONFLICT (user_id, storyboard_id, generation_type, generation_date) "
         "WHERE status = 'success' DO NOTHING",
         str(uuid.uuid4()), sid, uid, gtype, url, prompt, score, cost, status, err)
 
