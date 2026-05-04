@@ -1,0 +1,29 @@
+Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git status
+git log --oneline origin/main..HEAD
+git push origin main
+On branch main
+Your branch is ahead of 'origin/main' by 19 commits.
+  (use "git push" to publish your local commits)
+
+nothing to commit, working tree clean
+fd16694 (HEAD -> main) EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 200vs1025 2026-05-04_034918
+331c5e1 EFF evidence: VETO_EFF_MISSING 2026-05-04_034547
+8765e15 Phase 7: token alert pause env, UserStore phone/timezone sync, vault tier split, SSE Grok caps/extras, phonenumbers/geoip2
+5cd3a6e Family sanctuary v7-v9 video processing scripts
+afe34d1 Mobile: settings screen + main.dart updates
+b37a8ab EFF evidence: FABRICATION_UNDERSTATED 210vs1853 2026-05-04_033310
+bff60b5 EFF evidence: FABRICATION_UNDERSTATED+DENOMINATOR_CAPPED_AT_200 200vs1300 2026-05-04_033138
+e320244 EFF evidence: FABRICATION_OVERSTATED 115vs57 2026-05-04_032553
+944a61f Fix unterminated triple-quote literals in patient_sovereignty_service
+38cd5ec Migration 195: backfill family_members junction from users.family_id (PGSD Section VII parity)
+Enumerating objects: 231, done.
+Counting objects: 100% (231/231), done.
+Delta compression using up to 16 threads
+Compressing objects: 100% (167/167), done.
+Writing objects: 100% (172/172), 63.30 KiB | 3.72 MiB/s, done.
+Total 172 (delta 130), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (130/130), completed with 52 local objects.
+To github.com:Thera-cloud/Clinical-Sovereignty-Lab.git
+   079b580..bbad5cf  main -> main
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % 
