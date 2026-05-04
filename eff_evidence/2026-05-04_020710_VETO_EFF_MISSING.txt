@@ -1,0 +1,3 @@
+cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git add eff_evidence/ docs/LEFTOVER_AUDIT_2026-05-04.md
+git commit -m "EFF violations + leftover audit - 2026-05-04 02:05"

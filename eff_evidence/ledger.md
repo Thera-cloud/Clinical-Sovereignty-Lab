@@ -26,3 +26,70 @@
 - Violation: response contained no valid EFF line
 - Action: VETO required — request recalculation from Cursor
 
+
+## 2026-05-04 01:58:01 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_015801_FABRICATION_UNDERSTATED_45vs128.txt`
+- EFF line: `EFF line:        - EFF line: `EFF: 12/45 = 27% | FAIL``
+- Claimed total tokens: 45
+- Actual tokens (estimated from 99 words): ~128
+- Overstatement factor: x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 01:58:10 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_015810_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+
+
+## 2026-05-04 01:58:52 — FABRICATION_OVERSTATED
+- Evidence file: `2026-05-04_015852_FABRICATION_OVERSTATED_200vs13.txt`
+- EFF line: `echo "EFF: 50/200 = 25% | FAIL" | pbcopy`
+- Claimed total tokens: 200
+- Actual tokens (estimated from 10 words): ~13
+- Overstatement factor: 15.3x
+- Status: FABRICATION ALERT - overstated >2x
+
+
+## 2026-05-04 01:58:52 — FABRICATION_OVERSTATED
+- Evidence file: `2026-05-04_015852_FABRICATION_OVERSTATED_200vs1.txt`
+- EFF line: `EFF: 50/200 = 25% | FAIL`
+- Claimed total tokens: 200
+- Actual tokens (estimated from 0 words): ~1
+- Overstatement factor: 200.0x
+- Status: FABRICATION ALERT - overstated >2x
+
+
+## 2026-05-04 01:58:54 — FABRICATION_OVERSTATED
+- Evidence file: `2026-05-04_015854_FABRICATION_OVERSTATED_200vs1.txt`
+- EFF line: `EFF: 50/200 = 25% | FAIL`
+- Claimed total tokens: 200
+- Actual tokens (estimated from 0 words): ~1
+- Overstatement factor: 200.0x
+- Status: FABRICATION ALERT - overstated >2x
+
+
+## 2026-05-04 01:59:27 — FABRICATION_OVERSTATED
+- Evidence file: `2026-05-04_015927_FABRICATION_OVERSTATED_200vs67.txt`
+- EFF line: `cal-Sovereignty-Lab-2 % echo "EFF: 50/200 = 25% | FAIL" | pbcopy
+EFF line:        EFF: 50/200 = 25% | FAIL`
+- Claimed total tokens: 200
+- Actual tokens (estimated from 52 words): ~67
+- Overstatement factor: 2.9x
+- Status: FABRICATION ALERT - overstated >2x
+
+
+## 2026-05-04 02:04:58 — FABRICATION_UNDERSTATED
+- Evidence file: `2026-05-04_020458_FABRICATION_UNDERSTATED_95vs347.txt`
+- EFF line: `EFF: 52/95 ≈ 55% | FAIL — doc exceeds 500-token cap; kept full checklist table by design per your steps.`
+- Claimed total tokens: 95
+- Actual tokens (estimated from 267 words): ~347
+- Overstatement factor: .2x
+- Status: FABRICATION ALERT - understated >2x
+
+
+## 2026-05-04 02:07:10 — VETO: EFF MISSING
+- Evidence file: `2026-05-04_020710_VETO_EFF_MISSING.txt`
+- Violation: response contained no valid EFF line
+- Action: VETO required — request recalculation from Cursor
+

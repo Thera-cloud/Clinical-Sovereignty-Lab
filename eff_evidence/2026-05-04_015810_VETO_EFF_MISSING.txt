@@ -1,0 +1,14 @@
+cal-Sovereignty-Lab-2 % cd ~/Desktop/Clinical-Sovereignty-Lab-2
+git add eff_evidence/ ~/bin/eff_audit.sh ~/bin/eff_watcher.sh 2>/dev/null
+git add eff_evidence/
+git commit -m "EFF evidence capture system - 2026-05-04"
+[main a94390e] EFF evidence capture system - 2026-05-04
+ 7 files changed, 60 insertions(+)
+ create mode 100644 eff_evidence/2026-05-04_015545_FABRICATION_OVERSTATED_45vs1.txt
+ create mode 100644 eff_evidence/2026-05-04_015704_FABRICATION_UNDERSTATED_45vs100.txt
+ create mode 100644 eff_evidence/2026-05-04_015743_VETO_EFF_MISSING.txt
+ create mode 100644 eff_evidence/2026-05-04_fabrication_45vs18.txt
+ create mode 100644 eff_evidence/2026-05-04_summary.md
+ create mode 100644 eff_evidence/ledger.md
+ create mode 100644 eff_evidence/violations.csv
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % 

@@ -1,0 +1,27 @@
+eignty-Lab-2 % source /Users/nathannevedal/Des
+ktop/Clinical-Sovereignty-Lab-2/.venv/bin/activ
+ate
+(.venv) nathannevedal@Nathans-MacBook-Pro Clinical-Sovereignty-Lab-2 % ~/bin/eff_watcher.sh
+EFF watcher started. Monitoring clipboard every 2s.
+Copy any Cursor response to trigger audit.
+Press Ctrl+C to stop.
+
+===== 01:57:04 — clipboard changed, auditing =====
+/Users/nathannevedal/bin/eff_audit.sh: line 86: -1: substring expression < 0
+Captured:        /tmp/cursor_response.txt
+EFF line:        - EFF line: `EFF: 12/45 = 27% | FAIL`
+Claimed total:   45
+Actual words:    77
+Actual tokens:   ~100
+Overstatement:   x
+STATUS:          FABRICATION ALERT - understated >2x
+
+Evidence archived: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_015704_FABRICATION_UNDERSTATED_45vs100.txt
+Ledger updated:    /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+CSV updated:       /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/violations.csv
+
+===== 01:57:43 — clipboard changed, auditing =====
+VETO: EFF MISSING
+Evidence saved: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/2026-05-04_015743_VETO_EFF_MISSING.txt
+Ledger updated: /Users/nathannevedal/Desktop/Clinical-Sovereignty-Lab-2/eff_evidence/ledger.md
+
