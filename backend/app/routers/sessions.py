@@ -9,6 +9,11 @@ from app.services.api_server import get_current_user as _require_auth
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # py<3.9 — won't happen here, but guard
+    ZoneInfo = None  # type: ignore
+    ZoneInfoNotFoundError = Exception  # type: ignore
 import os
 import json
 import secrets
@@ -442,7 +447,8 @@ async def _lookup_client_contact(db_pool, client_id: str) -> dict:
             row = await conn.fetchrow(
                 "SELECT profile_data->>'email' AS email, "
                 "       profile_data->>'phone' AS phone, "
-                "       profile_data->>'name'  AS name "
+                "       profile_data->>'name'  AS name, "
+                "       profile_data->>'timezone' AS timezone "  # TZ-NOTIFICATION-FIX
                 "FROM users "
                 "WHERE hardware_id = $1 OR username = $1 "
                 "LIMIT 1",
@@ -454,6 +460,7 @@ async def _lookup_client_contact(db_pool, client_id: str) -> dict:
             "email": (row["email"] or "").strip(),
             "phone": (row["phone"] or "").strip(),
             "name": (row["name"] or "").strip(),
+            "timezone": (row["timezone"] or "").strip(),  # TZ-NOTIFICATION-FIX
         }
     except Exception as e:
         _logger.warning("_lookup_client_contact failed for %s: %s", client_id, e)
@@ -515,14 +522,27 @@ async def _send_session_link(request: Request, session: dict) -> dict:
     coach_name = coach["name"]
     coach_initials = (coach_name[:1] or "C").upper()
 
-    # Format date / time from scheduled_start (ISO).
+    # TZ-NOTIFICATION-FIX: resolve recipient timezone (fallback America/New_York).
+    tz_name = (contact.get("timezone") or "").strip() or "America/New_York"
+    tz_obj = None
+    if ZoneInfo is not None:
+        try:
+            tz_obj = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            _logger.warning("_send_session_link: unknown tz %r, falling back to UTC", tz_name)
+            tz_name = "UTC"
+            tz_obj = timezone.utc
+
+    # Format date / time from scheduled_start (ISO) in recipient timezone.
     start_iso = (session.get("scheduled_start") or "").strip()
     date_str = start_iso
     time_str = ""
     try:
         dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
+        if tz_obj is not None:
+            dt = dt.astimezone(tz_obj)
         date_str = dt.strftime("%B %d, %Y")
-        time_str = dt.strftime("%I:%M %p UTC").lstrip("0")
+        time_str = dt.strftime("%I:%M %p %Z").lstrip("0")
     except Exception:
         pass
 
@@ -536,7 +556,7 @@ async def _send_session_link(request: Request, session: dict) -> dict:
                 to_email=email_addr,
                 date=date_str,
                 time=time_str or start_iso,
-                timezone="UTC",
+                timezone=tz_name,  # TZ-NOTIFICATION-FIX
                 coach_name=coach_name,
                 coach_initials=coach_initials,
                 coach_credentials=coach.get("credentials") or "",
