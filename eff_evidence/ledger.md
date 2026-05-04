@@ -430,3 +430,11 @@ EFF: 580/650 = 89% | PASS
 
 ## 2026-05-04 17:33:33 VETO EFF MISSING
 - Evidence: 2026-05-04_173333_VETO_EFF_MISSING.txt
+
+## 2026-05-04 17:44:20 FABRICATION_UNDERSTATED
+- EFF: EFF: 220/240 = 92% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 200/220 = 91% | PASS LOSS: 20 tokens at rate unknown | session: n/a | model: unknown
+EFF: 170/190 = 89% | PASS
+- LOSS: LOSS: rate unknown if model unknown — no fabricated cost
+- Claimed: 240 Actual: 1417 Factor: .1x
+- Evidence: 2026-05-04_174420_FABRICATION_UNDERSTATED_240vs1417.txt
