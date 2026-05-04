@@ -1,0 +1,55 @@
+CoachN timezone
+Your Settings screen shows Timezone: America/New_York — that matches “Eastern” preference (actual offset on May 5 is EDT, UTC−4, not EST).
+
+Why the appointment shows 12:30 instead of 8:30 AM
+The DB stores scheduled_start in UTC. 8:30 AM Eastern on May 5, 2026 is 12:30 UTC — so the instant is correct.
+
+What’s wrong is how the coach UI labels it:
+
+PostgreSQL merge builds date / time from the UTC timestamp with strftime("%H:%M"), i.e. UTC clock time, not coach-local:
+
+bridge_handlers_v2.py
+Lines 308-329
+            try:
+                date_str = st_dt.date().isoformat()
+                time_str = st_dt.strftime("%H:%M")
+                start_iso = st_dt.isoformat()
+                end_iso = en_dt.isoformat() if en_dt else ""
+            except Exception:
+                continue
+            base["schedule"].append({
+                ...
+                "date": date_str,
+                "time": time_str,
+                "scheduled_start": start_iso,
+Flutter “SESSIONS THIS DAY” uses that time field directly (12:30), not scheduled_start converted with toLocal():
+
+updated_screens.dart
+Lines 9498-9518
+          ...sessions.map((s) {
+            final sm = Map<String, dynamic>.from(s);
+            ...
+            final tm = (sm['time'] ?? '').toString();
+            ...
+                    "${isC ? 'Consultation · ' : ''}$cl${tm.isNotEmpty ? ' • $tm' : ''}",
+The confirmed session card does the same: it joins date and time only — no parse of scheduled_start:
+
+updated_screens.dart
+Lines 8169-8298
+                  final date = (session['date'] ?? '').toString();
+                  final time = (session['time'] ?? '').toString();
+                  ...
+                    Text(
+                      [date, time].where((s) => s.trim().isNotEmpty).join(' at '),
+So 12:30 is UTC hour/minute surfaced as if it were local, not “wrong scheduling.” Pending bookings already format from scheduled_start + toLocal(); PG-merged rows don’t get that treatment in these widgets.
+
+Did Paula get SMS and email?
+That cannot be verified from the repo or screenshots alone. Delivery depends on _send_session_link at schedule time (SendGrid + Twilio), her profile_data email/phone, and carrier routing. To confirm on GREEN you’d check SendGrid activity, Twilio message logs, or backend logs around the schedule request — I don’t have those in this workspace.
+
+What time does the Zoom link show?
+A normal https://zoom.us/j/... URL does not encode the meeting time in the string; the correct wall-clock time comes from Zoom’s own invite/UI/calendar when they open it. Your backend stores the correct UTC start for the meeting; the gap you’re seeing is coach-portal display, not necessarily Zoom’s notion of the slot.
+
+Summary: Coach is on America/New_York; the session is almost certainly 12:30 UTC = 8:30 AM Eastern. The UI shows 12:30 because get_calendar_data_pg fills time from UTC and Flutter renders date/time instead of scheduled_start.toLocal(). Fixing it means either formatting time in the bridge using the coach’s profile_data.timezone, or preferring scheduled_start + local formatting in those Flutter paths (same pattern as pending bookings).
+
+EFF: 140/165 = 85% | PASS
+LOSS: 25 tokens at rate unknown | session: n/a | model: unknown

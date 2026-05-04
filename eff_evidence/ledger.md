@@ -438,3 +438,10 @@ EFF: 170/190 = 89% | PASS
 - LOSS: LOSS: rate unknown if model unknown — no fabricated cost
 - Claimed: 240 Actual: 1417 Factor: .1x
 - Evidence: 2026-05-04_174420_FABRICATION_UNDERSTATED_240vs1417.txt
+
+## 2026-05-04 17:53:50 FABRICATION_UNDERSTATED
+- EFF: EFF: 140/165 = 85% | PASS
+- LOSS: LOSS: 25 tokens at rate unknown | session: n/a | model: unknown
+- Claimed: 165 Actual: 527 Factor: .3x
+- Patterns: DENOMINATOR_CAPPED_AT_200
+- Evidence: 2026-05-04_175350_FABRICATION_UNDERSTATED_DENOMINATOR_CAPPED_AT_200_165vs527.txt
